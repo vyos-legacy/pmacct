@@ -1,0 +1,88 @@
+Revision: pmacct--main--0--patch-1
+Archive: jaq@spacepants.org--2004
+Creator: Jamie Wilkinson <jaq@spacepants.org>
+Date: Mon May 10 16:12:32 EST 2004
+Standard-date: 2004-05-10 06:12:32 GMT
+New-files: .arch-ids/AUTHORS.id .arch-ids/CONFIG-KEYS.id
+    .arch-ids/COPYING.id .arch-ids/ChangeLog.id
+    .arch-ids/EXAMPLES.id .arch-ids/FAQS.id
+    .arch-ids/INSTALL.id .arch-ids/INTERNALS.id
+    .arch-ids/KNOWN-BUGS.id .arch-ids/Makefile.am.id
+    .arch-ids/Makefile.in.id .arch-ids/NEWS.id
+    .arch-ids/PLUGINS.id .arch-ids/README.id
+    .arch-ids/SIGNALS.id .arch-ids/TODO.id
+    .arch-ids/TOOLS.id .arch-ids/acct.c.id
+    .arch-ids/aclocal.m4.id .arch-ids/bpf_filter.c.id
+    .arch-ids/cfg.c.id .arch-ids/cfg.h.id
+    .arch-ids/cfg_handlers.c.id .arch-ids/cfg_handlers.h.id
+    .arch-ids/configure.id .arch-ids/configure.in.id
+    .arch-ids/crc32.c.id .arch-ids/imt_plugin.c.id
+    .arch-ids/imt_plugin.h.id .arch-ids/install-sh.id
+    .arch-ids/ll.c.id .arch-ids/log.c.id .arch-ids/log.h.id
+    .arch-ids/memory.c.id .arch-ids/missing.id
+    .arch-ids/mkinstalldirs.id .arch-ids/mysql_plugin.c.id
+    .arch-ids/mysql_plugin.h.id .arch-ids/net_aggr.c.id
+    .arch-ids/net_aggr.h.id .arch-ids/network.h.id
+    .arch-ids/pgsql_plugin.c.id .arch-ids/pgsql_plugin.h.id
+    .arch-ids/pkt_handlers.c.id .arch-ids/pkt_handlers.h.id
+    .arch-ids/plugin_hooks.c.id .arch-ids/plugin_hooks.h.id
+    .arch-ids/pmacct-bpf.h.id .arch-ids/pmacct-data.h.id
+    .arch-ids/pmacct-defines.h.id .arch-ids/pmacct.c.id
+    .arch-ids/pmacct.h.id .arch-ids/pmacctd.c.id
+    .arch-ids/pmmyplay.c.id .arch-ids/pmpgplay.c.id
+    .arch-ids/server.c.id .arch-ids/signals.c.id
+    .arch-ids/sql_common.h.id .arch-ids/sql_handlers.c.id
+    .arch-ids/strlcpy.c.id .arch-ids/util.c.id
+    .arch-ids/util.h.id AUTHORS CONFIG-KEYS COPYING ChangeLog
+    EXAMPLES FAQS INSTALL INTERNALS KNOWN-BUGS Makefile.am
+    Makefile.in NEWS PLUGINS README SIGNALS TODO TOOLS acct.c
+    aclocal.m4 bpf_filter.c cfg.c cfg.h cfg_handlers.c
+    cfg_handlers.h configure configure.in crc32.c
+    examples/.arch-ids/=id
+    examples/.arch-ids/mrtg.conf.hosts.example.id
+    examples/.arch-ids/mrtg.conf.ports.example.id
+    examples/.arch-ids/networks.example.id
+    examples/.arch-ids/pmacctd-imt.conf.example.id
+    examples/.arch-ids/pmacctd-names.conf.example.id
+    examples/.arch-ids/pmacctd-sql.conf.example.id
+    examples/mrtg.conf.hosts.example
+    examples/mrtg.conf.ports.example
+    examples/networks.example
+    examples/pmacctd-imt.conf.example
+    examples/pmacctd-names.conf.example
+    examples/pmacctd-sql.conf.example imt_plugin.c
+    imt_plugin.h include/.arch-ids/=id
+    include/.arch-ids/extract.h.id
+    include/.arch-ids/fddi.h.id
+    include/.arch-ids/ieee802_11.h.id
+    include/.arch-ids/llc.h.id include/.arch-ids/sll.h.id
+    include/extract.h include/fddi.h include/ieee802_11.h
+    include/llc.h include/sll.h install-sh ll.c log.c log.h
+    memory.c missing mkinstalldirs mysql_plugin.c
+    mysql_plugin.h net_aggr.c net_aggr.h network.h
+    pcap/.arch-ids/=id pcap/.arch-ids/README.linux.id
+    pcap/.arch-ids/README.tru64.id pcap/README.linux
+    pcap/README.tru64 pgsql_plugin.c pgsql_plugin.h
+    pkt_handlers.c pkt_handlers.h plugin_hooks.c
+    plugin_hooks.h pmacct-bpf.h pmacct-data.h
+    pmacct-defines.h pmacct.c pmacct.h pmacctd.c pmmyplay.c
+    pmpgplay.c server.c signals.c sql/.arch-ids/=id
+    sql/.arch-ids/README.mysql.id
+    sql/.arch-ids/README.pgsql.id
+    sql/.arch-ids/pmacct-create-db.mysql.id
+    sql/.arch-ids/pmacct-create-db.pgsql.id
+    sql/.arch-ids/pmacct-create-table.pgsql.id
+    sql/.arch-ids/pmacct-grant-db.mysql.id sql/README.mysql
+    sql/README.pgsql sql/pmacct-create-db.mysql
+    sql/pmacct-create-db.pgsql
+    sql/pmacct-create-table.pgsql sql/pmacct-grant-db.mysql
+    sql_common.h sql_handlers.c strlcpy.c util.c util.h
+New-directories: .arch-ids examples examples/.arch-ids
+    include include/.arch-ids pcap pcap/.arch-ids sql
+    sql/.arch-ids
+New-patches: jaq@spacepants.org--2004/pmacct--main--0--patch-1
+Summary: Import of 0.6.3 sources.
+Keywords: 
+
+
+

@@ -1,0 +1,19 @@
+README for Debian's pmacct
+==========================
+
+
+Accounting on Multiple Interfaces
+---------------------------------
+
+Debian's pmacct initscript supports multiple interfaces.  Specify each
+interface you want to listen on, in the shell variable INTERFACES in
+/etc/default/pmacct .
+
+Create a configuration file for each interface in /etc/pmacct like so:
+
+/etc/pmacct/pmacct.eth1.conf for listening on eth1
+/etc/pmacct/pmacct.eth2.conf for listening on eth2
+
+and so on.
+
+Make sure each configuration file specifies the correct interface.

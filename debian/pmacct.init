@@ -1,0 +1,80 @@
+#!/bin/sh
+
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+DAEMON=/usr/sbin/pmacctd
+NAME=pmacctd
+DESC="promiscuous mode accounting daemon"
+CONFDIR=/etc/pmacct
+
+test -x $DAEMON || exit 0
+
+# Include pmacct defaults if available
+if [ -f /etc/default/pmacct ] ; then
+	. /etc/default/pmacct
+fi
+
+stop () {
+    #start-stop-daemon --stop --oknodo --quiet \
+    #	--pidfile /var/run/$NAME.pid \
+    #	--exec $DAEMON
+    killall -INT pmacctd
+}
+
+start () {
+    #start-stop-daemon --start --oknodo --quiet \
+    #	--pidfile /var/run/$NAME.pid \
+    #	--exec $DAEMON -- -f $PMACCTD_CONF $DAEMON_OPTS
+    if [ -n "$INTERFACES" ]; then
+    	for i in $INTERFACES; do
+		ip link set $i up
+		$DAEMON -f $CONFDIR/pmacctd.$i.conf $DAEMON_OPTS
+	done
+    else
+    	$DAEMON -f $CONFDIR/pmacctd.conf $DAEMON_OPTS
+    fi
+}
+
+case "$1" in
+  start)
+	echo -n "Starting $DESC: "
+	start
+	echo "$NAME."
+	;;
+  stop)
+	echo -n "Stopping $DESC: "
+	stop
+	echo "$NAME."
+	;;
+  #reload)
+	#
+	#	If the daemon can reload its config files on the fly
+	#	for example by sending it SIGHUP, do it here.
+	#
+	#	If the daemon responds to changes in its config file
+	#	directly anyway, make this a do-nothing entry.
+	#
+	# echo "Reloading $DESC configuration files."
+	# start-stop-daemon --stop --signal 1 --quiet --pidfile \
+	#	/var/run/$NAME.pid --exec $DAEMON
+  #;;
+  restart|force-reload)
+	#
+	#	If the "reload" option is implemented, move the "force-reload"
+	#	option to the "reload" entry above. If not, "force-reload" is
+	#	just the same as "restart".
+	#
+	echo -n "Restarting $DESC: "
+	stop
+	sleep 1
+	start
+	echo "$NAME."
+	;;
+  *)
+	N=/etc/init.d/$NAME
+	# echo "Usage: $N {start|stop|restart|reload|force-reload}" >&2
+	echo "Usage: $N {start|stop|restart|force-reload}" >&2
+	exit 1
+	;;
+esac
+
+exit 0

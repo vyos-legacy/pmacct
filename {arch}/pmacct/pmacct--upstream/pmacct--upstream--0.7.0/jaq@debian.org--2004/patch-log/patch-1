@@ -1,0 +1,45 @@
+Revision: pmacct--upstream--0.7.0--patch-1
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jamie.wilkinson@anchor.com.au>
+Date: Thu Aug 12 12:12:03 EST 2004
+Standard-date: 2004-08-12 02:12:03 GMT
+New-files: .arch-ids/ip_frag.c.id .arch-ids/ip_frag.h.id
+    .arch-ids/jhash.h.id .arch-ids/nfacctd.c.id
+    .arch-ids/nfacctd.h.id docs/.arch-ids/=id
+    docs/.arch-ids/AUTHORS.id docs/.arch-ids/CONFIG-KEYS.id
+    docs/.arch-ids/EXAMPLES.id docs/.arch-ids/FAQS.id
+    docs/.arch-ids/TOOLS.id docs/AUTHORS docs/CONFIG-KEYS
+    docs/EXAMPLES docs/FAQS docs/TOOLS
+    examples/.arch-ids/allow-list.example.id
+    examples/.arch-ids/nfacctd-print.conf.example.id
+    examples/.arch-ids/nfacctd-sql.conf.example.id
+    examples/allow-list.example
+    examples/nfacctd-print.conf.example
+    examples/nfacctd-sql.conf.example ip_frag.c ip_frag.h
+    jhash.h nfacctd.c nfacctd.h
+New-directories: docs docs/.arch-ids
+Renamed-files: .arch-ids/INTERNALS.id docs/.arch-ids/INTERNALS.id
+    .arch-ids/PLUGINS.id docs/.arch-ids/PLUGINS.id
+    .arch-ids/SIGNALS.id docs/.arch-ids/SIGNALS.id
+    INTERNALS docs/INTERNALS
+    PLUGINS docs/PLUGINS
+    SIGNALS docs/SIGNALS
+Modified-files: AUTHORS CONFIG-KEYS ChangeLog EXAMPLES FAQS
+    Makefile.am Makefile.in README TOOLS acct.c cfg.h
+    cfg_handlers.c cfg_handlers.h configure configure.in
+    crc32.c examples/networks.example
+    examples/pmacctd-imt.conf.example
+    examples/pmacctd-names.conf.example
+    examples/pmacctd-sql.conf.example imt_plugin.c
+    imt_plugin.h ll.c memory.c mysql_plugin.c mysql_plugin.h
+    net_aggr.c net_aggr.h network.h pgsql_plugin.c
+    pgsql_plugin.h pkt_handlers.c pkt_handlers.h
+    plugin_hooks.c pmacct-data.h pmacct-defines.h pmacct.c
+    pmacct.h pmacctd.c print_plugin.c print_plugin.h signals.c
+    sql_common.h util.c util.h
+New-patches: jaq@debian.org--2004/pmacct--upstream--0.7.0--patch-1
+Summary: imported new upstream version 0.7.0
+Keywords: 
+
+imported new upstream version 0.7.0
+

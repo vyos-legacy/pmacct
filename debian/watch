@@ -1,0 +1,2 @@
+version=2
+http://www.ba.cnr.it/~paolo/pmacct/ (?:.*/)?pmacct-?_?([\w+\d+\.]+|\d+)(\.tar|\.tgz)(\.gz|\.bz2|) debian uupdate

@@ -1,0 +1,93 @@
+pmacct (0.7.4-2) unstable; urgency=low
+
+  * Support multiple interfaces by allowing multiple pmacctd daemons to
+    run, as specified by /etc/default/pmacct.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue,  5 Oct 2004 15:42:41 +1000
+
+pmacct (0.7.4-1) unstable; urgency=low
+
+  * New upstream release.  (Closes: #274378)
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue,  5 Oct 2004 14:17:28 +1000
+
+pmacct (0.7.3-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue,  5 Oct 2004 13:15:26 +1000
+
+pmacct (0.7.2p1-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Thu, 12 Aug 2004 16:38:23 +1000
+
+pmacct (0.7.2-1) unstable; urgency=low
+
+  * New upstream release.
+    - VLAN accounting.
+    - Distributed accounting support.
+  * Ensure configure and Makefile.in aren't rebuilt by retouching them
+    just before configure stage (as date stamps from checkouts are
+    not guaranteed).
+  * Updated description to mention Netflow support.
+  * Added watch file from DEHS.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Thu, 12 Aug 2004 15:47:25 +1000
+
+pmacct (0.7.1-1) unstable; urgency=low
+
+  * New upstream release.
+    - Shared memory support built by default.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Thu, 12 Aug 2004 14:53:34 +1000
+
+pmacct (0.7.0-1) unstable; urgency=low
+
+  * New upstream release.
+    - Enhanced IP fragmentation handling.
+    - Adds Netflow capture support (nfacctd daemon).
+    - PostgreSQL deadlock fix.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Thu, 12 Aug 2004 12:22:43 +1000
+
+pmacct (0.6.4-1) unstable; urgency=low
+
+  * New upstream release.
+    - Improved performance when talking to databases.  (Closes: #258270)
+    - Removed transaction patch (implemented upstream).
+
+ -- Jamie Wilkinson <jaq@debian.org>  Thu, 12 Aug 2004 11:41:50 +1000
+
+pmacct (0.6.3-1) unstable; urgency=low
+
+  * New upstream release.
+    - Fixes segfault in pmpgplay binary.
+  * Added mysql support to the package.
+  * Added sql example scripts.  (Closes: #244235)
+
+ -- Jamie Wilkinson <jaq@debian.org>  Wed,  5 May 2004 14:35:04 +1000
+
+pmacct (0.6.2-2) unstable; urgency=low
+
+  * Added FAQS and CONFIG-KEYS to the documentation.
+  * Adjusted init script to send SIGINT to all pmacctd processes
+    as per SIGNALS documentation.
+  * Sped up the pgsql plugin by moving the transaction begin/end block
+    outside of the inner loop.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Fri, 30 Apr 2004 15:35:36 +1000
+
+pmacct (0.6.2-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Sun, 18 Apr 2004 12:32:23 +1000
+
+pmacct (0.6.0-1) unstable; urgency=low
+
+  * Initial Release.  (Closes: #241444)
+
+ -- Jamie Wilkinson <jaq@debian.org>  Wed, 24 Mar 2004 13:52:03 +1100
+

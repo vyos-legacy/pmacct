@@ -1,0 +1,15 @@
+Revision: debian-dir--pmacct--0--patch-6
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jamie.wilkinson@anchor.com.au>
+Date: Thu Aug 12 15:41:01 EST 2004
+Standard-date: 2004-08-12 05:41:01 GMT
+Modified-files: changelog rules
+New-patches: jaq@debian.org--2004/debian-dir--pmacct--0--patch-6
+Summary: new upstream version
+Keywords: 
+
+New version.
+
+Patched rules to build without regenerating configure (brokenly) upon a
+fresh checkout from the repo.
+
