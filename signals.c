@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -19,6 +19,8 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+/* defines */
+#define __SIGNALS_C
 
 /* includes */
 #include "pmacct.h"
@@ -98,9 +100,11 @@ void my_sigint_handler(int signum)
   if (config.syslog) closelog();
 
   if (config.acct_type == ACCT_PM) {
-    if (pcap_stats(glob_pcapt, &ps) < 0) printf("\npcap_stats: %s\n", pcap_geterr(glob_pcapt));
-    printf("\n%u packets received by filter\n", ps.ps_recv);
-    printf("%u packets dropped by kernel\n", ps.ps_drop);
+    if (config.dev) {
+      if (pcap_stats(glob_pcapt, &ps) < 0) printf("\npcap_stats: %s\n", pcap_geterr(glob_pcapt));
+      printf("\n%u packets received by filter\n", ps.ps_recv);
+      printf("%u packets dropped by kernel\n", ps.ps_drop);
+    }
   }
 
 #if defined (IRIX) || (SOLARIS)

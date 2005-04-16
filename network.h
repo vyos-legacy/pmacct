@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 #include "include/extract.h"
@@ -8,6 +8,11 @@
 #include "include/sll.h"
 #include "include/ieee802_11.h"
 #include "include/fddi.h"
+
+#if defined ENABLE_IPV6
+#include "include/ip6.h"
+#include "include/ah.h"
+#endif
 
 #define min(a,b) ((a)>(b)?(b):(a))
 
@@ -27,6 +32,7 @@ struct eth_header
 
 /* Ethernet protocol ID's */
 #define ETHERTYPE_IP		0x0800          /* IP */
+#define ETHERTYPE_IPV6          0x86dd		/* IPv6 */
 #define ETHERTYPE_PPPOE         0x8864          /* pppoe (session stage) */
 #define ETHERTYPE_8021Q		0x8100          /* 802.1Q */
 
@@ -34,6 +40,41 @@ struct eth_header
 #define PPP_HDRLEN      4       /* octets for standard ppp header */
 #define PPPOE_HDRLEN	6	/* octets for standard pppoe header  */
 #define PPP_IP          0x0021  /* Internet Protocol */
+#define PPP_IPV6	0x0057  /* IPv6 */
+#define PPP_ADDRESS     0xff    /* The address byte value */
+#define PPP_CONTROL     0x03    /* The control byte value */
+
+/* additional protocol definitions */
+#ifndef IPPROTO_HOPOPTS
+#define IPPROTO_HOPOPTS         0               /* IPv6 hop-by-hop options */
+#endif
+#ifndef IPPROTO_IPV6
+#define IPPROTO_IPV6            41
+#endif
+#ifndef IPPROTO_ROUTING
+#define IPPROTO_ROUTING         43              /* IPv6 routing header */
+#endif
+#ifndef IPPROTO_FRAGMENT
+#define IPPROTO_FRAGMENT        44              /* IPv6 fragmentation header */
+#endif
+#ifndef IPPROTO_ESP
+#define IPPROTO_ESP             50              /* SIPP Encap Sec. Payload */
+#endif
+#ifndef IPPROTO_AH
+#define IPPROTO_AH              51              /* SIPP Auth Header */
+#endif
+#ifndef IPPROTO_NONE
+#define IPPROTO_NONE            59              /* IPv6 no next header */
+#endif
+#ifndef IPPROTO_DSTOPTS
+#define IPPROTO_DSTOPTS         60              /* IPv6 destination options */
+#endif
+#ifndef IPPROTO_IPCOMP
+#define IPPROTO_IPCOMP          108
+#endif
+#ifndef IPPROTO_MOBILITY
+#define IPPROTO_MOBILITY        135
+#endif
 
 struct my_iphdr
 {
@@ -62,24 +103,41 @@ struct my_tlhdr {
 struct packet_ptrs {
   struct pcap_pkthdr *pkthdr; /* ptr to header structure passed by libpcap */
   u_char *f_agent; /* ptr to flow export agent */ 
-  u_char *f_header; /* ptr to netflow packet header */ 
-  u_char *f_data; /* ptr to netflow data */ 
-  u_char *idtable; /* ptr to id table map */
+  u_char *f_header; /* ptr to NetFlow packet header */ 
+  u_char *f_data; /* ptr to NetFlow data */ 
+  u_char *f_tpl; /* ptr to NetFlow V9 template */
+  u_char *idtable; /* ptr to pretag table map */
   u_char *packet_ptr; /* ptr to the whole packet */
   u_char *mac_ptr; /* ptr to mac addresses */
+  u_int16_t l3_proto; /* layer-3 protocol: IPv4, IPv6 */
+  int (*l3_handler)(register struct packet_ptrs *); /* layer-3 protocol handler */
+  u_int16_t l4_proto; /* layer-4 protocol */
+  u_int16_t tag; /* pre tag id */
+  u_int16_t pf; /* pending fragments */
   u_char *vlan_ptr; /* ptr to vlan id */
   u_char *iph_ptr; /* ptr to ip header */
   u_char *tlh_ptr; /* ptr to transport level protocol header */
+};
+
+struct host_addr {
+  u_int8_t family;
+  union {
+    struct in_addr ipv4;
+#if defined ENABLE_IPV6
+    struct in6_addr ipv6;
+#endif
+  } address;
 };
 
 struct pkt_primitives {
   u_int8_t eth_dhost[ETH_ADDR_LEN];
   u_int8_t eth_shost[ETH_ADDR_LEN];
   u_int16_t vlan_id;
-  struct in_addr src_ip;
-  struct in_addr dst_ip;
+  struct host_addr src_ip;
+  struct host_addr dst_ip;
   u_int16_t src_port;
   u_int16_t dst_port;
+  u_int8_t tos;
   u_int8_t proto;
   u_int16_t id;
 };

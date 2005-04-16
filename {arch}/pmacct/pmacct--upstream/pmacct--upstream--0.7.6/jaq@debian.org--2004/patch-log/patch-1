@@ -1,0 +1,34 @@
+Revision: pmacct--upstream--0.7.6--patch-1
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jaq@spacepants.org>
+Date: Sat Apr 16 14:38:18 EST 2005
+Standard-date: 2005-04-16 04:38:18 GMT
+New-files: .arch-ids/sql_common.c.id
+    examples/.arch-ids/gnuplot-example.sh.id
+    examples/.arch-ids/gnuplot.script.example.id
+    examples/.arch-ids/mrtg-example.sh.id
+    examples/.arch-ids/mrtg.conf.example.id
+    examples/.arch-ids/rrdtool-example.sh.id
+    examples/gnuplot-example.sh
+    examples/gnuplot.script.example
+    examples/mrtg-example.sh examples/mrtg.conf.example
+    examples/rrdtool-example.sh sql_common.c
+Removed-files: examples/.arch-ids/mrtg.conf.hosts.example.id
+    examples/.arch-ids/mrtg.conf.ports.example.id
+    examples/mrtg.conf.hosts.example
+    examples/mrtg.conf.ports.example
+Modified-files: AUTHORS ChangeLog EXAMPLES FAQS INSTALL
+    Makefile.am Makefile.in README acct.c configure
+    configure.in crc32.c docs/INTERNALS imt_plugin.c
+    imt_plugin.h ip_frag.c ip_frag.h memory.c mysql_plugin.c
+    mysql_plugin.h nfacctd.c pgsql_plugin.c pgsql_plugin.h
+    pmacct-defines.h pmacct.c pmacct.h pmacctd.c server.c
+    sql_common.h
+New-patches: jaq@debian.org--2004/pmacct--upstream--0.7.6--patch-1
+Summary: Imported pmacct-0.7.6
+Keywords: 
+
+Imported pmacct-0.7.6
+into jaq@debian.org--2004/pmacct--upstream--0.7.6
+
+

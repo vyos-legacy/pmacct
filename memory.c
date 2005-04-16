@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -19,6 +19,7 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+#define __MEMORY_C
 
 /* includes */
 #include "pmacct.h"
@@ -31,21 +32,13 @@
 void init_memory_pool_table()
 {
   if (config.num_memory_pools) {
-#if !defined (HAVE_MMAP)
-    mpd = (unsigned char *) malloc((config.num_memory_pools+1)*sizeof(struct memory_pool_desc));
-#else
     mpd = (unsigned char *) map_shared(0, (config.num_memory_pools+1)*sizeof(struct memory_pool_desc),
 				   PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-#endif
     memset(mpd, 0, (config.num_memory_pools+1)*sizeof(struct memory_pool_desc));
   }
   else {
-#if !defined (HAVE_MMAP)
-    mpd = (unsigned char *) malloc((NUM_MEMORY_POOLS+1)*sizeof(struct memory_pool_desc));
-#else
     mpd = (unsigned char *) map_shared(0, (NUM_MEMORY_POOLS+1)*sizeof(struct memory_pool_desc),
 				   PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
-#endif
     memset(mpd, 0, (NUM_MEMORY_POOLS+1)*sizeof(struct memory_pool_desc));
   }
 
@@ -115,13 +108,8 @@ struct memory_pool_desc *request_memory_pool(int size)
        	 		gcc version 3.3.3 (Debian 20040320) / glibc 2.3.2
       */
       // new_pool = (struct memory_pool_desc *) malloc(sizeof(struct memory_pool_desc));
-#if !defined (HAVE_MMAP)
-      new_pool = (struct memory_pool_desc *) malloc(1024);
-      if (!new_pool) return NULL;
-#else
       new_pool = (struct memory_pool_desc *) map_shared(0, 1024, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
       if (new_pool == MAP_FAILED) return NULL;
-#endif
       memset(new_pool, 0, sizeof(struct memory_pool_desc));
     }
     else new_pool = (struct memory_pool_desc *) mpd+(new_id-1);
@@ -131,13 +119,8 @@ struct memory_pool_desc *request_memory_pool(int size)
 
   /* We found a free room in mpd table; now we have
      allocate needed memory */
-#if !defined (HAVE_MMAP)
-  memptr = (unsigned char *) malloc(size);
-  if (!memptr) {
-#else
   memptr = (unsigned char *) map_shared(0, size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
   if (memptr == MAP_FAILED) {
-#endif
     Log(LOG_WARNING, "WARN: memory is sold out ! Please, clear in-memory stats !\n");
     return NULL;
   }

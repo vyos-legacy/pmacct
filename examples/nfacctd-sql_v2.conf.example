@@ -7,7 +7,7 @@
 ! debug: true 
 daemonize: false
 ! aggregate_filter[dummy]: src net 192.168.0.0/16 
-aggregate: src_host, dst_host
+aggregate: tag, src_host, dst_host
 ! plugin_buffer_size: 1024 
 pre_tag_map: ./id_map.example
 ! nfacctd_port: 5678 
@@ -24,4 +24,6 @@ sql_refresh_time: 90
 ! sql_optimize_clauses: true
 sql_history: 10m 
 sql_history_roundoff: mh
+! sql_preprocess: qnum=1000, minp=5
 ! networks_file: ./networks.example
+! ports_file: ./ports.example

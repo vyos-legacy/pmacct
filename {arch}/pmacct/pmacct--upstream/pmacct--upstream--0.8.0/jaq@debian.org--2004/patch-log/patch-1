@@ -1,0 +1,36 @@
+Revision: pmacct--upstream--0.8.0--patch-1
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jaq@spacepants.org>
+Date: Sat Apr 16 15:15:50 EST 2005
+Standard-date: 2005-04-16 05:15:50 GMT
+New-files: .arch-ids/addr.c.id .arch-ids/addr.h.id
+    .arch-ids/nfv9_template.c.id addr.c addr.h
+    include/.arch-ids/ah.h.id include/.arch-ids/ip6.h.id
+    include/ah.h include/ip6.h nfv9_template.c
+    sql/.arch-ids/README.IPv6.id sql/README.IPv6
+Modified-files: AUTHORS CONFIG-KEYS COPYING ChangeLog EXAMPLES
+    FAQS INSTALL KNOWN-BUGS Makefile.am Makefile.in README TODO
+    TOOLS acct.c cfg.c cfg.h cfg_handlers.c cfg_handlers.h
+    configure configure.in docs/INTERNALS
+    examples/pretag.map.example imt_plugin.c imt_plugin.h
+    ip_frag.c ip_frag.h ll.c log.c log_templates.c
+    log_templates.h memory.c mysql_plugin.c mysql_plugin.h
+    net_aggr.c net_aggr.h network.h nf_map.c nf_map_handlers.c
+    nf_map_handlers.h nfacctd-data.h nfacctd.c nfacctd.h
+    once.h pgsql_plugin.c pgsql_plugin.h pkt_handlers.c
+    pkt_handlers.h plugin_hooks.c plugin_hooks.h
+    pmacct-data.h pmacct-defines.h pmacct.c pmacct.h pmacctd.c
+    pmmyplay.c pmpgplay.c ports_aggr.c ports_aggr.h
+    preprocess.c preprocess.h print_plugin.c print_plugin.h
+    server.c signals.c sql/README.mysql sql/README.pgsql
+    sql/pmacct-create-table_v1.pgsql
+    sql/pmacct-create-table_v2.pgsql sql_common.h
+    sql_common_m.c sql_handlers.c util.c util.h
+New-patches: jaq@debian.org--2004/pmacct--upstream--0.8.0--patch-1
+Summary: Imported pmacct-0.8.0
+Keywords: 
+
+Imported pmacct-0.8.0
+into jaq@debian.org--2004/pmacct--upstream--0.8.0
+
+

@@ -1,0 +1,42 @@
+Revision: pmacct--debian--0.8.0--base-0
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jaq@spacepants.org>
+Date: Sat Apr 16 15:15:54 EST 2005
+Standard-date: 2005-04-16 05:15:54 GMT
+New-patches: jaq@debian.org--2004/pmacct--debian--0.8.0--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.6.3--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.6.3--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.6.4--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.6.4.1--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.6.4.1--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.0--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.0--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.0.1--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.1--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.1--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.2--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.2--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.2.1--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.2.1--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.3--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.3--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.4--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.4--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.5--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.5--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.6--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.6--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.7--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.7--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.8--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.8--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.7.9--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.7.9--patch-1
+    jaq@debian.org--2004/pmacct--upstream--0.8.0--base-0
+    jaq@debian.org--2004/pmacct--upstream--0.8.0--patch-1
+    jaq@spacepants.org--2004/pmacct--main--0--base-0
+    jaq@spacepants.org--2004/pmacct--main--0--patch-1
+Continuation-of: jaq@debian.org--2004/pmacct--upstream--0.8.0--patch-1
+Summary: tag of jaq@debian.org--2004/pmacct--upstream--0.8.0--patch-1
+
+(automatically generated log message)

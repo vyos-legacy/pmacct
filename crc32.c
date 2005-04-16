@@ -84,10 +84,24 @@ static unsigned int crc_32_tab[] = { /* CRC polynomial 0xedb88320 */
 static unsigned int __crc32 = 0x0U;
 
 /* XXX: to be optimized */
+/*
 Inline unsigned int cache_crc32(const unsigned char *buf, unsigned int len)
 {
   unsigned int crc = __crc32;
 
   while (len--) crc = crc_32_tab[(crc ^ (*buf++)) & 0xff] ^ (crc >> 8);
   return crc;
+}
+*/
+
+Inline unsigned int cache_crc32(const unsigned char *buf, unsigned int len)
+{
+  unsigned int hash = 5381;
+  unsigned int i = 0;
+
+  for (i = 0; i < len; buf++, i++) {
+    hash = ((hash << 5) + hash) + (*buf);
+  }
+
+  return hash;
 }

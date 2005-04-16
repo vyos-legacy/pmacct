@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -27,6 +27,7 @@
 #include "plugin_hooks.h"
 #include "print_plugin.h"
 #include "net_aggr.h"
+#include "ports_aggr.h"
 #include "util.h"
 #include "crc32.c"
 
@@ -35,11 +36,12 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 {
   struct pkt_data *data;
   struct networks_table nt;
+  struct networks_cache nc;
+  struct ports_table pt;
   unsigned char *pipebuf;
   struct pollfd pfd;
   time_t t, now;
-  int timeout, ret; 
-  unsigned int modulo;
+  int timeout, ret, num; 
 #if defined (HAVE_MMAP)
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
   unsigned char *rgptr;
@@ -54,18 +56,20 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   status->wakeup = TRUE;
 #endif
 
-  /* checks */
-  if (config.what_to_count & COUNT_SUM_HOST) {
-    Log(LOG_ERR, "ERROR: Option available only in memory table operations\nExiting ...\n\n");
-    exit(1);
-  }
-
   if (!config.print_refresh_time)
     config.print_refresh_time = DEFAULT_PRINT_REFRESH_TIME;
 
   timeout = config.print_refresh_time*1000;
 
-  if (config.networks_file) load_networks(config.networks_file, &nt);
+  if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS))
+    insert_func = P_sum_host_insert;
+  else if (config.what_to_count & COUNT_SUM_PORT) insert_func = P_sum_port_insert;
+  else insert_func = P_cache_insert;
+
+  load_networks(config.networks_file, &nt, &nc);
+  set_net_funcs(&nt);
+
+  if (config.ports_file) load_ports(config.ports_file, &pt);
   
   pp_size = sizeof(struct pkt_primitives);
   dbc_size = sizeof(struct chained_cache);
@@ -89,7 +93,7 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   /* print_refresh time init: deadline */
   refresh_deadline = now; 
-  t = roundoff_time(refresh_deadline);
+  t = roundoff_time(refresh_deadline, config.sql_history_roundoff);
   while ((t+config.print_refresh_time) < refresh_deadline) t += config.print_refresh_time;
   refresh_deadline = t;
   refresh_deadline += config.print_refresh_time; /* it's a deadline not a basetime */
@@ -180,14 +184,16 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
       while (((struct ch_buf_hdr *)pipebuf)->num) {
-	if (config.what_to_count & COUNT_SRC_NET)
-	  binsearch(&nt, &data->primitives.src_ip);
-	
-	if (config.what_to_count & COUNT_DST_NET)
-	  binsearch(&nt, &data->primitives.dst_ip);
+	for (num = 0; net_funcs[num]; num++)
+	  (*net_funcs[num])(&nt, &nc, &data->primitives);
 
-        modulo = P_cache_modulo(&data->primitives); 
-        P_cache_insert(data, modulo);
+	if (config.ports_file) {
+          if (!pt.table[data->primitives.src_port]) data->primitives.src_port = 0;
+          if (!pt.table[data->primitives.dst_port]) data->primitives.dst_port = 0;
+        }
+
+        (*insert_func)(data);
+
 	((struct ch_buf_hdr *)pipebuf)->num--;
         if (((struct ch_buf_hdr *)pipebuf)->num) data++;
       }
@@ -204,8 +210,9 @@ unsigned int P_cache_modulo(struct pkt_primitives *srcdst)
   return modulo %= config.print_cache_entries;
 }
 
-void P_cache_insert(struct pkt_data *data, unsigned int modulo)
+void P_cache_insert(struct pkt_data *data)
 {
+  unsigned int modulo = P_cache_modulo(&data->primitives);
   struct chained_cache *cache_ptr = &cache[modulo];
   struct pkt_primitives *srcdst = &data->primitives;
 
@@ -265,7 +272,6 @@ void P_cache_insert(struct pkt_data *data, unsigned int modulo)
 
 void P_cache_flush(struct chained_cache *queue[], int index)
 {
-  unsigned char *qptr = (unsigned char *) *queue;
   int j;
 
   for (j = 0; j < index; j++) {
@@ -289,7 +295,7 @@ struct chained_cache *P_cache_attach_new_node(struct chained_cache *elem)
 
 void P_cache_purge(struct chained_cache *queue[], int index)
 {
-  char *src_mac, *dst_mac, *src_host, *dst_host;
+  char *src_mac, *dst_mac, src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
   int j;
 
   if (config.print_markers) printf("--START (%u+%u)--\n", refresh_deadline-config.print_refresh_time,
@@ -302,13 +308,36 @@ void P_cache_purge(struct chained_cache *queue[], int index)
     dst_mac = (char *) ether_ntoa(queue[j]->eth_dhost);
     printf("%-17s  ", dst_mac);
     printf("%-5d  ", queue[j]->vlan_id); 
-    src_host = inet_ntoa(queue[j]->src_ip);
-    printf("%-15s  ", src_host);
-    dst_host = inet_ntoa(queue[j]->dst_ip);
-    printf("%-15s  ", dst_host);
+#if defined ENABLE_IPV6
+    if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-45d  ", ntohl(queue[j]->src_ip.address.ipv4.s_addr));
+#else
+    if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-15d  ", ntohl(queue[j]->src_ip.address.ipv4.s_addr));
+#endif
+    else {
+      addr_to_str(src_host, &queue[j]->src_ip);
+#if defined ENABLE_IPV6
+      printf("%-45s  ", src_host);
+#else
+      printf("%-15s  ", src_host);
+#endif
+    }
+#if defined ENABLE_IPV6
+    if (config.what_to_count & COUNT_DST_AS) printf("%-45d  ", ntohl(queue[j]->dst_ip.address.ipv4.s_addr));
+#else
+    if (config.what_to_count & COUNT_DST_AS) printf("%-15d  ", ntohl(queue[j]->dst_ip.address.ipv4.s_addr));
+#endif
+    else {
+      addr_to_str(dst_host, &queue[j]->dst_ip);
+#if defined ENABLE_IPV6
+      printf("%-45s  ", dst_host);
+#else
+      printf("%-15s  ", dst_host);
+#endif
+    }
     printf("%-5d     ", queue[j]->src_port);
     printf("%-5d     ", queue[j]->dst_port);
     printf("%-10s  ", _protocols[queue[j]->proto].name);
+    printf("%-3d    ", queue[j]->tos);
     printf("%-10u  ", queue[j]->packet_counter);
     printf("%u\n", queue[j]->bytes_counter);
   }
@@ -322,11 +351,17 @@ void P_write_stats_header()
   printf("SRC MAC            ");
   printf("DST MAC            ");
   printf("VLAN   ");
+#if defined ENABLE_IPV6
+  printf("SRC IP                                         ");
+  printf("DST IP                                         ");
+#else
   printf("SRC IP           ");
   printf("DST IP           ");
+#endif
   printf("SRC PORT  ");
   printf("DST PORT  ");
   printf("PROTOCOL    ");
+  printf("TOS    ");
   printf("PACKETS     ");
   printf("BYTES\n");
 }
@@ -346,4 +381,43 @@ void *Malloc(unsigned int size)
   }
 
   return obj;
+}
+
+void P_sum_host_insert(struct pkt_data *data)
+{
+  struct in_addr ip;
+#if defined ENABLE_IPV6
+  struct in6_addr ip6;
+#endif
+
+  if (data->primitives.dst_ip.family == AF_INET) {
+    ip.s_addr = data->primitives.dst_ip.address.ipv4.s_addr;
+    data->primitives.dst_ip.address.ipv4.s_addr = 0;
+    data->primitives.dst_ip.family = 0;
+    P_cache_insert(data);
+    data->primitives.src_ip.address.ipv4.s_addr = ip.s_addr;
+    P_cache_insert(data);
+  }
+#if defined ENABLE_IPV6
+  if (data->primitives.dst_ip.family == AF_INET6) {
+    memcpy(&ip6, &data->primitives.dst_ip.address.ipv6, sizeof(struct in6_addr));
+    memset(&data->primitives.dst_ip.address.ipv6, 0, sizeof(struct in6_addr));
+    data->primitives.dst_ip.family = 0;
+    insert_accounting_structure(data);
+    memcpy(&data->primitives.src_ip.address.ipv6, &ip6, sizeof(struct in6_addr));
+    insert_accounting_structure(data);
+    return;
+  }
+#endif
+}
+
+void P_sum_port_insert(struct pkt_data *data)
+{
+  u_int16_t port;
+
+  port = data->primitives.dst_port;
+  data->primitives.dst_port = 0;
+  P_cache_insert(data);
+  data->primitives.src_port = port;
+  P_cache_insert(data);
 }

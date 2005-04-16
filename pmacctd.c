@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -25,6 +25,8 @@
 /* includes */
 #include "pmacct.h"
 #include "pmacct-data.h"
+#include "pretag_handlers.h"
+#include "pretag-data.h"
 #include "plugin_hooks.h"
 #include "pkt_handlers.h"
 #include "ip_frag.h"
@@ -41,30 +43,32 @@ pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
 void usage_daemon(char *prog_name)
 {
   printf("%s\n", PMACCTD_USAGE_HEADER);
-  printf("Usage: %s [-D] [-b buckets] [-i interface] [filter]\n", prog_name);
+  printf("Usage: %s [-D|-d] [-i interface] [-c primitive[,...]] [-P plugin[,...]] [filter]\n", prog_name);
   printf("       %s [-f config_file]\n", prog_name);
   printf("       %s [-h]\n", prog_name);
-  printf("\n-GENERAL- options:\n");
-  printf("  -f  \tspecify a configuration file (see CONFIG-KEYS file for the valid config keys list)\n");
-  printf("  -c  \t[src_mac|dst_mac|vlan|src_host|dst_host|src_net|dst_net|sum|src_port|dst_port|proto] \n\tcounts source, destination or total IP traffic (default src_host)\n");
-  printf("  -D  \tdaemonize the process\n"); 
-  printf("  -N  \tdon't use promiscuous mode\n");
-  printf("  -n  \tpath for the file containing network definitions; to be used in conjunction with 'src_net' or 'dst_net'\n");
-  printf("  -P  \t[memory|print|mysql|pgsql] \n\tactivate specified plugins\n"); 
-  printf("  -d  \tenables debug mode\n");
-  printf("  -i  \tinterface used for listening\n");
-  printf("  -S  \t[auth|mail|daemon|kern|user|local[0-7]] \n\tenables syslog logging to the specified facility\n");
-  printf("  -F  \twrites 'core' process PID into the specified file\n");
-  printf("\n-MEMORY PLUGIN- options\n");
-  printf("  -p  \tpath for client-server communication\n");
+  printf("\nGeneral options:\n");
+  printf("  -h  \tshow this page\n");
+  printf("  -f  \tconfiguration file (see also CONFIG-KEYS)\n");
+  printf("  -c  \t[src_mac|dst_mac|vlan|src_host|dst_host|src_net|dst_net|src_port|dst_port|proto|tos|src_as|dst_as, \n\t ,sum_host,sum_net,sum_as,sum_port,tag,none] \n\taggregation primitives (DEFAULT: src_host)\n");
+  printf("  -D  \tdaemonize\n"); 
+  printf("  -N  \tdisable promiscuous mode\n");
+  printf("  -n  \tpath to a file containing network definitions\n");
+  printf("  -o  \tpath to a file containing port definitions\n");
+  printf("  -P  \t[memory|print|mysql|pgsql] \n\tactivate plugin\n"); 
+  printf("  -d  \tenable debug\n");
+  printf("  -i  \tlistening interface\n");
+  printf("  -I  \tread packets from the specified savefile\n");
+  printf("  -S  \t[auth|mail|daemon|kern|user|local[0-7]] \n\tsyslog facility\n");
+  printf("  -F  \twrite Core Process PID into the specified file\n");
+  printf("  -w  \twait for the listening interface to become available\n");
+  printf("\nMemory Plugin (-P memory) options:\n");
+  printf("  -p  \tsocket for client-server communication (DEFAULT: /tmp/collect.pipe)\n");
   printf("  -b  \tnumber of buckets\n");
-  printf("  -m  \tnumbers of memory pools\n");
-  printf("  -s  \tsize of each memory pool\n");
-  printf("\n-PgSQL and MySQL PLUGINS- options\n");
-  printf("  -r  \trefresh time of data into SQL database from in-memory cache (in seconds)\n");
-  printf("  -v  \tSQL table version\n");
-  printf("\n");
-  printf("  -h  \tprints this page\n");
+  printf("  -m  \tnumber of memory pools\n");
+  printf("  -s  \tmemory pool size\n");
+  printf("\nPostgreSQL (-P pgsql)/MySQL (-P mysql) plugin options:\n");
+  printf("  -r  \trefresh time (in seconds)\n");
+  printf("  -v  \t[1|2|3] \n\ttable version\n");
   printf("\n");
   printf("Examples:\n");
   printf("  Daemonize the process; listen on eth0; write stats in a MySQL database\n"); 
@@ -84,22 +88,20 @@ int main(int argc,char **argv)
   struct bpf_program filter;
   struct pcap_device device;
   char errbuf[PCAP_ERRBUF_SIZE];
-  int index, logf, ret;
+  int index, logf;
 
   struct plugins_list_entry *list;
+  struct plugin_requests req;
   char config_file[SRVBUFLEN];
   int psize = DEFAULT_SNAPLEN;
+
+  struct id_table idt;
+  struct pcap_callback_data cb_data;
 
   /* getopt() stuff */
   extern char *optarg;
   extern int optind, opterr, optopt;
   int errflag, cp; 
-
-  if (getuid() != 0) { 
-    printf("%s\n\n", PMACCTD_USAGE_HEADER);
-    printf("ERROR: You need superuser privileges to run this command.\nExiting ...\n\n");
-    exit(1);
-  }
 
   umask(077);
   compute_once();
@@ -139,6 +141,11 @@ int main(int argc,char **argv)
       strncat(cfg[rows], optarg, CFG_LINE_LEN(cfg[rows]));
       rows++;
       break;
+    case 'o':
+      strcpy(cfg[rows], "ports_file: ");
+      strncat(cfg[rows], optarg, CFG_LINE_LEN(cfg[rows]));
+      rows++;
+      break; 
     case 'N':
       strcpy(cfg[rows], "promisc: false");
       rows++;
@@ -201,6 +208,15 @@ int main(int argc,char **argv)
       strncat(cfg[rows], optarg, CFG_LINE_LEN(cfg[rows]));
       rows++;
       break;
+    case 'I':
+      strcpy(cfg[rows], "pcap_savefile: ");
+      strncat(cfg[rows], optarg, CFG_LINE_LEN(cfg[rows]));
+      rows++;
+      break;
+    case 'w':
+      strcpy(cfg[rows], "interface_wait: true");
+      rows++;
+      break;
     case 'h':
       usage_daemon(argv[0]);
       exit(0);
@@ -234,6 +250,15 @@ int main(int argc,char **argv)
     list = list->next;
   }
 
+  /* Let's check whether we need superuser privileges */
+  if (!config.pcap_savefile) {
+    if (getuid() != 0) {
+      printf("%s\n\n", PMACCTD_USAGE_HEADER);
+      printf("ERROR: You need superuser privileges to run this command.\nExiting ...\n\n");
+      exit(1);
+    }
+  }
+
   if (config.daemon) {
     list = plugins_list;
     while (list) {
@@ -261,37 +286,36 @@ int main(int argc,char **argv)
   /* Enforcing policies over aggregation methods */
   list = plugins_list;
   while (list) {
-    if (list->cfg.post_tag) list->cfg.what_to_count |= COUNT_ID; /* sanity checks will follow later */ 
     if (strcmp(list->type.string, "core")) {
-      if (((list->cfg.what_to_count & COUNT_SRC_PORT) || (list->cfg.what_to_count & COUNT_DST_PORT)) && !config.handle_fragments) {
+      evaluate_sums(&list->cfg.what_to_count);
+      if (list->cfg.what_to_count & (COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_SUM_PORT))
 	config.handle_fragments = TRUE;
-	init_ip_fragment_handler();
+      if (!list->cfg.what_to_count) {
+	Log(LOG_WARNING, "WARN: defaulting to SRC HOST aggregation in '%s-%s'.\n", list->name, list->type.string);
+	list->cfg.what_to_count |= COUNT_SRC_HOST;
       }
-      if (list->cfg.what_to_count & COUNT_SUM_HOST) {
-        if (list->cfg.what_to_count != COUNT_SUM_HOST) {
-          config.what_to_count = COUNT_SUM_HOST;
-          Log(LOG_WARNING, "WARN: using *only* sum aggregation method in '%s-%s'.\n", list->name, list->type.string);
-	}
-      }
-      else if (!list->cfg.what_to_count) {
-	Log(LOG_WARNING, "WARN: defaulting to src_host aggregation in '%s-%s'.\n", list->name, list->type.string);
-	list->cfg.what_to_count = COUNT_SRC_HOST;
-      }
-      else if ((list->cfg.what_to_count & COUNT_SRC_NET) || (list->cfg.what_to_count & COUNT_DST_NET)) {
+      if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_NET|COUNT_SUM_AS)) {
 	if (!list->cfg.networks_file) {
-	  Log(LOG_ERR, "ERROR: net aggregation method has been selected but no networks file specified. Exiting...\n\n");
+	  Log(LOG_ERR, "ERROR: NET/AS aggregation has been selected but NO networks file has been specified. Exiting...\n\n");
 	  exit(1);
 	}
 	else {
-	  if (list->cfg.what_to_count & COUNT_SRC_NET) list->cfg.what_to_count |= COUNT_SRC_HOST;
-	  if (list->cfg.what_to_count & COUNT_DST_NET) list->cfg.what_to_count |= COUNT_DST_HOST;
+	  if (((list->cfg.what_to_count & COUNT_SRC_NET) && (list->cfg.what_to_count & COUNT_SRC_AS)) ||
+	     ((list->cfg.what_to_count & COUNT_DST_NET) && (list->cfg.what_to_count & COUNT_DST_AS))) {
+	    Log(LOG_ERR, "ERROR: NET/AS are mutually exclusive. Exiting...\n\n"); 
+	    exit(1);
+	  }
 	}
       }
     } 
     list = list->next;
   }
 
-  if (!config.dev) {
+  if (config.handle_fragments) init_ip_fragment_handler();
+
+  /* If any device/savefile have been specified, choose a suitable device
+     where to listen for traffic */ 
+  if (!config.dev && !config.pcap_savefile) {
     Log(LOG_WARNING, "WARN: selecting a suitable device.\n");
     config.dev = pcap_lookupdev(errbuf); 
     if (!config.dev) {
@@ -303,11 +327,31 @@ int main(int argc,char **argv)
   /* reading filter; if it exists, we'll take an action later */
   if (!strlen(config_file)) config.clbuf = copy_argv(&argv[optind]);
 
-  /* starting the wheel */
-  if ((device.dev_desc = pcap_open_live(config.dev, psize, config.promisc, 1000, errbuf)) == NULL) {
-    Log(LOG_ERR, "ERROR: pcap_open_live(): %s\n", errbuf);
-    exit(1);
-  } 
+  if (config.dev && config.pcap_savefile) {
+    Log(LOG_ERR, "ERROR: 'interface' (-i) and 'pcap_savefile' (-I) directives are mutually exclusive. Exiting ...\n");
+    exit(1); 
+  }
+
+  throttle_startup:
+  if (config.dev) {
+    if ((device.dev_desc = pcap_open_live(config.dev, psize, config.promisc, 1000, errbuf)) == NULL) {
+      if (!config.if_wait) {
+        Log(LOG_ERR, "ERROR: pcap_open_live(): %s\n", errbuf);
+        exit(1);
+      }
+      else {
+        sleep(5); /* XXX: user defined ? */
+        goto throttle_startup;
+      }
+    } 
+  }
+  else if (config.pcap_savefile) {
+    if ((device.dev_desc = pcap_open_offline(config.pcap_savefile, errbuf)) == NULL) {
+      Log(LOG_ERR, "ERROR: pcap_open_offline(): %s\n", errbuf);
+      exit(1);
+    }
+  }
+
   device.active = TRUE;
   glob_pcapt = device.dev_desc; /* SIGINT/stats handling */ 
   if (config.pipe_size) {
@@ -343,6 +387,8 @@ int main(int argc,char **argv)
       list = list->next;
     }
   }
+
+  cb_data.device = &device;
   
   /* doing pcap stuff */
   if (pcap_lookupnet(config.dev, &localnet, &netmask, errbuf) < 0) {
@@ -363,8 +409,18 @@ int main(int argc,char **argv)
   signal(SIGHUP, reload); /* handles reopening of syslog channel */
   signal(SIGPIPE, SIG_IGN); /* we want to exit gracefully when a pipe is broken */
 
+  /* loading pre-tagging map, if any */
+  if (config.pre_tag_map) {
+    load_id_file(config.acct_type, config.pre_tag_map, &idt);
+    cb_data.idt = (u_char *) &idt;
+  }
+  else {
+    memset(&idt, 0, sizeof(idt));
+    cb_data.idt = NULL; 
+  }
+
   /* plugins glue: creation */
-  load_plugins(&device);
+  load_plugins(&device, &req);
   evaluate_packet_handlers();
 
   /* signals to be handled only by pmacctd;
@@ -372,41 +428,55 @@ int main(int argc,char **argv)
   if (!config.daemon) signal(SIGINT, my_sigint_handler);
   signal(SIGCHLD, handle_falling_child);
   kill(getpid(), SIGCHLD);
+  
+  /* When reading packets in a savefile, things are lightning fast; we will sit 
+     here just few seconds, thus allowing plugins to complete their startup operations */ 
+  if (config.pcap_savefile) sleep(2);
 
   /* Main loop: if pcap_loop() exits maybe an error occurred; we will try closing
      and reopening again our listening device */
   for(;;) {
     if (!device.active) {
-      Log(LOG_WARNING, "WARN: %s become unavailable; throttling ...\n", config.dev);
-      sleep(5); /* XXX: to get fixed */
-      if ((device.dev_desc = pcap_open_live(config.dev, psize, config.promisc, 1000, errbuf)) == NULL) {
-        Log(LOG_ERR, "ERROR: pcap_open_live(): %s\n", errbuf);
-        exit(1);
-      }
+      Log(LOG_WARNING, "WARN: %s has become unavailable; throttling ...\n", config.dev);
+      throttle_loop:
+      sleep(5); /* XXX: user defined ? */
+      if ((device.dev_desc = pcap_open_live(config.dev, psize, config.promisc, 1000, errbuf)) == NULL)
+        goto throttle_loop;
       pcap_setfilter(device.dev_desc, &filter);
       device.active = TRUE;
     }
-    pcap_loop(device.dev_desc, -1, pcap_cb, (u_char *) &device);
+    pcap_loop(device.dev_desc, -1, pcap_cb, (u_char *) &cb_data);
     pcap_close(device.dev_desc);
+
+    if (config.pcap_savefile) {
+      Log(LOG_INFO, "INFO: finished reading the specified savefile. Exiting in few seconds ...\n"); 
+      sleep(5);
+      stop_all_childs();
+    }
     device.active = FALSE;
   }
-
-  return 0;
 }
 
 void pcap_cb(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *buf)
 {
   struct packet_ptrs pptrs;
-  struct pcap_device *device = (struct pcap_device *) user;
+  struct pcap_callback_data *cb_data = (struct pcap_callback_data *) user;
+  struct pcap_device *device = cb_data->device; 
 
   /* We process the packet with the appropriate
      data link layer function */
-  if (buf) { 
-    pptrs.pkthdr = pkthdr;
+  if (buf) {
+    pptrs.pkthdr = (struct pcap_pkthdr *) pkthdr;
     pptrs.packet_ptr = (u_char *) buf;
+    pptrs.mac_ptr = 0; pptrs.vlan_ptr = 0;
+    pptrs.pf = 0;
+    pptrs.idtable = cb_data->idt;
     (*device->data->handler)(pkthdr, &pptrs);
     if (pptrs.iph_ptr) {
-      if (ip_handler(&pptrs)) exec_plugins(&pptrs);
+      if ((*pptrs.l3_handler)(&pptrs)) {
+	if (config.pre_tag_map) pptrs.tag = PM_find_id(&pptrs);
+	exec_plugins(&pptrs); 
+      }
     }
   }
 } 
@@ -414,28 +484,115 @@ void pcap_cb(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *buf)
 int ip_handler(register struct packet_ptrs *pptrs)
 {
   register u_int8_t len = 0;
-  register u_int8_t caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
+  register u_int16_t caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
   register unsigned char *ptr;
-  
+  register u_int16_t off = pptrs->iph_ptr-pptrs->packet_ptr;
+
   /* len: number of 32bit words forming the header */
   len = IP_HL(((struct my_iphdr *) pptrs->iph_ptr));
   len <<= 2;
   ptr = pptrs->iph_ptr+len;
+  off += len;
 
   /* check len */
-  if (ptr > (pptrs->packet_ptr+caplen)) return FALSE; /* IP packet truncated */
-  if (len < 20) return FALSE; /* 20=sizeof(struct my_iphdr) */
+  if (off > caplen) return FALSE; /* IP packet truncated */
+  pptrs->l4_proto = ((struct my_iphdr *)pptrs->iph_ptr)->ip_p;
   
   /* check fragments if needed */
   if (config.handle_fragments) {
-    if ((ptr+sizeof(struct my_tlhdr)) > (pptrs->packet_ptr+caplen)) return FALSE; /* XXX: or TRUE ? */ 
-    else pptrs->tlh_ptr = ptr; 
+    if ((pptrs->l4_proto == IPPROTO_TCP)||(pptrs->l4_proto == IPPROTO_UDP)) {
+      if (off+MyTLHdrSz > caplen) return FALSE;
+      pptrs->tlh_ptr = ptr; 
     
-    if (((struct my_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_MF|IP_OFFMASK))
-      return ip_fragment_handler(pptrs);
-    else return TRUE;
+      if (((struct my_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_MF|IP_OFFMASK))
+        return ip_fragment_handler(pptrs);
+    }
+  } 
+
+  return TRUE;
+}
+
+#if defined ENABLE_IPV6
+int ip6_handler(register struct packet_ptrs *pptrs)
+{
+  struct ip6_frag *fhdr;
+  register u_int16_t caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
+  u_int16_t len = 0, plen = ntohs(((struct ip6_hdr *)pptrs->iph_ptr)->ip6_plen);
+  u_int16_t off = pptrs->iph_ptr-pptrs->packet_ptr;
+  u_int32_t advance;
+  u_int8_t nh, fragmented = 0; 
+  u_char *ptr = pptrs->iph_ptr;
+
+  /* length checks */
+  if (off+IP6HdrSz > caplen) return FALSE; /* IP packet truncated */
+  if (plen == 0) { 
+    Log(LOG_INFO, "INFO: NULL IPv6 payload length. Jumbo packets not supported.\n");
+    return FALSE;
   }
-  else return TRUE;
+
+  pptrs->l4_proto = 0;
+  nh = ((struct ip6_hdr *)pptrs->iph_ptr)->ip6_nxt; 
+  advance = IP6HdrSz;
+  
+  while ((off+advance <= caplen) && advance) {
+    off += advance;
+    ptr += advance;
+
+    switch(nh) {
+    case IPPROTO_HOPOPTS:
+    case IPPROTO_DSTOPTS:
+    case IPPROTO_ROUTING:
+    case IPPROTO_MOBILITY:
+      nh = ((struct ip6_ext *)ptr)->ip6e_nxt;
+      advance = (((struct ip6_ext *)ptr)->ip6e_len + 1) << 3; 
+      break;
+    case IPPROTO_AH:
+      nh = ((struct ip6_ext *)ptr)->ip6e_nxt;
+      advance = sizeof(struct ah)+(((struct ah *)ptr)->ah_len << 2); /* hdr + sumlen */
+      break;
+    case IPPROTO_FRAGMENT:
+      if (config.handle_fragments) {
+        fhdr = (struct ip6_frag *) ptr;
+        fragmented = TRUE; 
+      }
+      nh = ((struct ip6_ext *)ptr)->ip6e_nxt;
+      advance = sizeof(struct ip6_frag);
+      break;
+    /* XXX: case IPPROTO_ESP: */
+    /* XXX: case IPPROTO_IPCOMP: */
+    default:
+      pptrs->tlh_ptr = ptr;
+      pptrs->l4_proto = nh;
+      goto end;
+    }
+  }
+
+  end:
+
+  if (fragmented) { 
+    if ((pptrs->l4_proto == IPPROTO_TCP)||(pptrs->l4_proto == IPPROTO_UDP)) {
+      if (off+MyTLHdrSz > caplen) return FALSE;
+      if (fhdr->ip6f_offlg & htons(IP6F_MORE_FRAG|IP6F_OFF_MASK))
+        return ip6_fragment_handler(pptrs, fhdr);
+    }
+  }
+
+  return TRUE;
+}
+#endif
+
+int PM_find_id(struct packet_ptrs *pptrs)
+{
+  struct id_table *t = (struct id_table *)pptrs->idtable;
+  int x, j, id, stop;
+
+  id = 0;
+  for (x = 0; x < t->ipv4_num; x++) {
+    for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
+    if (id) break;
+  }
+
+  return id;
 }
 
 void compute_once()
@@ -444,4 +601,10 @@ void compute_once()
   PdataSz = sizeof(struct pkt_data);
   ChBufHdrSz = sizeof(struct ch_buf_hdr);
   CharPtrSz = sizeof(char *);
+  IP4HdrSz = sizeof(struct my_iphdr);
+  MyTLHdrSz = sizeof(struct my_tlhdr);
+#if defined ENABLE_IPV6
+  IP6HdrSz = sizeof(struct ip6_hdr);
+  IP6AddrSz = sizeof(struct in6_addr);
+#endif
 }

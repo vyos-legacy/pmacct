@@ -1,0 +1,23 @@
+Revision: pmacct--upstream--0.8.3--patch-1
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jaq@spacepants.org>
+Date: Sat Apr 16 16:38:24 EST 2005
+Standard-date: 2005-04-16 06:38:24 GMT
+New-files: .arch-ids/UPGRADE.id UPGRADE
+    docs/.arch-ids/UPGRADE.id docs/UPGRADE
+Modified-files: AUTHORS CONFIG-KEYS ChangeLog FAQS README cfg.h
+    cfg_handlers.c configure configure.in
+    examples/nfacctd-sql_v2.conf.example
+    examples/pretag.map.example mysql_plugin.c nfacctd.c
+    nfacctd.h pgsql_plugin.c plugin_hooks.c plugin_hooks.h
+    pmacct-defines.h pmacct.c pmacct.h pmacctd.c pretag-data.h
+    pretag.c pretag.h pretag_handlers.c pretag_handlers.h
+    server.c signals.c util.c util.h
+New-patches: jaq@debian.org--2004/pmacct--upstream--0.8.3--patch-1
+Summary: Imported pmacct-0.8.3
+Keywords: 
+
+Imported pmacct-0.8.3
+into jaq@debian.org--2004/pmacct--upstream--0.8.3
+
+

@@ -1,0 +1,32 @@
+Revision: pmacct--upstream--0.7.9--patch-1
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jaq@spacepants.org>
+Date: Sat Apr 16 15:13:13 EST 2005
+Standard-date: 2005-04-16 05:13:13 GMT
+New-files: .arch-ids/preprocess.c.id
+    .arch-ids/preprocess.h.id preprocess.c preprocess.h
+Renamed-files: examples/.arch-ids/id_map.example.id examples/.arch-ids/pretag.map.example.id
+    examples/.arch-ids/networks.example.id examples/.arch-ids/networks.lst.example.id
+    examples/.arch-ids/ports.example.id examples/.arch-ids/ports.lst.example.id
+    examples/id_map.example examples/pretag.map.example
+    examples/networks.example examples/networks.lst.example
+    examples/ports.example examples/ports.lst.example
+Modified-files: AUTHORS CONFIG-KEYS ChangeLog EXAMPLES README
+    cfg.h cfg_handlers.c cfg_handlers.h configure configure.in
+    docs/INTERNALS docs/TRIGGER_VARS
+    examples/nfacctd-sql_v1.conf.example
+    examples/nfacctd-sql_v2.conf.example
+    examples/pmacctd-sql_v1.conf.example
+    examples/pmacctd-sql_v2.conf.example mysql_plugin.c
+    mysql_plugin.h nf_map.c nfacctd.c pgsql_plugin.c
+    pgsql_plugin.h pmacct-data.h pmacct-defines.h pmacctd.c
+    pmmyplay.c pmpgplay.c sql_common.h sql_common_m.c util.c
+    util.h
+New-patches: jaq@debian.org--2004/pmacct--upstream--0.7.9--patch-1
+Summary: Imported pmacct-0.7.9
+Keywords: 
+
+Imported pmacct-0.7.9
+into jaq@debian.org--2004/pmacct--upstream--0.7.9
+
+

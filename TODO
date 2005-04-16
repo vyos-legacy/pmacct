@@ -1,36 +1,47 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2004 by Paolo Lucente
+pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 
 
-This software is currently under strong development, i'll 
-try to reach a good and stable stage as soon as possible;
-The project has been started for practical reasons, i'll work
-on it mostly in my spare time. Any comment, suggestion, test,
-ideas and any other kind of help, contribution or support is
-warmly welcome. Listed below are only few ideas to be reached
-as soon as possible.
-Currently, this software has to be considered in an early
-development stage, so take care when using it in a production
-environment.
-I'm currently not able to provide any kind of mailing list or
-mission critical support mainly for lack of time and resource
-constraints. If you have ideas, resources or proposals, contact
-me (email is in AUTHORS textfile); i'll answer you as soon as
-possible.
+This software is currently under strong development, i'll try to
+reach a good and stable stage as soon as possible; the project
+has been started for practical reasons and i'm working on it,
+enthusiastically, mostly in my spare time. Any comment, idea,
+and any other kind of help, contribution or support is warmly
+welcome. Listed below are only few ideas to be reached as soon
+as possible.
+Currently, this software has to be considered in a development
+stage, so take care when using it in a production environment.
+If you find any bug, problem or misbehaviour don't hesitate to
+contact me.
+I'm currently not able to provide any kind of mission critical
+support, mainly for lack of resources. However, you may find
+useful the 'pmacct-discussion' mailing-list for getting in
+touch with us. Find details about it onto the project homepage. 
+If you have resources or proposals, feel free to contact me
+(email is in AUTHORS document); i'll be happy to read about
+them; i'll answer you as soon as possible.
  
- + explore new traffic sources other than promiscuous mode. 
- + strong improvements to the plugins architecture; more advanced
-   concepts are needed. It would permit some advanced feature such
-   as hotswap of old plugins without restarting pmacctd and should
-   facilitate development of custom plugins. 
- + throw away pipes in 'core' <-> 'plugins' communications. As of 
-   0.6.2 socketpair() has been introduced to alleviate pipe trobules.
-   However this is not the best solution. Better ways need to be
-   explored.
- + man page.
- + strong improvements to automake/autoconf part, i wrote a really
-   rough Makefile.am/configure.in pairs, trying to make things work,
-   that's all. 
+ + Alignment issues; configure now does the proper test for
+   unaligned accesses; a set of macros to copy 8/16/32 bit
+   chunks has also been created: it *should* be sufficient
+   as framework. Alignment issues have to be incrementally
+   resolved.
+ + explore new capturing 'sources' other than libpcap and
+   NetFlow V1/V5/V9. 
+ + improvements to the plugins architecture; more advanced
+   concept would be greatly useful: they would permit some
+   advanced feature such as hotswap of old plugins without
+   restarting the daemon and should ease development of
+   custom plugins. 
+ + optimizations to the communication between SQL plugins
+   and MySQL/PostgreSQL servers. This should lead to the
+   introduction of non-standard SQL queries and hints to 
+   short-circuit the UPDATE-then-INSERT cycle. 
+ + find if there is any interesting backend to support out
+   there. Writing to files is an already inflated proposal. 
+ + improvements to automake/autoconf part, i wrote a really
+   rough Makefile.am/configure.in pairs, trying to make things
+   work, that's all. 
 
 Cheers,
 Paolo

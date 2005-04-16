@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -30,26 +30,42 @@ struct DBdesc {
   short int fail;
 };
 
+struct BE_descs { /* Backend descriptors */
+  struct DBdesc *p;
+  struct DBdesc *b;
+  struct logfile *lf;
+};
+
 /* prototypes */
 void mysql_plugin(int, struct configuration *, void *);
-int MY_cache_dbop(MYSQL *, const struct db_cache *, const int);
-void MY_cache_purge(struct db_cache *[], int, const int, int);
-void MY_handle_collision(struct db_cache *);
+int MY_cache_dbop(MYSQL *, const struct db_cache *, struct insert_data *);
+void MY_cache_purge(struct db_cache *[], int, struct insert_data *);
 int MY_evaluate_history(int);
 int MY_compose_static_queries();
-unsigned int MY_cache_modulo(struct pkt_primitives *);
+void MY_cache_modulo(struct pkt_primitives *, struct insert_data *);
 void MY_cache_insert(struct pkt_data *, struct insert_data *);
-int MY_cache_flush(struct db_cache *[], int, int);
+int MY_cache_flush(struct db_cache *[], int);
 int MY_evaluate_primitives(int);
 void MY_exit_gracefully(int);
-void MY_Lock(struct DBdesc *, struct DBdesc *, struct logfile *);
-void MY_Query(struct DBdesc *, struct DBdesc *, struct logfile *, const struct db_cache *, int);
-void MY_Unlock(struct DBdesc *, struct DBdesc *, struct logfile *);
-FILE *MY_file_open(const char *, const char *);
+void MY_Lock(struct BE_descs *);
+void MY_Query(struct BE_descs *, const struct db_cache *, struct insert_data *);
+void MY_Unlock(struct BE_descs *);
+FILE *MY_file_open(const char *, const struct insert_data *);
 int MY_DB_Connect(struct DBdesc *, char *);
 int MY_Exec(char *);
+void MY_sum_host_insert(struct pkt_data *, struct insert_data *);
+void MY_sum_port_insert(struct pkt_data *, struct insert_data *);
+
+#if defined __PMACCT_PLAYER_C
+void print_header();
+#endif
 
 /* global vars */
+void (*insert_func)(struct pkt_data *, struct insert_data *);
+struct template_header th;
+struct template_entry *te;
+struct largebuf logbuf;
+struct largebuf envbuf;
 struct DBdesc p;
 struct DBdesc b;
-
+struct BE_descs bed;

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -28,20 +28,22 @@
 
 /* functions */
 
-/* load_plugins() starts plugin processes; creates
-   pipes and handles them inserting in channels_list
-   structure */
+/* load_plugins() starts plugin processes; creates pipes
+   and handles them inserting in channels_list structure */
+
 /* when not using map_shared, 'pipe_size' is the size of
-   the pipe created with socketpair(); when map_shareding
-   it refers to the size of the shared memory area */
-void load_plugins(struct pcap_device *device)
+   the pipe created with socketpair(); when map_shared is
+   enabled, it refers to the size of the shared memory
+   area */
+void load_plugins(struct pcap_device *device, struct plugin_requests *req)
 {
-  int x, v, socklen, index, ret;
+  int x, v, socklen;
   struct plugins_list_entry *list = plugins_list;
   int l = sizeof(list->cfg.pipe_size);
   struct channels_list_entry *chptr;
 
   init_pipe_channels();
+  memset(req, 0, sizeof(struct plugin_requests));
 
   while (list) {
     if ((*list->type.func)) {
@@ -149,7 +151,11 @@ void load_plugins(struct pcap_device *device)
       default: /* Parent */
 	close(list->pipe[0]);
 	setnonblocking(list->pipe[1]);
+	break;
       }
+
+      /* some residual check */
+      if ((chptr) && (chptr->filter)) req->bpf_filter = TRUE;
     }
     list = list->next;
   }
@@ -159,92 +165,90 @@ void load_plugins(struct pcap_device *device)
 
 void exec_plugins(struct packet_ptrs *pptrs) 
 {
-  int num, ret;
+  int num;
   struct pkt_data *pdata;
-  struct plugins_list_entry *list = plugins_list;
+  char *bptr;
   int index;
 
-  index = 0;
-  while (channels_list[index].aggregation) {
-    if (channels_list[index].aggregation == -1); /* channel has been marked as deleted */
-    else {
-      if (bpf_filter(channels_list[index].filter->bf_insns, pptrs->packet_ptr, pptrs->pkthdr->len,
-          pptrs->pkthdr->caplen) && (!channels_list[index].id_filter ||
-	  (channels_list[index].id_filter == ((struct my_iphdr *)pptrs->iph_ptr)->ip_id)) &&
-	  !evaluate_sampling(&channels_list[index].s)) {
-        /* constructing buffer: supported primitives + packet total length */
-        num = 0;
+  for (index = 0; channels_list[index].aggregation; index++) {
+    if (bpf_filter(channels_list[index].filter->bf_insns, pptrs->packet_ptr, pptrs->pkthdr->len,
+        pptrs->pkthdr->caplen) && (!channels_list[index].tag_filter.num ||
+	!evaluate_tags(&channels_list[index].tag_filter, pptrs->tag)) && 
+	!evaluate_sampling(&channels_list[index].s)) {
+      /* constructing buffer: supported primitives + packet total length */
+      num = 0;
 #if !defined (HAVE_MMAP)
-        pdata = (struct pkt_data *) channels_list[index].bufptr;
+      pdata = (struct pkt_data *) channels_list[index].bufptr;
 #else
-	/* rg.ptr points to slot's base address into the ring (shared memory); bufptr works
-	   as a displacement into the slot to place sequentially packets */
-        (char *) pdata = channels_list[index].rg.ptr+ChBufHdrSz+channels_list[index].bufptr; 
+      /* rg.ptr points to slot's base address into the ring (shared memory); bufptr works
+	 as a displacement into the slot to place sequentially packets */
+      /* bufptr -> bptr -> pdata: avoids lvalue crap. Signalled by Andreas Jochens on AMD64/gcc4.0 */
+      bptr = channels_list[index].rg.ptr+ChBufHdrSz+channels_list[index].bufptr; 
+      pdata = (struct pkt_data *)bptr; 
 #endif
-        while (channels_list[index].phandler[num] != NULL) {
-          (*channels_list[index].phandler[num])(&channels_list[index], pptrs, pdata);
-          num++;
+      while (channels_list[index].phandler[num]) {
+        (*channels_list[index].phandler[num])(&channels_list[index], pptrs, pdata);
+        num++;
+      }
+
+#if !defined (HAVE_MMAP)
+      ((struct ch_buf_hdr *)channels_list[index].buf)->num++;
+#else
+      channels_list[index].hdr.num++;
+#endif
+      channels_list[index].bufptr += PdataSz;
+
+      if ((channels_list[index].bufptr+PdataSz) > channels_list[index].bufend) {
+#if !defined (HAVE_MMAP)
+        if (write(channels_list[index].pipe, channels_list[index].buf, channels_list[index].bufsize) == -1) {
+	  if ((errno == EAGAIN) || (errno == ENOBUFS))
+	    Log(LOG_ERR, "ERROR: Pipe full. Raise maximum socket size for your system or try with a larger 'plugin_buffer_size' value. We are missing data.\n");
         }
 
-#if !defined (HAVE_MMAP)
-        ((struct ch_buf_hdr *)channels_list[index].buf)->num++;
+	/* rewind pointer */
+        channels_list[index].bufptr = channels_list[index].buf+ChBufHdrSz;
+        ((struct ch_buf_hdr *)channels_list[index].buf)->num = 0;
 #else
-	channels_list[index].hdr.num++;
-#endif
-        channels_list[index].bufptr += PdataSz;
+	channels_list[index].hdr.seq++;
+	channels_list[index].hdr.seq %= MAX_SEQNUM;
 
-        if ((channels_list[index].bufptr+PdataSz) > channels_list[index].bufend) {
-#if !defined (HAVE_MMAP)
-          if (write(channels_list[index].pipe, channels_list[index].buf, channels_list[index].bufsize) == -1) {
-	    if ((errno == EAGAIN) || (errno == ENOBUFS))
-	       Log(LOG_ERR, "ERROR: Pipe full. Raise maximum socket size for your system or try with a larger 'plugin_buffer_size' value. We are missing data.\n");
-          }
+	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->seq = channels_list[index].hdr.seq;
+	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->num = channels_list[index].hdr.num;
 
-	  /* rewind pointer */
-          channels_list[index].bufptr = channels_list[index].buf+ChBufHdrSz;
-          ((struct ch_buf_hdr *)channels_list[index].buf)->num = 0;
-#else
-	  channels_list[index].hdr.seq++;
-	  channels_list[index].hdr.seq %= MAX_SEQNUM;
-
-	  ((struct ch_buf_hdr *)channels_list[index].rg.ptr)->seq = channels_list[index].hdr.seq;
-	  ((struct ch_buf_hdr *)channels_list[index].rg.ptr)->num = channels_list[index].hdr.num;
-
-	  if (channels_list[index].status->wakeup) {
-	    channels_list[index].status->wakeup = channels_list[index].request;
-	    write(channels_list[index].pipe, &channels_list[index].rg.ptr, CharPtrSz); 
-	  }
-	  channels_list[index].rg.ptr += channels_list[index].bufsize;
-
-	  if ((channels_list[index].rg.ptr+channels_list[index].bufsize) > channels_list[index].rg.end)
-	    channels_list[index].rg.ptr = channels_list[index].rg.base;
-
-          /* rewind pointer */
-          channels_list[index].bufptr = channels_list[index].buf;
-          channels_list[index].hdr.num = 0;
-#endif
+	if (channels_list[index].status->wakeup) {
+	  channels_list[index].status->wakeup = channels_list[index].request;
+	  write(channels_list[index].pipe, &channels_list[index].rg.ptr, CharPtrSz); 
 	}
+	channels_list[index].rg.ptr += channels_list[index].bufsize;
+
+	if ((channels_list[index].rg.ptr+channels_list[index].bufsize) > channels_list[index].rg.end)
+	  channels_list[index].rg.ptr = channels_list[index].rg.base;
+
+        /* rewind pointer */
+        channels_list[index].bufptr = channels_list[index].buf;
+        channels_list[index].hdr.num = 0;
+#endif
       }
     }
-    index++;
   }
 }
 
 struct channels_list_entry *insert_pipe_channel(struct configuration *cfg, int pipe)
 {
   struct channels_list_entry *chptr; 
-  int index = 0, done = FALSE;  
+  int index = 0, x;  
 
   while (index < MAX_N_PLUGINS) {
     chptr = &channels_list[index]; 
-    if (chptr->aggregation == 0) { /* found room */
+    if (!chptr->aggregation) { /* found room */
       chptr->aggregation = cfg->what_to_count;
       chptr->pipe = pipe; 
       chptr->filter = &cfg->bpfp_a_filter; 
       chptr->bufsize = cfg->buffer_size;
       chptr->id = cfg->post_tag;
-      chptr->s.rate = cfg->sampling_rate;
-      if (config.acct_type == ACCT_NF) chptr->id_filter = cfg->pre_tag_filter;
+      if (cfg->sampling_rate) chptr->s.rate = cfg->sampling_rate;
+      for (x = 0; x < cfg->ptf.num; x++) chptr->tag_filter.table[x] = cfg->ptf.table[x];
+      chptr->tag_filter.num = cfg->ptf.num;
 #if !defined (HAVE_MMAP)
       chptr->buf = malloc(cfg->buffer_size);
       if (!chptr->buf) {
@@ -275,8 +279,7 @@ struct channels_list_entry *insert_pipe_channel(struct configuration *cfg, int p
       }
       memset(chptr->status, 0, sizeof(struct ch_status));
 #endif
-      
-      done = TRUE;
+
       break;
     }
     else chptr = NULL; 
@@ -290,30 +293,41 @@ struct channels_list_entry *insert_pipe_channel(struct configuration *cfg, int p
 void delete_pipe_channel(int pipe)
 {
   struct channels_list_entry *chptr;
-  int index = 0;
+  int index = 0, index2;
 
   while (index < MAX_N_PLUGINS) {
     chptr = &channels_list[index];
 
     if (chptr->pipe == pipe) {
-      chptr->aggregation = -1;
+      chptr->aggregation = FALSE;
 	
       /* we ensure that any plugin is depending on the one
 	 being removed via the 'same_aggregate' flag */
       if (!chptr->same_aggregate) {
-	for (index++; index < MAX_N_PLUGINS; index++) {
-	  chptr = &channels_list[index];
+	index2 = index;
+	for (index2++; index2 < MAX_N_PLUGINS; index2++) {
+	  chptr = &channels_list[index2];
 
-	  if (chptr->aggregation == -1) continue; /* this channel has already been deleted */  
-	  else if (chptr->aggregation == 0) break; /* we finished channels */
-
+	  if (!chptr->aggregation) break; /* we finished channels */
 	  if (chptr->same_aggregate) {
 	    chptr->same_aggregate = FALSE;
 	    break; 
 	  }
-	  else break;
+	  else break; /* we have nothing to do */
 	}
       }
+
+      index2 = index;
+      for (index2++; index2 < MAX_N_PLUGINS; index2++) {
+	chptr = &channels_list[index2];
+	if (chptr->aggregation) {
+	  memcpy(&channels_list[index], chptr, sizeof(struct channels_list_entry)); 
+	  memset(chptr, 0, sizeof(struct channels_list_entry)); 
+	  index++;
+	}
+	else break; /* we finished channels */
+      }
+       
       break;
     }
 
@@ -369,4 +383,21 @@ int evaluate_sampling(struct sampling *s)
     s->counter = s->rate;
     return FALSE;
   }
+}
+
+/* return value:
+   FALSE: packet matched the filter
+   TRUE: discard this packet
+*/
+int evaluate_tags(struct pretag_filter *filter, u_int16_t tag)
+{
+  int index;
+
+  if (filter->num == 0) return FALSE; /* no entries in the filter array: tag filtering disabled */
+  
+  for (index = 0; index < filter->num; index++) {
+    if (filter->table[index] == tag) return FALSE;
+  }
+
+  return TRUE;
 }

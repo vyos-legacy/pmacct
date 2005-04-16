@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -41,10 +41,11 @@ struct chained_cache {
   u_int8_t eth_dhost[ETH_ADDR_LEN];
   u_int8_t eth_shost[ETH_ADDR_LEN];
   u_int16_t vlan_id;
-  struct in_addr src_ip;
-  struct in_addr dst_ip;
+  struct host_addr src_ip;
+  struct host_addr dst_ip;
   u_int16_t src_port;
   u_int16_t dst_port;
+  u_int8_t tos;
   u_int8_t proto;
   u_int16_t id;
   u_int32_t packet_counter;
@@ -57,13 +58,16 @@ struct chained_cache {
 void print_plugin(int, struct configuration *, void *);
 struct chained_cache *P_cache_attach_new_node(struct chained_cache *);
 unsigned int P_cache_modulo(struct pkt_primitives *);
-void P_cache_insert(struct pkt_data *, unsigned int);
+void P_sum_host_insert(struct pkt_data *);
+void P_sum_port_insert(struct pkt_data *);
+void P_cache_insert(struct pkt_data *);
 void P_cache_flush(struct chained_cache *[], int);
 void P_cache_purge(struct chained_cache *[], int);
 void P_write_stats_header();
 void *Malloc(unsigned int);
 
 /* global vars */
+void (*insert_func)(struct pkt_data *); /* pointer to INSERT function */
 struct scratch_area sa;
 struct chained_cache *cache;
 struct chained_cache **queries_queue;

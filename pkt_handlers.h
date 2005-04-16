@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -40,18 +40,26 @@ EXT void src_host_handler(struct channels_list_entry *, struct packet_ptrs *, st
 EXT void dst_host_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void src_port_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void dst_port_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void ip_tos_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void ip_proto_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void counters_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void id_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 
+EXT void NF_src_mac_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void NF_dst_mac_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void NF_vlan_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_src_host_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_dst_host_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_src_port_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_dst_port_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void NF_src_as_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void NF_dst_as_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void NF_ip_tos_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_ip_proto_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_counters_msecs_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_counters_secs_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_counters_new_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
-EXT void NF_id_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+
+EXT void ptag_id_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 #undef EXT
 

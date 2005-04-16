@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -31,6 +31,7 @@ struct _dictionary_line {
 };
 
 struct configuration {
+  u_int32_t what_to_count;
   int acct_type; 
   int pipe_size;
   int buffer_size;
@@ -57,6 +58,8 @@ struct configuration {
   int sql_trigger_time;
   int sql_trigger_time_howmany; /* internal */
   char *sql_trigger_exec;
+  int sql_max_queries;
+  char *sql_preprocess;
   int print_refresh_time;
   int print_cache_entries;
   int print_markers;
@@ -64,9 +67,12 @@ struct configuration {
   char *nfacctd_ip;
   char *nfacctd_allow_file;
   int nfacctd_time;
+  int nfacctd_as;
   int promisc; /* pcap_open_live() promisc parameter */
   char *clbuf; /* pcap filter */
+  char *pcap_savefile;
   char *dev;
+  int if_wait;
   int num_memory_pools;
   int memory_pool_size;
   int buckets;
@@ -74,10 +80,11 @@ struct configuration {
   int active_plugins;
   char *pidfile; 
   char *networks_file;
-  unsigned int what_to_count;
+  int networks_cache_entries;
+  char *ports_file;
   char *a_filter;
   struct bpf_program bpfp_a_filter;
-  int pre_tag_filter;
+  struct pretag_filter ptf;
   char *pre_tag_map;
   int post_tag;
   int sampling_rate;

@@ -1,4 +1,4 @@
-To create the database and grant default permission to pmacctd you have to execute
+To create the database and grant default permission to the daemon you have to execute
 the two scripts below, in the same order; which user has to execute them and how to
 autenticate with the PostgreSQL server depends upon your current configuration.
 Keep in mind that both scripts need postgres superuser permissions to execute commands 
@@ -15,67 +15,36 @@ To create v2 tables:
 shell> psql -d template1 -f /tmp/pmacct-create-db.pgsql
 shell> psql -d pmacct -f /tmp/pmacct-create-table_v2.pgsql
 
-Two tables will be created in the 'pmacct' DB. 'acct' (or 'acct_v2' if using v2) table is
-the default table where data will be written when in 'frontend' mode (see 'sql_data'
-option in CONFIG-KEYS text file; default value is 'frontend'); 'acct_back' (or 'acct_back_v2'
-if using v2 tables) is the default table where data will be written when in 'backend'
-mode.
+To create v3 tables:
+shell> psql -d template1 -f /tmp/pmacct-create-db.pgsql
+shell> psql -d pmacct -f /tmp/pmacct-create-table_v3.pgsql
 
+A few tables will be created into 'pmacct' DB. 'acct' ('acct_v2' or 'acct_v3') table is
+the default table where data will be written when in 'typed' mode (see 'sql_data' option
+in CONFIG-KEYS text file; default value is 'typed'); 'acct_uni' ('acct_uni_v2' or
+'acct_uni_v3') is the default table where data will be written when in 'unified' mode.
 A pair of brief explanations: 
 
-- To understand difference between v1 and v2 tables:
-  - Do you need agent ID for distributed accounting ? Then you have to use v2.
+- To understand difference between v1, v2 and v3 tables:
+  - Do you need ToS/DSCP field (QoS) accounting ? Then you have to use v3.
+  - Do you need agent ID for distributed accounting and packet tagging ? Then you have to use v2. 
   - Do you need VLAN traffic accounting ? Then you have to use v2.
   - If all of the above point sound useless, then use v1.
 
-- What is the difference between 'frontend' and 'backend' modes ? What is the 'proto' table ?
-'frontend data are final, human readable strings; backend data are integers, IP addresses
-represented in network byte order, etc.'. An auxiliar 'proto' table will be created and
-contains names of protocols that in 'acct' table are represented as numbers. Joins are
-expensive, 'proto' table has been created *only* for your reference. 
+- What is the difference between 'typed' and 'unified' modes ? 
+The 'unified' table has IP addresses and MAC addresses specified as standard CHAR strings,
+slower but flexible (in the sense it may store each kind of strings); 'typed' tables sport
+PostgreSQL own types (inet, mac, etc.), faster but rigid. When not specifying your own
+'sql_table', this switch instructs the plugin which tables has to use. (default: 'typed').
 
-NOTE: if you are using 'backend' mode, of course you have the ability to translate data
-in a human readable form; PostgreSQL's internal ABSTIME() function is your friend when
-handling timestamps in unix format (since epoch); the following stored procedure is a
-sample of what you could need to translate IP addresses from integers in network byte
-order into strings:
+- What is the 'proto' table ?
+The auxiliar 'proto' table will be created by default. Its tuples are simply number-string
+pairs: the protocol field of both typed and unified tables is numerical. This table helps 
+in looking up protocol names by their number and viceversa. Because joins are expensive,
+'proto' table has been created *only* for your personal reference. 
 
-CREATE FUNCTION pm_inet_ntoa(int8) RETURNS CHAR AS '
-DECLARE
-    t CHAR(15);
-BEGIN
-    t = ($1 & 255::int8)        || ''.'' ||
-        (($1>>8)  & 255::int8)  || ''.'' ||
-        (($1>>16) & 255::int8)  || ''.'' ||
-        (($1>>24) & 255::int8);
-    RETURN t;
-END;
-' LANGUAGE 'plpgsql';
+NOTE: don't forget to specify which SQL table version you are currently using when running
+'pmacctd' or 'nfacctd':
 
-To create such a function you will need PL/pgSQL language handlers; they have to be created
-with the following declarations:
-
-CREATE FUNCTION plpgsql_call_handler() RETURNS OPAQUE AS 'plpgsql.so' LANGUAGE 'C';
-CREATE TRUSTED PROCEDURAL LANGUAGE 'plpgsql' HANDLER plpgsql_call_handler LANCOMPILER 'PL/pgSQL';
-
-
-Moreover; do you like automagical stuff ? Understanding a priori that you will get great 
-delays when facing with really large tables, you could also implement a view as a filter
-to your "acct_back" table, in the following way:
-
-CREATE VIEW data AS
-  SELECT mac_src,
-         mac_dst,
-         pm_inet_ntoa(ip_src) AS ip_src,
-         pm_inet_ntoa(ip_dst) AS ip_dst,
-         port_src,
-         port_dst,
-         ip_proto,
-         packets,
-         bytes,
-         ABSTIME(stamp_inserted)::Timestamp::Timestamp without time zone AS stamp_inserted,
-         ABSTIME(stamp_updated)::Timestamp::Timestamp without time zone AS stamp_updated
-  FROM acct_data; 
-
-
-
+commandline:    '-v [1|2|3]'
+configuration:  'sql_table_version: [1|2|3]'

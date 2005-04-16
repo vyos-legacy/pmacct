@@ -1,0 +1,320 @@
+/*
+    pmacct (Promiscuous mode IP Accounting package)
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
+*/
+
+/*
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+*/
+
+#define __PRETAG_HANDLERS_C
+
+#include "pmacct.h"
+#include "nfacctd.h"
+#include "pretag_handlers.h"
+#include "pretag-data.h"
+
+int PT_map_id_handler(struct id_entry *e, char *value)
+{
+  int j;
+
+  j = atoi(value);
+  if (!j || j > 65535) {
+    Log(LOG_ERR, "ERROR: Agent ID '%d' is invalid (range: 0 > ID > 65535). ", j);
+    return TRUE;
+  } 
+  e->id = j; 
+
+  return FALSE;
+}
+
+int PT_map_ip_handler(struct id_entry *e, char *value)
+{
+  if (!str_to_addr(value, &e->agent_ip)) {
+    Log(LOG_ERR, "ERROR: Bad IP address '%s'. ", value);
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+int PT_map_input_handler(struct id_entry *e, char *value)
+{
+  int x = 0, len = strlen(value);
+
+  while (x < len) {
+    if (!isdigit(value[x])) {
+      Log(LOG_ERR, "ERROR: bad 'in' value: '%s'. ", value);
+      return TRUE;
+    }
+    x++;
+  }
+  
+  e->input = htons(atoi(value));
+  for (x = 0; e->func[x]; x++);
+  e->func[x] = pretag_input_handler; 
+  return FALSE;
+}
+
+int PT_map_output_handler(struct id_entry *e, char *value)
+{
+  int x = 0, len = strlen(value);
+
+  while (x < len) {
+    if (!isdigit(value[x])) {
+      Log(LOG_ERR, "ERROR: bad 'out' value: '%s'. ", value);
+      return TRUE;
+    }
+    x++;
+  }
+
+  e->output = htons(atoi(value));
+  for (x = 0; e->func[x]; x++);
+  e->func[x] = pretag_output_handler;
+  return FALSE;
+}
+
+int PT_map_nexthop_handler(struct id_entry *e, char *value)
+{
+  int x = 0;
+
+  if (!str_to_addr(value, &e->nexthop)) {
+    Log(LOG_ERR, "ERROR: Bad nexthop address '%s'. ", value);
+    return TRUE;
+  }
+
+  for (x = 0; e->func[x]; x++);
+  e->func[x] = pretag_nexthop_handler;
+  return FALSE;
+}
+
+int PT_map_bgp_nexthop_handler(struct id_entry *e, char *value)
+{
+  int x = 0;
+
+  if (!str_to_addr(value, &e->bgp_nexthop)) {
+    Log(LOG_ERR, "ERROR: Bad BGP nexthop address '%s'. ", value);
+    return TRUE;
+  }
+
+  for (x = 0; e->func[x]; x++);
+  e->func[x] = pretag_bgp_nexthop_handler;
+  return FALSE;
+}
+
+int PT_map_engine_type_handler(struct id_entry *e, char *value)
+{
+  int x = 0, j, len = strlen(value);
+
+  while (x < len) {
+    if (!isdigit(value[x])) {
+      Log(LOG_ERR, "ERROR: bad 'engine_type' value: '%s'. ", value);
+      return TRUE;
+    }
+    x++;
+  }
+
+  j = atoi(value);
+  if (j > 255) {
+    Log(LOG_ERR, "ERROR: bad 'engine_type' value (range: 0 >= value > 256). ");
+    return TRUE;
+  }
+  e->engine_type = j; 
+  for (x = 0; e->func[x]; x++);
+  e->func[x] = pretag_engine_type_handler;
+  return FALSE;
+}
+
+int PT_map_engine_id_handler(struct id_entry *e, char *value)
+{
+  int x = 0, j, len = strlen(value);
+
+  while (x < len) {
+    if (!isdigit(value[x])) {
+      Log(LOG_ERR, "ERROR: bad 'engine_id' value: '%s'. ", value);
+      return TRUE;
+    }
+    x++;
+  }
+
+  j = atoi(value);
+  if (j > 255) {
+    Log(LOG_ERR, "ERROR: bad 'engine_id' value (range: 0 >= value > 256). ");
+    return TRUE;
+  }
+  e->engine_id = j;
+  for (x = 0; e->func[x]; x++);
+  e->func[x] = pretag_engine_id_handler;
+  return FALSE;
+}
+
+int PT_map_filter_handler(struct id_entry *e, char *value)
+{
+  struct pcap_device device;
+  bpf_u_int32 localnet, netmask;  /* pcap library stuff */
+  char errbuf[PCAP_ERRBUF_SIZE];
+  int x;
+
+  memset(&device, 0, sizeof(struct pcap_device));
+  device.dev_desc = pcap_open_dead(1, 128); /* link=1,snaplen=eth_header+my_iphdr+my_tlhdr */
+
+  pcap_lookupnet(config.dev, &localnet, &netmask, errbuf);
+  if (pcap_compile(device.dev_desc, &e->filter, value, 0, netmask) < 0) {
+    Log(LOG_ERR, "ERROR: malformed filter: %s\n", pcap_geterr(device.dev_desc));
+    return TRUE;
+  }
+
+  pcap_close(device.dev_desc);
+  for (x = 0; e->func[x]; x++);
+  e->func[x] = pretag_filter_handler;
+  return FALSE;
+}
+
+int pretag_input_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch(hdr->version) {
+  case 9:
+    if (!memcmp(&entry->input, pptrs->f_data+tpl->tpl[NF9_INPUT_SNMP].off, tpl->tpl[NF9_INPUT_SNMP].len)) return FALSE;
+    else return TRUE;
+  default:
+    if (entry->input == ((struct struct_export_v5 *)pptrs->f_data)->input) return FALSE;
+    else return TRUE; 
+  }
+}
+
+int pretag_output_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch(hdr->version) {
+  case 9:
+    if (!memcmp(&entry->output, pptrs->f_data+tpl->tpl[NF9_OUTPUT_SNMP].off, tpl->tpl[NF9_OUTPUT_SNMP].len)) return FALSE;
+    else return TRUE;
+  default:
+    if (entry->output == ((struct struct_export_v5 *)pptrs->f_data)->output) return FALSE;
+    else return TRUE;
+  }
+}
+
+int pretag_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch(hdr->version) {
+  case 9:
+    if (entry->nexthop.family == AF_INET) {
+      if (!memcmp(&entry->nexthop.address.ipv4, pptrs->f_data+tpl->tpl[NF9_IPV4_NEXT_HOP].off, tpl->tpl[NF9_IPV4_NEXT_HOP].len)) return FALSE;
+    }
+#if defined ENABLE_IPV6
+    else if (entry->nexthop.family == AF_INET6) {
+      if (!memcmp(&entry->nexthop.address.ipv6, pptrs->f_data+tpl->tpl[NF9_IPV6_NEXT_HOP].off, tpl->tpl[NF9_IPV6_NEXT_HOP].len)) return FALSE;
+    }
+#endif
+    else return TRUE;
+  default:
+    if (entry->nexthop.address.ipv4.s_addr == ((struct struct_export_v5 *)pptrs->f_data)->nexthop.s_addr) return FALSE;
+    else return TRUE;
+  }
+}
+
+int pretag_bgp_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch(hdr->version) {
+  case 9:
+    if (entry->bgp_nexthop.family == AF_INET) {
+      if (!memcmp(&entry->bgp_nexthop.address.ipv4, pptrs->f_data+tpl->tpl[NF9_BGP_IPV4_NEXT_HOP].off, tpl->tpl[NF9_BGP_IPV4_NEXT_HOP].len)) return FALSE;
+    }
+#if defined ENABLE_IPV6
+    else if (entry->nexthop.family == AF_INET6) {
+      if (!memcmp(&entry->bgp_nexthop.address.ipv6, pptrs->f_data+tpl->tpl[NF9_BGP_IPV6_NEXT_HOP].off, tpl->tpl[NF9_BGP_IPV6_NEXT_HOP].len)) return FALSE;
+    }
+#endif
+    else return TRUE;
+  default:
+    if (entry->bgp_nexthop.address.ipv4.s_addr == ((struct struct_export_v5 *)pptrs->f_data)->nexthop.s_addr) return FALSE;
+    else return TRUE;
+  }
+}
+
+int pretag_engine_type_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_char value[4];
+
+  switch(hdr->version) {
+  case 9:
+    memcpy(value, &((struct struct_header_v9 *)pptrs->f_data)->source_id, 4);
+    if (entry->engine_type == (u_int8_t)value[1]) return FALSE;
+    else return TRUE;
+  case 5:
+    if (entry->engine_type == ((struct struct_header_v5 *)pptrs->f_data)->engine_type) return FALSE;
+    else return TRUE;
+  default:
+    return TRUE; /* this field does not exist: condition is always true */
+  }
+}
+
+int pretag_engine_id_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_char value[4];
+
+  switch(hdr->version) {
+  case 9:
+    memcpy(value, &((struct struct_header_v9 *)pptrs->f_data)->source_id, 4);
+    if (entry->engine_id == (u_int8_t)value[0]) return FALSE;
+    else return TRUE;
+  case 5:
+    if (entry->engine_id == ((struct struct_header_v5 *)pptrs->f_data)->engine_id) return FALSE;
+    else return TRUE;
+  default:
+    return TRUE; /* this field does not exist: condition is always true */
+  }
+}
+
+int pretag_filter_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+
+  if (bpf_filter(entry->filter.bf_insns, pptrs->packet_ptr, pptrs->pkthdr->len, pptrs->pkthdr->caplen)) 
+    return FALSE; /* matched filter */
+  else return TRUE;
+}
+
+int pretag_id_handler(struct packet_ptrs *pptrs, void *id, void *e)
+{
+  struct id_entry *entry = e;
+
+  int *tid = id;
+  *tid = entry->id;
+  return TRUE; /* cap */
+}
+

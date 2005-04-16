@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -71,38 +71,38 @@ void count_vlan_handler(const struct db_cache *cache_elem, int num, char **ptr_v
 
 void count_src_host_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
 {
-  char *ptr;
+  char ptr[INET6_ADDRSTRLEN];
 
-  ptr = inet_ntoa(cache_elem->src_ip);
+  addr_to_str(ptr, &cache_elem->src_ip);
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ptr);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ptr);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
 
-void PG_count_src_host_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_src_as_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
 {
-  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->src_ip.s_addr);
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->src_ip.s_addr);
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ntohl(cache_elem->src_ip.address.ipv4.s_addr));
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ntohl(cache_elem->src_ip.address.ipv4.s_addr));
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
 
 void count_dst_host_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
 {
-  char *ptr;
+  char ptr[INET6_ADDRSTRLEN];
 
-   ptr = inet_ntoa(cache_elem->dst_ip);
-   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ptr);
-   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ptr);
-   *ptr_where += strlen(*ptr_where);
-   *ptr_values += strlen(*ptr_values);
+  addr_to_str(ptr, &cache_elem->dst_ip);
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
 }
 
-void PG_count_dst_host_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_dst_as_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
 {
-  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->dst_ip.s_addr);
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->dst_ip.s_addr);
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ntohl(cache_elem->dst_ip.address.ipv4.s_addr));
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ntohl(cache_elem->dst_ip.address.ipv4.s_addr));
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
@@ -122,6 +122,15 @@ void count_dst_port_handler(const struct db_cache *cache_elem, int num, char **p
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
+
+void count_ip_tos_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+{
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->tos);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->tos);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
 
 void MY_count_ip_proto_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
 {
@@ -149,14 +158,6 @@ void count_timestamp_handler(const struct db_cache *cache_elem, int num, char **
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->basetime);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->basetime);
-  *ptr_where += strlen(*ptr_where);
-  *ptr_values += strlen(*ptr_values);
-}
-
-void PG_count_timestamp_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
-{
-  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->basetime);
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, time(NULL), cache_elem->basetime);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }

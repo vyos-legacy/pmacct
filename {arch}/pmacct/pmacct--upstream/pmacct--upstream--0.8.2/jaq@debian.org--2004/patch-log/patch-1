@@ -1,0 +1,32 @@
+Revision: pmacct--upstream--0.8.2--patch-1
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jaq@spacepants.org>
+Date: Sat Apr 16 16:35:10 EST 2005
+Standard-date: 2005-04-16 06:35:10 GMT
+New-files: .arch-ids/pretag.h.id pretag.h
+Renamed-files: .arch-ids/nf_map.c.id .arch-ids/pretag.c.id
+    .arch-ids/nf_map_handlers.c.id .arch-ids/pretag_handlers.c.id
+    .arch-ids/nf_map_handlers.h.id .arch-ids/pretag_handlers.h.id
+    .arch-ids/nfacctd-data.h.id .arch-ids/pretag-data.h.id
+    nf_map.c pretag.c
+    nf_map_handlers.c pretag_handlers.c
+    nf_map_handlers.h pretag_handlers.h
+    nfacctd-data.h pretag-data.h
+Modified-files: AUTHORS CONFIG-KEYS ChangeLog EXAMPLES FAQS
+    Makefile.am Makefile.in README addr.c addr.h cfg.h
+    cfg_handlers.c cfg_handlers.h configure configure.in
+    docs/INTERNALS examples/pretag.map.example imt_plugin.c
+    imt_plugin.h ip_frag.c mysql_plugin.c net_aggr.c nfacctd.c
+    nfacctd.h nfv9_template.c pgsql_plugin.c pkt_handlers.c
+    pkt_handlers.h plugin_hooks.c plugin_hooks.h
+    pmacct-data.h pmacct-defines.h pmacct.c pmacct.h pmacctd.c
+    pretag-data.h pretag.c pretag_handlers.c
+    pretag_handlers.h print_plugin.c server.c util.c util.h
+New-patches: jaq@debian.org--2004/pmacct--upstream--0.8.2--patch-1
+Summary: Imported pmacct-0.8.2
+Keywords: 
+
+Imported pmacct-0.8.2
+into jaq@debian.org--2004/pmacct--upstream--0.8.2
+
+
