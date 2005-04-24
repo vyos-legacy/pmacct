@@ -1,4 +1,6 @@
 arch ancestry version 1
+arch:patch:jaq@debian.org--2004/debian-dir--pmacct--0--patch-26
+arch:patch:jaq@debian.org--2004/debian-dir--pmacct--0--patch-25
 arch:patch:jaq@debian.org--2004/debian-dir--pmacct--0--patch-24
 arch:patch:jaq@debian.org--2004/debian-dir--pmacct--0--patch-23
 arch:patch:jaq@debian.org--2004/debian-dir--pmacct--0--patch-22

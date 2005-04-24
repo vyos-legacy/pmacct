@@ -141,7 +141,7 @@ exclude ^(.arch-ids|\{arch\}|\.arch-inventory)$
 
 junk ^(,.*)$
 
-precious ^(\+.*|\.gdbinit|\.#ckpts-lock|=build\.*|=install\.*|CVS|CVS\.adm|RCS|RCSLOG|SCCS|TAGS|\.svn|.*\.o)$
+precious ^(\+.*|\.gdbinit|\.#ckpts-lock|=build\.*|=install\.*|CVS|CVS\.adm|RCS|RCSLOG|SCCS|TAGS|\.svn)$
 
 # Files matching the following regexp are classified as backup files, and
 # traversal does not descend into backup directories:
@@ -153,7 +153,7 @@ backup ^.*(~|\.~[0-9]+~|\.bak|\.swp|\.orig|\.rej|\.original|\.modified|\.reject)
 # you can add them to the regexp for deliberately unrecognized files.  Traversal
 # does not descend into unrecognized directories.
 
-unrecognized ^(.*\.(a|so|core|so(\.[[:digit:]]+)*)|core)$
+unrecognized ^(.*\.(o|a|so|core|so(\.[[:digit:]]+)*)|core)$
 
 # Files which match the following pattern are treated as source files.
 # Traversal _does_ descend into source directories:

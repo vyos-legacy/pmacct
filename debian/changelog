@@ -1,3 +1,10 @@
+pmacct (0.8.4-1) unstable; urgency=low
+
+  * New upstream release.
+  * Added UPGRADE to docs. 
+
+ -- Jamie Wilkinson <jaq@debian.org>  Sun, 24 Apr 2005 12:43:26 +1000
+
 pmacct (0.8.3-1) unstable; urgency=low
 
   * New upstream release.
