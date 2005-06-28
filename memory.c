@@ -80,7 +80,7 @@ struct memory_pool_desc *request_memory_pool(int size)
       new_pool->id = current_pool->id+1;
     }
     if (size <= new_pool->len) {
-      if (config.debug) Log(LOG_DEBUG, "DEBUG: using an already allocated memory segment.\n");
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): using an already allocated memory segment.\n", config.name, config.type);
       memset(new_pool->base_ptr, 0, size);
       new_pool->ptr = new_pool->base_ptr;
       new_pool->space_left = size;
@@ -92,7 +92,7 @@ struct memory_pool_desc *request_memory_pool(int size)
      news and registering them in memory pool descriptors
      table */
   new_id = current_pool->id+1;
-  if (config.debug) Log(LOG_DEBUG, "DEBUG: allocating a new memory segment.\n");
+  Log(LOG_DEBUG, "DEBUG ( %s/%s ): allocating a new memory segment.\n", config.name, config.type);
 
   if (config.num_memory_pools) {
     if (new_id > config.num_memory_pools) return NULL; 
@@ -121,7 +121,7 @@ struct memory_pool_desc *request_memory_pool(int size)
      allocate needed memory */
   memptr = (unsigned char *) map_shared(0, size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
   if (memptr == MAP_FAILED) {
-    Log(LOG_WARNING, "WARN: memory is sold out ! Please, clear in-memory stats !\n");
+    Log(LOG_WARNING, "WARN ( %s/%s ): memory sold out ! Please, clear in-memory stats !\n", config.name, config.type);
     return NULL;
   }
 

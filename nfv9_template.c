@@ -70,12 +70,11 @@ struct template_cache_entry *insert_template_v9(struct template_hdr_v9 *hdr, str
 
   ptr = malloc(sizeof(struct template_cache_entry));
   if (!ptr) {
-    Log(LOG_ERR, "ERROR: Unable to allocate enough memory for a new Template Cache Entry.\n");
+    Log(LOG_ERR, "ERROR ( default/core ): Unable to allocate enough memory for a new Template Cache Entry.\n");
     return NULL;
   }
 
   memset(ptr, 0, sizeof(struct template_cache_entry));
-  // ptr->agent = ((struct sockaddr_in *)pptrs->f_agent)->sin_addr.s_addr;
   sa_to_addr((struct sockaddr *)pptrs->f_agent, &ptr->agent, &port);
   ptr->source_id = ((struct struct_header_v9 *)pptrs->f_header)->source_id;
   ptr->template_id = hdr->template_id;
@@ -102,16 +101,18 @@ struct template_cache_entry *insert_template_v9(struct template_hdr_v9 *hdr, str
 
 void refresh_template_v9(struct template_hdr_v9 *hdr, struct template_cache_entry *tpl, struct packet_ptrs *pptrs)
 {
+  struct template_cache_entry *next;
   struct template_field_v9 *field;
   u_int16_t count, num = ntohs(hdr->num), type, port;
   u_char *ptr;
 
+  next = tpl->next;
   memset(tpl, 0, sizeof(struct template_cache_entry));
-  // tpl->agent = ((struct sockaddr_in *)pptrs->f_agent)->sin_addr.s_addr;
   sa_to_addr((struct sockaddr *)pptrs->f_agent, &tpl->agent, &port);
   tpl->source_id = ((struct struct_header_v9 *)pptrs->f_header)->source_id;
   tpl->template_id = hdr->template_id;
   tpl->num = num;
+  tpl->next = next;
 
   count = num;
   ptr = (u_char *) hdr;

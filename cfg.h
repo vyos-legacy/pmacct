@@ -27,19 +27,26 @@
 /* structures */
 struct _dictionary_line {
   char key[SRVBUFLEN];
-  int (*func)(char *, char *);
+  int (*func)(char *, char *, char *);
 };
 
 struct configuration {
+  char *name;
+  char *type;
   u_int32_t what_to_count;
   int acct_type; 
   int pipe_size;
   int buffer_size;
   int handle_fragments;
+  int handle_flows;
+  int frag_bufsz;
+  int flow_bufsz;
+  int flow_lifetime;
   char *imt_plugin_path;
   char *imt_plugin_passwd;
   char *sql_db;
   char *sql_table;
+  char *sql_table_schema;
   int sql_table_version;
   char *sql_user;
   char *sql_passwd;
@@ -60,6 +67,8 @@ struct configuration {
   char *sql_trigger_exec;
   int sql_max_queries;
   char *sql_preprocess;
+  int sql_preprocess_type;
+  int sql_multi_values;
   int print_refresh_time;
   int print_cache_entries;
   int print_markers;
@@ -90,6 +99,7 @@ struct configuration {
   int sampling_rate;
   char *syslog;
   int debug;
+  int snaplen;
 };
 
 struct plugin_type_entry {
@@ -113,15 +123,15 @@ struct plugins_list_entry {
 #else
 #define EXT
 #endif
-EXT void evaluate_configuration(int);
+EXT void evaluate_configuration(char *, int);
 EXT int parse_configuration_file(char *);
-EXT int parse_plugin_names(int, int);
-EXT void debug_configuration_file(int);
-EXT int create_plugin(char *, char *);
+EXT int parse_plugin_names(char *, int, int);
+EXT void debug_configuration_file(char *, int);
+EXT int create_plugin(char *, char *, char *);
 EXT int delete_plugin_by_id(int);
 EXT struct plugins_list_entry *search_plugin_by_pipe(int);
 EXT struct plugins_list_entry *search_plugin_by_pid(pid_t);
-EXT void sanitize_cfg(int);
+EXT void sanitize_cfg(int, char *);
 EXT void set_default_values();
 
 /* global vars */

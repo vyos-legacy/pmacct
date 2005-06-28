@@ -8,8 +8,8 @@ However, sometimes the upgrade may require some easy operations aimed to support
 the changes done or break old assumptions no longer valid. Such happenings have
 been (and will be) very limited through the development process.
  
-TO:	0.8.3
-FROM:	All 
+TO:	>= 0.8.3 
+FROM:	<= 0.8.2 
 TOPIC:	Pre-Tagging, Post-Tagging
 DESC:	In all previous releases, the 'pre_tag_map' and 'post_tag' directives were
         causing the captured traffic to be automatically tagged while forwarded to

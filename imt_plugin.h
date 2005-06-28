@@ -29,9 +29,11 @@
 
 /* Structures */
 struct acc {
+#if defined (HAVE_L2)
   u_int8_t eth_dhost[ETH_ADDR_LEN];
   u_int8_t eth_shost[ETH_ADDR_LEN];
   u_int16_t vlan_id;
+#endif
   struct host_addr src_ip;
   struct host_addr dst_ip;
   u_int16_t src_port;
@@ -41,6 +43,7 @@ struct acc {
   u_int16_t id;
   u_int32_t bytes_counter;
   u_int32_t packet_counter;
+  u_int32_t flow_counter;
   unsigned int signature;
   u_int8_t reset_flag;
   struct acc *next;
@@ -120,6 +123,9 @@ EXT void Accumulate_Counters(struct pkt_data *, struct acc *);
 #endif
 EXT void sum_host_insert(struct pkt_data *);
 EXT void sum_port_insert(struct pkt_data *);
+#if defined HAVE_L2
+EXT void sum_mac_insert(struct pkt_data *);
+#endif
 EXT void exit_now(int);
 #undef EXT
 

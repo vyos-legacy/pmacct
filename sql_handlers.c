@@ -39,37 +39,39 @@ static char fake_mac[] = "0:0:0:0:0:0";
 static char fake_host[] = "0.0.0.0";
 
 /* Functions */
-void count_src_mac_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+#if defined (HAVE_L2)
+void count_src_mac_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
-  char *ptr;
+  char buf[17];
 
-  ptr = (char *)ether_ntoa(cache_elem->eth_shost);
-  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ptr);
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ptr);
+  etheraddr_string(cache_elem->eth_shost, buf);
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, buf);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, buf);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_dst_mac_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_dst_mac_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
-  char *ptr;
+  char buf[17];
 
-  ptr = (char *)ether_ntoa(cache_elem->eth_dhost);
-  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ptr);
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ptr);
+  etheraddr_string(cache_elem->eth_dhost, buf);
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, buf);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, buf);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_vlan_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_vlan_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->vlan_id);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->vlan_id);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
+#endif
 
-void count_src_host_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_src_host_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   char ptr[INET6_ADDRSTRLEN];
 
@@ -80,7 +82,7 @@ void count_src_host_handler(const struct db_cache *cache_elem, int num, char **p
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_src_as_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_src_as_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ntohl(cache_elem->src_ip.address.ipv4.s_addr));
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ntohl(cache_elem->src_ip.address.ipv4.s_addr));
@@ -88,7 +90,7 @@ void count_src_as_handler(const struct db_cache *cache_elem, int num, char **ptr
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_dst_host_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_dst_host_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   char ptr[INET6_ADDRSTRLEN];
 
@@ -99,7 +101,7 @@ void count_dst_host_handler(const struct db_cache *cache_elem, int num, char **p
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_dst_as_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_dst_as_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ntohl(cache_elem->dst_ip.address.ipv4.s_addr));
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ntohl(cache_elem->dst_ip.address.ipv4.s_addr));
@@ -107,7 +109,7 @@ void count_dst_as_handler(const struct db_cache *cache_elem, int num, char **ptr
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_src_port_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_src_port_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->src_port);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->src_port);
@@ -115,7 +117,7 @@ void count_src_port_handler(const struct db_cache *cache_elem, int num, char **p
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_dst_port_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_dst_port_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->dst_port);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->dst_port);
@@ -123,7 +125,7 @@ void count_dst_port_handler(const struct db_cache *cache_elem, int num, char **p
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_ip_tos_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_ip_tos_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->tos);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->tos);
@@ -132,7 +134,7 @@ void count_ip_tos_handler(const struct db_cache *cache_elem, int num, char **ptr
 }
 
 
-void MY_count_ip_proto_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void MY_count_ip_proto_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   if (cache_elem->proto <= protocols_number) {
     snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, _protocols[cache_elem->proto].name);
@@ -146,7 +148,7 @@ void MY_count_ip_proto_handler(const struct db_cache *cache_elem, int num, char 
   *ptr_values += strlen(*ptr_values);
 }
 
-void PG_count_ip_proto_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void PG_count_ip_proto_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->proto);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->proto);
@@ -154,15 +156,15 @@ void PG_count_ip_proto_handler(const struct db_cache *cache_elem, int num, char 
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_timestamp_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_timestamp_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->basetime);
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->basetime);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, idata->now, cache_elem->basetime);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_id_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void count_id_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->id);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->id);
@@ -171,7 +173,7 @@ void count_id_handler(const struct db_cache *cache_elem, int num, char **ptr_val
 }
 
 /* Fake handlers next */ 
-void fake_mac_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void fake_mac_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, fake_mac);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, fake_mac);
@@ -179,7 +181,7 @@ void fake_mac_handler(const struct db_cache *cache_elem, int num, char **ptr_val
   *ptr_values += strlen(*ptr_values);
 }
 
-void fake_host_handler(const struct db_cache *cache_elem, int num, char **ptr_values, char **ptr_where)
+void fake_host_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, fake_host);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, fake_host);

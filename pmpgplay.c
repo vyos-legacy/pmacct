@@ -62,9 +62,11 @@ void print_header()
 {
   printf("NUM       ");
   printf("ID     ");
+#if defined (HAVE_L2)
   printf("SRC MAC            ");
   printf("DST MAC            ");
   printf("VLAN   ");
+#endif
 #if defined ENABLE_IPV6
   printf("SRC IP                                         ");
   printf("DST IP                                         ");
@@ -77,6 +79,7 @@ void print_header()
   printf("PROTOCOL    ");
   printf("TOS    ");
   printf("PACKETS     ");
+  printf("FLOWS       ");
   printf("BYTES       ");
   printf("BASETIME\n");
 }
@@ -84,16 +87,18 @@ void print_header()
 void print_data(struct db_cache *data, u_int32_t wtc, int num)
 {
   struct tm *lt;
-  char *src_mac, *dst_mac, src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
+  char src_mac[17], dst_mac[17], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
   int j;
 
   printf("%-8d  ", num);
   printf("%-5d  ", data->id);
-  src_mac = (char *) ether_ntoa(data->eth_shost);
+#if defined (HAVE_L2)
+  etheraddr_string(data->eth_shost, src_mac);
   printf("%-17s  ", src_mac);
-  dst_mac = (char *) ether_ntoa(data->eth_dhost);
+  etheraddr_string(data->eth_dhost, dst_mac);
   printf("%-17s  ", dst_mac);
   printf("%-5d  ", data->vlan_id);
+#endif
 #if defined ENABLE_IPV6
   if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-45d  ", ntohl(data->src_ip.address.ipv4.s_addr));
   else {
@@ -122,6 +127,7 @@ void print_data(struct db_cache *data, u_int32_t wtc, int num)
   printf("%-10s  ", _protocols[data->proto].name);
   printf("%-3d    ", data->tos);
   printf("%-10u  ", data->packet_counter);
+  printf("%-10u  ", data->flows_counter);
   printf("%-10u  ", data->bytes_counter);
   if (lh.sql_history) {
     lt = localtime(&data->basetime);
@@ -322,8 +328,8 @@ int main(int argc, char **argv)
   
   if (!do_nothing) {
     PG_compose_conn_string(&p, sql_host);
-    if (!PG_DB_Connect(&p)) {
-      printf("ALERT: PG_DB_Connect(): PGSQL daemon failed.\n");
+    if (!PG_DB_Connect2(&p)) {
+      printf("ALERT: PG_DB_Connect2(): PGSQL daemon failed.\n");
       exit(1);
     }
   }
@@ -334,6 +340,7 @@ int main(int argc, char **argv)
   /* composing the proper (filled with primitives used during
      the current execution) SQL strings */
   idata.num_primitives = PG_compose_static_queries();
+  idata.now = time(NULL);
 
   /* handling offset */ 
   if (position) n = fseek(f, (th.sz*position), SEEK_CUR);
@@ -375,20 +382,23 @@ int main(int argc, char **argv)
   return 0;
 }
 
-int PG_cache_dbop(PGconn *db_desc, const struct db_cache *cache_elem, struct insert_data *idata)
+int PG_cache_dbop(PGconn *db_desc, struct db_cache *cache_elem, struct insert_data *idata)
 {
   PGresult *ret;
   char *ptr_values, *ptr_where, *err_string;
-  int num=0;
+  int num=0, have_flows=0;
+
+  if (lh.what_to_count & COUNT_FLOWS) have_flows = TRUE;
 
   /* constructing SQL query */
   ptr_where = where_clause;
   ptr_values = values_clause;
   while (num < idata->num_primitives) {
-    (*where[num].handler)(cache_elem, num, &ptr_values, &ptr_where);
+    (*where[num].handler)(cache_elem, idata, num, &ptr_values, &ptr_where);
     num++;
   }
-  snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter, time(NULL));
+  if (have_flows) snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter, time(NULL));
+  else snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter, time(NULL));
   strncat(sql_data, where_clause, SPACELEFT(sql_data));
 
   /* sending UPDATE query */
@@ -407,7 +417,8 @@ int PG_cache_dbop(PGconn *db_desc, const struct db_cache *cache_elem, struct ins
   if (sql_dont_try_update || (!PG_affected_rows(ret))) {
     /* UPDATE failed, trying with an INSERT query */
     strncpy(sql_data, insert_clause, sizeof(sql_data));
-    snprintf(ptr_values, SPACELEFT(values_clause), ", %u, %u)", cache_elem->packet_counter, cache_elem->bytes_counter);
+    if (have_flows) snprintf(ptr_values, SPACELEFT(values_clause), ", %u, %lu, %u)", cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
+    else snprintf(ptr_values, SPACELEFT(values_clause), ", %u, %lu)", cache_elem->packet_counter, cache_elem->bytes_counter);
     strncat(sql_data, values_clause, SPACELEFT(sql_data));
 
     ret = PQexec(db_desc, sql_data);
@@ -438,7 +449,7 @@ int PG_evaluate_history(int primitive)
     strncat(where[primitive].string, "stamp_inserted", SPACELEFT(where[primitive].string));
 
     strncat(insert_clause, "stamp_updated, stamp_inserted", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "CURRENT_TIMESTAMP(0), ABSTIME(%u)::Timestamp", SPACELEFT(values[primitive].string));
+    strncat(values[primitive].string, "ABSTIME(%u)::Timestamp, ABSTIME(%u)::Timestamp", SPACELEFT(values[primitive].string));
 
     where[primitive].type = values[primitive].type = TIMESTAMP;
     values[primitive].handler = where[primitive].handler = count_timestamp_handler;
@@ -484,6 +495,7 @@ int PG_evaluate_primitives(int primitive)
     }
 
     if (lh.what_to_count & COUNT_SUM_PORT) what_to_count |= COUNT_SUM_PORT;
+    if (lh.what_to_count & COUNT_SUM_MAC) what_to_count |= COUNT_SUM_MAC;
 
     what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_IP_PROTO|COUNT_ID|COUNT_VLAN|COUNT_IP_TOS;
   }
@@ -491,7 +503,8 @@ int PG_evaluate_primitives(int primitive)
   /* 1st part: arranging pointers to an opaque structure and 
      composing the static selection (WHERE) string */
 
-  if (what_to_count & COUNT_SRC_MAC) {
+#if defined (HAVE_L2)
+  if (what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
@@ -545,6 +558,7 @@ int PG_evaluate_primitives(int primitive)
       primitive++;
     }
   }
+#endif
 
   if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SUM_HOST|COUNT_SUM_NET)) {
     if (primitive) {
@@ -759,7 +773,17 @@ int PG_evaluate_primitives(int primitive)
 
 int PG_compose_static_queries()
 {
-  int primitives=0;
+  int primitives=0, have_flows=0;
+
+  if (lh.what_to_count & COUNT_FLOWS || (lh.sql_table_version >= 4 && !lh.sql_optimize_clauses)) {
+    lh.what_to_count |= COUNT_FLOWS;
+    have_flows = TRUE;
+
+    if (lh.sql_table_version < 4 && !lh.sql_optimize_clauses) {
+      printf("ERROR: The accounting of flows requires SQL table v4. Exiting.\n");
+      exit(1);
+    }
+  }
 
   /* "INSERT INTO ... VALUES ... " and "... WHERE ..." stuff */
   strncpy(where[primitives].string, " WHERE ", sizeof(where[primitives].string));
@@ -767,14 +791,17 @@ int PG_compose_static_queries()
   strncpy(values[primitives].string, " VALUES (", sizeof(values[primitives].string));
   primitives = PG_evaluate_history(primitives);
   primitives = PG_evaluate_primitives(primitives);
-  strncat(insert_clause, ", packets, bytes)", SPACELEFT(insert_clause));
+  strncat(insert_clause, ", packets, bytes", SPACELEFT(insert_clause));
+  if (have_flows) strncat(insert_clause, ", flows", SPACELEFT(insert_clause));
+  strncat(insert_clause, ")", SPACELEFT(insert_clause));
 
   /* "LOCK ..." stuff */
   snprintf(lock_clause, sizeof(lock_clause), "BEGIN; LOCK %s IN EXCLUSIVE MODE;", sql_table);
 
   /* "UPDATE ... SET ..." stuff */
   snprintf(update_clause, sizeof(update_clause), "UPDATE %s ", sql_table);
-  strncat(update_clause, "SET packets=packets+%u, bytes=bytes+%u", SPACELEFT(update_clause));
+  strncat(update_clause, "SET packets=packets+%u, bytes=bytes+%lu", SPACELEFT(update_clause));
+  if (have_flows) strncat(update_clause, ", flows=flows+%u", SPACELEFT(update_clause));
   if (lh.sql_history) strncat(update_clause, ", stamp_updated=CURRENT_TIMESTAMP(0)", SPACELEFT(update_clause));
 
   return primitives;
@@ -803,7 +830,7 @@ void PG_compose_conn_string(struct DBdesc *db, char *host)
   }
 }
 
-int PG_DB_Connect(struct DBdesc *db)
+int PG_DB_Connect2(struct DBdesc *db)
 {
   db->desc = PQconnectdb(db->conn_string);
   if (PQstatus(db->desc) == CONNECTION_BAD) db->connected = FALSE;

@@ -38,8 +38,22 @@
 #define STALE_M 3
 #define RETIRE_M STALE_M*STALE_M
 
+/* backend types */
+#define BE_TYPE_PRIMARY	0
+#define BE_TYPE_BACKUP 1
+#define BE_TYPE_LOGFILE 2
+
 /* macros */
 #define SPACELEFT(x) (sizeof(x)-strlen(x))
+#define SPACELEFT_LEN(x,y) (sizeof(x)-y)
+#define SPACELEFT_PTR(x,y) (y-strlen(x))
+
+struct multi_values {
+  int buffer_offset;      /* multi-values buffer offset where to write next query */ 
+  int head_buffer_elem;   /* first multi-values buffer element */ 
+  int buffer_elem_num;    /* number of elements in the multi-values buffer */ 
+  int last_queue_elem;	  /* last queue element signallation */
+};
 
 /* structures */
 struct insert_data {
@@ -51,6 +65,11 @@ struct insert_data {
   time_t timeslot;   /* counters timeslot */ 
   time_t t_timeslot; /* trigger timeslot */
   int num_primitives;
+  int dyn_table;
+  int recover;
+  int new_basetime;
+  int current_queue_elem;
+  struct multi_values mv;
   /* stats */
   time_t elap_time; /* elapsed time */
   unsigned int ten; /* total elements number */
@@ -60,9 +79,11 @@ struct insert_data {
 };
 
 struct db_cache {
+#if defined (HAVE_L2)
   u_int8_t eth_dhost[ETH_ADDR_LEN];
   u_int8_t eth_shost[ETH_ADDR_LEN];
   u_int16_t vlan_id;
+#endif
   struct host_addr src_ip;
   struct host_addr dst_ip;
   u_int16_t src_port;
@@ -72,8 +93,9 @@ struct db_cache {
   u_int16_t id;
   u_int32_t bytes_counter;
   u_int32_t packet_counter;
+  u_int32_t flows_counter;
   time_t basetime;
-  int valid;
+  short int valid;
   unsigned int signature;
   u_int8_t chained;
   struct db_cache *prev;
@@ -102,7 +124,7 @@ struct logfile {
   short int fail;
 };
 
-typedef void (*dbop_handler) (const struct db_cache *, int, char **, char **);
+typedef void (*dbop_handler) (const struct db_cache *, const struct insert_data *, int, char **, char **);
 typedef int (*preprocess_func) (struct db_cache *[], int *);
 
 struct frags {
@@ -117,22 +139,22 @@ struct frags {
 #else
 #define EXT
 #endif
-EXT void count_src_mac_handler(const struct db_cache *, int, char **, char **);
-EXT void count_dst_mac_handler(const struct db_cache *, int, char **, char **);
-EXT void count_vlan_handler(const struct db_cache *, int, char **, char **);
-EXT void count_src_host_handler(const struct db_cache *, int, char **, char **);
-EXT void count_src_as_handler(const struct db_cache *, int, char **, char **);
-EXT void count_dst_host_handler(const struct db_cache *, int, char **, char **);
-EXT void count_dst_as_handler(const struct db_cache *, int, char **, char **);
-EXT void count_src_port_handler(const struct db_cache *, int, char **, char **);
-EXT void count_dst_port_handler(const struct db_cache *, int, char **, char **);
-EXT void count_ip_tos_handler(const struct db_cache *, int, char **, char **);
-EXT void MY_count_ip_proto_handler(const struct db_cache *, int, char **, char **);
-EXT void PG_count_ip_proto_handler(const struct db_cache *, int, char **, char **);
-EXT void count_timestamp_handler(const struct db_cache *, int, char **, char **);
-EXT void count_id_handler(const struct db_cache *, int, char **, char **);
-EXT void fake_mac_handler(const struct db_cache *, int, char **, char **);
-EXT void fake_host_handler(const struct db_cache *, int, char **, char **);
+EXT void count_src_mac_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_dst_mac_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_vlan_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_src_host_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_src_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_dst_host_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_dst_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_src_port_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_dst_port_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_ip_tos_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void MY_count_ip_proto_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void PG_count_ip_proto_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_timestamp_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_id_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void fake_mac_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void fake_host_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 #undef EXT
 
 /* global vars: a simple way of gain precious speed when playing with strings */
@@ -147,8 +169,10 @@ EXT char sql_data[LONGLONGSRVBUFLEN];
 EXT char lock_clause[LONGSRVBUFLEN];
 EXT char unlock_clause[LONGSRVBUFLEN];
 EXT char update_clause[LONGSRVBUFLEN];
+EXT char set_clause[LONGSRVBUFLEN];
 EXT char insert_clause[LONGSRVBUFLEN];
 EXT char values_clause[LONGSRVBUFLEN];
+EXT char *multi_values_buffer;
 EXT char where_clause[LONGSRVBUFLEN];
 EXT struct db_cache *cache;
 EXT struct db_cache **queries_queue;
@@ -157,7 +181,10 @@ EXT int cq_ptr, qq_ptr, qq_size, pp_size, dbc_size, cq_size;
 EXT struct db_cache lru_head, *lru_tail;
 EXT struct frags where[N_PRIMITIVES+2];
 EXT struct frags values[N_PRIMITIVES+2];
-EXT int num_primitives; /* last resort for signal handling */
+EXT int glob_num_primitives; /* last resort for signal handling */
+EXT int glob_basetime; /* last resort for signal handling */
+EXT int glob_new_basetime; /* last resort for signal handling */
+EXT int glob_dyn_table; /* last resort for signal handling */
 #undef EXT
 
 /* the following include depends on structure definition above */

@@ -1,3 +1,28 @@
+pmacct (0.8.8-1) unstable; urgency=low
+
+  * New upstream release.
+  * Fix path to postgresql headers.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue, 28 Jun 2005 13:38:16 +1000
+
+pmacct (0.8.7-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue, 28 Jun 2005 13:34:12 +1000
+
+pmacct (0.8.6-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue, 28 Jun 2005 13:30:23 +1000
+
+pmacct (0.8.5-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue, 28 Jun 2005 13:26:14 +1000
+
 pmacct (0.8.4-1) unstable; urgency=low
 
   * New upstream release.

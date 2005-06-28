@@ -21,6 +21,7 @@ sql_table_version: 2
 sql_passwd: arealsmartpwd
 sql_user: pmacct
 sql_refresh_time: 90
+! sql_multi_values: 1000000
 ! sql_optimize_clauses: true
 sql_history: 10m 
 sql_history_roundoff: mh

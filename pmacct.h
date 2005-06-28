@@ -69,9 +69,11 @@
 #define INET6_ADDRSTRLEN 46
 #endif
 
-#ifdef SOLARIS
+#if defined SOLARIS
+#if defined CPU_sparc
 #define htons(x) (x)
 #define htonl(x) (x)
+#endif
 #define u_int8_t uint8_t
 #define u_int16_t uint16_t
 #define u_int32_t uint32_t
@@ -132,6 +134,10 @@
 }
 #endif
 
+struct plugin_requests {
+  u_int8_t bpf_filter; /* On-request packet copy for BPF purposes */
+};
+
 #include "pmacct-defines.h"
 #include "network.h"
 #include "pretag.h"
@@ -139,6 +145,7 @@
 #include "util.h"
 #include "log.h"
 #include "once.h"
+#include "mpls.h"
 
 /* structures */
 struct pcap_device {
@@ -180,10 +187,6 @@ struct largebuf {
 	x.end = x.base+sizeof(x.base); \
 	x.ptr = x.base;
 
-struct plugin_requests {
-  u_int8_t bpf_filter; /* On-request packet copy for BPF purposes */
-};
-
 /* prototypes */
 void startup_handle_falling_child();
 void handle_falling_child();
@@ -198,11 +201,13 @@ void reload();
 #endif
 EXT void eth_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 EXT void fddi_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
+EXT u_int16_t mpls_handler(u_char *, u_int16_t *, u_int16_t *, register struct packet_ptrs *);
 EXT void ppp_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 EXT void ieee_802_11_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 EXT void sll_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 EXT void raw_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 EXT u_char *llc_handler(const struct pcap_pkthdr *, u_int, register u_char *, register struct packet_ptrs *);
+EXT void chdlc_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 #undef EXT
 
 #if (!defined __PMACCTD_C) 
@@ -228,7 +233,7 @@ extern int debug;
 extern int have_num_memory_pools; /* global getopt() stuff */
 extern struct configuration config; /* global configuration structure */ 
 extern struct plugins_list_entry *plugins_list; /* linked list of each plugin configuration */
-extern struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
 extern pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
+extern u_char dummy_tlhdr[16];
 #endif
 

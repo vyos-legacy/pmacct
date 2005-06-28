@@ -165,11 +165,23 @@ static struct _protocols_struct _protocols[] = {
 #ifdef __PMACCTD_C
 static struct _devices_struct _devices[] = {
   {eth_handler, DLT_EN10MB},
-  {fddi_handler, DLT_FDDI},
   {ppp_handler, DLT_PPP},
+  {fddi_handler, DLT_FDDI},
+#if defined DLT_IEEE802_11
   {ieee_802_11_handler, DLT_IEEE802_11}, 
+#endif
+#if defined DLT_LINUX_SLL
   {sll_handler, DLT_LINUX_SLL},
+#endif
+#if defined DLT_RAW
   {raw_handler, DLT_RAW},
+#endif
+#if defined DLT_C_HDLC
+  {chdlc_handler, DLT_C_HDLC},
+#endif
+#ifdef DLT_HDLC
+  {chdlc_handler, DLT_HDLC},
+#endif
   {NULL, -1},
 };
 #endif
@@ -181,6 +193,7 @@ static struct _dictionary_line dictionary[] = {
   {"pidfile", cfg_key_pidfile},
   {"daemonize", cfg_key_daemonize},
   {"aggregate", cfg_key_aggregate},
+  {"snaplen", cfg_key_snaplen},
   {"aggregate_filter", cfg_key_aggregate_filter},
   {"promisc", cfg_key_promisc},
   {"pcap_filter", cfg_key_pcap_filter},
@@ -199,6 +212,7 @@ static struct _dictionary_line dictionary[] = {
   {"imt_mem_pools_size", cfg_key_imt_mem_pools_size},
   {"sql_db", cfg_key_sql_db},
   {"sql_table", cfg_key_sql_table},
+  {"sql_table_schema", cfg_key_sql_table_schema},
   {"sql_table_version", cfg_key_sql_table_version},
   {"sql_host", cfg_key_sql_host},
   {"sql_data", cfg_key_sql_data},
@@ -217,6 +231,8 @@ static struct _dictionary_line dictionary[] = {
   {"sql_cache_entries", cfg_key_sql_cache_entries},
   {"sql_dont_try_update", cfg_key_sql_dont_try_update},
   {"sql_preprocess", cfg_key_sql_preprocess},
+  {"sql_preprocess_type", cfg_key_sql_preprocess_type},
+  {"sql_multi_values", cfg_key_sql_multi_values},
   {"print_refresh_time", cfg_key_print_refresh_time},
   {"print_cache_entries", cfg_key_print_cache_entries},
   {"print_markers", cfg_key_print_markers},
@@ -227,6 +243,9 @@ static struct _dictionary_line dictionary[] = {
   {"nfacctd_time_new", cfg_key_nfacctd_time_new},
   {"nfacctd_as_new", cfg_key_nfacctd_as_new},
   {"pmacctd_force_frag_handling", cfg_key_pmacctd_force_frag_handling},
+  {"pmacctd_frag_buffer_size", cfg_key_pmacctd_frag_buffer_size},
+  {"pmacctd_flow_buffer_size", cfg_key_pmacctd_flow_buffer_size},
+  {"pmacctd_flow_lifetime", cfg_key_pmacctd_flow_lifetime},
   {"pmacctd_id", cfg_key_post_tag},	/* obsolete */
   {"nfacctd_id_file", cfg_key_pre_tag_map},	/* obsolete */
   {"pcap_savefile", cfg_key_pcap_savefile},

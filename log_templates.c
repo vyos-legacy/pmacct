@@ -33,13 +33,14 @@ struct template_entry *build_template(struct template_header *th)
   u_char *te;
   u_int16_t tot_size = 0;
 
-  th->num = 13;
+  th->num = 14;
 
   te = malloc(th->num*sizeof(struct template_entry));  
   memset(te, 0, th->num*sizeof(struct template_entry));
   base = (struct template_entry *) te;
   ptr = base;
 
+#if defined (HAVE_L2)
   ptr->tag = COUNT_DST_MAC;
   ptr->size = sizeof(dummy.eth_dhost);
   tot_size += ptr->size;
@@ -54,6 +55,13 @@ struct template_entry *build_template(struct template_header *th)
   ptr->size = sizeof(dummy.vlan_id);
   tot_size += ptr->size;
   ptr++;
+#else 
+  th->num--; th->num--; /* we replace 3 entries with just 1 */
+  ptr->tag = NO_L2;
+  ptr->size = 14; 
+  tot_size += ptr->size;
+  ptr++;
+#endif
 
   ptr->tag = COUNT_SRC_HOST;
   ptr->size = sizeof(dummy.src_ip);
@@ -100,6 +108,11 @@ struct template_entry *build_template(struct template_header *th)
   tot_size += ptr->size;
   ptr++;
 
+  ptr->tag = FLOWS;
+  ptr->size = sizeof(dummy.flows_counter);
+  tot_size += ptr->size;
+  ptr++;
+
   ptr->tag = TIMESTAMP;
   ptr->size = sizeof(dummy.basetime);
   tot_size += ptr->size;
@@ -120,6 +133,7 @@ void set_template_funcs(struct template_header *th, struct template_entry *head)
 
   for (te = head, cnt = 0; cnt < ntohs(th->num); cnt++, te++) {
     switch (te->tag) {
+#if defined (HAVE_L2)
     case COUNT_SRC_MAC:
       template_funcs[cnt] = TPL_push_src_mac;
       break;
@@ -129,6 +143,7 @@ void set_template_funcs(struct template_header *th, struct template_entry *head)
     case COUNT_VLAN:
       template_funcs[cnt] = TPL_push_vlan;
       break;
+#endif
     case COUNT_SRC_HOST:
       template_funcs[cnt] = TPL_push_src_ip;
       break;
@@ -156,8 +171,14 @@ void set_template_funcs(struct template_header *th, struct template_entry *head)
     case PACKETS:
       template_funcs[cnt] = TPL_push_packet_counter;
       break;
+    case FLOWS:
+      template_funcs[cnt] = TPL_push_flows_counter;
+      break;
     case TIMESTAMP:
       template_funcs[cnt] = TPL_push_timestamp;
+      break;
+    case NO_L2:
+      template_funcs[cnt] = TPL_push_nol2;
       break;
     default:
       template_funcs[cnt] = NULL;
@@ -179,6 +200,7 @@ u_int16_t TPL_push(u_char *dst, const struct db_cache *src)
   return ptr-dst;
 }
 
+#if defined (HAVE_L2)
 void TPL_push_src_mac(u_char **dst, const struct db_cache *src)
 {
   int size = sizeof(src->eth_shost);
@@ -200,6 +222,15 @@ void TPL_push_vlan(u_char **dst, const struct db_cache *src)
   int size = sizeof(src->vlan_id);
 
   memcpy(*dst, &src->vlan_id, size);
+  *dst += size;
+}
+#endif
+
+void TPL_push_nol2(u_char **dst, const struct db_cache *src)
+{
+  int size = 14; 
+
+  memset(*dst, 0, size);
   *dst += size;
 }
 
@@ -275,6 +306,14 @@ void TPL_push_packet_counter(u_char **dst, const struct db_cache *src)
   *dst += size;
 }
 
+void TPL_push_flows_counter(u_char **dst, const struct db_cache *src)
+{
+  int size = sizeof(src->flows_counter);
+
+  memcpy(*dst, &src->flows_counter, size);
+  *dst += size;
+}
+
 void TPL_push_timestamp(u_char **dst, const struct db_cache *src)
 {
   int size = sizeof(src->basetime);
@@ -297,6 +336,7 @@ void TPL_pop(u_char *src, struct db_cache *dst, struct template_header *th, u_ch
     sz = teptr->size;
     
     switch (teptr->tag) {
+#if defined (HAVE_L2)
     case COUNT_SRC_MAC:
       memcpy(&dst->eth_shost, ptr, sz);
       break;
@@ -306,6 +346,7 @@ void TPL_pop(u_char *src, struct db_cache *dst, struct template_header *th, u_ch
     case COUNT_VLAN:
       memcpy(&dst->vlan_id, ptr, sz);
       break;
+#endif
     case COUNT_SRC_HOST:
       if (sz == 4) {
 	/* legacy IP addresses */
@@ -345,8 +386,13 @@ void TPL_pop(u_char *src, struct db_cache *dst, struct template_header *th, u_ch
     case PACKETS:
       memcpy(&dst->packet_counter, ptr, sz);
       break;
+    case FLOWS:
+      memcpy(&dst->flows_counter, ptr, sz);
+      break;
     case TIMESTAMP:
       memcpy(&dst->basetime, ptr, sz);
+      break;
+    case NO_L2:
       break;
     default:
       printf("ERROR: template entry not supported: '%d'\n", teptr->tag);
@@ -362,6 +408,7 @@ void TPL_check_sizes(struct template_header *th, struct db_cache *elem, u_char *
 
   for (; cnt < th->num; cnt++, teptr++) {
     switch (teptr->tag) {
+#if defined (HAVE_L2)
     case COUNT_SRC_MAC:
       if (teptr->size > sizeof(elem->eth_shost)) goto exit_lane;
       break;
@@ -371,6 +418,7 @@ void TPL_check_sizes(struct template_header *th, struct db_cache *elem, u_char *
     case COUNT_VLAN:
       if (teptr->size > sizeof(elem->vlan_id)) goto exit_lane;
       break;
+#endif
     case COUNT_SRC_HOST:
       if (teptr->size > sizeof(elem->src_ip)) goto exit_lane;
       break;
@@ -398,8 +446,13 @@ void TPL_check_sizes(struct template_header *th, struct db_cache *elem, u_char *
     case PACKETS:
       if (teptr->size > sizeof(elem->packet_counter)) goto exit_lane;
       break;
+    case FLOWS:
+      if (teptr->size > sizeof(elem->flows_counter)) goto exit_lane;
+      break;
     case TIMESTAMP:
       if (teptr->size > sizeof(elem->basetime)) goto exit_lane;
+      break;
+    case NO_L2:
       break;
     default:
       printf("ERROR: template entry not supported: '%d'\n", teptr->tag);

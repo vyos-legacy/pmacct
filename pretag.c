@@ -28,7 +28,7 @@
 #include "pretag_handlers.h"
 #include "pretag-data.h"
 
-void load_id_file(int acct_type, char *filename, struct id_table *t)
+void load_id_file(int acct_type, char *filename, struct id_table *t, struct plugin_requests *req)
 {
   struct id_table tmp;
   struct id_entry *ptr;
@@ -46,7 +46,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t)
 
   if (filename) {
     if ((file = fopen(filename, "r")) == NULL) {
-      Log(LOG_ERR, "ERROR: Pre-Tagging map '%s' not found\n", filename);
+      Log(LOG_ERR, "ERROR: Pre-Tagging map '%s' not found.\n", filename);
       exit(1);
     }
 
@@ -60,7 +60,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t)
       memset(buf, 0, SRVBUFLEN);
       if (fgets(buf, SRVBUFLEN, file)) {
         if (!iscomment(buf) && !isblankline(buf)) {
-          if (!check_not_valid_char(buf, '|')) {
+          if (!check_not_valid_char(filename, buf, '|')) {
             mark_columns(buf);
             trim_all_spaces(buf);
 	    strip_quotes(buf);
@@ -84,7 +84,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t)
                 if (start == &buf[x]) continue;
                 buf[x] = '\0';
                 if (value || !key) {
-                  Log(LOG_ERR, "ERROR: %s: malformed line %d. Ignored.\n", filename, tot_lines);
+                  Log(LOG_ERR, "ERROR ( %s ): malformed line %d. Ignored.\n", filename, tot_lines);
                   err = TRUE;
                   break;
                 }
@@ -98,14 +98,14 @@ void load_id_file(int acct_type, char *filename, struct id_table *t)
 
                 for (dindex = 0; strcmp(map_dictionary[dindex].key, ""); dindex++) {
                   if (!strcmp(map_dictionary[dindex].key, key)) {
-                    err = (*map_dictionary[dindex].func)(&tmp.e[tmp.num], value);
+                    err = (*map_dictionary[dindex].func)(filename, &tmp.e[tmp.num], value, req);
                     break;
                   }
                   else err = E_NOTFOUND; /* key not found */
                 }
                 if (err) {
-                  if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR: %s: unknown key '%s' at line %d. Ignored.\n", filename, key, tot_lines);
-                  else Log(LOG_ERR, "%s: line %d ignored.\n", filename, tot_lines);
+                  if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s ): unknown key '%s' at line %d. Ignored.\n", filename, key, tot_lines);
+                  else Log(LOG_ERR, "ERROR ( %s ): line %d ignored.\n", filename, tot_lines);
                   break; 
                 }
                 key = NULL; value = NULL;
@@ -127,11 +127,11 @@ void load_id_file(int acct_type, char *filename, struct id_table *t)
 	      /* if any required field is missing and other errors have been signalled
 	         before we will trap an error message */
 	      else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.family) && !err)
-	        Log(LOG_ERR, "ERROR: required key missing at line: %d. Required keys are: 'id', 'ip'.\n", tot_lines); 
+	        Log(LOG_ERR, "ERROR ( %s ): required key missing at line: %d. Required keys are: 'id', 'ip'.\n", filename, tot_lines); 
 	    }
 	    else if (acct_type == ACCT_PM) {
 	      if (tmp.e[tmp.num].agent_ip.family)
-		Log(LOG_ERR, "ERROR: key 'ip' not applicable here. Invalid line: %d.\n", tot_lines);
+		Log(LOG_ERR, "ERROR ( %s ): key 'ip' not applicable here. Invalid line: %d.\n", filename, tot_lines);
 	      else if (!err && tmp.e[tmp.num].id) {
                 int j;
 
@@ -142,7 +142,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t)
 	      } 
 	    }
           }
-          else Log(LOG_ERR, "%s: malformed line %d. Ignored.\n", filename, tot_lines);
+          else Log(LOG_ERR, "ERROR ( %s ): malformed line: %d. Ignored.\n", filename, tot_lines);
         }
       }
     }

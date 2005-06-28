@@ -21,7 +21,7 @@
 
 /* defines */
 #define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:l:v:o:"
-#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:w"
+#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:wL:"
 #define ARGS_PMACCT "Ssc:etm:p:P:M:arN:n:"
 #define N_PRIMITIVES 21
 #define N_FUNCS 10 
@@ -41,11 +41,11 @@
 #define LARGEBUFLEN 8192
 
 #define MANTAINER "Paolo Lucente <paolo.lucente@ic.cnr.it>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.8.3"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.8.3"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.8.3"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.8.3"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.8.3"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.8.8"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.8.8"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.8.8"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.8.8"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.8.8"
 
 #ifndef TRUE
 #define TRUE 1
@@ -82,11 +82,15 @@
 #define COUNT_SUM_AS		0x00020000
 #define COUNT_SUM_PORT		0x00040000
 #define TIMESTAMP               0x00080000 /* USE_TIMESTAMPS */
+#define COUNT_FLOWS		0x00100000
+#define COUNT_SUM_MAC		0x00200000
 
 /* BYTES and PACKETS are used into templates; we let their values to
    overlap with some values we will not need into templates */ 
 #define BYTES			COUNT_SRC_NET
 #define PACKETS			COUNT_DST_NET
+#define FLOWS			COUNT_SUM_HOST
+#define NO_L2			COUNT_SUM_NET
 
 #define FAKE_SRC_MAC		0x00000001
 #define FAKE_DST_MAC		0x00000002

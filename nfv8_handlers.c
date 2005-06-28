@@ -132,6 +132,7 @@ void v8_6_filter_handler(struct packet_ptrs *pptrs, void *data)
   struct struct_export_v8_6 *exp = (struct struct_export_v8_6 *) data;
 
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_dst.s_addr, exp->dstaddr);
+  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, exp->tos);
 }
 
 void v8_7_filter_handler(struct packet_ptrs *pptrs, void *data)
@@ -140,6 +141,7 @@ void v8_7_filter_handler(struct packet_ptrs *pptrs, void *data)
 
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_src.s_addr, exp->srcaddr);
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_dst.s_addr, exp->dstaddr);
+  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, exp->tos);
 }
 
 void v8_8_filter_handler(struct packet_ptrs *pptrs, void *data)
@@ -149,6 +151,7 @@ void v8_8_filter_handler(struct packet_ptrs *pptrs, void *data)
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_src.s_addr, exp->srcaddr);
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_dst.s_addr, exp->dstaddr);
   Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_p, exp->prot);
+  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, exp->tos);
   Assign16(((struct my_tlhdr *)pptrs->tlh_ptr)->src_port, exp->srcport);
   Assign16(((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port, exp->dstport);
 }
@@ -157,7 +160,7 @@ void v8_9_filter_handler(struct packet_ptrs *pptrs, void *data)
 {
   struct struct_export_v8_9 *exp = (struct struct_export_v8_9 *) data;
 
-  /* It contains just AS informations; no filtering chances */
+  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, exp->tos);
 }
 
 void v8_10_filter_handler(struct packet_ptrs *pptrs, void *data)
@@ -165,6 +168,7 @@ void v8_10_filter_handler(struct packet_ptrs *pptrs, void *data)
   struct struct_export_v8_10 *exp = (struct struct_export_v8_10 *) data;
 
   Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_p, exp->prot);
+  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, exp->tos);
   Assign16(((struct my_tlhdr *)pptrs->tlh_ptr)->src_port, exp->srcport);
   Assign16(((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port, exp->dstport);
 }
@@ -174,6 +178,7 @@ void v8_11_filter_handler(struct packet_ptrs *pptrs, void *data)
   struct struct_export_v8_11 *exp = (struct struct_export_v8_11 *) data;
 
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_src.s_addr, exp->src_prefix);
+  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, exp->tos);
 }
 
 void v8_12_filter_handler(struct packet_ptrs *pptrs, void *data)
@@ -181,6 +186,7 @@ void v8_12_filter_handler(struct packet_ptrs *pptrs, void *data)
   struct struct_export_v8_12 *exp = (struct struct_export_v8_12 *) data;
 
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_dst.s_addr, exp->dst_prefix);
+  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, exp->tos);
 }
 
 void v8_13_filter_handler(struct packet_ptrs *pptrs, void *data)
@@ -189,6 +195,7 @@ void v8_13_filter_handler(struct packet_ptrs *pptrs, void *data)
 
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_src.s_addr, exp->src_prefix);
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_dst.s_addr, exp->dst_prefix);
+  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, exp->tos);
 }
 
 void v8_14_filter_handler(struct packet_ptrs *pptrs, void *data)
@@ -198,6 +205,7 @@ void v8_14_filter_handler(struct packet_ptrs *pptrs, void *data)
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_src.s_addr, exp->src_prefix);
   Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_dst.s_addr, exp->dst_prefix);
   Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_p, exp->prot);
+  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, exp->tos);
   Assign16(((struct my_tlhdr *)pptrs->tlh_ptr)->src_port, exp->srcport);
   Assign16(((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port, exp->dstport);
 }

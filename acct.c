@@ -36,7 +36,7 @@ struct acc *search_accounting_structure(struct pkt_primitives *addr)
   hash = cache_crc32((unsigned char *)addr, pp_size);
   pos = hash % config.buckets;
 
-  if (config.debug) Log(LOG_DEBUG, "Bucket: %u\n", pos);
+  Log(LOG_DEBUG, "DEBUG ( %s/%s ): Selecting bucket %u.\n", config.name, config.type, pos);
 
   elem_acc = (struct acc *) a;
   elem_acc += pos;  
@@ -66,7 +66,7 @@ void insert_accounting_structure(struct pkt_data *data)
   hash = cache_crc32((unsigned char *)addr, pp_size);
   pos = hash % config.buckets;
       
-  if (config.debug) Log(LOG_DEBUG, "Bucket: %u\n", pos);
+  Log(LOG_DEBUG, "DEBUG ( %s/%s ): Selecting bucket %u.\n", config.name, config.type, pos);
   /* 
      1st stage: compare data with last used element;
      2nd stage: compare data with elements in the table, following chains
@@ -77,6 +77,7 @@ void insert_accounting_structure(struct pkt_data *data)
       if (memcmp(elem_acc, addr, sizeof(struct pkt_primitives)) == 0) {
         if (elem_acc->reset_flag) reset_counters(elem_acc);
         elem_acc->packet_counter += ntohl(data->pkt_num);
+        elem_acc->flow_counter += ntohl(data->flo_num);
         elem_acc->bytes_counter += ntohl(data->pkt_len);
         return;
       }
@@ -91,6 +92,7 @@ void insert_accounting_structure(struct pkt_data *data)
       if (memcmp(elem_acc, addr, sizeof(struct pkt_primitives)) == 0) {
         if (elem_acc->reset_flag) reset_counters(elem_acc);
         elem_acc->packet_counter += ntohl(data->pkt_num);
+        elem_acc->flow_counter += ntohl(data->flo_num);
         elem_acc->bytes_counter += ntohl(data->pkt_len);
         lru_elem_ptr[config.buckets] = elem_acc;
         return;
@@ -100,6 +102,7 @@ void insert_accounting_structure(struct pkt_data *data)
       if (elem_acc->reset_flag) elem_acc->reset_flag = FALSE; 
       memcpy(elem_acc, addr, sizeof(struct pkt_primitives));
       elem_acc->packet_counter += ntohl(data->pkt_num);
+      elem_acc->flow_counter += ntohl(data->flo_num);
       elem_acc->bytes_counter += ntohl(data->pkt_len);
       elem_acc->signature = hash;
       lru_elem_ptr[config.buckets] = elem_acc;
@@ -108,7 +111,7 @@ void insert_accounting_structure(struct pkt_data *data)
 
     /* Handling collisions */
     else if (elem_acc->next != NULL) {
-      if (config.debug) Log(LOG_DEBUG, "Walking through the collision-chain for this bucket\n");
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): Walking through the collision-chain.\n", config.name, config.type);
       elem_acc = elem_acc->next;
       solved = FALSE;
     }
@@ -118,7 +121,7 @@ void insert_accounting_structure(struct pkt_data *data)
       if (no_more_space) return;
 
       /* We have to allocate new space for this address */
-      if (config.debug) Log(LOG_DEBUG, "Creating new element in this bucket\n");
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): Creating new element.\n", config.name, config.type);
 
       if (current_pool->space_left >= sizeof(struct acc)) {
         new_elem = current_pool->ptr;
@@ -128,7 +131,7 @@ void insert_accounting_structure(struct pkt_data *data)
       else {
         current_pool = request_memory_pool(config.memory_pool_size); 
 	if (current_pool == NULL) {
-          Log(LOG_WARNING, "WARN: unable to allocate more memory pools, clear stats manually!\n");
+          Log(LOG_WARNING, "WARN ( %s/%s ): Unable to allocate more memory pools, clear stats manually!\n", config.name, config.type);
 	  no_more_space = TRUE;
 	  return;
         }
@@ -143,6 +146,7 @@ void insert_accounting_structure(struct pkt_data *data)
       elem_acc = (struct acc *) new_elem;
       memcpy(elem_acc, addr, sizeof(struct pkt_primitives));
       elem_acc->packet_counter += ntohl(data->pkt_num);
+      elem_acc->flow_counter += ntohl(data->flo_num);
       elem_acc->bytes_counter += ntohl(data->pkt_len);
       elem_acc->signature = hash;
       elem_acc->next = NULL;

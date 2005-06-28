@@ -32,7 +32,7 @@ void load_ports(char *filename, struct ports_table *pt)
 {
   FILE *file;
   char buf[8];
-  int ret, rows = 0;
+  int ret, rows = 0, newline = TRUE;
 
   if (filename) {
     if ((file = fopen(filename,"r")) == NULL) {
@@ -44,12 +44,21 @@ void load_ports(char *filename, struct ports_table *pt)
 
       while (!feof(file)) {
         if (fgets(buf, 8, file)) { 
-	  rows++;
+	  if (strchr(buf, '\n')) { 
+            if (!newline) {
+	      newline = TRUE; 
+	      continue;
+	    }
+	  }
+	  else {
+            if (!newline) continue;
+	    newline = FALSE;
+	  }
 	  trim_spaces(buf);
 	  if (!strlen(buf) || (buf[0] == '!')) continue;
 	  ret = atoi(buf); 
 	  if ((ret > 0) && (ret < PORTS_TABLE_ENTRIES)) pt->table[ret] = TRUE;
-	  else Log(LOG_WARNING, "WARN: invalid port at %s:%d\n", filename, rows); 
+	  else Log(LOG_WARNING, "WARN ( %s ): invalid port %d\n", filename, rows); 
 	}
       }
     }

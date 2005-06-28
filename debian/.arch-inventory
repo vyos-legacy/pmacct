@@ -1,3 +1,0 @@
-precious ^files$
-precious ^pmacct$
-precious ^.*\.(substvars|debhelper)$

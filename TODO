@@ -27,7 +27,7 @@ them; i'll answer you as soon as possible.
    as framework. Alignment issues have to be incrementally
    resolved.
  + explore new capturing 'sources' other than libpcap and
-   NetFlow V1/V5/V9. 
+   all supported NetFlow versions. 
  + improvements to the plugins architecture; more advanced
    concept would be greatly useful: they would permit some
    advanced feature such as hotswap of old plugins without

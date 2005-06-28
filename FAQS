@@ -15,23 +15,27 @@ A: It's http://www.ba.cnr.it/~paolo/pmacct/ . Actually there isn't any other off
 Q: 'pmacct', 'pmacctd', 'nfacctd' -- but what do they mean ?
 A: 'pmacct' is intended to be the name of the project; 'pmacctd' is the name of the
    libpcap-based IP accounting and aggregation daemon; 'nfacctd' is the name of the
-   NetFlow v1/v5/v9 accounting and aggregation daemon which entered the project
+   NetFlow v1/v5/v7/v8/v9 accounting and aggregation daemon which entered the project
    starting from version 0.7.0.
 
 
 Q: I use flow-tools since many years and, because of the actual working environment,
-   i cannot replace the flow-capture with nfacctd as NetFlow collector. So, do i have
-   any chance to chain flow-tools with pmacct ? 
-A: Yes. pmacctd - since 0.8.2 release - is able to read libpcap savefiles, which is 
-   also one of the output formats supported by flow-export tool. The following example
-   is quite simple (no aggregation, tagging and selection features available in pmacct
-   are involved):
+   i cannot simply replace the flow-capture with nfacctd as NetFlow collector. So, do
+   i have any change to let flow-tools and pmacct work together ?
+A: Yes. Two approaches are available. a) pmacctd - since 0.8.2 release - is able to
+   read libpcap savefiles, which is  also one of the output formats supported by the 
+   flow-export tool. The following example is quite simple (no aggregation, tagging
+   and selection features available in pmacct are involved):
 
    shell> cat /[...]/ft-v05.[...] | flow-export -f 1 | pmacctd -P mysql -I - -c src_host,dst_host,src_port,dst_port,proto
 
    The equivalent configuration directive for '-I -' switch (which roughly means: read
    libpcap savefile from stdin) is: 'pcap_savefile: -'. 
-     
+   b) use the UDP samplicator tool (http://www.switch.ch/tf-tant/floma/sw/samplicator) 
+   to replicate the received NetFlow datagrams to a set of collectors (e.g., nfacctd,
+   flow-capture and flow-receive). Compared to flow-fanout, it is of generic use (that
+   is, not limited to just pmacct and flow-tools) and should be lighter (because of no
+   PDU verificaiton, no time handling, etc.). 
 
 Q: When using the libpcap-based daemon, 'pmacctd', i feel the sensation of an high
    CPU usage: i see the 'pmacctd' process lurking a great CPU share. Any chance to
@@ -58,11 +62,6 @@ A: Yes, there are good chances to reduce the CPU usage, posed that the CPU you a
    Then look at the following solutions on 'pmacctd'/'nfacctd' side (and for further
    details see also 'Communications between core process and plugins' chapter, INTERNALS
    document):
-
-   mmap(): at 'configure' time, remember to add the '--enable-mmap' switch to avoid
-   unnecessary copies. By default, the shared memory use have been disabled in all 0.7.x
-   releases. Starting with release 0.8.0, it's enabled by default and could be disabled
-   via the '--disable-mmap' switch. 
 
    'plugin_buffer_size': turns on bufferization. '1024', '2048' or '4096' are sufficient
    values for common environments. If the circular queue size (also referred as pipe size)
@@ -123,6 +122,13 @@ A: Many technical consideration may be spent on this topic but they all have a c
    hosts will talk to. So, be careful and remember that if, say, 60.000 contemporary flows
    could be easily handled in a memory structure, they just would be an overkill if translated
    in SQL queries each few minutes. 
+
+
+Q: How to get the historical accounting enabled ? I see the SQL table having 'stamp_inserted'
+   and 'stamp_updated' fields but they do not get any value. 
+A: Historical accounting gets enabled by adding to the configuration a 'sql_history' directive.
+   It's also highly adviceable to associate a 'sql_history_roundoff' to it. For details about
+   the syntax of the two directives and some examples, take a look to the CONFIG-KEYS document. 
 
 
 Q: While giving a look to the ugly 'numbers' returned by either a SQL query or pmacct
@@ -222,8 +228,9 @@ A: You need to get involved with SQL tables when you use a SQL plugin (*astonish
    have been introduced over the time and often backward compatibility when upgrading
    pmacct is a need. 
    
-   Briefly, v1, v2 or v3 tables ? Few rules of thumb follow:
+   Briefly, v1, v2, v3 or v4 tables ? Few rules of thumb follow:
 
+   - Do you need flows (other than packets) accounting ? Then you have to use v4.
    - Do you need ToS/DSCP field (QoS) accounting ? Then you have to use v3.
    - Do you need agent ID for distributed accounting and packet tagging ? Then you have to use v2.
    - Do you need VLAN traffic accounting ? Then you have to use v2.

@@ -94,16 +94,16 @@ EXT void search_dst_as(struct networks_table *, struct networks_cache *, struct 
 
 EXT void load_networks(char *, struct networks_table *, struct networks_cache *); /* wrapper */ 
 EXT void load_networks4(char *, struct networks_table *, struct networks_cache *); 
-EXT void merge_sort(struct networks_table_entry *, int, int);
-EXT void merge(struct networks_table_entry *, int, int, int);
+EXT void merge_sort(char *, struct networks_table_entry *, int, int);
+EXT void merge(char *, struct networks_table_entry *, int, int, int);
 EXT struct networks_table_entry *binsearch(struct networks_table *, struct networks_cache *, struct host_addr *);
 EXT void networks_cache_insert(struct networks_cache *, u_int32_t *, struct networks_table_entry *);
 EXT struct networks_table_entry *networks_cache_search(struct networks_cache *, u_int32_t *);
 
 #if defined ENABLE_IPV6
 EXT void load_networks6(char *, struct networks_table *, struct networks_cache *); 
-EXT void merge_sort6(struct networks6_table_entry *, int, int);
-EXT void merge6(struct networks6_table_entry *, int, int, int);
+EXT void merge_sort6(char *, struct networks6_table_entry *, int, int);
+EXT void merge6(char *, struct networks6_table_entry *, int, int, int);
 EXT struct networks6_table_entry *binsearch6(struct networks_table *, struct networks_cache *, struct host_addr *);
 EXT void networks_cache_insert6(struct networks_cache *, void *, struct networks6_table_entry *);
 EXT struct networks6_table_entry *networks_cache_search6(struct networks_cache *, void *);

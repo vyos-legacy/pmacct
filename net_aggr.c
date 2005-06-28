@@ -86,7 +86,7 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
 	    tmpt->table[eff_rows].as = atoi(as);
 	  }
 	  else tmpt->table[eff_rows].as = 0;
-	  if (!sanitize_buf_net(bufptr, rows)) {
+	  if (!sanitize_buf_net(filename, bufptr, rows)) {
 	    delim = strchr(bufptr, '/');
 	    *delim = '\0';
 	    net = bufptr;
@@ -97,13 +97,13 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
 	    buflen = strlen(mask);
 	    for (j = 0; j < buflen; j++) {
 	      if (!isdigit(mask[j])) {
-		Log(LOG_ERR, "ERROR: Invalid network mask '%s'.\n", mask);
+		Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%s'.\n", filename, mask);
 		goto cycle_end;
 	      }
 	    }
 	    index = atoi(mask); 
 	    if (index > 32) {
-	      Log(LOG_ERR, "ERROR: Invalid network mask '%d'.\n", index);
+	      Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%d'.\n", filename, index);
 	      goto cycle_end;
 	    }
 
@@ -120,7 +120,7 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
       fclose(file);
 
       /* 3rd step: sorting table */
-      merge_sort(tmpt->table, 0, eff_rows);
+      merge_sort(filename, tmpt->table, 0, eff_rows);
       tmpt->num = eff_rows;
 
       /* 4th step: collecting informations in the sorted table;
@@ -195,7 +195,8 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
       if (config.debug) { 
         index = 0;
         while (index < tmpt->num) {
-	  Log(LOG_DEBUG, "DEBUG: (networks table IPv4) net: %x, mask: %x\n", nt->table[index].net, nt->table[index].mask); 
+	  Log(LOG_DEBUG, "DEBUG ( %s ): (networks table IPv4) net: %x, mask: %x\n", 
+			  filename, nt->table[index].net, nt->table[index].mask); 
 	  // Log(LOG_DEBUG, "DEBUG: (networks table) net: %x, mask: %x, level: %u, childs: %u\n",
 	  //   tmpt->table[index].net, tmpt->table[index].mask, mdt[index].level, mdt[index].childs); 
 	  index++;
@@ -212,7 +213,7 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
 }
 
 /* sort the (sub)array v from start to end */
-void merge_sort(struct networks_table_entry *table, int start, int end)
+void merge_sort(char *filename, struct networks_table_entry *table, int start, int end)
 {
   int middle;
 
@@ -223,20 +224,20 @@ void merge_sort(struct networks_table_entry *table, int start, int end)
   middle = (start+end)/2;
 
   /* sort the subarray from start..middle */
-  merge_sort(table, start, middle);
+  merge_sort(filename, table, start, middle);
 
   /* sort the subarray from middle..end */
-  merge_sort(table, middle, end);
+  merge_sort(filename, table, middle, end);
 
   /* merge the two sorted halves */
-  merge(table, start, middle, end);
+  merge(filename, table, start, middle, end);
 }
 
 /* 
    merge the subarray v[start..middle] with v[middle..end], placing the
    result back into v.
 */
-void merge(struct networks_table_entry *table, int start, int middle, int end)
+void merge(char *filename, struct networks_table_entry *table, int start, int middle, int end)
 {
   struct networks_table_entry *v1, *v2;
   int  v1_n, v2_n, v1_index, v2_index, i, s = sizeof(struct networks_table_entry);
@@ -247,7 +248,7 @@ void merge(struct networks_table_entry *table, int start, int middle, int end)
   v1 = malloc(v1_n*s);
   v2 = malloc(v2_n*s);
 
-  if ((!v1) || (!v2)) Log(LOG_ERR, "ERROR: Memory sold out when allocating 'networks table'\n"); 
+  if ((!v1) || (!v2)) Log(LOG_ERR, "ERROR ( %s ): Memory sold out when allocating 'networks table'\n", filename); 
 
   for (i=0; i<v1_n; i++) memcpy(&v1[i], &table[start+i], s);
   for (i=0; i<v2_n; i++) memcpy(&v2[i], &table[middle+i], s);
@@ -565,7 +566,7 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
             tmpt->table6[eff_rows].as = atoi(as);
           }
           else tmpt->table6[eff_rows].as = 0;
-          if (!sanitize_buf_net(bufptr, rows)) {
+          if (!sanitize_buf_net(filename, bufptr, rows)) {
             delim = strchr(bufptr, '/');
             *delim = '\0';
             net = bufptr;
@@ -577,13 +578,13 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
             buflen = strlen(mask);
             for (j = 0; j < buflen; j++) {
               if (!isdigit(mask[j])) {
-                Log(LOG_ERR, "ERROR: Invalid network mask '%s'.\n", mask);
+                Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%s'.\n", filename, mask);
                 goto cycle_end;
               }
             }
             index = atoi(mask);
             if (index > 128) {
-              Log(LOG_ERR, "ERROR: Invalid network mask '%d'.\n", index);
+              Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%d'.\n", filename, index);
               goto cycle_end;
             }
 
@@ -605,7 +606,7 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
       fclose(file);
 
       /* 3rd step: sorting table */
-      merge_sort6(tmpt->table6, 0, eff_rows);
+      merge_sort6(filename, tmpt->table6, 0, eff_rows);
       tmpt->num6 = eff_rows;
 
       /* 4th step: collecting informations in the sorted table;
@@ -684,7 +685,7 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
       if (config.debug) {
         index = 0;
         while (index < tmpt->num6) {
-          Log(LOG_DEBUG, "DEBUG: (networks table IPv6) net: %x:%x:%x:%x, mask: %x:%x:%x:%x\n",
+          Log(LOG_DEBUG, "DEBUG ( %s ): (networks table IPv6) net: %x:%x:%x:%x, mask: %x:%x:%x:%x\n", filename,
 	    nt->table6[index].net[0], nt->table6[index].net[1], nt->table6[index].net[2], nt->table6[index].net[3],
 	    nt->table6[index].mask[0], nt->table6[index].mask[1], nt->table6[index].mask[2], nt->table6[index].mask[3]);
           // Log(LOG_DEBUG, "DEBUG: (networks table) net: %x, mask: %x, level: %u, childs: %u\n",
@@ -703,7 +704,7 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
 }
 
 /* sort the (sub)array v from start to end */
-void merge_sort6(struct networks6_table_entry *table, int start, int end)
+void merge_sort6(char * filename, struct networks6_table_entry *table, int start, int end)
 {
   int middle;
 
@@ -714,20 +715,20 @@ void merge_sort6(struct networks6_table_entry *table, int start, int end)
   middle = (start+end)/2;
 
   /* sort the subarray from start..middle */
-  merge_sort6(table, start, middle);
+  merge_sort6(filename, table, start, middle);
 
   /* sort the subarray from middle..end */
-  merge_sort6(table, middle, end);
+  merge_sort6(filename, table, middle, end);
 
   /* merge the two sorted halves */
-  merge6(table, start, middle, end);
+  merge6(filename, table, start, middle, end);
 }
 
 /*
    merge the subarray v[start..middle] with v[middle..end], placing the
    result back into v.
 */
-void merge6(struct networks6_table_entry *table, int start, int middle, int end)
+void merge6(char *filename, struct networks6_table_entry *table, int start, int middle, int end)
 {
   struct networks6_table_entry *v1, *v2;
   int v1_n, v2_n, v1_index, v2_index, i, x, s = sizeof(struct networks6_table_entry);
@@ -739,7 +740,7 @@ void merge6(struct networks6_table_entry *table, int start, int middle, int end)
   v1 = malloc(v1_n*s);
   v2 = malloc(v2_n*s);
 
-  if ((!v1) || (!v2)) Log(LOG_ERR, "ERROR: Memory sold out when allocating 'networks table'\n");
+  if ((!v1) || (!v2)) Log(LOG_ERR, "ERROR ( %s ): Memory sold out when allocating 'networks table'\n", filename);
 
   for (i=0; i<v1_n; i++) memcpy(&v1[i], &table[start+i], s);
   for (i=0; i<v2_n; i++) memcpy(&v2[i], &table[middle+i], s);

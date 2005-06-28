@@ -40,21 +40,23 @@ EXT void trim_all_spaces(char *);
 EXT void strip_quotes(char *);
 EXT int isblankline(char *);
 EXT int iscomment(char *);
-EXT int check_not_valid_char(char *, int);
+EXT int check_not_valid_char(char *, char *, int);
 EXT time_t roundoff_time(time_t, char *);
 EXT time_t calc_monthly_timeslot(time_t, int, int);
 EXT void write_pid_file(char *);
-EXT int sanitize_buf_net(char *, int);
+EXT int sanitize_buf_net(char *, char *, int);
 EXT int sanitize_buf(char *);
 EXT void mark_columns(char *);
 EXT int Setsocksize(int, int, int, void *, int);
 EXT void *map_shared(void *, size_t, int, int, int, off_t);
 EXT void lower_string(char *);
-EXT void evaluate_sums(u_int32_t *);
+EXT void evaluate_sums(u_int32_t *, char *, char *);
 EXT int file_archive(const char *, int);
 EXT void stop_all_childs();
 EXT int file_lock(int);
 EXT int file_unlock(int);
+EXT void strftime_same(char *, int, char *, const time_t *);
+EXT int read_SQLquery_from_file(char *, char *, int);
 
 EXT unsigned int str_to_addr(const char *, struct host_addr *);
 #undef EXT

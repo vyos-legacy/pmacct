@@ -63,11 +63,12 @@ customization are available in INTERNALS document.
 If you definitely need versioning, don't forget to specify which SQL table version you are
 currently using:
 
-commandline: 	'-v [1|2|3]'
-configuration:  'sql_table_version: [1|2|3]'	
+commandline: 	'-v [1|2|3|4]'
+configuration:  'sql_table_version: [1|2|3|4]'	
 
-Now, v1, v2 or v3 tables ? Few rules of thumb follow:
+Now, v1, v2, v3 or v4 tables ? Few rules of thumb follow:
 
+- Do you need flows (other than packets) accounting ? Then you have to use v4.
 - Do you need ToS/DSCP field (QoS) accounting ? Then you have to use v3.
 - Do you need agent ID for distributed accounting and packet tagging ? Then you have to use v2.  
 - Do you need VLAN traffic accounting ? Then you have to use v2.
@@ -88,11 +89,7 @@ shell> mysql -u root -p < pmacct-grant-db.mysql
 
 Data will be available in 'acct_v2' table of 'pmacct' DB.
 
-- To create v3 tables:
-shell> mysql -u root -p < pmacct-create-db_v3.mysql
-shell> mysql -u root -p < pmacct-grant-db.mysql
-
-Data will be available in 'acct_v3' table of 'pmacct' DB.
+... And so on for the newer versions.
 
 IIIc. PostgreSQL examples
 Which user has to execute the following two scripts and how to autenticate with the PostgreSQL
@@ -109,9 +106,7 @@ To create v2 tables:
 shell> psql -d template1 -f /tmp/pmacct-create-db.pgsql
 shell> psql -d pmacct -f /tmp/pmacct-create-table_v2.pgsql
 
-To create v3 tables:
-shell> psql -d template1 -f /tmp/pmacct-create-db.pgsql
-shell> psql -d pmacct -f /tmp/pmacct-create-table_v3.pgsql
+... And so on for the newer versions.
 
 A few tables will be created into 'pmacct' DB. 'acct' ('acct_v2' or 'acct_v3') table is
 the default table where data will be written when in 'typed' mode (see 'sql_data' option

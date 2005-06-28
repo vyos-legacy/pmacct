@@ -53,11 +53,11 @@ void usage_client(char *prog)
   printf("Queries:\n");
   printf("  -s\tcollect full table statistics\n"); 
   printf("  -N\t[matching data[';' ... ]] | ['file:'[filename]] \n\tmatch actual data; print counter(s) only\n");
-  printf("  -n\t[bytes|packets|all] \n\tselect counter to print (applies to -N)\n");
+  printf("  -n\t[bytes|packets|flows|all] \n\tselect counter to print (applies to -N)\n");
   printf("  -S\tSum counters instead of returning a single counter for each request (applies to -N)\n");
   printf("  -M\t[matching data[';' ... ]] | ['file:'[filename]] \n\tmatch actual data; print formatted table\n");
   printf("  -a\tdisplay all table fields (even those currently unused)\n");
-  printf("  -c\t[src_mac|dst_mac|vlan|src_host|dst_host|src_port|dst_port|tos|proto|src_as|dst_as| \n\t |sum_host|sum_net|sum_as|sum_port|tag] \n\tselect primitives (required by -N and -M)\n");
+  printf("  -c\t[src_mac|dst_mac|vlan|src_host|dst_host|src_port|dst_port|tos|proto|src_as|dst_as| \n\t |sum_mac|sum_host|sum_net|sum_as|sum_port|tag|flows] \n\tselect primitives and flows (required by -N and -M)\n");
   printf("  -e\tclear statistics\n");
   printf("  -r\treset counters for the matched entries (applies to either -N or -M)\n");
   printf("  -t\tcheck table status\n");
@@ -126,13 +126,16 @@ void write_stats_header(u_int32_t what_to_count, u_int8_t have_wtc)
     printf("PROTOCOL    ");
     printf("TOS    ");
     printf("PACKETS     ");
+    printf("FLOWS       ");
     printf("BYTES\n");
   }
   else {
     if (what_to_count & COUNT_ID) printf("ID     ");
-    if (what_to_count & COUNT_SRC_MAC) printf("SRC MAC            "); 
+#if defined HAVE_L2
+    if (what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) printf("SRC MAC            "); 
     if (what_to_count & COUNT_DST_MAC) printf("DST MAC            "); 
     if (what_to_count & COUNT_VLAN) printf("VLAN   ");
+#endif
 #if defined ENABLE_IPV6
     if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SRC_AS)) printf("SRC IP                                         "); 
     if (what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS)) printf("SRC IP                                         ");
@@ -147,6 +150,7 @@ void write_stats_header(u_int32_t what_to_count, u_int8_t have_wtc)
     if (what_to_count & COUNT_IP_PROTO) printf("PROTOCOL    ");
     if (what_to_count & COUNT_IP_TOS) printf("TOS    ");
     printf("PACKETS     ");
+    if (what_to_count & COUNT_FLOWS) printf("FLOWS       ");
     printf("BYTES\n");
   }
 }
@@ -197,7 +201,7 @@ int main(int argc,char **argv)
   struct query_entry request;
   char clibuf[clibufsz], *bufptr;
   unsigned char *largebuf, *elem;
-  char *ethernet_address, ip_address[INET6_ADDRSTRLEN];
+  char ethernet_address[17], ip_address[INET6_ADDRSTRLEN];
   char path[128], file[128], password[9];
   int sd, buflen, unpacked, printed;
   int counter=0;
@@ -276,6 +280,7 @@ int main(int argc,char **argv)
 	  count_token_int[count_index] = COUNT_IP_PROTO;
 	  what_to_count |= COUNT_IP_PROTO;
 	}
+#if defined HAVE_L2
         else if (!strcmp(count_token[count_index], "src_mac")) {
 	  count_token_int[count_index] = COUNT_SRC_MAC;
 	  what_to_count |= COUNT_SRC_MAC;
@@ -288,6 +293,11 @@ int main(int argc,char **argv)
 	  count_token_int[count_index] = COUNT_VLAN;
 	  what_to_count |= COUNT_VLAN;
 	}
+	else if (!strcmp(count_token[count_index], "sum_mac")) {
+	  count_token_int[count_index] = COUNT_SUM_MAC;
+	  what_to_count |= COUNT_SUM_MAC;
+	}
+#endif 
         else if (!strcmp(count_token[count_index], "tos")) {
 	  count_token_int[count_index] = COUNT_IP_TOS;
 	  what_to_count |= COUNT_IP_TOS;
@@ -357,6 +367,7 @@ int main(int argc,char **argv)
     case 'n':
       if (!strcmp(optarg, "bytes")) which_counter = 0;
       else if (!strcmp(optarg, "packets")) which_counter = 1;
+      else if (!strcmp(optarg, "flows")) which_counter = 3;
       else if (!strcmp(optarg, "all")) which_counter = 2;
       else printf("WARN: ignoring unknown counter: %s.\n", optarg);
       break;
@@ -542,29 +553,34 @@ int main(int argc,char **argv)
             exit(1);
           }
         }
-        else if (!strcmp(count_token[match_string_index], "src_mac")) {
-          unsigned char *eth_ptr;
+#if defined (HAVE_L2)
+        else if (!strcmp(count_token[match_string_index], "src_mac") ||
+		 !strcmp(count_token[match_string_index], "sum_mac")) {
+          unsigned char ethaddr[ETH_ADDR_LEN];
+	  int res;
 
-          eth_ptr = (unsigned char *)ether_aton(match_string_token);
-	  if (!eth_ptr) {
+          res = string_etheraddr(match_string_token, ethaddr);
+	  if (res) {
 	    printf("ERROR: src_mac: Invalid MAC address: '%s'\n", match_string_token);
             exit(1);
 	  }
-	  else memcpy(&request.data.eth_shost, eth_ptr, ETH_ADDR_LEN);
+	  else memcpy(&request.data.eth_shost, ethaddr, ETH_ADDR_LEN);
         }
         else if (!strcmp(count_token[match_string_index], "dst_mac")) {
-          unsigned char *eth_ptr;
+          unsigned char ethaddr[ETH_ADDR_LEN];
+	  int res;
 
-          eth_ptr = (unsigned char *)ether_aton(match_string_token);
-          if (!eth_ptr) {
+          res = string_etheraddr(match_string_token, ethaddr);
+          if (res) {
             printf("ERROR: src_mac: Invalid MAC address: '%s'\n", match_string_token);
             exit(1);
           }
-          else memcpy(&request.data.eth_dhost, eth_ptr, ETH_ADDR_LEN);
+          else memcpy(&request.data.eth_dhost, ethaddr, ETH_ADDR_LEN);
         }
         else if (!strcmp(count_token[match_string_index], "vlan")) {
 	  request.data.vlan_id = atoi(match_string_token);
         }
+#endif
         else if (!strcmp(count_token[match_string_index], "src_port") ||
 		 !strcmp(count_token[match_string_index], "sum_port")) { 
           request.data.src_port = atoi(match_string_token);
@@ -606,8 +622,8 @@ int main(int argc,char **argv)
 	else if (!strcmp(count_token[match_string_index], "tag")) {
 	  int value = atoi(match_string_token);
 
-	  if ((value < 1) || (value > 65535)) {
-	    printf("WARN: 'tag' has to be in the range 1-65535.\n");
+	  if ((value < 0) || (value > 65535)) {
+	    printf("WARN: 'tag' has to be in the range 0-65535.\n");
 	    exit(1);
 	  }
 
@@ -646,21 +662,21 @@ int main(int argc,char **argv)
       if (memcmp(&acc_elem, &empty_addr, sizeof(struct pkt_primitives)) != 0) {
         if (!have_wtc || (what_to_count & COUNT_ID))
 	  printf("%-5d  ", acc_elem->primitives.id);
-
-	if (!have_wtc || (what_to_count & COUNT_SRC_MAC)) {
-	  ethernet_address = (char *) ether_ntoa(acc_elem->primitives.eth_shost);
+#if defined (HAVE_L2)
+	if (!have_wtc || (what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC))) {
+	  etheraddr_string(acc_elem->primitives.eth_shost, ethernet_address);
 	  printf("%-17s  ", ethernet_address);
 	}
 
 	if (!have_wtc || (what_to_count & COUNT_DST_MAC)) {
-	  ethernet_address = (char *) ether_ntoa(acc_elem->primitives.eth_dhost);
+	  etheraddr_string(acc_elem->primitives.eth_dhost, ethernet_address);
 	  printf("%-17s  ", ethernet_address);
 	} 
 
 	if (!have_wtc || (what_to_count & COUNT_VLAN)) {
           printf("%-5d  ", acc_elem->primitives.vlan_id);
         }
-
+#endif
 	if (!have_wtc || (what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST|COUNT_SRC_NET
 	    |COUNT_SUM_NET|COUNT_SRC_AS|COUNT_SUM_AS))) {
 #if defined ENABLE_IPV6
@@ -707,6 +723,10 @@ int main(int argc,char **argv)
 	  printf("%-3d    ", acc_elem->primitives.tos); 
 
         printf("%-10u  ", acc_elem->pkt_num); 
+
+        if (!have_wtc || (what_to_count & COUNT_FLOWS))
+	  printf("%-10u  ", acc_elem->flo_num); 
+
         printf("%u\n", acc_elem->pkt_len); 
         counter++;
       }
@@ -736,7 +756,7 @@ int main(int argc,char **argv)
   }
   else if (want_counter) {
     unsigned char *base;
-    u_int32_t bcnt = 0, pcnt = 0; 
+    u_int32_t bcnt = 0, pcnt = 0, fcnt = 0; 
     int printed;
 
     unpacked = Recv(sd, &largebuf);
@@ -745,19 +765,22 @@ int main(int argc,char **argv)
     for (printed = sizeof(struct query_header); printed < unpacked; printed += sizeof(struct pkt_data), acc_elem++) {
       if (sum_counters) {
 	pcnt += acc_elem->pkt_num;
+	fcnt += acc_elem->flo_num;
 	bcnt += acc_elem->pkt_len;
       }
       else {
         if (which_counter == 0) printf("%u\n", acc_elem->pkt_len); /* print bytes */
         else if (which_counter == 1) printf("%u\n", acc_elem->pkt_num); /* print packets */
-        else if (which_counter == 2) printf("%u %u\n", acc_elem->pkt_num, acc_elem->pkt_len); /* print packets+bytes */
+        else if (which_counter == 2) printf("%u %u %u\n", acc_elem->pkt_num, acc_elem->pkt_len, acc_elem->flo_num); /* print packets+bytes+flows */
+        else if (which_counter == 3) printf("%u\n", acc_elem->flo_num); /* print flows */
       }
     }
       
     if (sum_counters) {
       if (which_counter == 0) printf("%u\n", bcnt); /* print bytes */
       else if (which_counter == 1) printf("%u\n", pcnt); /* print packets */
-      else if (which_counter == 2) printf("%u %u\n", pcnt, bcnt); /* print packets+bytes */
+      else if (which_counter == 2) printf("%u %u %u\n", pcnt, bcnt, fcnt); /* print packets+bytes+flows */
+      else if (which_counter == 3) printf("%u\n", fcnt); /* print flows */
     }
   }
   else {
