@@ -112,7 +112,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
               }
             }
             /* verifying errors and required fields */
-	    if (acct_type == ACCT_NF) {
+	    if (acct_type == ACCT_NF || acct_type == ACCT_SF) {
               if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].agent_ip.family) {
                 int j;
 

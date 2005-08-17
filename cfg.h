@@ -88,6 +88,7 @@ struct configuration {
   int daemon;
   int active_plugins;
   char *pidfile; 
+  int networks_mask;
   char *networks_file;
   int networks_cache_entries;
   char *ports_file;

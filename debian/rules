@@ -35,7 +35,7 @@ config.status: configure
 		--infodir=\$${prefix}/share/info \
 		--enable-mmap \
 		--enable-pgsql \
-		--with-pgsql-includes=/usr/include/postgresql/8.0 \
+		--with-pgsql-includes=`pg_config --includedir` \
 		--enable-mysql
 
 build: build-stamp

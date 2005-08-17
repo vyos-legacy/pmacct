@@ -77,10 +77,13 @@ EXT void init_ip4_flow_handler();
 EXT int ip_flow_handler(struct packet_ptrs *); 
 EXT int find_flow(u_int32_t, struct packet_ptrs *); 
 EXT int create_flow(u_int32_t, struct ip_flow *, u_int8_t, unsigned int, struct packet_ptrs *); 
-EXT inline unsigned int hash_flow(u_int32_t, u_int32_t, u_int16_t, u_int16_t, u_int8_t);
 EXT void prune_old_flows(u_int32_t); 
-EXT inline unsigned int is_expired(u_int32_t, struct ip_flow_common *);
-EXT inline void is_closing(u_int32_t, struct packet_ptrs *, struct ip_flow_common *);
+
+#if (defined __IP_FLOW_C) /* we avoid to export inlined code */
+EXT Inline unsigned int hash_flow(u_int32_t, u_int32_t, u_int16_t, u_int16_t, u_int8_t);
+EXT Inline unsigned int is_expired(u_int32_t, struct ip_flow_common *);
+EXT Inline void is_closing(u_int32_t, struct packet_ptrs *, struct ip_flow_common *);
+#endif
 
 #if defined ENABLE_IPV6
 EXT void init_ip6_flow_handler();

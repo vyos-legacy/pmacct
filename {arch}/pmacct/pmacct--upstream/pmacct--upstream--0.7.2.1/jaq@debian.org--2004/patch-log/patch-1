@@ -1,0 +1,12 @@
+Revision: pmacct--upstream--0.7.2.1--patch-1
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jamie.wilkinson@anchor.com.au>
+Date: Thu Aug 12 16:32:40 EST 2004
+Standard-date: 2004-08-12 06:32:40 GMT
+Modified-files: ChangeLog nfacctd.c pmacctd.c
+New-patches: jaq@debian.org--2004/pmacct--upstream--0.7.2.1--patch-1
+Summary: importing new upstream version 0.7.2p1
+Keywords: 
+
+importing new upstream version 0.7.2p1
+

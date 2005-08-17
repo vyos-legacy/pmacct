@@ -1,0 +1,11 @@
+Revision: debian-dir--filtergen--0--patch-4
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jaq@spacepants.org>
+Date: Wed Jun  9 19:31:57 EST 2004
+Standard-date: 2004-06-09 09:31:57 GMT
+Modified-files: changelog rules
+New-patches: jaq@debian.org--2004/debian-dir--filtergen--0--patch-4
+Summary:  Add make check
+
+
+

@@ -71,23 +71,23 @@ NetFlow	   |    \	    &&				      |  						 |
 		   |
 		   |
 		  /
-          ----[ pmacctd loop ]----------------------------------------------
-         |								    |
-	 |         [   handle   ]     [  handle  ]    [  handle   ]	    |
-	 | ... ====[ link layer ]=====[ IP layer ]====[ fragments ]==== ... |
-	 |								    |
-	  ------------------------------------------------------------------
+          ----[ pmacctd loop ]------------------------------------------------------------
+         |								    		  |
+	 |         [   handle   ]     [  handle  ]    [  handle   ]	[ handle ]        |
+	 | ... ====[ link layer ]=====[ IP layer ]====[ fragments ]==== [ flows ]==== ... |
+	 |								    		  |
+	  --------------------------------------------------------------------------------
 
 
 IV. Processes Vs. threads 
-pmacctd and nfacctd, the two pmacct daemons, rely strongly over a multi-process organization
-rather than over threads. For threads we mean what is commonly referred as threads of execution
-that share their entire address space inside a single process.
+pmacctd, nfacctd and sfacctd, the pmacct package daemons, rely strongly over a multi-process
+organization rather than over threads. For threads we mean what is commonly referred as
+threads of execution that share their entire address space inside a single process.
 Processes are used to encapsulate each plugin instance and, indeed, the Core Process. It 
 either captures packets via the well-known libpcap API (pmacctd) or listens for specific
-packets coming from the network (nfacctd listens for NetFlow packets); packets are then
-processed (filtered out, tagged, aggregated and bufferized) and sent to the active plugins.
-They pick and handle in some meaningful way aggregated data (struct pkt_data).
+packets coming from the network (nfacctd, for example, listens for NetFlow packets); packets
+are then processed (filtered out, tagged, aggregated and bufferized) and sent to the active
+plugins. They pick and handle in some meaningful way aggregated data (struct pkt_data).
 A picture follows:
 					   |===> [ pmacctd/plugin ]
 libpcap			           pipe/shm|

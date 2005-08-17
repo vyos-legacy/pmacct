@@ -357,19 +357,6 @@ struct data_hdr_v9 {
   u_int16_t flow_len;
 };
 
-struct packet_ptrs_vector {
-  struct packet_ptrs v4;
-  struct packet_ptrs vlan4;
-  struct packet_ptrs mpls4;
-  struct packet_ptrs vlanmpls4;
-#if defined ENABLE_IPV6
-  struct packet_ptrs v6;
-  struct packet_ptrs vlan6;
-  struct packet_ptrs mpls6;
-  struct packet_ptrs vlanmpls6;
-#endif
-};
-
 /* defines */
 #define DEFAULT_NFACCTD_PORT 2100
 #define NETFLOW_MSG_SIZE 1550
@@ -471,11 +458,6 @@ struct packet_ptrs_vector {
 #define NF9_FTYPE_VLAN_MPLS_IPV4	15
 #define NF9_FTYPE_VLAN_MPLS_IPV6	16
 
-struct hosts_table {
-  unsigned short int num;
-  struct host_addr table[MAX_MAP_ENTRIES];
-};
-
 /* Ordered Template field */
 struct otpl_field {
   u_int16_t off;
@@ -517,13 +499,13 @@ EXT void process_v8_packet(unsigned char *, u_int16_t, struct packet_ptrs *, str
 EXT void process_v9_packet(unsigned char *, u_int16_t, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT void load_allow_file(char *, struct hosts_table *);
 EXT int check_allow(struct hosts_table *, struct sockaddr *);
-EXT int NF_find_id(struct packet_ptrs *);
-EXT u_int16_t evaluate_flow_type(struct template_cache_entry *, struct packet_ptrs *);
+EXT u_int16_t NF_evaluate_flow_type(struct template_cache_entry *, struct packet_ptrs *);
 EXT void reset_mac(struct packet_ptrs *);
 EXT void reset_mac_vlan(struct packet_ptrs *);
 EXT void reset_ip4(struct packet_ptrs *);
 EXT void reset_ip6(struct packet_ptrs *);
 EXT void notify_malf_packet(short int, char *, struct sockaddr *);
+EXT int NF_find_id(struct packet_ptrs *);
 
 EXT struct template_cache tpl_cache;
 EXT struct v8_handler_entry v8_handlers[15];

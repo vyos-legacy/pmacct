@@ -8,8 +8,8 @@ I.	Plugins included with pmacct distribution
 II.	Configuring pmacct for compilation
 III.	Brief SQL setup examples
 IV.	Common terms used in this document
-V.	Running pmacct daemon (pmacctd)
-VI.	Running nfacct daemon (nfacctd)
+V.	Running the libpcap-based daemon (pmacctd)
+VI.	Running either the NetFlow or sFlow daemon (nfacctd/sfacctd)
 VII.	Running pmacct client (pmacct)
 VIII.	Running logfile players (pmmyplay and pmpgplay) 
 
@@ -123,12 +123,12 @@ EXP: When requesting data from client side ('pmacct') to the daemon side (eg. 'p
 - Actual data are matched.
 
 
-V. RUNNING PMACCTD DAEMON (pmacctd)
+V. Running the libpcap-based daemon (pmacctd) 
 You can run pmacctd either with commandline options or using a configuration file. Please remember
-that sample configuration files are in "examples" directory of the tarball. Note also that most of
-new features are available only as configuration directives (so, not as commandline switches).
-The use of a configuration file and commandline switches is mutual exclusive. To understand of all
-existing configuration directives, please read CONFIG-KEYS document. 
+that sample configuration files are in 'examples' tree of the tarball. Note also that most of the
+new features are available only as configuration directives (so, not as commandline switches). The
+use of a configuration file and commandline switches is mutual exclusive. To be aware of the existing 
+configuration directives, please read the CONFIG-KEYS document. 
 
 Show all available pmacctd commandline switches:
 shell> pmacctd -h
@@ -181,10 +181,11 @@ shell> pmacctd -c src_host,dst_host -S local2
 NOTE: superuser privileges are needed to execute pmacctd correctly. 
 
 
-VI. Running nfacct daemon (nfacctd)
-All examples about pmacctd are also valid for nfacctd with the exception of directive that apply exclusively
-to libpcap. If you've skipped examples in section 'IV', please read them. To be aware of all existing config
-keys, please read also CONFIG-KEYS document. Examples follow:
+VI. Running either the NetFlow or sFlow daemon (nfacctd/sfacctd) 
+All examples about pmacctd are also valid for nfacctd and sfacctd with the exception of directives that apply
+exclusively to libpcap. If you've skipped examples in section 'IV', please read them before continuing. To be
+aware of all existing configuration keys available, please read also the CONFIG-KEYS document. And now, let's
+go to the examples:
 
 Run nfacctd reading configuration from a specified file.
 shell> nfacctd -f nfacctd.conf

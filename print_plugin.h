@@ -71,6 +71,7 @@ void P_cache_flush(struct chained_cache *[], int);
 void P_cache_purge(struct chained_cache *[], int);
 void P_write_stats_header();
 void *Malloc(unsigned int);
+void P_exit_now(int);
 
 /* global vars */
 void (*insert_func)(struct pkt_data *); /* pointer to INSERT function */

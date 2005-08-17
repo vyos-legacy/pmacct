@@ -75,7 +75,7 @@ int ip_flow_handler(struct packet_ptrs *pptrs)
   return find_flow(now, pptrs);
 }
 
-inline void is_closing(u_int32_t now, struct packet_ptrs *pptrs, struct ip_flow_common *fp)
+Inline void is_closing(u_int32_t now, struct packet_ptrs *pptrs, struct ip_flow_common *fp)
 {
   if (pptrs->is_closing) fp->closed = now;
   else fp->closed = FALSE;
@@ -238,7 +238,7 @@ void prune_old_flows(u_int32_t now)
 
 /* hash_fragment() is taken (it has another name there) from Linux kernel 2.4;
    see full credits contained in jhash.h */ 
-inline unsigned int hash_flow(u_int32_t ip_src, u_int32_t ip_dst,
+Inline unsigned int hash_flow(u_int32_t ip_src, u_int32_t ip_dst,
 		u_int16_t port_src, u_int16_t port_dst, u_int8_t proto)
 {
   return jhash_3words((u_int32_t)(port_src ^ port_dst) << 16 | proto, ip_src, ip_dst, flt_trivial_hash_rnd) & (FLOW_TABLE_HASHSZ-1);
@@ -247,7 +247,7 @@ inline unsigned int hash_flow(u_int32_t ip_src, u_int32_t ip_dst,
 /* is_expired() returns: TRUE if the flow has expired; FALSE if the flow
    is still valid; the function will contain any further semi-stateful
    evaluation over specific protocols */ 
-inline unsigned int is_expired(u_int32_t now, struct ip_flow_common *fp)
+Inline unsigned int is_expired(u_int32_t now, struct ip_flow_common *fp)
 {
   if (fp->proto == IPPROTO_TCP && fp->closed) {
     if ((fp->ctype == FL_TCPFIN) && (now > fp->closed+FLOW_TCPFIN_LIFETIME)) return TRUE;

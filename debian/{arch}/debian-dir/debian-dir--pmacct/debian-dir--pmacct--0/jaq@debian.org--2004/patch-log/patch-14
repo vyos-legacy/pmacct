@@ -1,0 +1,13 @@
+Revision: debian-dir--pmacct--0--patch-14
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jamie.wilkinson@anchor.com.au>
+Date: Tue Oct  5 15:44:07 EST 2004
+Standard-date: 2004-10-05 05:44:07 GMT
+New-files: .arch-ids/README.Debian.id README.Debian
+Modified-files: changelog pmacct.default pmacct.init
+New-patches: jaq@debian.org--2004/debian-dir--pmacct--0--patch-14
+Summary: support for multiple interfaces in the initscript
+Keywords: 
+
+
+

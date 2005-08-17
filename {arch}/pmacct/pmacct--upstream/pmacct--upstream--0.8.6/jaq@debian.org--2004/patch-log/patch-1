@@ -1,0 +1,23 @@
+Revision: pmacct--upstream--0.8.6--patch-1
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jamie.wilkinson@anchor.com.au>
+Date: Tue Jun 28 13:27:38 EST 2005
+Standard-date: 2005-06-28 03:27:38 GMT
+Modified-files: AUTHORS CONFIG-KEYS ChangeLog EXAMPLES FAQS
+    README acct.c cfg.h cfg_handlers.c cfg_handlers.h configure
+    configure.in docs/TRIGGER_VARS imt_plugin.c imt_plugin.h
+    log.c log_templates.c log_templates.h memory.c
+    mysql_plugin.c mysql_plugin.h network.h nfacctd.c
+    nfacctd.h pgsql_plugin.c pgsql_plugin.h pkt_handlers.c
+    pmacct-data.h pmacct-defines.h pmacct.c pmacctd.c
+    pmmyplay.c pmpgplay.c print_plugin.c print_plugin.h
+    server.c sql_common.h sql_common_m.c sql_handlers.c util.c
+    util.h
+New-patches: jaq@debian.org--2004/pmacct--upstream--0.8.6--patch-1
+Summary: Imported pmacct-0.8.6
+Keywords: 
+
+Imported pmacct-0.8.6
+into jaq@debian.org--2004/pmacct--upstream--0.8.6
+
+

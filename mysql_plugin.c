@@ -65,10 +65,12 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   /* XXX: glue */
   memcpy(&config, cfgptr, sizeof(struct configuration));
+  recollect_pipe_memory(ptr);
 
   /* signal handling */
   signal(SIGINT, MY_exit_gracefully);
   signal(SIGHUP, reload); /* handles reopening of syslog channel */
+  signal(SIGUSR1, SIG_IGN); 
 #if !defined FBSD4
   signal(SIGCHLD, SIG_IGN); 
 #else

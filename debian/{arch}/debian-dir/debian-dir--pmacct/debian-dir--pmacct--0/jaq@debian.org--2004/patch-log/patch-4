@@ -1,0 +1,12 @@
+Revision: debian-dir--pmacct--0--patch-4
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jamie.wilkinson@anchor.com.au>
+Date: Thu Aug 12 14:35:36 EST 2004
+Standard-date: 2004-08-12 04:35:36 GMT
+Modified-files: changelog docs
+New-patches: jaq@debian.org--2004/debian-dir--pmacct--0--patch-4
+Summary: new upstream versino
+Keywords: 
+
+locations of some docs changed.  removed NEWS cos it just says "read changelog"
+

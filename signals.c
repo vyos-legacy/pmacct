@@ -140,3 +140,17 @@ void reload()
   signal(SIGHUP, reload);
 }
 
+void push_stats()
+{
+  time_t now = time(NULL);
+
+  if (config.acct_type == ACCT_PM) {
+    if (config.dev) {
+      if (pcap_stats(glob_pcapt, &ps) < 0) Log(LOG_INFO, "\npcap_stats: %s\n", pcap_geterr(glob_pcapt));
+      Log(LOG_NOTICE, "\n(%u) %u packets received by filter\n", now, ps.ps_recv);
+      Log(LOG_NOTICE, "(%u) %u packets dropped by kernel\n", now, ps.ps_drop);
+    }
+  }
+
+  signal(SIGUSR1, push_stats);
+}

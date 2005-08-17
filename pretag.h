@@ -33,6 +33,7 @@ struct id_entry {
   u_int16_t output; /* output interface index */
   u_int8_t engine_type;
   u_int8_t engine_id;
+  u_int32_t agent_id; /* applies to sFlow's agentSubId */
   struct bpf_program filter;
   u_int8_t v8agg;
   pretag_handler func[N_MAP_HANDLERS];

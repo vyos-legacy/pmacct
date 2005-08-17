@@ -2,7 +2,7 @@ Source: pmacct
 Section: net
 Priority: optional
 Maintainer: Jamie Wilkinson <jaq@debian.org>
-Build-Depends: debhelper (>= 4.0.0), zlib1g-dev, libpcap-dev, postgresql-dev, libmysqlclient-dev
+Build-Depends: debhelper (>= 4.0.0), zlib1g-dev, libpcap-dev, libpq-dev | postgresql-dev, libmysqlclient12-dev
 Standards-Version: 3.6.1
 
 Package: pmacct

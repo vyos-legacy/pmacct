@@ -1,0 +1,28 @@
+Revision: pmacct--upstream--0.8.1--patch-1
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jaq@spacepants.org>
+Date: Sat Apr 16 16:25:56 EST 2005
+Standard-date: 2005-04-16 06:25:56 GMT
+New-files: sql/.arch-ids/pmacct-create-db_v3.mysql.id
+    sql/.arch-ids/pmacct-create-table_v3.pgsql.id
+    sql/pmacct-create-db_v3.mysql
+    sql/pmacct-create-table_v3.pgsql
+Modified-files: AUTHORS CONFIG-KEYS ChangeLog EXAMPLES FAQS
+    README TODO acct.c cfg_handlers.c configure configure.in
+    imt_plugin.c log_templates.c mysql_plugin.c
+    mysql_plugin.h nfacctd.c nfacctd.h pgsql_plugin.c
+    pkt_handlers.c plugin_hooks.c plugin_hooks.h
+    pmacct-defines.h pmacct.c pmacct.h pmacctd.c pmmyplay.c
+    pmpgplay.c print_plugin.c server.c signals.c
+    sql/README.mysql sql/README.pgsql
+    sql/pmacct-create-db_v1.mysql
+    sql/pmacct-create-db_v2.mysql sql_common.h
+    sql_handlers.c
+New-patches: jaq@debian.org--2004/pmacct--upstream--0.8.1--patch-1
+Summary: Imported pmacct-0.8.1
+Keywords: 
+
+Imported pmacct-0.8.1
+into jaq@debian.org--2004/pmacct--upstream--0.8.1
+
+

@@ -23,6 +23,8 @@
 
 #include "pmacct.h"
 #include "nfacctd.h"
+#include "sflow.h"
+#include "sfacctd.h"
 #include "pretag_handlers.h"
 #include "pretag-data.h"
 
@@ -64,7 +66,9 @@ int PT_map_input_handler(char *filename, struct id_entry *e, char *value, struct
   
   e->input = htons(atoi(value));
   for (x = 0; e->func[x]; x++);
-  e->func[x] = pretag_input_handler; 
+  if (config.acct_type == ACCT_NF) e->func[x] = pretag_input_handler; 
+  else if (config.acct_type == ACCT_SF) e->func[x] = SF_pretag_input_handler; 
+
   return FALSE;
 }
 
@@ -82,7 +86,9 @@ int PT_map_output_handler(char *filename, struct id_entry *e, char *value, struc
 
   e->output = htons(atoi(value));
   for (x = 0; e->func[x]; x++);
-  e->func[x] = pretag_output_handler;
+  if (config.acct_type == ACCT_NF) e->func[x] = pretag_output_handler;
+  else if (config.acct_type == ACCT_SF) e->func[x] = SF_pretag_output_handler;
+
   return FALSE;
 }
 
@@ -96,7 +102,9 @@ int PT_map_nexthop_handler(char *filename, struct id_entry *e, char *value, stru
   }
 
   for (x = 0; e->func[x]; x++);
-  e->func[x] = pretag_nexthop_handler;
+  if (config.acct_type == ACCT_NF) e->func[x] = pretag_nexthop_handler;
+  else if (config.acct_type == ACCT_SF) e->func[x] = SF_pretag_nexthop_handler;
+
   return FALSE;
 }
 
@@ -110,7 +118,9 @@ int PT_map_bgp_nexthop_handler(char *filename, struct id_entry *e, char *value, 
   }
 
   for (x = 0; e->func[x]; x++);
-  e->func[x] = pretag_bgp_nexthop_handler;
+  if (config.acct_type == ACCT_NF) e->func[x] = pretag_bgp_nexthop_handler;
+  else if (config.acct_type == ACCT_SF) e->func[x] = SF_pretag_bgp_nexthop_handler;
+
   return FALSE;
 }
 
@@ -133,7 +143,8 @@ int PT_map_engine_type_handler(char *filename, struct id_entry *e, char *value, 
   }
   e->engine_type = j; 
   for (x = 0; e->func[x]; x++);
-  e->func[x] = pretag_engine_type_handler;
+  if (config.acct_type == ACCT_NF) e->func[x] = pretag_engine_type_handler;
+
   return FALSE;
 }
 
@@ -156,7 +167,8 @@ int PT_map_engine_id_handler(char *filename, struct id_entry *e, char *value, st
   }
   e->engine_id = j;
   for (x = 0; e->func[x]; x++);
-  e->func[x] = pretag_engine_id_handler;
+  if (config.acct_type == ACCT_NF) e->func[x] = pretag_engine_id_handler;
+
   return FALSE;
 }
 
@@ -204,9 +216,22 @@ int PT_map_v8agg_handler(char *filename, struct id_entry *e, char *value, struct
   }
   e->v8agg = tmp; 
   for (x = 0; e->func[x]; x++);
-  e->func[x] = pretag_v8agg_handler;
+  if (config.acct_type == ACCT_NF) e->func[x] = pretag_v8agg_handler;
+
   return FALSE;
 }
+
+int PT_map_agent_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+{
+  int x = 0;
+  
+  e->agent_id = htonl(atoi(value));
+  for (x = 0; e->func[x]; x++);
+  if (config.acct_type == ACCT_SF) e->func[x] = SF_pretag_agent_id_handler;
+
+  return FALSE;
+}
+
 
 int pretag_input_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
@@ -441,5 +466,64 @@ int pretag_id_handler(struct packet_ptrs *pptrs, void *id, void *e)
   int *tid = id;
   *tid = entry->id;
   return TRUE; /* cap */
+}
+
+int SF_pretag_input_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  if (ntohs(entry->input) == sample->inputPort) return FALSE;
+  else return TRUE; 
+}
+
+int SF_pretag_output_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  if (ntohs(entry->output) == sample->outputPort) return FALSE;
+  else return TRUE;
+}
+
+int SF_pretag_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  if (entry->nexthop.family == AF_INET) {
+    if (!memcmp(&entry->nexthop.address.ipv4, &sample->nextHop.address.ip_v4, 4)) return FALSE;
+  }
+#if defined ENABLE_IPV6
+  else if (entry->nexthop.family == AF_INET6) {
+    if (!memcmp(&entry->nexthop.address.ipv6, &sample->nextHop.address.ip_v6, IP6AddrSz)) return FALSE;
+  }
+#endif
+  else return TRUE;
+}
+
+int SF_pretag_bgp_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  if (entry->bgp_nexthop.family == AF_INET) {
+    if (!memcmp(&entry->bgp_nexthop.address.ipv4, &sample->bgp_nextHop.address.ip_v4, 4)) return FALSE;
+  }
+#if defined ENABLE_IPV6
+  else if (entry->bgp_nexthop.family == AF_INET6) {
+    if (!memcmp(&entry->bgp_nexthop.address.ipv6, &sample->bgp_nextHop.address.ip_v6, IP6AddrSz)) return FALSE;
+  }
+#endif
+  else return TRUE;
+}
+
+int SF_pretag_agent_id_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  if (ntohl(entry->agent_id) == sample->agentSubId) return FALSE;
+  else return TRUE;
 }
 

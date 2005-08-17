@@ -1,0 +1,20 @@
+Revision: pmacct--upstream--0.9.1--patch-1
+Archive: jaq@debian.org--2004
+Creator: Jamie Wilkinson <jaq@spacepants.org>
+Date: Wed Aug 17 18:01:47 EST 2005
+Standard-date: 2005-08-17 08:01:47 GMT
+Modified-files: AUTHORS CONFIG-KEYS ChangeLog FAQS README cfg.h
+    cfg_handlers.c cfg_handlers.h configure configure.in
+    docs/INTERNALS docs/SIGNALS imt_plugin.c mysql_plugin.c
+    net_aggr.c net_aggr.h nfacctd.c pgsql_plugin.c
+    plugin_hooks.c plugin_hooks.h pmacct-data.h
+    pmacct-defines.h pmacct.h pmacctd.c preprocess.c
+    preprocess.h print_plugin.c print_plugin.h sfacctd.c
+    signals.c
+New-patches: jaq@debian.org--2004/pmacct--upstream--0.9.1--patch-1
+Summary: Imported pmacct-0.9.1
+Keywords: 
+
+Imported pmacct-0.9.1
+into jaq@debian.org--2004/pmacct--upstream--0.9.1
+

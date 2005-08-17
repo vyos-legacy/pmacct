@@ -169,3 +169,21 @@ struct pkt_data {
   u_int32_t flo_num;
   u_int32_t pkt_time;
 };
+
+struct packet_ptrs_vector {
+  struct packet_ptrs v4;
+  struct packet_ptrs vlan4;
+  struct packet_ptrs mpls4;
+  struct packet_ptrs vlanmpls4;
+#if defined ENABLE_IPV6
+  struct packet_ptrs v6;
+  struct packet_ptrs vlan6;
+  struct packet_ptrs mpls6;
+  struct packet_ptrs vlanmpls6;
+#endif
+};
+
+struct hosts_table {
+  unsigned short int num;
+  struct host_addr table[MAX_MAP_ENTRIES];
+};

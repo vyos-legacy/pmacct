@@ -20,7 +20,11 @@
 */
 
 /* includes */
+#if defined CUT_MYSQLINCLUDES_DIR
+#include <mysql.h>
+#else
 #include <mysql/mysql.h>
+#endif
 
 /* structures */
 struct DBdesc {

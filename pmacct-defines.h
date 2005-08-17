@@ -20,7 +20,8 @@
 */
 
 /* defines */
-#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:l:v:o:"
+#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:"
+#define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:"
 #define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:wL:"
 #define ARGS_PMACCT "Ssc:etm:p:P:M:arN:n:"
 #define N_PRIMITIVES 21
@@ -41,11 +42,12 @@
 #define LARGEBUFLEN 8192
 
 #define MANTAINER "Paolo Lucente <paolo.lucente@ic.cnr.it>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.8.8"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.8.8"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.8.8"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.8.8"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.8.8"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.9.1"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.9.1"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.9.1"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.9.1"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.9.1"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.9.1"
 
 #ifndef TRUE
 #define TRUE 1
@@ -60,7 +62,8 @@
 
 /* acct_type */ 
 #define ACCT_PM		1	/* promiscuous mode */
-#define ACCT_NF		2	/* netflow */
+#define ACCT_NF		2	/* NetFlow */
+#define ACCT_SF		3	/* sFlow */
 
 #define COUNT_SRC_HOST		0x00000001
 #define COUNT_DST_HOST		0x00000002

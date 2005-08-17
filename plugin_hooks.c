@@ -407,3 +407,20 @@ int evaluate_tags(struct pretag_filter *filter, u_int16_t tag)
 
   return TRUE;
 }
+
+void recollect_pipe_memory(struct channels_list_entry *mychptr)
+{
+  struct channels_list_entry *chptr;
+  int index = 0;
+
+  while (index < MAX_N_PLUGINS) {
+    chptr = &channels_list[index];
+#if defined (HAVE_MMAP)
+    if (mychptr->rg.base != chptr->rg.base) {
+      munmap(chptr->rg.base, (chptr->rg.end-chptr->rg.base)+1550);
+      munmap(chptr->status, sizeof(struct ch_status));
+    }
+#endif
+    index++;
+  }
+}

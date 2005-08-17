@@ -611,3 +611,11 @@ int read_SQLquery_from_file(char *path, char *buf, int size)
   } 
   else *ptr = '\0';
 } 
+
+void stick_bosbit(u_char *label)
+{
+  u_char *ptr;
+
+  ptr = label+2;
+  *ptr |= 0x1;
+}

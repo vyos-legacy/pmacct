@@ -1,5 +1,61 @@
-pmacct (Promiscuous mode IP Accounting package) v0.8.8
+pmacct (Promiscuous mode IP Accounting package) v0.9.1
 pmacct is Copyright (C) 2003-2005 by Paolo Lucente
+
+0.9.1 -- 16-Aug-2005
+  + Probabilistic, flow size dependent sampling has been introduced into the
+    'sql_preprocess' tier via the new 'fss' keyword: it is computed against
+    the bytes counter and returns renormalized results. Aggregates which have
+    collected more than the 'fss' threshold in the last time window are
+    sampled. Those under the threshold are sampled with probability p(bytes). 
+    For further details read the CONFIG-KEYS and the paper:
+    - N.G. Duffield, C. Lund, M. Thorup, "Charging from sampled network usage"
+      http://www.research.att.com/~duffield/pubs/DLT01-usage.pdf
+  + Probabilistic sampling under hard resource constraints has been introduced
+    into the 'sql_preprocess' tier via the new 'fsrc' keyword: it is computed
+    against the bytes counter and returns renormalized results. The method
+    selects only 'fsrc' flows from the set of the flows collected during the
+    last time window, providing an unbiasied estimate of the real bytes counter.
+    For further details read the CONFIG-KEYS and the paper:
+    - N.G. Duffield, C. Lund, M. Thorup, "Flow Sampling Under Hard Resource Constraints"
+      http://www.research.att.com/~duffield/pubs/DLT03-constrained.pdf
+  + A new 'networks_mask' configuration directive has been introduced: it
+    allows to specify a network mask - in bits - to be applied apply to src_net
+    and dst_net primitives. The mask is applied before evaluating the content of 
+    'networks_file' (if any).
+  + Added a new signal handler for SIGUSR1 in pmacctd: a 'killall -USR1 pmacctd'
+    now returns a few statistics via either console or syslog; the syslog level
+    reserved for such purpose is the NOTICE. 
+  ! sfacctd: an issue regarding non-IP packets has been fixed: some of them
+    (mainly ARPs) were incorrectly reported. Now they are properly filtered out. 
+  ! A minor memory leak has been fixed; it was affecting running instances of
+    pmacctd, nfacctd and sfacctd with multiple plugins attached. Now resources
+    are properly recollected. 
+
+0.9.0 -- 25-Jul-2005
+  + PMACCT OPENS TO sFlow: support for the sFlow v2/v4/v5 protocol has been
+    introduced and a new daemon 'sfacctd' has been added. The implementation
+    includes support for BGP, MPLS, VLANs, IPv4, IPv6 along with packet tagging,
+    filtering and aggregation capabilities. 'sfacctd' makes use of Flow Samples
+    exported by a sFlow agent while Counter Samples are skipped and the MIB is
+    ignored. All actually supported backends are available for storage: MySQL,
+    PostgreSQL and In-Memory tables. http://www.sflow.org/products/network.php
+    lists the network equipments supporting the sFlow protocol.
+  + A new commandline option '-L' is now supported by 'nfacctd' and 'sfacctd';
+    it allows to specify an IPv4/IPv6 address where to bind the daemon. It is
+    the equivalent for the 'nfacctd_ip' and 'sfacctd_ip' configuration directives. 
+  ! The NetFlow v9 MPLS stack handler has been fixed; it now also sticks the BoS
+    bit (Bottom of the Stack) to the last processed label. This makes the flow
+    compliant to BPF filters compiled by the newly released libpcap 0.9.3. 
+  ! Some Tru64 compilation issues related to the ip_flow.[c|h] files have been
+    solved. 
+  ! Some configuration tests have been added; u_intXX_t definitions are tested
+    and fixed (whenever possible, ie. uintXX_t types are available). Particularly
+    useful on Solaris and IRIX platforms.
+  ! Configuration hints for MySQL headers have been enhanced. This will ease the
+    compilation of pmacct against MySQL library either from a precompiled binary
+    distribution or from the FreeBSD ports. Many hhanks for the bug report go to
+    John Von Essen. 
+  ! NetFlow v8 source/destination AS handlers have been fixed. 
 
 0.8.8 -- 27-Jun-2005
   + Added IP flows support in pmacctd (release 0.8.5 has seen its introduction

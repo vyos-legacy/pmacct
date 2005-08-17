@@ -96,6 +96,18 @@ void set_preprocess_funcs(char *string, struct preprocess *prep)
       prep->minppf = atoi(value);
       if (!prep->minppf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'minppf' value.\n", config.name, config.type);
     }
+    else if (!strcmp(key, "fss")) {
+      prep->fss = atoi(value);
+      if (!prep->fss) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'fss' value.\n", config.name, config.type);
+    }
+    else if (!strcmp(key, "fsrc")) {
+      prep->fsrc = atoi(value);
+      if (!prep->fsrc) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'fsrc' value.\n", config.name, config.type);
+      else {
+	fsrc_queue.num = 0;
+	memset(&fsrc_queue.head, 0, sizeof(struct fsrc_queue_elem)); 
+      }
+    }
 
     else if (!strcmp(key, "recover")) {
       prep->recover = atoi(value);
@@ -108,7 +120,7 @@ void set_preprocess_funcs(char *string, struct preprocess *prep)
   if ((!prep->minp) && (!prep->minb) && (!prep->minf) &&
       (!prep->maxp) && (!prep->maxb) && (!prep->maxf) &&
       (!prep->maxbpp) && (!prep->maxppf) && (!prep->minbpp) &&
-      (!prep->minppf)) {
+      (!prep->minppf) && (!prep->fss) && (!prep->fsrc)) {
     Log(LOG_ERR, "ERROR ( %s/%s ): 'sql_preprocess' does not contain any check. Ignored.\n", config.name, config.type); 
     return;
   } 
@@ -181,6 +193,18 @@ void set_preprocess_funcs(char *string, struct preprocess *prep)
 
   if (prep->minppf) {
     preprocess_funcs[j] = check_minppf;
+    prep->num++;
+    j++;
+  }
+
+  if (prep->fss) {
+    preprocess_funcs[j] = check_fss;
+    prep->num++;
+    j++;
+  }
+
+  if (prep->fsrc) {
+    preprocess_funcs[j] = check_fsrc;
     prep->num++;
     j++;
   }
@@ -311,6 +335,111 @@ int check_minppf(struct db_cache *queue[], int *num)
     if (queue[x]->packet_counter/queue[x]->flows_counter >= prep.minppf) queue[x]->valid++; 
   }
 
+  return FALSE;
+}
+
+int check_fss(struct db_cache *queue[], int *num)
+{
+  u_int32_t t = prep.fss; /* threshold */
+  float p = 0 /* probability */, res; 
+  u_int16_t bpratio;
+  int x;
+
+  for (x = 0; x < *num; x++) {
+    res = (float) queue[x]->bytes_counter/t;
+    if (res < 1) p += res;
+    if (p >= 1 || res >= 1) {
+      queue[x]->valid++;
+      if (queue[x]->bytes_counter < t) {
+	bpratio = queue[x]->bytes_counter/queue[x]->packet_counter;
+	queue[x]->bytes_counter = t;
+	queue[x]->packet_counter = queue[x]->bytes_counter/bpratio; /* hmmm */
+      }
+      if (p >= 1) p -= 1;
+    } 
+  }
+
+  return FALSE;
+}
+
+/* 
+   This is an initial implementation and any advice is welcome:
+   - seed: microseconds value returned by the gettimeofday() call
+   - random value: high-order bits returned by the random() call
+*/
+int check_fsrc(struct db_cache *queue[], int *num)
+{
+  struct fsrc_queue_elem *ptr, *last_seen, *new;
+  struct timeval tv; struct timezone tz;
+  float w /* random variable */, z;
+  u_int32_t max = prep.fsrc+1; /* maximum number of allowed flows */
+  int x, queueElemSz = sizeof(struct fsrc_queue_elem);
+  u_int16_t bpratio;
+
+  u_int32_t total = 0, subtotal = 0;
+
+  /* no need to sample */ 
+  if (*num <= prep.fsrc) {
+    for (x = 0; x < *num; x++) queue[x]->valid++;
+    goto end;
+  }
+
+  /* 1st stage: computing the m+1==max flows with highest z */ 
+  for (x = 0; x < *num; x++) {
+    gettimeofday(&tv, &tz);
+    srandom((unsigned int)tv.tv_usec);
+    w = (float) (random()/(RAND_MAX+1.0));
+
+    z = (float) queue[x]->bytes_counter/w;
+
+    ptr = &fsrc_queue.head;
+    while (z > ptr->z) {
+      last_seen = ptr; 
+      if (ptr->next) ptr = ptr->next;
+      else break; 
+    } 
+
+    if (fsrc_queue.num < max) {
+      new = malloc(queueElemSz);
+      fsrc_queue.num++;
+      new->next = last_seen->next;
+      last_seen->next = new;
+    }
+    else {
+      if (last_seen == &fsrc_queue.head) continue;
+      new = fsrc_queue.head.next;
+      if (last_seen != fsrc_queue.head.next) {
+        fsrc_queue.head.next = new->next;
+        new->next = last_seen->next;
+	last_seen->next = new;
+      }
+    }
+    
+    new->cache_ptr = queue[x];
+    new->z = z;
+
+    total += queue[x]->bytes_counter;
+  }
+
+  /* 2nd stage + 3rd stage:
+     - validating the highest m flows 
+     - renormalizing the highest m flows:
+       Xi(bytes_counter) = { max[ Xi(bytes_counter), Xm+1(z) ]: i = 1,...,m }
+  */ 
+  for (ptr = fsrc_queue.head.next->next; ptr; ptr = ptr->next) {
+    ptr->cache_ptr->valid++; 
+    if (ptr->cache_ptr->bytes_counter < fsrc_queue.head.next->z) {
+      bpratio = ptr->cache_ptr->bytes_counter/ptr->cache_ptr->packet_counter;
+      ptr->cache_ptr->bytes_counter = fsrc_queue.head.next->z;
+      ptr->cache_ptr->packet_counter = ptr->cache_ptr->bytes_counter/bpratio; /* hmmm */
+    }
+
+    subtotal += ptr->cache_ptr->bytes_counter;
+  }
+
+  if (config.debug) Log(LOG_DEBUG, "DEBUG: TOT/%u/%u SUBTOT/%u/%u\n", *num, total, fsrc_queue.num-1, subtotal);
+
+  end:
   return FALSE;
 }
 

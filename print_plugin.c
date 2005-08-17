@@ -51,6 +51,16 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 #endif
 
   memcpy(&config, cfgptr, sizeof(struct configuration));
+  recollect_pipe_memory(ptr);
+
+  /* signal handling */
+  signal(SIGINT, P_exit_now);
+  signal(SIGUSR1, SIG_IGN);
+#if !defined FBSD4
+  signal(SIGCHLD, SIG_IGN);
+#else
+  signal(SIGCHLD, ignore_falling_child);
+#endif
 
 #if defined (HAVE_MMAP)
   status->wakeup = TRUE;
@@ -448,3 +458,8 @@ void P_sum_mac_insert(struct pkt_data *data)
   P_cache_insert(data);
 }
 #endif
+
+void P_exit_now(int signum)
+{
+  exit(0);
+}
