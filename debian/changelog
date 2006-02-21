@@ -1,3 +1,10 @@
+pmacct (0.9.1-1.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Build against libmysqlclient15-dev.  Closes: #343796.
+
+ -- Matej Vela <vela@debian.org>  Tue, 21 Feb 2006 07:33:15 +0100
+
 pmacct (0.9.1-1) unstable; urgency=low
 
   * New upstream release.
