@@ -25,7 +25,14 @@ shell> mysql -u root -p < pmacct-grant-db.mysql
 
 Data will be available in 'acct_v4' table of 'pmacct' DB.
 
-- To understand difference between v1, v2, v3 and v4 tables:
+- To create v5 tables:
+shell> mysql -u root -p < pmacct-create-db_v5.mysql
+shell> mysql -u root -p < pmacct-grant-db.mysql
+
+Data will be available in 'acct_v5' table of 'pmacct' DB.
+
+- To understand difference between v1, v2, v3, v4 and v5 tables:
+  - Do you need packet classification ? Then you have to use v5.
   - Do you need flows (other than packets) accounting ? Then you have to use v4.
   - Do you need ToS/DSCP field (QoS) accounting ? Then you have to use v3.
   - Do you need agent ID for distributed accounting and packet tagging ? Then you have to use v2. 
@@ -35,6 +42,6 @@ Data will be available in 'acct_v4' table of 'pmacct' DB.
 NOTE: don't forget to specify which SQL table version you
 are currently using when running 'pmacctd' or 'nfacctd':
 
-commandline:    '-v [1|2|3|4]'
-configuration:  'sql_table_version: [1|2|3|4]'
+commandline:    '-v [1|2|3|4|5]'
+configuration:  'sql_table_version: [1|2|3|4|5]'
 

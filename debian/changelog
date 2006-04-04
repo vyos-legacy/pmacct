@@ -1,3 +1,45 @@
+pmacct (0.10.0-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue,  4 Apr 2006 12:13:24 +1000
+
+pmacct (0.9.6-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue,  4 Apr 2006 12:04:05 +1000
+
+pmacct (0.9.5-1) unstable; urgency=low
+
+  * New upstream release.
+  * Added build dependency on libsqlite3-dev for the new SQLite backend.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue,  4 Apr 2006 12:01:52 +1000
+
+pmacct (0.9.4-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue,  4 Apr 2006 11:58:37 +1000
+
+pmacct (0.9.3-1) unstable; urgency=low
+
+  * New upstream release.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue,  4 Apr 2006 11:55:41 +1000
+
+pmacct (0.9.2-1) unstable; urgency=low
+
+  * New upstream release.
+  * Acknowledge NMU.  Thanks Matej.  (Closes: #343796)
+  * Dump the config.log if configure blows up.
+  * Bumped standards version to 3.6.2 (no other changes made).
+  * Updated FSF address in copyright to appease my cruel mistress
+    lintian.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue,  4 Apr 2006 11:51:08 +1000
+
 pmacct (0.9.1-1.1) unstable; urgency=medium
 
   * Non-maintainer upload.

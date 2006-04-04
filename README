@@ -1,40 +1,41 @@
 NAME:
-  pmacct (Promiscuous mode IP Accounting package) v0.9.1
-  pmacct is Copyright (C) 2003-2005 by Paolo Lucente
+  pmacct (Promiscuous mode IP Accounting package) v0.10.0
+  pmacct is Copyright (C) 2003-2006 by Paolo Lucente
 
 
 DESCRIPTION:
-  pmacct is a small set of passive network monitoring tools to measure, account and
-  aggregate IPv4 and IPv6 traffic; aggregation revolves around the key concept of
-  primitives (VLAN id, source and destination MAC addresses, hosts, networks, ports,
-  AS numbers, IP protocol and ToS/DSCP field are supported) which may be arbitrarily 
-  combined to build custom aggregation methods; support for historical data breakdown,
-  triggers and packet tagging, filtering, sampling. Aggregates can be stored into
-  memory tables, SQL databases (MySQL or PostgreSQL) or simply pushed to stdout. Data
-  is collected from the network either using libpcap (and optionally promiscuous mode)
-  or reading Netflow v1/v5/v7/v8/v9 and sFlow v2/v4/v5 datagrams. 
+  pmacct is a small set of passive network monitoring tools to measure, account,
+  classify and aggregate IPv4 and IPv6 traffic; a pluggable and flexible architecture
+  allows to store the collected traffic data into memory tables or SQL (MySQL, SQLite,
+  PostgreSQL) databases. pmacct supports fully customizable historical data breakdown,
+  flow sampling, filtering and tagging, recovery actions, and triggers. Libpcap, sFlow
+  v2/v4/v5 and NetFlow v1/v5/v7/v8/v9 are supported, both unicast and multicast.
+  Also, a client program makes it easy to export data to tools like RRDtool, GNUPlot,
+  Net-SNMP, MRTG, and Cacti.
 
-  IP accounting is the key for a range of operations like billing, pricing models
-  application, live or historical traffic analysis; it is also a valuable way to go
-  for putting thresholds and firing triggers while measuring the underlying network.
-  Taking SNMP data from physical or virtual interfaces of network equipments
-  sometimes is not too useful because of coarse granularity of counters.
-  Finer granularities are reached if counters match useful logical entities
-  (such as Autonomous Systems, departmental networks, specific traffic flows,
-  etc.).
+  Aggregation revolves around the key concept of primitives (source and destination
+  MAC addresses, hosts, networks, ports, AS numbers, VLAN id, IP protocol and ToS/DSCP
+  field are supported) which may be arbitrarily combined to build custom aggregation
+  methods. Layer 7 (application) classification is fully extensible: classifiers are
+  either based over regular expressions (RE) patterns or dynamic shared objects (SO).
+  They are both loaded at runtime. Many RE patterns for popular protocols are already
+  available through the L7-Filter project.
 
-  Many network equipments already support redirection of network traffic to a
-  replication port; non-blocking architectures help in not negatively affect the
-  global performances and routing/forwarding operations when mirroring data. 
-  Alternatively, some equipments support export protocols (like Cisco's Netflow)
-  to monitor the network at a traffic flows level.
-  Both approaches, traffic mirroring and export protocols, leave new chances to
-  monitor the network online (but not inline), off critical paths. This translates
-  in new opportunities arising for advanced data manipulation or post-processing
-  activities.
+  IP accounting is the key for a range of operations like billing, live or historical
+  traffic analysis or pricing models application; it is also a valuable way to go for
+  the enforcement of thresholds while measuring the the underlying network.  
+  Taking SNMP data from physical or virtual interfaces of network equipments sometimes
+  is not too useful because of coarse granularity of counters. Finer granularities are
+  reached if counters match consistent logical entities (such as departmental networks,
+  Autonomous Systems, specific traffic flows, etc.).
 
-  Please refer to the TODO file to read about some immediate future projects  
-  about development of this tool.
+  Many network equipments support redirection of network traffic to a replication port;
+  non-blocking architectures help in not negatively affect the global performances and
+  routing/forwarding operations when mirroring data. Alternatively, software probes or
+  high-end equipments implement export protocols, like sFlow or Netflow. Both them leave
+  leave new chances to monitor the network online (but not inline), off critical paths.
+  This translates in new opportunities arising for advanced data manipulation or post-
+  processing activities.
 
 
 REQUIREMENTS:
@@ -45,13 +46,15 @@ PLATFORMS:
   It has been tested and reported to work on:
 
   Red Hat Linux 7.x/8.x/9.x
-  Fedora Core 1/2/3
+  Fedora Core 1/2/3/4
   Slackware Linux 8.x/9.x
   Gentoo Linux 1.4.x/1.6.x
   SuSE Linux 9.x
   Debian 3.x
   Solaris 8/9/10 x86/sparc
-  FreeBSD 4.x/5.x x86 
+  FreeBSD 4.x/5.x/6.x x86/sparc 
+  OpenBSD 3.8 x86/sparc
+  NetBSD 2.0 x86
   LEAF Bering-uClibc
   Tru64 5.x
 
@@ -76,8 +79,14 @@ SFLOW:
 
   sFlow packets have been read successfully from:
   HP Procurve 2800 series (fw: I.08.58) 
+  HP Procurve 9300 series (fw: 7.7.01) 
+  Foundry Networks Bigiron 8000 JetCore Router (fw: 07.7.01e)
+  Foundry Networks Bigiron 8000 IronCore (fw: 07.7.01e)
+  Foundry Networks FastIron FWS2402 (fw: 02.2.01)
+  Foundry Networks FastIron FESX424
+  Force10 E300 (fw: 6.2.1.0)
 
-  Did you successfully read sFlow packets from ANY network equipment ?
+  Did you successfully read sFlow packets from other network equipment ?
   Please, let me know.
 
 

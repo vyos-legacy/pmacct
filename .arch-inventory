@@ -1,9 +1,0 @@
-precious ^Makefile$
-precious ^config\.(log|cache|status|guess|sub)$
-precious ^sfacctd$
-precious ^nfacctd$
-precious ^pmacctd$
-precious ^pmacct$
-precious ^pm(my|pg)play$
-precious ^build-stamp$
-junk ^autom4te\.cache$

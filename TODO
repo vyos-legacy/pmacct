@@ -1,5 +1,5 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2003-2005 by Paolo Lucente
+pmacct is Copyright (C) 2003-2006 by Paolo Lucente
 
 
 This software is currently under strong development, i'll try to
@@ -21,11 +21,6 @@ If you have resources or proposals, feel free to contact me
 (email is in AUTHORS document); i'll be happy to read about
 them; i'll answer you as soon as possible.
  
- + Alignment issues; configure now does the proper test for
-   unaligned accesses; a set of macros to copy 8/16/32 bit
-   chunks has also been created: it *should* be sufficient
-   as framework. Alignment issues have to be incrementally
-   resolved.
  + explore new capturing 'sources' other than libpcap and
    all supported NetFlow versions. 
  ! sFlow: lacks of support for common architectures such as 
@@ -34,19 +29,20 @@ them; i'll answer you as soon as possible.
    an extensive testing. Requests, feedbacks and support 
    are welcome. 
  + improvements to the plugins architecture; more advanced
-   concept would be greatly useful: they would permit some
+   concepts will be greatly useful: they would permit some
    advanced feature such as hotswap of old plugins without
-   restarting the daemon and should ease development of
-   custom plugins. 
- + optimizations to the communication between SQL plugins
-   and MySQL/PostgreSQL servers. This should lead to the
-   introduction of non-standard SQL queries and hints to 
-   short-circuit the UPDATE-then-INSERT cycle. 
- + find if there is any interesting backend to support out
-   there. Writing to files is an already inflated proposal. 
- + improvements to automake/autoconf part, i wrote a really
-   rough Makefile.am/configure.in pairs, trying to make things
-   work, that's all. 
+   the need to restart the daemon and should ease/encourage
+   the development of new plugins. 
+ + find new and interesting backends to support out there.
+   Writing to files is an already inflated method currently
+   supported by a number of applications. 
+ + Improvements and optimizations to the packet/flow/stream
+   classification engine; priority should be given to novel
+   approaches to be introduced through new shared objects
+   (SO) hooked to the existing pmacct code.
+ + Refurbishment of the Pre-Tagging facilities. Some more
+   advanced concepts are needed: in the short term we will
+   try to introduce NOT, JEQ, JNE, RET operations.
 
 Cheers,
 Paolo

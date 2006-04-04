@@ -36,7 +36,9 @@ config.status: configure
 		--enable-mmap \
 		--enable-pgsql \
 		--with-pgsql-includes=`pg_config --includedir` \
-		--enable-mysql
+		--enable-mysql \
+		--enable-sqlite3 \
+		|| cat config.log
 
 build: build-stamp
 

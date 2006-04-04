@@ -8,8 +8,8 @@
 ! 'nfacctd': valid keys: 'id', 'ip', 'in', 'out', 'engine_type', 'engine_id', 'nexthop',
 ! 'bgp_nexthop', 'v8agg' and 'filter'; mandatory keys for each rule: 'id' and 'ip'.
 !
-! 'sfacctd': valid keys: 'id', 'ip', 'in', 'out', 'agent_id', 'nexthop', 'bgp_nexthop' and
-! 'filter'; mandatory keys for each rule: 'id' and 'ip'.
+! 'sfacctd': valid keys: 'id', 'ip', 'in', 'out', 'agent_id', 'nexthop', 'bgp_nexthop', 
+! 'sampling_rate' and 'filter'; mandatory keys for each rule: 'id' and 'ip'.
 !
 ! 'pmacctd': valid keys: 'id' and 'filter'. 'id' is mandatory for each rule. All remaining
 ! primitives don't apply.
@@ -41,12 +41,21 @@
 !			100000 and an inner label of 1024. 
 ! 'v8agg'		In NetFlow V8 it's compared against the aggregation method in use.
 !			Valid values are in the range 0 > value > 15. 
-! 'agent_id'		In sFlow it's compared against the subAgentId field. sFlow v2/v4
-!			lacks of such field, so it applies only to sFlow v5. 
+! 'agent_id'		In sFlow v5 it's compared against the subAgentId field. sFlow v2
+!			and v4 lack of such field, so it does not apply.
+! 'sampling_rate'       In sFlow v2/v4/v5 it's compared against the sampling_rate field.
+! 'src_as'		source Autonomous System Number. In pmacctd it works only against
+!			a Networks Map; in nf|sfacctd it works against either a Networks
+!			Map or ASN field in the datagram, if present (this is always true
+!			for sFlow but not for certain versions/subversions of NetFlow).  
+! 'dst_as'              destination Autonomous System Number. same 'src_as' remarks hold
+!			here. Read them above.
 !
 
 !
-! The following rules apply to 'nfacctd'; they will return an error if applied to 'pmacctd'
+! A few examples NetFlow-related. The format of the rules is the same of 'sfacctd' ones
+! but some keys don't apply to it. Note that the format of 'pmacctd' rules is slightly
+! different.
 !
 id=1	ip=192.168.2.1	in=4
 id=10	ip=192.168.1.1 	in=5	out=3
@@ -57,6 +66,16 @@ id=14	ip=192.168.1.1  engine_type=1 engine_id=0
 id=15	ip=192.168.1.1  in=3 filter='src net 192.168.0.0/24' 
 
 !
-! The following rule applies to 'pmacctd'; it will return an error if applied to 'nfacctd'
+! The following rule applies to 'pmacctd'; it will return an error if applied to either
+! 'nfacctd' or 'sfacctd'
 !
 id=21	filter='src net 192.168.0.0/16'
+
+!
+! A few examples sFlow-related. The format of the rules is the same of 'nfacctd' ones
+! but some keys don't apply to it. Note that the format of 'pmacctd' rules differs.
+!
+id=30 ip=192.168.1.1 
+id=31 ip=192.168.1.1 out=50
+id=32 ip=192.168.1.1 out=50 agent_id=0 sampling_rate=512
+
