@@ -69,6 +69,8 @@ void print_header()
   printf("DST_MAC            ");
   printf("VLAN   ");
 #endif
+  printf("SRC_AS  ");
+  printf("DST_AS  ");
 #if defined ENABLE_IPV6
   printf("SRC_IP                                         ");
   printf("DST_IP                                         ");
@@ -107,28 +109,18 @@ void print_data(struct db_cache *cache_elem, u_int32_t wtc, int num)
   printf("%-17s  ", dst_mac);
   printf("%-5d  ", data->vlan_id);
 #endif
+  printf("%-5d   ", data->src_as);
+  printf("%-5d   ", data->dst_as);
 #if defined ENABLE_IPV6
-  if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-45d  ", ntohl(data->src_ip.address.ipv4.s_addr));
-  else {
-    addr_to_str(src_host, &data->src_ip);
-    printf("%-45s  ", src_host);
-  }
-  if (wtc & COUNT_DST_AS) printf("%-45d  ", ntohl(data->dst_ip.address.ipv4.s_addr));
-  else {
-    addr_to_str(dst_host, &data->dst_ip);
-    printf("%-45s  ", dst_host);
-  }
+  addr_to_str(src_host, &data->src_ip);
+  printf("%-45s  ", src_host);
+  addr_to_str(dst_host, &data->dst_ip);
+  printf("%-45s  ", dst_host);
 #else
-  if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-15d  ", ntohl(data->src_ip.address.ipv4.s_addr));
-  else {
-    addr_to_str(src_host, &data->src_ip);
-    printf("%-15s  ", src_host);
-  }
-  if (wtc & COUNT_DST_AS) printf("%-15d  ", ntohl(data->dst_ip.address.ipv4.s_addr));
-  else {
-    addr_to_str(dst_host, &data->dst_ip);
-    printf("%-15s  ", dst_host);
-  }
+  addr_to_str(src_host, &data->src_ip);
+  printf("%-15s  ", src_host);
+  addr_to_str(dst_host, &data->dst_ip);
+  printf("%-15s  ", dst_host);
 #endif
   printf("%-5d     ", data->src_port);
   printf("%-5d     ", data->dst_port);
@@ -591,9 +583,17 @@ int MY_evaluate_primitives(int primitive)
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "'%u'", SPACELEFT(values[primitive].string));
-    strncat(where[primitive].string, "ip_src='%u'", SPACELEFT(where[primitive].string));
+
+    if (lh.sql_table_version >= 6) {
+      strncat(insert_clause, "as_src", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "as_src=%u", SPACELEFT(where[primitive].string));
+    }
+    else {
+      strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "\'%u\'", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "ip_src=\'%u\'", SPACELEFT(where[primitive].string));
+    }
     values[primitive].type = where[primitive].type = COUNT_SRC_AS;
     values[primitive].handler = where[primitive].handler = count_src_as_handler;
     primitive++;
@@ -605,9 +605,17 @@ int MY_evaluate_primitives(int primitive)
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "'%u'", SPACELEFT(values[primitive].string));
-    strncat(where[primitive].string, "ip_dst='%u'", SPACELEFT(where[primitive].string));
+
+    if (lh.sql_table_version >= 6) {
+      strncat(insert_clause, "as_dst", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "as_dst=%u", SPACELEFT(where[primitive].string));
+    }
+    else {
+      strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "\'%u\'", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "ip_dst=\'%u\'", SPACELEFT(where[primitive].string));
+    }
     values[primitive].type = where[primitive].type = COUNT_DST_AS;
     values[primitive].handler = where[primitive].handler = count_dst_as_handler;
     primitive++;

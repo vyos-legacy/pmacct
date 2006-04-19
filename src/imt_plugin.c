@@ -74,9 +74,10 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   memset(pipebuf, 0, config.buffer_size);
   no_more_space = FALSE;
 
-  if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS))
+  if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET))
     insert_func = sum_host_insert;
   else if (config.what_to_count & COUNT_SUM_PORT) insert_func = sum_port_insert;
+  else if (config.what_to_count & COUNT_SUM_AS) insert_func = sum_as_insert;
 #if defined (HAVE_L2)
   else if (config.what_to_count & COUNT_SUM_MAC) insert_func = sum_mac_insert;
 #endif
@@ -375,6 +376,17 @@ void sum_port_insert(struct pkt_data *data)
   data->primitives.dst_port = 0;
   insert_accounting_structure(data);
   data->primitives.src_port = port;
+  insert_accounting_structure(data);
+}
+
+void sum_as_insert(struct pkt_data *data)
+{
+  u_int16_t asn;
+
+  asn = data->primitives.dst_as;
+  data->primitives.dst_as = 0;
+  insert_accounting_structure(data);
+  data->primitives.src_as = asn;
   insert_accounting_structure(data);
 }
 

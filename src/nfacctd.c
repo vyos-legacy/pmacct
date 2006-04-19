@@ -69,7 +69,7 @@ void usage_daemon(char *prog_name)
   printf("  -s  \tMemory pool size\n");
   printf("\nPostgreSQL (-P pgsql)/MySQL (-P mysql)/SQLite (-P sqlite3) plugin options:\n");
   printf("  -r  \tRefresh time (in seconds)\n");
-  printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 ] \n\tTable version\n");
+  printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 ] \n\tTable version\n");
   printf("\n");
   printf("Examples:\n");
   printf("  Daemonize the process and write data into a MySQL database\n");
@@ -310,11 +310,6 @@ int main(int argc,char **argv, char **envp)
       }
       if ((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) && !list->cfg.networks_file && !list->cfg.networks_mask) {
         Log(LOG_ERR, "ERROR ( %s/%s ): NET aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
-        exit(1);
-      }
-      if (((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) && (list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS))) ||
-          ((list->cfg.what_to_count & COUNT_DST_NET) && (list->cfg.what_to_count & COUNT_DST_AS))) {
-        Log(LOG_ERR, "ERROR ( %s/%s ): NET/AS are mutually exclusive. Exiting...\n\n", list->name, list->type.string);
         exit(1);
       }
     } 
@@ -1189,6 +1184,7 @@ void compute_once()
   IP4TlSz = sizeof(struct my_iphdr)+sizeof(struct my_tlhdr);
   PptrsSz = sizeof(struct packet_ptrs);
   CSSz = sizeof(struct class_st);
+  HostAddrSz = sizeof(struct host_addr);
 
 #if defined ENABLE_IPV6
   IP6HdrSz = sizeof(struct ip6_hdr);

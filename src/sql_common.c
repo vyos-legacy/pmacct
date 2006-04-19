@@ -47,9 +47,10 @@ void sql_set_signals()
 
 void sql_set_insert_func()
 {
-  if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS))
+  if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET))
     insert_func = sql_sum_host_insert;
   else if (config.what_to_count & COUNT_SUM_PORT) insert_func = sql_sum_port_insert;
+  else if (config.what_to_count & COUNT_SUM_AS) insert_func = sql_sum_as_insert;
 #if defined (HAVE_L2)
   else if (config.what_to_count & COUNT_SUM_MAC) insert_func = sql_sum_mac_insert;
 #endif
@@ -516,6 +517,17 @@ void sql_sum_port_insert(struct pkt_data *data, struct insert_data *idata)
   sql_cache_insert(data, idata);
 }
 
+void sql_sum_as_insert(struct pkt_data *data, struct insert_data *idata)
+{
+  u_int16_t asn;
+
+  asn = data->primitives.dst_as;
+  data->primitives.dst_as = 0;
+  sql_cache_insert(data, idata);
+  data->primitives.src_as = asn;
+  sql_cache_insert(data, idata);
+}
+
 #if defined (HAVE_L2)
 void sql_sum_mac_insert(struct pkt_data *data, struct insert_data *idata)
 {
@@ -599,6 +611,16 @@ int sql_evaluate_primitives(int primitive)
   u_int32_t what_to_count = 0, fakes = 0;
   short int assume_custom_table = FALSE; 
 
+  /* SQL tables < v6 multiplex IP addresses and AS numbers on the same field, thus are
+     unable to use both them for a same direction (ie. src, dst). Tables v6 break such
+     assumption */ 
+  if (((config.what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SUM_HOST|COUNT_SUM_NET) &&
+     config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) || (config.what_to_count & COUNT_DST_AS
+     && config.what_to_count & (COUNT_DST_HOST|COUNT_DST_NET))) && config.sql_table_version < 6) { 
+    Log(LOG_ERR, "ERROR ( %s/%s ): SQL tables < v6 are unable to mix IP addresses and AS numbers for the same direction (ie. src, dst).\n", config.name, config.type);
+    exit_plugin(1);
+  }
+
   if (config.sql_optimize_clauses) {
     what_to_count = config.what_to_count;
     assume_custom_table = TRUE;
@@ -614,20 +636,42 @@ int sql_evaluate_primitives(int primitive)
     else fakes |= FAKE_DST_MAC;
 
     if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET)) what_to_count |= COUNT_SRC_HOST;
-    else if (config.what_to_count & COUNT_SRC_AS) what_to_count |= COUNT_SRC_AS;
     else if (config.what_to_count & COUNT_SUM_HOST) what_to_count |= COUNT_SUM_HOST;
     else if (config.what_to_count & COUNT_SUM_NET) what_to_count |= COUNT_SUM_NET;
-    else if (config.what_to_count & COUNT_SUM_AS) what_to_count |= COUNT_SUM_AS;
+    else fakes |= FAKE_SRC_HOST;
+
+    if (config.sql_table_version < 6) {
+      if (config.what_to_count & COUNT_SRC_AS) what_to_count |= COUNT_SRC_AS;
+      else if (config.what_to_count & COUNT_SUM_AS) what_to_count |= COUNT_SUM_AS; 
+      else fakes |= FAKE_SRC_AS;
+    }
     else {
-      if (config.what_to_count & COUNT_DST_AS) fakes |= FAKE_SRC_AS;
-      else fakes |= FAKE_SRC_HOST;
+      what_to_count |= COUNT_SRC_AS; 
+      if (config.what_to_count & COUNT_SUM_AS) what_to_count |= COUNT_SUM_AS;
     }
 
     if (config.what_to_count & (COUNT_DST_HOST|COUNT_DST_NET)) what_to_count |= COUNT_DST_HOST;
-    else if (config.what_to_count & COUNT_DST_AS) what_to_count |= COUNT_DST_AS;
-    else {
-      if (config.what_to_count & COUNT_SRC_AS) fakes |= FAKE_DST_AS;
-      else fakes |= FAKE_DST_HOST;
+    else fakes |= FAKE_DST_HOST;
+
+    if (config.sql_table_version < 6) {
+      if (config.what_to_count & COUNT_DST_AS) what_to_count |= COUNT_DST_AS;
+      else fakes |= FAKE_DST_AS;
+    }
+    else what_to_count |= COUNT_DST_AS;
+
+    if (config.sql_table_version < 6) {
+      if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) {
+        if (fakes & FAKE_SRC_HOST) fakes ^= FAKE_SRC_HOST;
+      }
+      else {
+        if (fakes & FAKE_SRC_AS) fakes ^= FAKE_SRC_AS;
+      }
+      if (what_to_count & COUNT_DST_AS) {
+        if (fakes & FAKE_DST_HOST) fakes ^= FAKE_DST_HOST;
+      }
+      else {
+        if (fakes & FAKE_DST_AS) fakes ^= FAKE_DST_AS;
+      }
     }
 
     if (config.what_to_count & COUNT_SUM_PORT) what_to_count |= COUNT_SUM_PORT;
@@ -729,15 +773,23 @@ int sql_evaluate_primitives(int primitive)
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
-    if (!strcmp(config.type, "mysql") || !strcmp(config.type, "sqlite3") ||
-	(!strcmp(config.type, "pgsql") && !strcmp(config.sql_data, "unified"))) {
-      strncat(values[primitive].string, "\'%u\'", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "ip_src=\'%u\'", SPACELEFT(where[primitive].string));
+
+    if (config.sql_table_version >= 6) {
+      strncat(insert_clause, "as_src", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "as_src=%u", SPACELEFT(where[primitive].string));
     }
     else {
-      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "ip_src=%u", SPACELEFT(where[primitive].string));
+      strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
+      if (!strcmp(config.type, "mysql") || !strcmp(config.type, "sqlite3") ||
+	 (!strcmp(config.type, "pgsql") && !strcmp(config.sql_data, "unified"))) {
+	strncat(values[primitive].string, "\'%u\'", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "ip_src=\'%u\'", SPACELEFT(where[primitive].string));
+      }
+      else {
+	strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "ip_src=%u", SPACELEFT(where[primitive].string));
+      }
     }
     values[primitive].type = where[primitive].type = COUNT_SRC_AS;
     values[primitive].handler = where[primitive].handler = count_src_as_handler;
@@ -750,15 +802,23 @@ int sql_evaluate_primitives(int primitive)
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
-    if (!strcmp(config.type, "mysql") || !strcmp(config.type, "sqlite3") ||
-	(!strcmp(config.type, "pgsql") && !strcmp(config.sql_data, "unified"))) { 
-      strncat(values[primitive].string, "\'%u\'", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "ip_dst=\'%u\'", SPACELEFT(where[primitive].string));
+
+    if (config.sql_table_version >= 6) {
+      strncat(insert_clause, "as_dst", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "as_dst=%u", SPACELEFT(where[primitive].string));
     }
     else {
-      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "ip_dst=%u", SPACELEFT(where[primitive].string));
+      strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
+      if (!strcmp(config.type, "mysql") || !strcmp(config.type, "sqlite3") ||
+	 (!strcmp(config.type, "pgsql") && !strcmp(config.sql_data, "unified"))) { 
+	strncat(values[primitive].string, "\'%u\'", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "ip_dst=\'%u\'", SPACELEFT(where[primitive].string));
+      }
+      else {
+	strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "ip_dst=%u", SPACELEFT(where[primitive].string));
+      }
     }
     values[primitive].type = where[primitive].type = COUNT_DST_AS;
     values[primitive].handler = where[primitive].handler = count_dst_as_handler;

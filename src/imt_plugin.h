@@ -127,6 +127,7 @@ EXT void Accumulate_Counters(struct pkt_data *, struct acc *);
 #endif
 EXT void sum_host_insert(struct pkt_data *);
 EXT void sum_port_insert(struct pkt_data *);
+EXT void sum_as_insert(struct pkt_data *);
 #if defined HAVE_L2
 EXT void sum_mac_insert(struct pkt_data *);
 #endif

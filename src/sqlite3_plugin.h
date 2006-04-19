@@ -46,3 +46,4 @@ static char sqlite3_table_v2[] = "acct_v2";
 static char sqlite3_table_v3[] = "acct_v3";
 static char sqlite3_table_v4[] = "acct_v4";
 static char sqlite3_table_v5[] = "acct_v5";
+static char sqlite3_table_v6[] = "acct_v6";

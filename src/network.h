@@ -202,6 +202,8 @@ struct pkt_primitives {
 #endif
   struct host_addr src_ip;
   struct host_addr dst_ip;
+  u_int16_t src_as;
+  u_int16_t dst_as;
   u_int16_t src_port;
   u_int16_t dst_port;
   u_int8_t tos;

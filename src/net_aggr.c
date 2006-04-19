@@ -454,6 +454,11 @@ void set_net_funcs(struct networks_table *nt)
     else {
       net_funcs[count] = search_src_as;
       count++;
+
+      if (!(config.what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST|COUNT_SRC_NET|COUNT_SUM_NET))) {
+	net_funcs[count] = drop_src_host;
+	count++;
+      }
     }
   }
 
@@ -473,6 +478,11 @@ void set_net_funcs(struct networks_table *nt)
     else {
       net_funcs[count] = search_dst_as;
       count++;
+
+      if (!(config.what_to_count & (COUNT_DST_HOST|COUNT_DST_NET))) {
+        net_funcs[count] = drop_dst_host;
+        count++;
+      }
     }
   }
 }
@@ -608,17 +618,12 @@ void search_src_as(struct networks_table *nt, struct networks_cache *nc, struct 
   
   if (p->src_ip.family == AF_INET) {
     res = binsearch(nt, nc, &p->src_ip);
-    if (!res) p->src_ip.address.ipv4.s_addr = 0;
-    else p->src_ip.address.ipv4.s_addr = htonl(res->as);
+    if (res) p->src_as = res->as;
   }
 #if defined ENABLE_IPV6
   else if (p->src_ip.family == AF_INET6) {
     res6 = binsearch6(nt, nc, &p->src_ip);
-    if (!res6) memset(&p->src_ip.address.ipv6, 0, IP6AddrSz);
-    else {
-      p->src_ip.family = AF_INET;
-      p->src_ip.address.ipv4.s_addr = htonl(res6->as);
-    }
+    if (res6) p->src_as = res6->as;
   }
 #endif
 }
@@ -632,19 +637,24 @@ void search_dst_as(struct networks_table *nt, struct networks_cache *nc, struct 
   
   if (p->dst_ip.family == AF_INET) {
     res = binsearch(nt, nc, &p->dst_ip);
-    if (!res) p->dst_ip.address.ipv4.s_addr = 0;
-    else p->dst_ip.address.ipv4.s_addr = htonl(res->as);
+    if (res) p->dst_as = res->as;
   }
 #if defined ENABLE_IPV6
   else if (p->dst_ip.family == AF_INET6) {
     res6 = binsearch6(nt, nc, &p->dst_ip);
-    if (!res6) memset(&p->dst_ip.address.ipv6, 0, IP6AddrSz);
-    else {
-      p->dst_ip.family = AF_INET;
-      p->dst_ip.address.ipv4.s_addr = htonl(res6->as);
-    }
+    if (res6) p->dst_as = res6->as;
   }
 #endif
+}
+
+void drop_src_host(struct networks_table *nt, struct networks_cache *nc, struct pkt_primitives *p)
+{
+  memset(&p->src_ip, 0, HostAddrSz);
+}
+
+void drop_dst_host(struct networks_table *nt, struct networks_cache *nc, struct pkt_primitives *p)
+{
+  memset(&p->dst_ip, 0, HostAddrSz);
 }
 
 u_int16_t search_pretag_src_as(struct networks_table *nt, struct networks_cache *nc, struct packet_ptrs *pptrs)

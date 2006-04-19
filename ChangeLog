@@ -1,5 +1,26 @@
-pmacct (Promiscuous mode IP Accounting package) v0.10.0
+pmacct (Promiscuous mode IP Accounting package) v0.10.1
 pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+
+0.10.1 -- 18-04-2006
+  + AS numbers and IP addresses are no more multiplexed into the same
+    field. This ends the limitation of being unable to have both data
+    types in the same table (which could be useful for troubleshooting
+    purposes, for example). A new SQL table version, v6, is introduced
+    in order to support this new data model in all SQL plugins.  
+  ! Minor fixes to PostgreSQL table schemas, v2 to v5: a) the 'vlan'
+    field was erroneously missing from primary keys, slowing down
+    INSERT and UPDATE queries; b) primary keys were identified as
+    'acct_pk', thus not allowing multiple tables of different version
+    to share the same database; now constraint name is: 'acct_vX_pk',
+    with X being the version number. Many thanks to Sven Anderson for
+    catching the a)
+  ! An alignment issue has been catched when the etheraddr_string() 
+    gets called from count_src|dst_mac_handlers() in sql_handlers.c
+    This seems to be closely connected to a similar trouble catched
+    by Daniel Streicher on x86_64 recently.
+  ! Fixed an issue with mask_elem() in server.c . Both src|dst_net
+    primitives were not (positively, ie. copied back when required)
+    masked.  
 
 0.10.0 -- 22-03-2006
   + Collectors (ie. pmacctd) are now compiled exporting full Dynamic

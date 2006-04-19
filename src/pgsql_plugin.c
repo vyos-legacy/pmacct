@@ -690,13 +690,13 @@ void PG_init_default_values(struct insert_data *idata)
   if (!config.sql_table) {
     /* checking 'typed' table constraints */
     if (!strcmp(config.sql_data, "typed")) {
-      if ((config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS)) && (config.what_to_count &
-	(COUNT_SRC_HOST|COUNT_DST_HOST|COUNT_SRC_NET|COUNT_DST_NET))) {
-	Log(LOG_ERR, "ERROR ( %s/%s ): 'typed' PostgreSQL table in use: unable to mix HOST/NET and AS aggregations.\n",
-		config.name, config.type);
+      if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS|COUNT_DST_AS) && config.what_to_count &
+	(COUNT_SRC_HOST|COUNT_SUM_HOST|COUNT_DST_HOST|COUNT_SRC_NET|COUNT_SUM_NET|COUNT_DST_NET) &&
+	config.sql_table_version < 6) {
+	Log(LOG_ERR, "ERROR ( %s/%s ): 'typed' PostgreSQL table in use: unable to mix HOST/NET and AS aggregations.\n", config.name, config.type);
 	exit_plugin(1);
       }
-      else typed = TRUE;
+      typed = TRUE;
     }
     else if (!strcmp(config.sql_data, "unified")) typed = FALSE;
     else {
@@ -705,7 +705,8 @@ void PG_init_default_values(struct insert_data *idata)
     }
 
     if (typed) {
-      if (config.sql_table_version == 5) {
+      if (config.sql_table_version == 6) config.sql_table = pgsql_table_v6; 
+      else if (config.sql_table_version == 5) {
         if (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) config.sql_table = pgsql_table_as_v5;
         else config.sql_table = pgsql_table_v5;
       }
@@ -727,7 +728,11 @@ void PG_init_default_values(struct insert_data *idata)
       }
     }
     else {
-      if (config.sql_table_version == 5) config.sql_table = pgsql_table_uni_v5;
+      if (config.sql_table_version == 6) {
+	Log(LOG_WARNING, "WARN ( %s/%s ): Unified data are no longer supported. Switching to typed data.\n", config.name, config.type);
+	config.sql_table = pgsql_table_v6;
+      }
+      else if (config.sql_table_version == 5) config.sql_table = pgsql_table_uni_v5;
       else if (config.sql_table_version == 4) config.sql_table = pgsql_table_uni_v4;
       else if (config.sql_table_version == 3) config.sql_table = pgsql_table_uni_v3;
       else if (config.sql_table_version == 2) config.sql_table = pgsql_table_uni_v2;

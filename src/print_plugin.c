@@ -76,9 +76,10 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   timeout = config.print_refresh_time*1000;
 
-  if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS))
+  if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET))
     insert_func = P_sum_host_insert;
   else if (config.what_to_count & COUNT_SUM_PORT) insert_func = P_sum_port_insert;
+  else if (config.what_to_count & COUNT_SUM_AS) insert_func = P_sum_as_insert;
 #if defined (HAVE_L2)
   else if (config.what_to_count & COUNT_SUM_MAC) insert_func = P_sum_mac_insert;
 #endif
@@ -423,33 +424,21 @@ void P_cache_purge(struct chained_cache *queue[], int index)
     etheraddr_string(data->eth_dhost, dst_mac);
     printf("%-17s  ", dst_mac);
     printf("%-5d  ", data->vlan_id); 
+    printf("%-5d   ", data->src_as); 
+    printf("%-5d   ", data->dst_as); 
 #endif
+    addr_to_str(src_host, &data->src_ip);
 #if defined ENABLE_IPV6
-    if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-45d  ", ntohl(data->src_ip.address.ipv4.s_addr));
+    printf("%-45s  ", src_host);
 #else
-    if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-15d  ", ntohl(data->src_ip.address.ipv4.s_addr));
+    printf("%-15s  ", src_host);
 #endif
-    else {
-      addr_to_str(src_host, &data->src_ip);
+    addr_to_str(dst_host, &data->dst_ip);
 #if defined ENABLE_IPV6
-      printf("%-45s  ", src_host);
+    printf("%-45s  ", dst_host);
 #else
-      printf("%-15s  ", src_host);
+    printf("%-15s  ", dst_host);
 #endif
-    }
-#if defined ENABLE_IPV6
-    if (config.what_to_count & COUNT_DST_AS) printf("%-45d  ", ntohl(data->dst_ip.address.ipv4.s_addr));
-#else
-    if (config.what_to_count & COUNT_DST_AS) printf("%-15d  ", ntohl(data->dst_ip.address.ipv4.s_addr));
-#endif
-    else {
-      addr_to_str(dst_host, &data->dst_ip);
-#if defined ENABLE_IPV6
-      printf("%-45s  ", dst_host);
-#else
-      printf("%-15s  ", dst_host);
-#endif
-    }
     printf("%-5d     ", data->src_port);
     printf("%-5d     ", data->dst_port);
     printf("%-10s  ", _protocols[data->proto].name);
@@ -477,6 +466,8 @@ void P_write_stats_header()
   printf("DST_MAC            ");
   printf("VLAN   ");
 #endif
+  printf("SRC_AS  ");
+  printf("DST_AS  ");
 #if defined ENABLE_IPV6
   printf("SRC_IP                                         ");
   printf("DST_IP                                         ");
@@ -553,6 +544,17 @@ void P_sum_port_insert(struct pkt_data *data)
   data->primitives.dst_port = 0;
   P_cache_insert(data);
   data->primitives.src_port = port;
+  P_cache_insert(data);
+}
+
+void P_sum_as_insert(struct pkt_data *data)
+{
+  u_int16_t asn;
+
+  asn = data->primitives.dst_as;
+  data->primitives.dst_as = 0;
+  P_cache_insert(data);
+  data->primitives.src_as = asn;
   P_cache_insert(data);
 }
 

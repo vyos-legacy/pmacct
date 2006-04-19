@@ -226,20 +226,22 @@ void mask_elem(struct pkt_primitives *d, struct acc *src, u_int32_t w)
   if (w & COUNT_DST_MAC) memcpy(d->eth_dhost, s->eth_dhost, ETH_ADDR_LEN); 
   if (w & COUNT_VLAN) d->vlan_id = s->vlan_id; 
 #endif
-  if ((w & COUNT_SRC_HOST) || (w & COUNT_SRC_AS)) {
+  if (w & (COUNT_SRC_HOST|COUNT_SRC_NET)) {
     if (s->src_ip.family == AF_INET) d->src_ip.address.ipv4.s_addr = s->src_ip.address.ipv4.s_addr; 
 #if defined ENABLE_IPV6
     else if (s->src_ip.family == AF_INET6) memcpy(&d->src_ip.address.ipv6,  &s->src_ip.address.ipv6, sizeof(struct in6_addr));
 #endif
     d->src_ip.family = s->src_ip.family;
   }
-  if ((w & COUNT_DST_HOST) || (w & COUNT_DST_AS)) {
+  if (w & (COUNT_DST_HOST|COUNT_DST_NET)) {
     if (s->dst_ip.family == AF_INET) d->dst_ip.address.ipv4.s_addr = s->dst_ip.address.ipv4.s_addr; 
 #if defined ENABLE_IPV6
     else if (s->dst_ip.family == AF_INET6) memcpy(&d->dst_ip.address.ipv6,  &s->dst_ip.address.ipv6, sizeof(struct in6_addr));
 #endif
     d->dst_ip.family = s->dst_ip.family;
   }
+  if (w & COUNT_SRC_AS) d->src_as = s->src_as; 
+  if (w & COUNT_DST_AS) d->dst_as = s->dst_as; 
   if (w & COUNT_SRC_PORT) d->src_port = s->src_port; 
   if (w & COUNT_DST_PORT) d->dst_port = s->dst_port; 
   if (w & COUNT_IP_TOS) d->tos = s->tos;

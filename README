@@ -1,5 +1,5 @@
 NAME:
-  pmacct (Promiscuous mode IP Accounting package) v0.10.0
+  pmacct (Promiscuous mode IP Accounting package) v0.10.1
   pmacct is Copyright (C) 2003-2006 by Paolo Lucente
 
 
@@ -79,7 +79,8 @@ SFLOW:
 
   sFlow packets have been read successfully from:
   HP Procurve 2800 series (fw: I.08.58) 
-  HP Procurve 9300 series (fw: 7.7.01) 
+  HP Procurve 4200 series (fw: L.10.02) 
+  HP Procurve 9300 series (fw: I.07.7.01) 
   Foundry Networks Bigiron 8000 JetCore Router (fw: 07.7.01e)
   Foundry Networks Bigiron 8000 IronCore (fw: 07.7.01e)
   Foundry Networks FastIron FWS2402 (fw: 02.2.01)

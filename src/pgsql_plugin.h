@@ -52,6 +52,7 @@ static char pgsql_table_v2[] = "acct_v2";
 static char pgsql_table_v3[] = "acct_v3";
 static char pgsql_table_v4[] = "acct_v4";
 static char pgsql_table_v5[] = "acct_v5";
+static char pgsql_table_v6[] = "acct_v6";
 static char pgsql_table_uni[] = "acct_uni";
 static char pgsql_table_uni_v2[] = "acct_uni_v2";
 static char pgsql_table_uni_v3[] = "acct_uni_v3";

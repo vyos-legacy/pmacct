@@ -57,6 +57,7 @@ struct chained_cache *P_cache_attach_new_node(struct chained_cache *);
 unsigned int P_cache_modulo(struct pkt_primitives *);
 void P_sum_host_insert(struct pkt_data *);
 void P_sum_port_insert(struct pkt_data *);
+void P_sum_as_insert(struct pkt_data *);
 #if defined (HAVE_L2)
 void P_sum_mac_insert(struct pkt_data *);
 #endif

@@ -53,6 +53,8 @@ EXT void TPL_push_dst_mac(u_char **, const struct db_cache *);
 EXT void TPL_push_vlan(u_char **, const struct db_cache *);
 EXT void TPL_push_src_ip(u_char **, const struct db_cache *);
 EXT void TPL_push_dst_ip(u_char **, const struct db_cache *);
+EXT void TPL_push_src_as(u_char **, const struct db_cache *);
+EXT void TPL_push_dst_as(u_char **, const struct db_cache *);
 EXT void TPL_push_src_port(u_char **, const struct db_cache *);
 EXT void TPL_push_dst_port(u_char **, const struct db_cache *);
 EXT void TPL_push_tos(u_char **, const struct db_cache *);
