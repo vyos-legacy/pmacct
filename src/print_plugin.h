@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -38,15 +38,10 @@ struct scratch_area {
 
 struct chained_cache {
   struct pkt_primitives primitives;
-#if defined HAVE_64BIT_COUNTERS
-  u_int64_t bytes_counter;
-  u_int64_t packet_counter;
-  u_int64_t flow_counter;
-#else
-  u_int32_t bytes_counter;
-  u_int32_t packet_counter;
-  u_int32_t flow_counter;
-#endif
+  pm_counter_t bytes_counter;
+  pm_counter_t packet_counter;
+  pm_counter_t flow_counter;
+  u_int32_t tcp_flags;
   int valid;
   struct chained_cache *next;
 };

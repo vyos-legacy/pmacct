@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -28,15 +28,15 @@
 #include "pgsql_plugin.h"
 #include "ip_flow.h"
 #include "classifier.h"
-#include "util.h"
 
-#define ARGS "df:o:n:sthiP:T:U:D:H:"
+#define ARGS "df:o:n:sthieP:T:U:D:H:"
 
 struct logfile_header lh;
 char sql_pwd[SRVBUFLEN];
 int re = 0, we = 0;
 int debug = 0;
 int sql_dont_try_update = 0;
+int sql_history_since_epoch = 0;
 char *sql_table, *sql_user, *sql_db;
 char timebuf[SRVBUFLEN];
 
@@ -56,6 +56,7 @@ void usage(char *prog)
   printf("  -D\t[ DB ]\n\tUse the specified SQL database\n");
   printf("  -T\t[ table ]\n\tUse the specified SQL table\n");
   printf("  -i\tDon't try update, use insert only.\n");
+  printf("  -e\tUse seconds since Epoch timestamps.\n");
   printf("\n");
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
@@ -137,9 +138,12 @@ void print_data(struct db_cache *cache_elem, u_int32_t wtc, int num)
   printf("%-10lu  ", cache_elem->bytes_counter);
 #endif
   if (lh.sql_history) {
-    lt = localtime(&cache_elem->basetime);
-    strftime(timebuf, SRVBUFLEN, "%Y-%m-%d %H:%M:%S" , lt);
-    printf("%s\n", timebuf);
+    if (!sql_history_since_epoch) {
+      lt = localtime(&cache_elem->basetime);
+      strftime(timebuf, SRVBUFLEN, "%Y-%m-%d %H:%M:%S" , lt);
+      printf("%s\n", timebuf);
+    }
+    else printf("%u\n", cache_elem->basetime);
   }
   else printf("0\n");
 }
@@ -211,6 +215,9 @@ int main(int argc, char **argv)
       break;
     case 'i':
       sql_dont_try_update = TRUE;
+      break;
+    case 'e':
+      sql_history_since_epoch = TRUE;
       break;
     case 'P':
       strlcpy(sql_pwd, optarg, sizeof(sql_pwd));
@@ -454,11 +461,17 @@ int PG_evaluate_history(int primitive)
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    strncat(where[primitive].string, "ABSTIME(%u)::Timestamp::Timestamp without time zone = ", SPACELEFT(where[primitive].string));
+    if (!sql_history_since_epoch)
+      strncat(where[primitive].string, "ABSTIME(%u)::Timestamp::Timestamp without time zone = ", SPACELEFT(where[primitive].string));
+    else
+      strncat(where[primitive].string, "%u = ", SPACELEFT(where[primitive].string));
     strncat(where[primitive].string, "stamp_inserted", SPACELEFT(where[primitive].string));
 
     strncat(insert_clause, "stamp_updated, stamp_inserted", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "ABSTIME(%u)::Timestamp, ABSTIME(%u)::Timestamp", SPACELEFT(values[primitive].string));
+    if (!sql_history_since_epoch)
+      strncat(values[primitive].string, "ABSTIME(%u)::Timestamp, ABSTIME(%u)::Timestamp", SPACELEFT(values[primitive].string));
+    else
+      strncat(values[primitive].string, "%u, %u", SPACELEFT(values[primitive].string));
 
     where[primitive].type = values[primitive].type = TIMESTAMP;
     values[primitive].handler = where[primitive].handler = count_timestamp_handler;
@@ -833,7 +846,12 @@ int PG_compose_static_queries()
   strncat(update_clause, "SET packets=packets+%lu, bytes=bytes+%lu", SPACELEFT(update_clause));
   if (have_flows) strncat(update_clause, ", flows=flows+%lu", SPACELEFT(update_clause));
 #endif
-  if (lh.sql_history) strncat(update_clause, ", stamp_updated=CURRENT_TIMESTAMP(0)", SPACELEFT(update_clause));
+  if (lh.sql_history) {
+    if (!sql_history_since_epoch)
+      strncat(update_clause, ", stamp_updated=CURRENT_TIMESTAMP(0)", SPACELEFT(update_clause));
+    else
+      strncat(update_clause, ", stamp_updated=DATE_PART('epoch',NOW())::BIGINT", SPACELEFT(update_clause));
+  }
 
   return primitives;
 }

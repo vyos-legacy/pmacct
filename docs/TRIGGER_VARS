@@ -105,3 +105,13 @@ DESC:		Returns the current timeslot width (in seconds), if 'sql_history'
 		is NOT defined (this causes the trigger to be launched each time
 		the purging event occurs).
  
+VAR:		$SQL_MAX_WRITERS
+DESC:		Returns the maximum number of concurrent writer processes allowed
+		(see CONFIG-KEYS for further details about 'sql_max_writers').  
+
+VAR:            $SQL_ACTIVE_WRITERS
+DESC:           Returns the active number of concurrent writer processes in place
+                (see CONFIG-KEYS for further details about 'sql_max_writers'). If
+		used in conjunction with $SQL_MAX_WRITERS, it can prevent hitting
+		the upper limit of writers by taking corrective actions or firing
+		proper notifications.

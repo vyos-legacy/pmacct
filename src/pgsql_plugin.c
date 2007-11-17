@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -27,7 +27,6 @@
 #include "plugin_hooks.h"
 #include "sql_common.h"
 #include "pgsql_plugin.h"
-#include "util.h"
 #include "sql_common_m.c"
 
 /* Functions */
@@ -41,7 +40,6 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   time_t refresh_deadline;
   int timeout;
   int ret, num;
-#if defined (HAVE_MMAP)
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
@@ -49,7 +47,6 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   unsigned char *rgptr;
   int pollagain = TRUE;
   u_int32_t seq = 1, rg_err_count = 0;
-#endif
 
   /* XXX: glue */
   memcpy(&config, cfgptr, sizeof(struct configuration));
@@ -96,9 +93,7 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   /* plugin main loop */
   for(;;) {
     poll_again:
-#if defined (HAVE_MMAP)
     status->wakeup = TRUE;
-#endif
     ret = poll(&pfd, 1, timeout);
     if (ret < 0) goto poll_again;
 
@@ -107,6 +102,7 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
     switch (ret) {
     case 0: /* poll(): timeout */
+      if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata);
       switch (fork()) {
       case 0: /* Child */
 	/* we have to ignore signals to avoid loops:
@@ -115,7 +111,8 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	signal(SIGHUP, SIG_IGN);
 	pm_setproctitle("%s [%s]", "PostgreSQL Plugin -- DB Writer", config.name);
 
-	if (qq_ptr) {
+	if (qq_ptr && sql_writers.flags != CHLD_ALERT) {
+	  if (sql_writers.flags == CHLD_WARNING) sql_db_fail(&p);
 	  (*sqlfunc_cbr.connect)(&p, NULL);
           (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, &idata); 
 	  (*sqlfunc_cbr.close)(&bed);
@@ -127,7 +124,6 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
         exit(0);
       default: /* Parent */
-        if (qq_ptr) qq_ptr = sql_cache_flush(queries_queue, qq_ptr);
 	gettimeofday(&idata.flushtime, &tz);
 	refresh_deadline += config.sql_refresh_time; 
 	if (idata.now > idata.triggertime) {
@@ -137,6 +133,9 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	}
 	idata.new_basetime = FALSE;
 	glob_new_basetime = FALSE;
+	qq_ptr = pqq_ptr;
+	memcpy(queries_queue, pending_queries_queue, sizeof(queries_queue));
+
 	if (reload_map) {
 	  load_networks(config.networks_file, &nt, &nc);
 	  load_ports(config.ports_file, &pt);
@@ -146,12 +145,6 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
       break;
     default: /* poll(): received data */
-#if !defined (HAVE_MMAP)
-      if ((ret = read(pipe_fd, pipebuf, config.buffer_size)) == 0) 
-        exit_plugin(1); /* we exit silently; something happened at the write end */
-
-      if (ret < 0) goto poll_again;
-#else
       read_data:
       if (!pollagain) {
         seq++;
@@ -187,10 +180,10 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       memcpy(pipebuf, rg->ptr, bufsz);
       if ((rg->ptr+bufsz) >= rg->end) rg->ptr = rg->base;
       else rg->ptr += bufsz;
-#endif
 
       /* lazy sql refresh handling */ 
       if (idata.now > refresh_deadline) {
+        if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata);
         switch (fork()) {
         case 0: /* Child */
           /* we have to ignore signals to avoid loops:
@@ -199,7 +192,8 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	  signal(SIGHUP, SIG_IGN);
 	  pm_setproctitle("%s [%s]", "PostgreSQL Plugin -- DB Writer", config.name);
 
-	  if (qq_ptr) {
+          if (qq_ptr && sql_writers.flags != CHLD_ALERT) {
+	    if (sql_writers.flags == CHLD_WARNING) sql_db_fail(&p);
             (*sqlfunc_cbr.connect)(&p, NULL); 
             (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, &idata);
 	    (*sqlfunc_cbr.close)(&bed);
@@ -211,7 +205,6 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
           exit(0);
         default: /* Parent */
-          if (qq_ptr) qq_ptr = sql_cache_flush(queries_queue, qq_ptr);
 	  gettimeofday(&idata.flushtime, &tz);
 	  refresh_deadline += config.sql_refresh_time; 
 	  if (idata.now > idata.triggertime) {
@@ -221,6 +214,9 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           }
 	  idata.new_basetime = FALSE;
 	  glob_new_basetime = FALSE;
+	  qq_ptr = pqq_ptr;
+	  memcpy(queries_queue, pending_queries_queue, sizeof(queries_queue));
+
 	  if (reload_map) {
 	    load_networks(config.networks_file, &nt, &nc);
 	    load_ports(config.ports_file, &pt);
@@ -264,14 +260,12 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	((struct ch_buf_hdr *)pipebuf)->num--;
 	if (((struct ch_buf_hdr *)pipebuf)->num) data++;
       }
-#if defined (HAVE_MMAP)
       goto read_data;
-#endif
     }
   }
 }
 
-int PG_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_data *idata)
+int PG_cache_dbop_copy(struct DBdesc *db, struct db_cache *cache_elem, struct insert_data *idata)
 {
   PGresult *ret;
   char *ptr_values, *ptr_where;
@@ -281,60 +275,67 @@ int PG_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_
 
   /* constructing SQL query */
   ptr_where = where_clause;
-  ptr_values = values_clause; 
+  ptr_values = values_clause;
   memset(where_clause, 0, sizeof(where_clause));
   memset(values_clause, 0, sizeof(values_clause));
+
+  memcpy(&values, &copy_values, sizeof(values));
   while (num < idata->num_primitives) {
     (*where[num].handler)(cache_elem, idata, num, &ptr_values, &ptr_where);
     num++;
   }
 
+#if defined HAVE_64BIT_COUNTERS
+  if (have_flows) snprintf(ptr_values, SPACELEFT(values_clause), ",%llu,%llu,%llu\n", cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
+  else snprintf(ptr_values, SPACELEFT(values_clause), ",%llu,%llu\n", cache_elem->packet_counter, cache_elem->bytes_counter);
+#else
+  if (have_flows) snprintf(ptr_values, SPACELEFT(values_clause), ",%lu,%lu,%lu\n", cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
+  else snprintf(ptr_values, SPACELEFT(values_clause), ",%lu,%lu\n", cache_elem->packet_counter, cache_elem->bytes_counter);
+#endif
+  strncpy(sql_data, values_clause, sizeof(sql_data));
+  
+  if (PQputCopyData(db->desc, sql_data, strlen(sql_data)) < 0) { // avoid strlen() 
+    db->errmsg = PQerrorMessage(db->desc);
+    Log(LOG_DEBUG, "DEBUG ( %s/%s ): FAILED query follows:\n%s\n", config.name, config.type, sql_data);
+    if (db->errmsg) Log(LOG_ERR, "ERROR ( %s/%s ): %s\n", config.name, config.type, db->errmsg);
+    sql_db_fail(db);
+
+    return TRUE;
+  }
+  idata->iqn++;
+  idata->een++;
+
+  Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n", config.name, config.type, sql_data);
+
+  return FALSE;
+}
+
+int PG_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_data *idata)
+{
+  PGresult *ret;
+  char *ptr_values, *ptr_where, *ptr_set;
+  int num, have_flows=0;
+
+  if (config.what_to_count & COUNT_FLOWS) have_flows = TRUE;
+
+  /* constructing SQL query */
+  ptr_where = where_clause;
+  ptr_values = values_clause; 
+  ptr_set = set_clause;
+  memset(where_clause, 0, sizeof(where_clause));
+  memset(values_clause, 0, sizeof(values_clause));
+  memset(set_clause, 0, sizeof(set_clause));
+
+  for (num = 0; num < idata->num_primitives; num++)
+    (*where[num].handler)(cache_elem, idata, num, &ptr_values, &ptr_where);
+
+  for (num = 0; set[num].type; num++)
+    (*set[num].handler)(cache_elem, idata, num, &ptr_set, NULL);
+
   /* sending UPDATE query */
   if (!config.sql_dont_try_update) {
-    /* searching for pending accumulators: this means we know of unclassified counters has been
-       kicked to the DB previously; we now try to remove such data by issuing a negative UPDATE
-       query. If we are successfull, we add the counters to the new class. Otherwise we discard
-       them. */
-    if (config.what_to_count & COUNT_CLASS && cache_elem->ba) {
-      char local_where_clause[LONGSRVBUFLEN], local_values_clause[LONGSRVBUFLEN];
-      char *local_ptr_where = local_where_clause, *local_ptr_values = local_values_clause;
-      pm_class_t tmp = cache_elem->primitives.class;
-
-      cache_elem->primitives.class = 0; num = 0;
-      memset(local_where_clause, 0, sizeof(local_where_clause));
-      memset(local_values_clause, 0, sizeof(local_values_clause));
-      while (num < idata->num_primitives) {
-        (*where[num].handler)(cache_elem, idata, num, &local_ptr_values, &local_ptr_where);
-        num++;
-      }
-      if (have_flows) snprintf(sql_data, sizeof(sql_data), update_negative_clause, cache_elem->pa, cache_elem->ba, cache_elem->fa);
-      else snprintf(sql_data, sizeof(sql_data), update_negative_clause, cache_elem->pa, cache_elem->ba);
-      strncat(sql_data, local_where_clause, SPACELEFT(sql_data));
-      cache_elem->primitives.class = tmp;
-
-      ret = PQexec(db->desc, sql_data);
-      if (PQresultStatus(ret) != PGRES_COMMAND_OK) {
-	db->errmsg = PQresultErrorMessage(ret);
-	PQclear(ret);
-	Log(LOG_DEBUG, "DEBUG ( %s/%s ): FAILED query follows:\n%s\n", config.name, config.type, sql_data);
-	if (db->errmsg) Log(LOG_ERR, "ERROR ( %s/%s ): %s\n\n", config.name, config.type, db->errmsg);
-	return TRUE;
-      }
-      PQclear(ret);
-
-      if (PG_affected_rows(ret)) {
-        cache_elem->bytes_counter += cache_elem->ba;
-        cache_elem->packet_counter += cache_elem->pa;
-        cache_elem->flows_counter += cache_elem->fa;
-
-        Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, sql_data);
-        // idata->uqn++; /* XXX: negative UPDATE queries number ? */
-      }
-    }
-
-    /* XXX: optimize time() usage */
-    if (have_flows) snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter, now);
-    else snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter, now);
+    strncpy(sql_data, update_clause, SPACELEFT(sql_data));
+    strncat(sql_data, set_clause, SPACELEFT(sql_data));
     strncat(sql_data, where_clause, SPACELEFT(sql_data));
 
     ret = PQexec(db->desc, sql_data);
@@ -343,6 +344,8 @@ int PG_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_
       PQclear(ret);
       Log(LOG_DEBUG, "DEBUG ( %s/%s ): FAILED query follows:\n%s\n", config.name, config.type, sql_data);
       if (db->errmsg) Log(LOG_ERR, "ERROR ( %s/%s ): %s\n\n", config.name, config.type, db->errmsg);
+      sql_db_fail(db);
+
       return TRUE;
     }
     PQclear(ret);
@@ -366,6 +369,7 @@ int PG_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_
       PQclear(ret);
       Log(LOG_DEBUG, "DEBUG ( %s/%s ): FAILED query follows:\n%s\n", config.name, config.type, sql_data);
       if (db->errmsg) Log(LOG_ERR, "ERROR ( %s/%s ): %s\n\n", config.name, config.type, db->errmsg);
+      sql_db_fail(db);
 
       return TRUE;
     }
@@ -405,16 +409,14 @@ void PG_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
   if (idata->dyn_table) {
     char tmpbuf[LONGLONGSRVBUFLEN];
 
+    strftime_same(copy_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
     strftime_same(insert_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
     strftime_same(update_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
-    strftime_same(update_negative_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
     strftime_same(lock_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
-    strftime_same(delete_shadows_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
 
     if (config.sql_table_schema && idata->new_basetime) sql_create_table(bed.p, idata); 
   }
-  strncat(update_clause, set_clause, SPACELEFT(update_clause));
-  strncat(update_negative_clause, set_negative_clause, SPACELEFT(update_negative_clause));
+  // strncat(update_clause, set_clause, SPACELEFT(update_clause));
 
   /* beginning DB transaction */
   (*sqlfunc_cbr.lock)(bed.p);
@@ -434,11 +436,12 @@ void PG_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
     }
   }
 
-  if (config.what_to_count & COUNT_CLASS && !config.sql_dont_try_update)
-    (*sqlfunc_cbr.delete_shadows)(&bed);
-
   /* Finalizing DB transaction */
   if (!p.fail) {
+    if (config.sql_use_copy) {
+      if (PQputCopyEnd(p.desc, NULL) < 0) Log(LOG_ERR, "ERROR ( %s/%s ): COPY failed!\n\n", config.name, config.type); 
+    }
+
     ret = PQexec(p.desc, "COMMIT");
     if (PQresultStatus(ret) != PGRES_COMMAND_OK) {
       if (!reprocess) {
@@ -455,14 +458,16 @@ void PG_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
     reprocess--;
     if (reprocess) {
       for (j = 0; j <= reprocess; j++) {
-	/* we avoid not valid elements (valid == 0) and already recovered 
-	   elements (valid == -1) to be reprocessed */  
-        if (queue[j]->valid > 0) sql_query(&bed, queue[j], idata);
+	/* don't reprocess free (SQL_CACHE_FREE) and already recovered (SQL_CACHE_ERROR) elements */
+        if (queue[j]->valid == SQL_CACHE_COMMITTED) sql_query(&bed, queue[j], idata);
       }
     }
   }
 
   if (b.connected) {
+    if (config.sql_use_copy) {
+      if (PQputCopyEnd(b.desc, NULL) < 0) Log(LOG_ERR, "ERROR ( %s/%s ): COPY failed!\n\n", config.name, config.type);
+    }
     ret = PQexec(b.desc, "COMMIT");
     if (PQresultStatus(ret) != PGRES_COMMAND_OK) sql_db_fail(&b);
     PQclear(ret);
@@ -474,7 +479,7 @@ void PG_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
 
   if (config.debug) {
     idata->elap_time = time(NULL)-start;
-    Log(LOG_DEBUG, "( %s/%s ) *** Purging cache - END (QN: %u, ET: %u) ***\n", config.name, config.type, index, idata->elap_time);
+    Log(LOG_DEBUG, "( %s/%s ) *** Purging cache - END (QN: %u, ET: %u) ***\n", config.name, config.type, idata->qn, idata->elap_time);
   }
 
   if (config.sql_trigger_exec) {
@@ -485,20 +490,39 @@ void PG_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
 
 int PG_evaluate_history(int primitive)
 {
-  if (config.sql_history) {
+  if (config.sql_history || config.nfacctd_sql_log) {
     if (primitive) {
+      strncat(copy_clause, ", ", SPACELEFT(copy_clause));
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    strncat(where[primitive].string, "ABSTIME(%u)::Timestamp::Timestamp without time zone = ", SPACELEFT(where[primitive].string));
+    if (!config.sql_history_since_epoch)
+      strncat(where[primitive].string, "ABSTIME(%u)::Timestamp::Timestamp without time zone = ", SPACELEFT(where[primitive].string));
+    else
+      strncat(where[primitive].string, "%u = ", SPACELEFT(where[primitive].string));
     strncat(where[primitive].string, "stamp_inserted", SPACELEFT(where[primitive].string));
 
+    strncat(copy_clause, "stamp_updated, stamp_inserted", SPACELEFT(copy_clause));
     strncat(insert_clause, "stamp_updated, stamp_inserted", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "ABSTIME(%u)::Timestamp, ABSTIME(%u)::Timestamp", SPACELEFT(values[primitive].string));
-
+    if (config.sql_use_copy) {
+      if (!config.sql_history_since_epoch) { 
+	strncat(values[primitive].string, "%s, %s", SPACELEFT(values[primitive].string));
+        values[primitive].handler = where[primitive].handler = count_copy_timestamp_handler;
+      }
+      else {
+	strncat(values[primitive].string, "%u, %u", SPACELEFT(values[primitive].string));
+        values[primitive].handler = where[primitive].handler = count_timestamp_handler;
+      }
+    }
+    else {
+      if (!config.sql_history_since_epoch)
+	strncat(values[primitive].string, "ABSTIME(%u)::Timestamp, ABSTIME(%u)::Timestamp", SPACELEFT(values[primitive].string));
+      else
+	strncat(values[primitive].string, "%u, %u", SPACELEFT(values[primitive].string));
+      values[primitive].handler = where[primitive].handler = count_timestamp_handler;
+    }
     where[primitive].type = values[primitive].type = TIMESTAMP;
-    values[primitive].handler = where[primitive].handler = count_timestamp_handler;
 
     primitive++;
   }
@@ -508,7 +532,7 @@ int PG_evaluate_history(int primitive)
 
 int PG_compose_static_queries()
 {
-  int primitives=0, have_flows=0;
+  int primitives=0, set_primitives=0, have_flows=0, lock=0;
 
   if (config.what_to_count & COUNT_FLOWS || (config.sql_table_version >= 4 && !config.sql_optimize_clauses)) {
     config.what_to_count |= COUNT_FLOWS;
@@ -520,37 +544,99 @@ int PG_compose_static_queries()
     }
   }
 
-  /* "INSERT INTO ... VALUES ... " and "... WHERE ..." stuff */
+  /* "INSERT INTO ... VALUES ... ", "COPY ... ", "... WHERE ..." stuff */
   strncpy(where[primitives].string, " WHERE ", sizeof(where[primitives].string));
+  snprintf(copy_clause, sizeof(copy_clause), "COPY %s (", config.sql_table);
   snprintf(insert_clause, sizeof(insert_clause), "INSERT INTO %s (", config.sql_table);
   strncpy(values[primitives].string, " VALUES (", sizeof(values[primitives].string));
   primitives = PG_evaluate_history(primitives);
   primitives = sql_evaluate_primitives(primitives);
+
+  strncat(copy_clause, ", packets, bytes", SPACELEFT(copy_clause));
+  if (have_flows) strncat(copy_clause, ", flows", SPACELEFT(copy_clause));
+  strncat(copy_clause, ") FROM STDIN DELIMITER \',\'", SPACELEFT(copy_clause));
+
   strncat(insert_clause, ", packets, bytes", SPACELEFT(insert_clause));
   if (have_flows) strncat(insert_clause, ", flows", SPACELEFT(insert_clause));
   strncat(insert_clause, ")", SPACELEFT(insert_clause));
 
   /* "LOCK ..." stuff */
+  
   if (config.sql_dont_try_update) snprintf(lock_clause, sizeof(lock_clause), "BEGIN;");
-  else snprintf(lock_clause, sizeof(lock_clause), "BEGIN; LOCK %s IN EXCLUSIVE MODE;", config.sql_table);
+  else {
+    if (config.sql_locking_style) lock = sql_select_locking_style(config.sql_locking_style); 
+    switch (lock) {
+    case PM_LOCK_ROW_EXCLUSIVE:
+      snprintf(lock_clause, sizeof(lock_clause), "BEGIN; LOCK %s IN ROW EXCLUSIVE MODE;", config.sql_table);
+      break;
+    case PM_LOCK_EXCLUSIVE:
+    default:
+      snprintf(lock_clause, sizeof(lock_clause), "BEGIN; LOCK %s IN EXCLUSIVE MODE;", config.sql_table);
+      break;
+    }
+  }
 
   /* "UPDATE ... SET ..." stuff */
   snprintf(update_clause, sizeof(update_clause), "UPDATE %s ", config.sql_table);
-  snprintf(update_negative_clause, sizeof(update_negative_clause), "UPDATE %s ", config.sql_table);
-#if defined HAVE_64BIT_COUNTERS
-  strncpy(set_clause, "SET packets=packets+%llu, bytes=bytes+%llu", SPACELEFT(set_clause));
-  if (have_flows) strncat(set_clause, ", flows=flows+%llu", SPACELEFT(set_clause));
-#else
-  strncpy(set_clause, "SET packets=packets+%lu, bytes=bytes+%lu", SPACELEFT(set_clause));
-  if (have_flows) strncat(set_clause, ", flows=flows+%lu", SPACELEFT(set_clause));
-#endif
-  if (config.sql_history) strncat(set_clause, ", stamp_updated=CURRENT_TIMESTAMP(0)", SPACELEFT(set_clause)); 
-  strncpy(set_negative_clause, "SET packets=packets-%lu, bytes=bytes-%lu", SPACELEFT(set_negative_clause));
-  if (have_flows) strncat(set_negative_clause, ", flows=flows-%lu", SPACELEFT(set_negative_clause));
-  if (config.sql_history) strncat(set_negative_clause, ", stamp_updated=CURRENT_TIMESTAMP(0)", SPACELEFT(set_negative_clause));
 
-  /* "DELETE ..." stuff */
-  snprintf(delete_shadows_clause, sizeof(delete_shadows_clause), "DELETE FROM %s WHERE packets = 0 AND bytes = 0 AND flows = 0", config.sql_table);
+  set_primitives = sql_compose_static_set(have_flows);
+
+  if (config.sql_history || config.nfacctd_sql_log) {
+    if (!config.nfacctd_sql_log) {
+      if (!config.sql_history_since_epoch) {
+	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+	strncat(set[set_primitives].string, "stamp_updated=CURRENT_TIMESTAMP(0)", SPACELEFT(set[set_primitives].string)); 
+	set[set_primitives].type = TIMESTAMP;
+	set[set_primitives].handler = count_noop_setclause_handler;
+	set_primitives++;
+      }
+      else {
+	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+	strncat(set[set_primitives].string, "stamp_updated=DATE_PART('epoch',NOW())::BIGINT", SPACELEFT(set[set_primitives].string));
+	set[set_primitives].type = TIMESTAMP;
+	set[set_primitives].handler = count_noop_setclause_handler;
+	set_primitives++;
+      }
+    }
+    else {
+      if (!config.sql_history_since_epoch) {
+	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+	strncat(set[set_primitives].string, "stamp_updated=ABSTIME(%u)::Timestamp", SPACELEFT(set[set_primitives].string));
+	set[set_primitives].type = TIMESTAMP;
+	set[set_primitives].handler = count_timestamp_setclause_handler;
+	set_primitives++;
+      }
+      else {
+	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+	strncat(set[set_primitives].string, "stamp_updated=%u", SPACELEFT(set[set_primitives].string));
+	set[set_primitives].type = TIMESTAMP;
+	set[set_primitives].handler = count_timestamp_setclause_handler;
+	set_primitives++;
+      }
+    }
+  }
+
+  /* values for COPY */
+  memcpy(&copy_values, &values, sizeof(copy_values));
+  {
+    int num, x, y;
+    char *ptr;
+
+    ptr = strchr(copy_values[0].string, '(');
+    ptr++; strcpy(copy_values[0].string, ptr);
+
+    for (num = 0; num < primitives; num++) {
+      for (x = 0; copy_values[num].string[x] != '\0'; x++) {
+	if (copy_values[num].string[x] == ' ' || copy_values[num].string[x] == '\'') {
+	  for (y = x + 1; copy_values[num].string[y] != '\0'; y++)
+            copy_values[num].string[y-1] = copy_values[num].string[y];
+          copy_values[num].string[y-1] = '\0';
+          x--;
+        }
+      }
+      copy_values[num].string[x] = '\0';
+    }
+  }
 
   return primitives;
 }
@@ -572,25 +658,6 @@ void PG_compose_conn_string(struct DBdesc *db, char *host)
   }
 }
 
-void PG_delete_shadows(struct BE_descs *bed)
-{
-  PGresult *PGret;
-  struct DBdesc *db = NULL;
-
-  if (bed->p->connected) db = bed->p;
-  else if (bed->b->connected) db = bed->b;
-
-  if (!db->fail) {
-    PGret = PQexec(db->desc, delete_shadows_clause);
-    if (PQresultStatus(PGret) != PGRES_COMMAND_OK) {
-      db->errmsg = PQresultErrorMessage(PGret);
-      sql_db_errmsg(db);
-      sql_db_fail(db);
-    }
-    PQclear(PGret);
-  }
-}
-
 void PG_Lock(struct DBdesc *db)
 {
   PGresult *PGret;
@@ -603,6 +670,17 @@ void PG_Lock(struct DBdesc *db)
       sql_db_fail(db);
     }
     PQclear(PGret);
+    
+    /* If using COPY, let's initialize it */
+    if (config.sql_use_copy) {
+      PGret = PQexec(db->desc, copy_clause);
+      if (PQresultStatus(PGret) != PGRES_COPY_IN) {
+	db->errmsg = PQresultErrorMessage(PGret);
+	sql_db_errmsg(db);
+	sql_db_fail(db);
+      }
+      PQclear(PGret);
+    }
   }
 }
 
@@ -618,17 +696,19 @@ void PG_file_close(struct logfile *lf)
 
 void PG_DB_Connect(struct DBdesc *db, char *host)
 {
-  db->desc = PQconnectdb(db->conn_string);
-  if (PQstatus(db->desc) == CONNECTION_BAD) {
-    char errmsg[64+SRVBUFLEN];
+  if (!db->fail) {
+    db->desc = PQconnectdb(db->conn_string);
+    if (PQstatus(db->desc) == CONNECTION_BAD) {
+      char errmsg[64+SRVBUFLEN];
 
-    sql_db_fail(db);
-    strcpy(errmsg, "Failed connecting to ");
-    strcat(errmsg, db->conn_string);
-    db->errmsg = errmsg;
-    sql_db_errmsg(db);
+      sql_db_fail(db);
+      strcpy(errmsg, "Failed connecting to ");
+      strcat(errmsg, db->conn_string);
+      db->errmsg = errmsg;
+      sql_db_errmsg(db);
+    }
+    else sql_db_ok(db);
   }
-  else sql_db_ok(db);
 }
 
 void PG_DB_Close(struct BE_descs *bed)
@@ -642,13 +722,15 @@ void PG_create_dyn_table(struct DBdesc *db, char *buf)
   char *err_string;
   PGresult *PGret;
 
-  PGret = PQexec(db->desc, buf);
-  if (PQresultStatus(PGret) != PGRES_COMMAND_OK) {
-    err_string = PQresultErrorMessage(PGret);
-    Log(LOG_DEBUG, "DEBUG ( %s/%s ): FAILED query follows:\n%s\n", config.name, config.type, buf);
-    Log(LOG_ERR, "ERROR ( %s/%s ): %s\n\n", config.name, config.type, err_string);
+  if (!db->fail) {
+    PGret = PQexec(db->desc, buf);
+    if (PQresultStatus(PGret) != PGRES_COMMAND_OK) {
+      err_string = PQresultErrorMessage(PGret);
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): FAILED query follows:\n%s\n", config.name, config.type, buf);
+      Log(LOG_ERR, "ERROR ( %s/%s ): %s\n\n", config.name, config.type, err_string);
+    }
+    PQclear(PGret);
   }
-  PQclear(PGret);
 }
 
 static int PG_affected_rows(PGresult *result)
@@ -673,11 +755,11 @@ void PG_set_callbacks(struct sqlfunc_cb_registry *cbr)
   cbr->close = PG_DB_Close;
   cbr->lock = PG_Lock;
   /* cbr->unlock */ 
-  cbr->op = PG_cache_dbop;
+  if (!config.sql_use_copy) cbr->op = PG_cache_dbop;
+  else cbr->op = PG_cache_dbop_copy;
   cbr->create_table = PG_create_dyn_table;
   cbr->purge = PG_cache_purge;
   cbr->create_backend = PG_create_backend;
-  cbr->delete_shadows = PG_delete_shadows;
 }
 
 void PG_init_default_values(struct insert_data *idata)
@@ -705,7 +787,8 @@ void PG_init_default_values(struct insert_data *idata)
     }
 
     if (typed) {
-      if (config.sql_table_version == 6) config.sql_table = pgsql_table_v6; 
+      if (config.sql_table_version == 7) config.sql_table = pgsql_table_v7;
+      else if (config.sql_table_version == 6) config.sql_table = pgsql_table_v6; 
       else if (config.sql_table_version == 5) {
         if (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) config.sql_table = pgsql_table_as_v5;
         else config.sql_table = pgsql_table_v5;
@@ -728,7 +811,11 @@ void PG_init_default_values(struct insert_data *idata)
       }
     }
     else {
-      if (config.sql_table_version == 6) {
+      if (config.sql_table_version == 7) {
+	Log(LOG_WARNING, "WARN ( %s/%s ): Unified data are no longer supported. Switching to typed data.\n", config.name, config.type);
+	config.sql_table = pgsql_table_v7;
+      }
+      else if (config.sql_table_version == 6) {
 	Log(LOG_WARNING, "WARN ( %s/%s ): Unified data are no longer supported. Switching to typed data.\n", config.name, config.type);
 	config.sql_table = pgsql_table_v6;
       }
@@ -743,4 +830,5 @@ void PG_init_default_values(struct insert_data *idata)
   glob_dyn_table = idata->dyn_table;
 
   if (config.sql_backup_host || config.sql_recovery_logfile) idata->recover = TRUE;
+  if (!config.sql_dont_try_update && config.sql_use_copy) config.sql_use_copy = FALSE; 
 }

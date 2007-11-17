@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -23,6 +23,7 @@
 
 /* includes */
 #include "pmacct.h"
+#include "pmacct-data.h"
 #include "nfacctd.h"
 #include "sflow.h"
 #include "sfacctd.h"
@@ -61,39 +62,41 @@ void evaluate_packet_handlers()
     }
 #endif
 
-    if (channels_list[index].aggregation & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SRC_AS)) {
+    if (channels_list[index].aggregation & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SUM_HOST|COUNT_SUM_NET)) {
+      if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = src_host_handler;
+      else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_src_host_handler;
+      else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_src_host_handler;
+      primitives++;
+    }
+
+    if (channels_list[index].aggregation & (COUNT_DST_HOST|COUNT_DST_NET|COUNT_SUM_HOST|COUNT_SUM_NET)) {
+      if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = dst_host_handler;
+      else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_dst_host_handler;
+      else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_dst_host_handler;
+      primitives++;
+    }
+    
+    if (channels_list[index].aggregation & (COUNT_SRC_AS|COUNT_SUM_AS)) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = src_host_handler;
       else if (config.acct_type == ACCT_NF) {
-	if (channels_list[index].aggregation & COUNT_SRC_AS) {
-	  if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = NF_src_as_handler;
-	  else channels_list[index].phandler[primitives] = NF_src_host_handler;
-	}
+	if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = NF_src_as_handler;
 	else channels_list[index].phandler[primitives] = NF_src_host_handler;
       }
       else if (config.acct_type == ACCT_SF) {
-        if (channels_list[index].aggregation & COUNT_SRC_AS) {
-          if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = SF_src_as_handler;
-	  else channels_list[index].phandler[primitives] = SF_src_host_handler;
-        }
+        if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = SF_src_as_handler;
 	else channels_list[index].phandler[primitives] = SF_src_host_handler;
       }
       primitives++;
     }
 
-    if (channels_list[index].aggregation & (COUNT_DST_HOST|COUNT_DST_NET|COUNT_DST_AS)) {
+    if (channels_list[index].aggregation & (COUNT_DST_AS|COUNT_SUM_AS)) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = dst_host_handler;
       else if (config.acct_type == ACCT_NF) {
-	if (channels_list[index].aggregation & COUNT_DST_AS) {
-	  if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = NF_dst_as_handler; 
-	  else channels_list[index].phandler[primitives] = NF_dst_host_handler;
-	}
+	if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = NF_dst_as_handler; 
 	else channels_list[index].phandler[primitives] = NF_dst_host_handler;
       }
       else if (config.acct_type == ACCT_SF) {
-        if (channels_list[index].aggregation & COUNT_DST_AS) {
-	  if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = SF_dst_as_handler;
-	  else channels_list[index].phandler[primitives] = SF_dst_host_handler;
-        }
+	if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = SF_dst_as_handler;
 	else channels_list[index].phandler[primitives] = SF_dst_host_handler;
       }
       primitives++;
@@ -113,41 +116,6 @@ void evaluate_packet_handlers()
       primitives++;
     }
 
-    if (channels_list[index].aggregation & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS)) {
-      if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = src_host_handler;
-      else if (config.acct_type == ACCT_NF) {
-        if (channels_list[index].aggregation & COUNT_SUM_AS) {
-          if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = NF_src_as_handler;
-          else channels_list[index].phandler[primitives] = NF_src_host_handler;
-	}
-        else channels_list[index].phandler[primitives] = NF_src_host_handler;
-      }
-      else if (config.acct_type == ACCT_SF) {
-        if (channels_list[index].aggregation & COUNT_SUM_AS) {
-	  if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = SF_src_as_handler;
-	  else channels_list[index].phandler[primitives] = SF_src_host_handler;
-	}
-	else channels_list[index].phandler[primitives] = SF_src_host_handler;
-      }
-      primitives++;
-      if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = dst_host_handler;
-      else if (config.acct_type == ACCT_NF) {
-        if (channels_list[index].aggregation & COUNT_SUM_AS) {
-          if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = NF_dst_as_handler;
-          else channels_list[index].phandler[primitives] = NF_dst_host_handler;
-	}
-        else channels_list[index].phandler[primitives] = NF_dst_host_handler;
-      }
-      else if (config.acct_type == ACCT_SF) {
-        if (channels_list[index].aggregation & COUNT_SUM_AS) {
-          if (config.nfacctd_as == NF_AS_KEEP) channels_list[index].phandler[primitives] = SF_dst_as_handler;
-	  else channels_list[index].phandler[primitives] = SF_dst_host_handler;
-	}
-	else channels_list[index].phandler[primitives] = SF_dst_host_handler;
-      }
-      primitives++;
-    }
-
     if (channels_list[index].aggregation & COUNT_IP_TOS) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = ip_tos_handler;
       else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_ip_tos_handler;
@@ -161,6 +129,14 @@ void evaluate_packet_handlers()
       else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_ip_proto_handler;
       primitives++;
     }
+
+    if (channels_list[index].aggregation & COUNT_TCPFLAGS) {
+      if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = tcp_flags_handler;
+      else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_tcp_flags_handler;
+      else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_tcp_flags_handler;
+      primitives++;
+    }
+
     if (channels_list[index].aggregation & COUNT_FLOWS) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = flows_handler;
       else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_flows_handler;
@@ -169,25 +145,54 @@ void evaluate_packet_handlers()
     }
     if (channels_list[index].aggregation & COUNT_CLASS) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = class_handler;
-      else if (config.acct_type == ACCT_NF) primitives--; /* NO class handling for NetFlow */
-      else if (config.acct_type == ACCT_SF) primitives--; /* NO class handling for sFlow */
+      else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_class_handler;
+      else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_class_handler; 
       primitives++;
     }
 
-    if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = counters_handler;
-    else if (config.acct_type == ACCT_NF) {
-      if (config.nfacctd_time == NF_TIME_SECS) channels_list[index].phandler[primitives] = NF_counters_secs_handler;
-      else if (config.nfacctd_time == NF_TIME_NEW) channels_list[index].phandler[primitives] = NF_counters_new_handler;
-      else channels_list[index].phandler[primitives] = NF_counters_msecs_handler; /* default */
-    }
-    else if (config.acct_type == ACCT_SF) {
-      channels_list[index].phandler[primitives] = SF_counters_new_handler;
-      if (config.sfacctd_renormalize) {
-	primitives++;
-	channels_list[index].phandler[primitives] = SF_counters_renormalize_handler;
+    if (channels_list[index].aggregation & COUNT_COUNTERS) {
+      if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = counters_handler;
+      else if (config.acct_type == ACCT_NF) {
+	if (config.nfacctd_time == NF_TIME_SECS) channels_list[index].phandler[primitives] = NF_counters_secs_handler;
+	else if (config.nfacctd_time == NF_TIME_NEW) channels_list[index].phandler[primitives] = NF_counters_new_handler;
+	else channels_list[index].phandler[primitives] = NF_counters_msecs_handler; /* default */
+	if (config.sfacctd_renormalize) {
+	  primitives++;
+	  channels_list[index].phandler[primitives] = NF_counters_renormalize_handler;
+	}
       }
+      else if (config.acct_type == ACCT_SF) {
+	channels_list[index].phandler[primitives] = SF_counters_new_handler;
+	if (config.sfacctd_renormalize) {
+	  primitives++;
+	  channels_list[index].phandler[primitives] = SF_counters_renormalize_handler;
+	}
+      }
+      primitives++;
     }
-    primitives++;
+
+    if (channels_list[index].plugin->type.id == PLUGIN_ID_NFPROBE) {
+      if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = nfprobe_extras_handler;
+      else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_nfprobe_extras_handler;
+      else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_nfprobe_extras_handler;
+      primitives++;
+    }
+
+    if (channels_list[index].aggregation & COUNT_PAYLOAD) {
+      if (channels_list[index].plugin->type.id == PLUGIN_ID_SFPROBE) {
+        if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = sfprobe_payload_handler;
+        else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_sfprobe_payload_handler;
+        else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_sfprobe_payload_handler;
+      }
+      primitives++;
+    }
+
+    if (channels_list[index].s.rate) {
+      if (channels_list[index].plugin->type.id == PLUGIN_ID_SFPROBE)
+	channels_list[index].phandler[primitives] = sfprobe_sampling_handler;
+      else channels_list[index].phandler[primitives] = sampling_handler;
+      primitives++;
+    }
 
     if (config.acct_type == ACCT_PM || config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) {
       if (channels_list[index].aggregation & COUNT_ID) {
@@ -196,30 +201,45 @@ void evaluate_packet_handlers()
 	  channels_list[index].phandler[primitives] = ptag_id_handler;
 	  primitives++;
 	}
+	else {
+	  if (config.acct_type == ACCT_NF) {
+	    channels_list[index].phandler[primitives] = NF_id_handler;
+	    primitives++;
+	  }
+	  else if (config.acct_type == ACCT_SF) {
+	    channels_list[index].phandler[primitives] = SF_id_handler;
+	    primitives++;
+	  }
+	}
+
 	if (channels_list[index].id) { 
 	  channels_list[index].phandler[primitives] = id_handler; 
 	  primitives++;
 	}
       }
     }
-
     index++;
   }
 }
 
 #if defined (HAVE_L2)
-void src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   if (pptrs->mac_ptr) memcpy(pdata->primitives.eth_shost, (pptrs->mac_ptr+ETH_ADDR_LEN), ETH_ADDR_LEN); 
 }
 
-void dst_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void dst_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   if (pptrs->mac_ptr) memcpy(pdata->primitives.eth_dhost, pptrs->mac_ptr, ETH_ADDR_LEN);
 }
 
-void vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   u_int16_t vlan_id;
   
   if (pptrs->vlan_ptr) {
@@ -229,8 +249,10 @@ void vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, 
 }
 #endif
 
-void src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   if (pptrs->l3_proto == ETHERTYPE_IP) {
     pdata->primitives.src_ip.address.ipv4.s_addr = ((struct my_iphdr *) pptrs->iph_ptr)->ip_src.s_addr;
     pdata->primitives.src_ip.family = AF_INET;
@@ -243,8 +265,10 @@ void src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *ppt
 #endif
 }
 
-void dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   if (pptrs->l3_proto == ETHERTYPE_IP) {
     pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct my_iphdr *) pptrs->iph_ptr)->ip_dst.s_addr;
     pdata->primitives.dst_ip.family = AF_INET;
@@ -257,22 +281,27 @@ void dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *ppt
 #endif
 }
 
-void src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   if (pptrs->l4_proto == IPPROTO_UDP || pptrs->l4_proto == IPPROTO_TCP)
     pdata->primitives.src_port = ntohs(((struct my_tlhdr *) pptrs->tlh_ptr)->src_port);
   else pdata->primitives.src_port = 0;
 }
 
-void dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   if (pptrs->l4_proto == IPPROTO_UDP || pptrs->l4_proto == IPPROTO_TCP)
     pdata->primitives.dst_port = ntohs(((struct my_tlhdr *) pptrs->tlh_ptr)->dst_port);
   else pdata->primitives.dst_port = 0;
 }
 
-void ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   u_int32_t tos;
 
   if (pptrs->l3_proto == ETHERTYPE_IP) {
@@ -287,13 +316,24 @@ void ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs
 #endif
 }
 
-void ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  
   pdata->primitives.proto = pptrs->l4_proto;
 }
 
-void counters_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void tcp_flags_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
+  if (pptrs->l4_proto == IPPROTO_TCP) pdata->tcp_flags = pptrs->tcp_flags;
+}
+
+void counters_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   if (pptrs->l3_proto == ETHERTYPE_IP) pdata->pkt_len = ntohs(((struct my_iphdr *) pptrs->iph_ptr)->ip_len);
 #if defined ENABLE_IPV6
   else if (pptrs->l3_proto == ETHERTYPE_IPV6) pdata->pkt_len = ntohs(((struct ip6_hdr *) pptrs->iph_ptr)->ip6_plen)+IP6HdrSz;
@@ -303,21 +343,28 @@ void counters_handler(struct channels_list_entry *chptr, struct packet_ptrs *ppt
     pptrs->pf = 0;
   }
   else pdata->pkt_num = 1; 
-  pdata->pkt_time = ((struct pcap_pkthdr *)pptrs->pkthdr)->ts.tv_sec;
+  pdata->time_start = ((struct pcap_pkthdr *)pptrs->pkthdr)->ts.tv_sec;
+  pdata->time_end = 0;
 }
 
-void id_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void id_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   pdata->primitives.id = chptr->id;
 }
 
-void flows_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void flows_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   if (pptrs->new_flow) pdata->flo_num = 1;
 }
 
-void class_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void class_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   pdata->primitives.class = pptrs->class;
   pdata->cst.ba = pptrs->cst.ba;
   pdata->cst.pa = pptrs->cst.pa;
@@ -325,11 +372,58 @@ void class_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs,
     pdata->cst.fa = pptrs->cst.fa;
   pdata->cst.stamp.tv_sec = pptrs->cst.stamp.tv_sec;
   pdata->cst.stamp.tv_usec = pptrs->cst.stamp.tv_usec;
+  pdata->cst.tentatives = pptrs->cst.tentatives;
+}
+
+void sfprobe_payload_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_payload *payload = (struct pkt_payload *) *data;
+  struct pkt_data tmp;
+  char *buf = (char *) *data, *tmpp = (char *) &tmp;
+  int space = (chptr->bufend - chptr->bufptr) - PpayloadSz;
+
+  src_host_handler(chptr, pptrs, &tmpp);
+  dst_host_handler(chptr, pptrs, &tmpp);
+  memcpy(&payload->src_ip, &tmp.primitives.src_ip, HostAddrSz);
+  memcpy(&payload->dst_ip, &tmp.primitives.dst_ip, HostAddrSz);
+
+  payload->cap_len = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
+  payload->pkt_len = ((struct pcap_pkthdr *)pptrs->pkthdr)->len;
+  payload->pkt_num = 1; 
+  payload->time_start = ((struct pcap_pkthdr *)pptrs->pkthdr)->ts.tv_sec;
+  payload->class = pptrs->class;
+  payload->tag = pptrs->tag;
+
+  /* We could be capturing the entire packet; DEFAULT_PLOAD_SIZE is our cut-off point */
+  if (payload->cap_len > DEFAULT_PLOAD_SIZE) payload->cap_len = DEFAULT_PLOAD_SIZE;
+
+  if (space >= payload->cap_len) {
+    buf += PpayloadSz;
+    memcpy(buf, pptrs->packet_ptr, payload->cap_len);
+    chptr->bufptr += payload->cap_len; /* don't count pkt_payload here */ 
+#if NEED_ALIGN
+    while (chptr->bufptr % 4 != 0) chptr->bufptr++; /* Don't worry, it's harmless increasing here */
+#endif
+  }
+  else {
+    chptr->bufptr += space;
+    chptr->reprocess = TRUE;
+  }
+}
+
+void nfprobe_extras_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct pkt_extras *pextras = (struct pkt_extras *) ++pdata;
+
+  if (pptrs->mpls_ptr) memcpy(&pextras->mpls_top_label, pptrs->mpls_ptr, 4);
+  if (pptrs->l4_proto == IPPROTO_TCP) pextras->tcp_flags = pptrs->tcp_flags;
 }
 
 #if defined (HAVE_L2)
-void NF_src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
@@ -342,8 +436,9 @@ void NF_src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *p
   }
 }
 
-void NF_dst_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_dst_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
@@ -356,8 +451,9 @@ void NF_dst_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *p
   }
 }
 
-void NF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
@@ -372,8 +468,9 @@ void NF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
 }
 #endif
 
-void NF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
@@ -435,8 +532,9 @@ void NF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   }
 }
 
-void NF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
@@ -502,8 +600,9 @@ void NF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   }
 }
 
-void NF_src_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_src_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   u_int16_t asn16;
@@ -551,8 +650,9 @@ void NF_src_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
   }
 }
 
-void NF_dst_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_dst_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   u_int16_t asn16;
@@ -600,8 +700,9 @@ void NF_dst_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
   }
 }
 
-void NF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   
@@ -643,15 +744,17 @@ void NF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *
     break;
   default:
     if ((((struct struct_export_v5 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
-        ((struct struct_export_v5 *) pptrs->f_data)->prot == IPPROTO_TCP)
+        ((struct struct_export_v5 *) pptrs->f_data)->prot == IPPROTO_TCP) {
       pdata->primitives.src_port = ntohs(((struct struct_export_v5 *) pptrs->f_data)->srcport);
+    }
     else pdata->primitives.src_port = 0;
     break;
   }
 }
 
-void NF_dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
@@ -700,8 +803,9 @@ void NF_dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   }
 }
 
-void NF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
@@ -749,8 +853,9 @@ void NF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
   }
 }
 
-void NF_ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
@@ -783,9 +888,31 @@ void NF_ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   }
 }
 
-/* times from the netflow engine are in msecs */
-void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_tcp_flags_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_int8_t tcp_flags;
+
+  switch(hdr->version) {
+  case 9:
+    if ((u_int8_t)*(pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off) == IPPROTO_TCP) {
+      memcpy(&tcp_flags, pptrs->f_data+tpl->tpl[NF9_TCP_FLAGS].off, tpl->tpl[NF9_TCP_FLAGS].len);
+      pdata->tcp_flags = tcp_flags;
+    }
+    break;
+  default:
+    if (((struct struct_export_v5 *) pptrs->f_data)->prot == IPPROTO_TCP && hdr->version == 5)
+      pdata->tcp_flags = ((struct struct_export_v5 *) pptrs->f_data)->tcp_flags;
+    break;
+  }
+}
+
+/* times from the netflow engine are in msecs */
+void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   time_t fstime;
@@ -812,7 +939,10 @@ void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_
     }
     
     memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
-    pdata->pkt_time = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+    pdata->time_start = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime))/1000);
+    memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_LAST_SWITCHED].off, tpl->tpl[NF9_LAST_SWITCHED].len);
+    pdata->time_end = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime))/1000);
     break;
   case 8:
@@ -820,41 +950,52 @@ void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_
     case 6:
       pdata->pkt_len = ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->dPkts);
-      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->First))/1000);
+      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->Last))/1000);
       break;
     case 7:
       pdata->pkt_len = ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->dPkts);
-      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->First))/1000);
+      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->Last))/1000);
       break;
     case 8:
       pdata->pkt_len = ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->dPkts);
-      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->First))/1000);
+      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->Last))/1000);
       break;
     default:
       pdata->pkt_len = ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->dPkts);
-      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->First))/1000);
+      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->Last))/1000);
       break;
     }
     break;
   default:
     pdata->pkt_len = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dOctets);
     pdata->pkt_num = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dPkts);
-    pdata->pkt_time = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
+    pdata->time_start = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
       ((ntohl(((struct struct_header_v5 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v5 *) pptrs->f_data)->First))/1000); 
+    pdata->time_end = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v5 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v5 *) pptrs->f_data)->Last))/1000); 
     break;
   }
 }
 
 /* times from the netflow engine are in secs */
-void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   time_t fstime;
@@ -881,7 +1022,10 @@ void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_p
     }
 
     memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
-    pdata->pkt_time = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+    pdata->time_start = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+      (ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime));
+    memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_LAST_SWITCHED].off, tpl->tpl[NF9_LAST_SWITCHED].len);
+    pdata->time_end = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
       (ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime));
     break;
   case 8:
@@ -889,41 +1033,52 @@ void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_p
     case 6:
       pdata->pkt_len = ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->dPkts);
-      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->First));
+      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+       (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->Last));
       break;
     case 7:
       pdata->pkt_len = ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->dPkts);
-      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->First));
+      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+       (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->Last));
       break;
     case 8:
       pdata->pkt_len = ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->dPkts);
-      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->First));
+      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+       (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->Last));
       break;
     default:
       pdata->pkt_len = ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->dOctets);
       pdata->pkt_num = ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->dPkts);
-      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      pdata->time_start = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
        (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->First));
+      pdata->time_end = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+       (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->Last));
       break;
     }
     break;
   default:
     pdata->pkt_len = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dOctets);
     pdata->pkt_num = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dPkts);
-    pdata->pkt_time = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
+    pdata->time_start = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
       (ntohl(((struct struct_header_v5 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v5 *) pptrs->f_data)->First));
+    pdata->time_end = ntohl(((struct struct_header_v5 *) pptrs->f_header)->unix_secs)-
+      (ntohl(((struct struct_header_v5 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v5 *) pptrs->f_data)->Last));
     break;
   }
 }
 
 /* ignore netflow engine times and generate new ones */
-void NF_counters_new_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_counters_new_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   u_int32_t t32;
@@ -948,7 +1103,8 @@ void NF_counters_new_handler(struct channels_list_entry *chptr, struct packet_pt
       pdata->pkt_num = pm_ntohll(t64);
     }
 
-    pdata->pkt_time = 0;
+    pdata->time_start = 0;
+    pdata->time_end = 0;
     break;
   case 8:
     switch(hdr->aggregation) {
@@ -969,23 +1125,28 @@ void NF_counters_new_handler(struct channels_list_entry *chptr, struct packet_pt
       pdata->pkt_num = ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->dPkts);
       break;
     }
-    pdata->pkt_time = 0;
+    pdata->time_start = 0;
+    pdata->time_end = 0;
     break;
   default:
     pdata->pkt_len = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dOctets);
     pdata->pkt_num = ntohl(((struct struct_export_v5 *) pptrs->f_data)->dPkts);
-    pdata->pkt_time = 0;
+    pdata->time_start = 0;
+    pdata->time_end = 0;
     break;
   }
 }
 
-void ptag_id_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void ptag_id_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
   pdata->primitives.id = pptrs->tag;
 }
 
-void NF_flows_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_flows_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   u_int32_t t32;
@@ -1020,31 +1181,165 @@ void NF_flows_handler(struct channels_list_entry *chptr, struct packet_ptrs *ppt
   }
 }
 
-#if defined (HAVE_L2)
-void SF_src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void NF_sfprobe_payload_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_payload *payload = (struct pkt_payload *) *data;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  struct pkt_data tmp;
+  char *buf = (char *) *data, *tmpp = (char *) &tmp;
+  int space = (chptr->bufend - chptr->bufptr) - PpayloadSz;
+
+  NF_counters_msecs_handler(chptr, pptrs, &tmpp);
+  NF_class_handler(chptr, pptrs, &tmpp);
+  NF_id_handler(chptr, pptrs, &tmpp); /* XXX: conditional? */
+  NF_src_host_handler(chptr, pptrs, &tmpp);
+  NF_dst_host_handler(chptr, pptrs, &tmpp);
+
+  payload->cap_len = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen; /* XXX */
+  payload->pkt_len = tmp.pkt_len;
+  payload->pkt_num = tmp.pkt_num;
+  payload->time_start = tmp.time_start;
+  payload->class = tmp.primitives.class;
+  payload->tag = tmp.primitives.id;
+  memcpy(&payload->src_ip, &tmp.primitives.src_ip, HostAddrSz);
+  memcpy(&payload->dst_ip, &tmp.primitives.dst_ip, HostAddrSz);
+
+  if (space >= payload->cap_len) {
+    buf += PpayloadSz;
+    memcpy(buf, pptrs->packet_ptr, payload->cap_len);
+    chptr->bufptr += payload->cap_len; /* don't count pkt_payload here */
+  }
+  else {
+    chptr->bufptr += space;
+    chptr->reprocess = TRUE;
+  }
+}
+
+void NF_nfprobe_extras_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct pkt_extras *pextras = (struct pkt_extras *) ++pdata;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch(hdr->version) {
+  case 9:
+    if (tpl->tpl[NF9_MPLS_LABEL_1].len)
+      memcpy(&pextras->mpls_top_label, pptrs->f_data+tpl->tpl[NF9_MPLS_LABEL_1].off, tpl->tpl[NF9_MPLS_LABEL_1].len);
+    if ((u_int8_t)*(pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off) == IPPROTO_TCP)
+      memcpy(&pextras->tcp_flags, pptrs->f_data+tpl->tpl[NF9_TCP_FLAGS].off, tpl->tpl[NF9_TCP_FLAGS].len);
+    break;
+  default:
+    pextras->mpls_top_label = 0;
+    if (((struct struct_export_v5 *) pptrs->f_data)->prot == IPPROTO_TCP && hdr->version == 5)
+      pextras->tcp_flags = ((struct struct_export_v5 *) pptrs->f_data)->tcp_flags;
+    break;
+  }
+}
+
+void NF_class_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  time_t fstime;
+
+  switch(hdr->version) {
+  case 9:
+    if (tpl->tpl[NF9_CUST_CLASS].len) { 
+      pdata->primitives.class = pptrs->class; 
+      pdata->cst.ba = 0; 
+      pdata->cst.pa = 0; 
+      pdata->cst.fa = 0; 
+
+      if (tpl->tpl[NF9_FIRST_SWITCHED].len) {
+        memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
+        pdata->cst.stamp.tv_sec = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+           ((ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime))/1000);
+      }
+      else pdata->cst.stamp.tv_sec = time(NULL);
+      pdata->cst.stamp.tv_usec = 0; 
+    }
+    break;
+  default:
+    break;
+  }
+}
+
+void NF_id_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch(hdr->version) {
+  case 9:
+    if (tpl->tpl[NF9_CUST_TAG].len) {
+      memcpy(&pdata->primitives.id, pptrs->f_data+tpl->tpl[NF9_CUST_TAG].off, tpl->tpl[NF9_CUST_TAG].len);
+      pdata->primitives.id = ntohs(pdata->primitives.id);
+    }
+    break;
+  default:
+    break;
+  }
+}
+
+void NF_counters_renormalize_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct struct_header_v5 *hdr5 = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v9 *hdr9 = (struct struct_header_v9 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_int16_t srate = 0, is_sampled = 0;
+
+  switch (hdr->version) {
+  case 5:
+    hdr5 = (struct struct_header_v5 *) pptrs->f_header;
+    is_sampled = ( ntohs(hdr5->sampling) & 0xC000 );
+    srate = ( ntohs(hdr5->sampling) & 0x3FFF );
+    /* XXX: checking srate value instead of is_sampled as Sampling
+       Mode seems not to be a mandatory field. */
+    if (srate) {
+      pdata->pkt_len = pdata->pkt_len * srate;
+      pdata->pkt_num = pdata->pkt_num * srate;
+    }
+    break;
+  default:
+    break;
+  }
+}
+
+#if defined (HAVE_L2)
+void SF_src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
 
   memcpy(pdata->primitives.eth_shost, sample->eth_src, ETH_ADDR_LEN);
 }
 
-void SF_dst_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_dst_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
 
   memcpy(pdata->primitives.eth_dhost, sample->eth_dst, ETH_ADDR_LEN);
 }
 
-void SF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
   
   pdata->primitives.vlan_id = sample->in_vlan;
 }
 #endif
 
-void SF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
   SFLAddress *addr = &sample->ipsrc;
 
@@ -1060,8 +1355,9 @@ void SF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
 #endif
 }
 
-void SF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
   SFLAddress *addr = &sample->ipdst;
 
@@ -1077,8 +1373,9 @@ void SF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
 #endif
 }
 
-void SF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
 
   if (sample->dcd_ipProtocol == IPPROTO_UDP || sample->dcd_ipProtocol == IPPROTO_TCP)
@@ -1086,8 +1383,9 @@ void SF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   else pdata->primitives.src_port = 0;
 }
 
-void SF_dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
 
   if (sample->dcd_ipProtocol == IPPROTO_UDP || sample->dcd_ipProtocol == IPPROTO_TCP)
@@ -1095,112 +1393,178 @@ void SF_dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   else pdata->primitives.dst_port = 0;
 }
 
-void SF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
 
   pdata->primitives.tos = sample->dcd_ipTos;
 }
 
-void SF_ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
 
   pdata->primitives.proto = sample->dcd_ipProtocol; 
 }
 
-void SF_counters_new_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_tcp_flags_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  pdata->tcp_flags = sample->dcd_tcpFlags; 
+}
+
+void SF_counters_new_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
 
   pdata->pkt_len = sample->sampledPacketSize;
   pdata->pkt_num = 1;
-  pdata->pkt_time = 0;
+  pdata->time_start = 0;
+  pdata->time_end = 0;
 
   /* XXX: fragment handling */
 }
 
-u_int8_t SF_crh_memerr = TRUE; /* SF_crh_memerr: allows to return malloc()-related errors once per event */
-void SF_counters_renormalize_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_counters_renormalize_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct xflow_status_entry *entry = (struct xflow_status_entry *) pptrs->f_status;
+  struct xflow_status_entry_sampling *sentry;
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
   u_int32_t eff_srate;
 
-  /* 
-     hash calculation is perfectible: it works fine with IPv4 addresses but
-     will show poor results if applied to IPv6 (matching the high-end class
-     bits - though a minimum dispersion is still achieved by employing the
-     interface index). However, if the number of sFlow agents is limited, it
-     should not have a significative negative impact.
-  */ 
-  u_int32_t hash = (sample->ds_index ^ sample->agent_addr.address.ip_v4.s_addr) % RENORM_TABLE_SZ; 
-  struct SF_renorm_entry *entry = renorm_table[hash];
+  sentry = search_smp_if_status_table(entry->sampling, (sample->ds_class << 24 | sample->ds_index));
+  if (sentry) { 
+    /* flow sequence number is strictly increasing; however we need a) to avoid
+       a division-by-zero by checking the last value and the new one and b) to
+       deal with out-of-order datagrams */
+    if (sample->samplesGenerated > sentry->seqno && sample->samplePool > sentry->sample_pool) {
+      eff_srate = (sample->samplePool-sentry->sample_pool) / (sample->samplesGenerated-sentry->seqno);
+      pdata->pkt_len = pdata->pkt_len * eff_srate;
+      pdata->pkt_num = pdata->pkt_num * eff_srate;
 
-  cycle_again:
-  if (entry) { 
-    if (!memcmp(&entry->agent_addr, &sample->agent_addr, SFLAddressSz) && entry->agentSubId == sample->agentSubId &&
-        entry->ds == (sample->ds_class << 24 | sample->ds_index)) { 
+      sentry->sample_pool = sample->samplePool;
+      sentry->seqno = sample->samplesGenerated;
 
-      /* flow sequence number is strictly increasing; however we need a) to avoid
-         a division-by-zero by checking the last value and the new one and b) to
-	 deal with out-of-order datagrams */
-      if (sample->samplesGenerated > entry->seqno && sample->samplePool > entry->sample_pool) {
-	eff_srate = (sample->samplePool-entry->sample_pool) / (sample->samplesGenerated-entry->seqno);
-	pdata->pkt_len = pdata->pkt_len * eff_srate;
-	pdata->pkt_num = pdata->pkt_num * eff_srate;
-
-        entry->sample_pool = sample->samplePool;
-        entry->seqno = sample->samplesGenerated;
-      }
-      else {
-	pdata->pkt_len = pdata->pkt_len * sample->meanSkipCount;
-	pdata->pkt_num = pdata->pkt_num * sample->meanSkipCount;
-      }
+      return;
     }
-    else {
-      entry = entry->next;
-      goto cycle_again;
+    /* Let's handle long positive/negative jumps as resets */ 
+    else if (MAX(sample->samplesGenerated, sentry->seqno) >
+	    (MIN(sample->samplesGenerated, sentry->seqno)+XFLOW_RESET_BOUNDARY)) {
+      sentry->sample_pool = sample->samplePool;
+      sentry->seqno = sample->samplesGenerated;
     }
   }
   else {
-    if (renorm_table_entries < RENORM_TABLE_MAX_ENTRIES) {
-      entry = malloc(SFrenormEntrySz);
-      if (!entry) {
-        if (SF_crh_memerr) {
-	  Log(LOG_ERR, "ERROR: unable to allocate more entries into the sFlow renormalization table.\n");
-	  SF_crh_memerr = FALSE;
-        }
-      }
-      else {
-        memcpy(&entry->agent_addr, &sample->agent_addr, SFLAddressSz);
-        entry->agentSubId = sample->agentSubId;
-        entry->ds = (sample->ds_class << 24 | sample->ds_index);
-        entry->sample_pool = sample->samplePool;
-        entry->seqno = sample->samplesGenerated; 
-        entry->next = FALSE;
-        if (!renorm_table[hash]) renorm_table[hash] = entry;
-        SF_crh_memerr = TRUE;
-	renorm_table_entries++;
-      }
+    sentry = create_smp_entry_status_table(entry);
+    if (sentry) {
+      sentry->interface = (sample->ds_class << 24 | sample->ds_index);
+      sentry->sample_pool = sample->samplePool;
+      sentry->seqno = sample->samplesGenerated; 
     }
-
-    pdata->pkt_len = pdata->pkt_len * sample->meanSkipCount;
-    pdata->pkt_num = pdata->pkt_num * sample->meanSkipCount;
   }
+
+  pdata->pkt_len = pdata->pkt_len * sample->meanSkipCount;
+  pdata->pkt_num = pdata->pkt_num * sample->meanSkipCount;
 }
 
-void SF_src_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_src_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
   u_int32_t asn32;
   
   pdata->primitives.src_as = sample->src_as;
 }
 
-void SF_dst_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+void SF_dst_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
   SFSample *sample = (SFSample *) pptrs->f_data;
   u_int32_t asn32;
 
   pdata->primitives.dst_as = sample->dst_as;
+}
+
+void SF_sfprobe_payload_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_payload *payload = (struct pkt_payload *) *data;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+  struct pkt_data tmp;
+  char *buf = (char *) *data, *tmpp = (char *) &tmp;
+  int space = (chptr->bufend - chptr->bufptr) - PpayloadSz;
+
+  SF_src_host_handler(chptr, pptrs, &tmpp);
+  SF_dst_host_handler(chptr, pptrs, &tmpp);
+  memcpy(&payload->src_ip, &tmp.primitives.src_ip, HostAddrSz);
+  memcpy(&payload->dst_ip, &tmp.primitives.dst_ip, HostAddrSz);
+
+  payload->cap_len = sample->headerLen;
+  payload->pkt_len = sample->sampledPacketSize;
+  payload->pkt_len = 1; 
+  payload->time_start = time(NULL); /* XXX */
+  payload->class = sample->class;
+  payload->tag = sample->tag;
+
+  if (space >= payload->cap_len) {
+    buf += PpayloadSz;
+    memcpy(buf, sample->header, payload->cap_len);
+    chptr->bufptr += payload->cap_len; /* don't count pkt_payload here */
+  }
+  else {
+    chptr->bufptr += space;
+    chptr->reprocess = TRUE;
+  }
+}
+
+void SF_nfprobe_extras_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct pkt_extras *pextras = (struct pkt_extras *) ++pdata;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  if (sample->lstk.depth) memcpy(&pextras->mpls_top_label, &sample->lstk.stack[0], 4);
+  if (sample->dcd_ipProtocol == IPPROTO_TCP) pextras->tcp_flags = sample->dcd_tcpFlags;
+}
+
+void SF_class_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  pdata->primitives.class = sample->class;
+  pdata->cst.ba = 0;
+  pdata->cst.pa = 0;
+  pdata->cst.fa = 0;
+
+  pdata->cst.stamp.tv_sec = time(NULL); /* XXX */
+  pdata->cst.stamp.tv_usec = 0;
+}
+
+void SF_id_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  pdata->primitives.id = sample->tag;
+}
+
+void sampling_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  pm_counter_t sample_pool = 0;
+
+  evaluate_sampling(&chptr->s, &pdata->pkt_len, &pdata->pkt_num, &sample_pool);
+}
+
+void sfprobe_sampling_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_payload *payload = (struct pkt_payload *) *data;
+
+  evaluate_sampling(&chptr->s, &payload->pkt_len, &payload->pkt_num, &payload->sample_pool);
 }

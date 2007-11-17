@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -25,6 +25,7 @@
 /* prototypes */
 void pgsql_plugin(int, struct configuration *, void *);
 int PG_cache_dbop(struct DBdesc *, struct db_cache *, struct insert_data *);
+int PG_cache_dbop_copy(struct DBdesc *, struct db_cache *, struct insert_data *);
 void PG_cache_purge(struct db_cache *[], int, struct insert_data *);
 int PG_evaluate_history(int);
 int PG_compose_static_queries();
@@ -33,7 +34,6 @@ void PG_Lock(struct DBdesc *);
 void PG_file_close(struct logfile *);
 void PG_DB_Connect(struct DBdesc *, char *);
 void PG_DB_Close(struct BE_descs *);
-void PG_delete_shadows(struct BE_descs *);
 void PG_create_dyn_table(struct DBdesc *, char *);
 static int PG_affected_rows(PGresult *);
 void PG_create_backend(struct DBdesc *);
@@ -53,6 +53,7 @@ static char pgsql_table_v3[] = "acct_v3";
 static char pgsql_table_v4[] = "acct_v4";
 static char pgsql_table_v5[] = "acct_v5";
 static char pgsql_table_v6[] = "acct_v6";
+static char pgsql_table_v7[] = "acct_v7";
 static char pgsql_table_uni[] = "acct_uni";
 static char pgsql_table_uni_v2[] = "acct_uni_v2";
 static char pgsql_table_uni_v3[] = "acct_uni_v3";

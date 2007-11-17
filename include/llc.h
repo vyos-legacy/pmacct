@@ -18,7 +18,7 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * @(#) $Header: /tcpdump/master/tcpdump/llc.h,v 1.13 2001/06/04 05:47:13 guy Exp $ (LBL)
+ * @(#) $Header: /home/repo/pmacct/include/llc.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ (LBL)
  */
 
 /*

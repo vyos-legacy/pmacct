@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -30,7 +30,6 @@
 #include "ports_aggr.h"
 #include "ip_flow.h"
 #include "classifier.h"
-#include "util.h"
 #include "crc32.c"
 
 /* Functions */
@@ -43,7 +42,6 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct timezone tz;
   time_t t, now;
   int timeout, ret, num; 
-#if defined (HAVE_MMAP)
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
@@ -51,7 +49,6 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   unsigned char *rgptr;
   int pollagain = TRUE;
   u_int32_t seq = 1, rg_err_count = 0;
-#endif
 
   memcpy(&config, cfgptr, sizeof(struct configuration));
   recollect_pipe_memory(ptr);
@@ -135,9 +132,7 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   /* plugin main loop */
   for(;;) {
     poll_again:
-#if defined (HAVE_MMAP)
     status->wakeup = TRUE;
-#endif
     ret = poll(&pfd, 1, timeout);
     if (ret < 0) goto poll_again;
 
@@ -165,12 +160,6 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
       break;
     default: /* we received data */
-#if !defined (HAVE_MMAP)
-      if ((ret = read(pipe_fd, pipebuf, config.buffer_size)) == 0) 
-        exit_plugin(1); /* we exit silently; something happened at the write end */
-
-      if (ret < 0) goto poll_again;
-#else
       read_data:
       if (!pollagain) {
         seq++;
@@ -204,7 +193,6 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       memcpy(pipebuf, rg->ptr, bufsz);
       if ((rg->ptr+bufsz) >= rg->end) rg->ptr = rg->base;
       else rg->ptr += bufsz;
-#endif
 
       /* lazy refresh time handling */ 
       if (now > refresh_deadline) {
@@ -244,9 +232,7 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	((struct ch_buf_hdr *)pipebuf)->num--;
         if (((struct ch_buf_hdr *)pipebuf)->num) data++;
       }
-#if defined (HAVE_MMAP)
       goto read_data;
-#endif
     }
   }
 }
@@ -303,9 +289,10 @@ void P_cache_insert(struct pkt_data *data)
 
     if (Cursor) {
       if (timeval_cmp(&data->cst.stamp, &flushtime) >= 0) {
-        Cursor->bytes_counter -= data->cst.ba;
-        Cursor->packet_counter -= data->cst.pa;
-        Cursor->flow_counter -= data->cst.fa;
+	/* MIN(): ToS issue */
+        Cursor->bytes_counter -= MIN(Cursor->bytes_counter, data->cst.ba);
+        Cursor->packet_counter -= MIN(Cursor->packet_counter, data->cst.pa);
+        Cursor->flow_counter -= MIN(Cursor->flow_counter, data->cst.fa);
       }
       else memset(&data->cst, 0, CSSz);
     }
@@ -343,6 +330,7 @@ void P_cache_insert(struct pkt_data *data)
     cache_ptr->packet_counter = data->pkt_num;
     cache_ptr->flow_counter = data->flo_num;
     cache_ptr->bytes_counter = data->pkt_len;
+    cache_ptr->tcp_flags = data->tcp_flags;
     if (config.what_to_count & COUNT_CLASS) {
       cache_ptr->bytes_counter += data->cst.ba;
       cache_ptr->packet_counter += data->cst.pa;
@@ -356,6 +344,7 @@ void P_cache_insert(struct pkt_data *data)
       cache_ptr->packet_counter += data->pkt_num;
       cache_ptr->flow_counter += data->flo_num;
       cache_ptr->bytes_counter += data->pkt_len;
+      cache_ptr->tcp_flags |= data->tcp_flags;
       if (config.what_to_count & COUNT_CLASS) {
         cache_ptr->bytes_counter += data->cst.ba;
         cache_ptr->packet_counter += data->cst.pa;
@@ -367,6 +356,7 @@ void P_cache_insert(struct pkt_data *data)
       cache_ptr->packet_counter = data->pkt_num;
       cache_ptr->flow_counter = data->flo_num;
       cache_ptr->bytes_counter = data->pkt_len;
+      cache_ptr->tcp_flags = data->tcp_flags;
       if (config.what_to_count & COUNT_CLASS) {
         cache_ptr->bytes_counter += data->cst.ba;
         cache_ptr->packet_counter += data->cst.pa;
@@ -441,6 +431,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
 #endif
     printf("%-5d     ", data->src_port);
     printf("%-5d     ", data->dst_port);
+    printf("%-3d        ", queue[j]->tcp_flags);
     printf("%-10s  ", _protocols[data->proto].name);
     printf("%-3d    ", data->tos);
 #if defined HAVE_64BIT_COUNTERS
@@ -477,6 +468,7 @@ void P_write_stats_header()
 #endif
   printf("SRC_PORT  ");
   printf("DST_PORT  ");
+  printf("TCP_FLAGS  ");
   printf("PROTOCOL    ");
   printf("TOS    ");
 #if defined HAVE_64BIT_COUNTERS

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -21,15 +21,16 @@
 
 #define DEFAULT_CHBUFLEN 4096
 #define DEFAULT_PIPE_SIZE 65535
+#define DEFAULT_PLOAD_SIZE 256 
 #define WARNING_PIPE_SIZE 16384000 /* 16 Mb */
 #define MAX_FAILS 5 
-#if defined (HAVE_MMAP)
 #define MAX_SEQNUM 65536 
 #define MAX_RG_COUNT_ERR 3
-#endif
 
 struct channels_list_entry;
-typedef void (*pkt_handler) (struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+typedef void (*pkt_handler) (struct channels_list_entry *, struct packet_ptrs *, char **);
+typedef int (*ring_cleaner) (void *);
+typedef pm_counter_t (*skip_func) (pm_counter_t);
 
 struct ring {
   u_int32_t seq;
@@ -39,9 +40,7 @@ struct ring {
 };
 
 struct ch_buf_hdr {
-#if defined (HAVE_MMAP)
   u_int32_t seq;
-#endif
   int num;
 };
 
@@ -50,36 +49,44 @@ struct ch_status {
 };
 
 struct sampling {
-  u_int32_t rate;
-  u_int32_t counter; 
+  pm_counter_t rate;
+  pm_counter_t counter; 
+  pm_counter_t sample_pool;
+  pm_counter_t sampled_pkts;
+  skip_func sf;
+};
+
+struct aggregate_filter {
+  int *num;
+  struct bpf_program **table;
 };
 
 struct channels_list_entry {
   u_int32_t aggregation;
-#if !defined (HAVE_MMAP)
-  char *buf;		/* ptr to buffer base address */
-  char *bufptr;		/* ptr to buffer current address */
-  char *bufend;		/* ptr to buffer end address */
-#else
   u_int32_t buf;	/* buffer base */
   u_int32_t bufptr;	/* buffer current */
   u_int32_t bufend;	/* buffer end; max 4Gb */
   struct ring rg;	
   struct ch_buf_hdr hdr;
   struct ch_status *status;
-  u_int8_t request;			/* does the plugin support on-request wakeup ? */
-#endif
+  ring_cleaner clean_func;
+  u_int8_t request;					/* does the plugin support on-request wakeup ? */
+  u_int8_t reprocess;					/* do we need to jump back for packet reprocessing ? */
   int bufsize;		
   int same_aggregate;
   pkt_handler phandler[N_PRIMITIVES];
-  struct bpf_program *filter;
   int pipe;
-  u_int16_t id;				/* used to tag packets passing through the channel (post tag) */
-  struct pretag_filter tag_filter; 	/* used it to filter pre-tagged packets basing on their id */
+  u_int16_t id;						/* post-tagging id */
+  struct pretag_filter tag_filter; 			/* filter aggregates basing on their tag */
+  struct aggregate_filter agg_filter; 			/* filter aggregates basing on L2-L4 primitives */
   struct sampling s;
+  struct plugins_list_entry *plugin;			/* backpointer to the plugin the actual channel belongs to */
 };
 
 #if (defined __PLUGIN_HOOKS_C)
+#if (defined ENABLE_THREADS)
+pthread_mutex_t *channels_list_mutex;
+#endif
 extern struct channels_list_entry channels_list[MAX_N_PLUGINS];
 #endif
 
@@ -91,15 +98,24 @@ extern struct channels_list_entry channels_list[MAX_N_PLUGINS];
 #endif
 EXT void load_plugins(struct plugin_requests *);
 EXT void exec_plugins(struct packet_ptrs *pptrs);
+EXT void load_plugin_filters(int);
 EXT struct channels_list_entry *insert_pipe_channel(struct configuration *, int); 
 EXT void delete_pipe_channel(int);
 EXT void sort_pipe_channels();
 EXT void init_pipe_channels();
-EXT int evaluate_sampling(struct sampling *);
 EXT int evaluate_tags(struct pretag_filter *, u_int16_t);
+EXT int evaluate_filters(struct aggregate_filter *, char *, struct pcap_pkthdr *);
 EXT void recollect_pipe_memory(struct channels_list_entry *);
 EXT void init_random_seed();
 EXT void fill_pipe_buffer();
+EXT int check_shadow_status(struct packet_ptrs *, struct channels_list_entry *);
+EXT int pkt_data_clean(void *);
+EXT int pkt_payload_clean(void *);
+EXT int pkt_extras_clean(void *);
+EXT void evaluate_sampling(struct sampling *, pm_counter_t *, pm_counter_t *, pm_counter_t *);
+EXT pm_counter_t take_simple_random_skip(pm_counter_t);
+EXT pm_counter_t take_simple_systematic_skip(pm_counter_t);
+
 #undef EXT
 
 #if (defined __PLUGIN_HOOKS_C)
@@ -109,6 +125,8 @@ EXT void fill_pipe_buffer();
 #endif
 EXT void imt_plugin(int, struct configuration *, void *);
 EXT void print_plugin(int, struct configuration *, void *);
+EXT void nfprobe_plugin(int, struct configuration *, void *);
+EXT void sfprobe_plugin(int, struct configuration *, void *);
 
 #ifdef WITH_MYSQL
 EXT void mysql_plugin(int, struct configuration *, void *);
@@ -121,6 +139,8 @@ EXT void pgsql_plugin(int, struct configuration *, void *);
 #ifdef WITH_SQLITE3
 EXT void sqlite3_plugin(int, struct configuration *, void *);
 #endif
+
+EXT void stats_plugin(int, struct configuration *, void *);
 
 EXT char *extract_token(char **, int);
 #undef EXT

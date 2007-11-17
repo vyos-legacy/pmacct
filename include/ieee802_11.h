@@ -1,4 +1,4 @@
-/* @(#) $Header: /tcpdump/master/tcpdump/ieee802_11.h,v 1.3 2001/06/14 09:50:01 guy Exp $ (LBL) */
+/* @(#) $Header: /home/repo/pmacct/include/ieee802_11.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ (LBL) */
 /*
  * Copyright (c) 2001
  *	Fortress Technologies

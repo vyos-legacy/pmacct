@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -78,9 +78,10 @@ void insert_accounting_structure(struct pkt_data *data)
     if (elem_acc) {
       if (timeval_cmp(&data->cst.stamp, &elem_acc->rstamp) >= 0 && 
 	  timeval_cmp(&data->cst.stamp, &table_reset_stamp) >= 0) {
-        elem_acc->bytes_counter -= data->cst.ba;
-        elem_acc->packet_counter -= data->cst.pa;
-        elem_acc->flow_counter -= data->cst.fa;
+	/* MIN(): ToS issue */
+        elem_acc->bytes_counter -= MIN(elem_acc->bytes_counter, data->cst.ba);
+        elem_acc->packet_counter -= MIN(elem_acc->packet_counter, data->cst.pa);
+        elem_acc->flow_counter -= MIN(elem_acc->flow_counter, data->cst.fa);
       } 
       else memset(&data->cst, 0, CSSz);
     }
@@ -105,6 +106,7 @@ void insert_accounting_structure(struct pkt_data *data)
         elem_acc->packet_counter += data->pkt_num;
         elem_acc->flow_counter += data->flo_num;
         elem_acc->bytes_counter += data->pkt_len;
+	elem_acc->tcp_flags |= data->tcp_flags;
         if (config.what_to_count & COUNT_CLASS) {
           elem_acc->packet_counter += data->cst.pa;
           elem_acc->bytes_counter += data->cst.ba;
@@ -125,6 +127,7 @@ void insert_accounting_structure(struct pkt_data *data)
         elem_acc->packet_counter += data->pkt_num;
         elem_acc->flow_counter += data->flo_num;
         elem_acc->bytes_counter += data->pkt_len;
+	elem_acc->tcp_flags |= data->tcp_flags;
 	if (config.what_to_count & COUNT_CLASS) {
 	  elem_acc->packet_counter += data->cst.pa;
 	  elem_acc->bytes_counter += data->cst.ba;
@@ -140,6 +143,7 @@ void insert_accounting_structure(struct pkt_data *data)
       elem_acc->packet_counter += data->pkt_num;
       elem_acc->flow_counter += data->flo_num;
       elem_acc->bytes_counter += data->pkt_len;
+      elem_acc->tcp_flags |= data->tcp_flags;
       elem_acc->signature = hash;
       if (config.what_to_count & COUNT_CLASS) {
         elem_acc->packet_counter += data->cst.pa;
@@ -189,6 +193,7 @@ void insert_accounting_structure(struct pkt_data *data)
       elem_acc->packet_counter += data->pkt_num;
       elem_acc->flow_counter += data->flo_num;
       elem_acc->bytes_counter += data->pkt_len;
+      elem_acc->tcp_flags = data->tcp_flags;
       elem_acc->signature = hash; 
       if (config.what_to_count & COUNT_CLASS) {
         elem_acc->packet_counter += data->cst.pa;
@@ -212,5 +217,6 @@ void reset_counters(struct acc *elem)
   elem->reset_flag = FALSE;
   elem->packet_counter = 0;
   elem->bytes_counter = 0;
+  elem->tcp_flags = 0;
   memcpy(&elem->rstamp, &cycle_stamp, sizeof(struct timeval));
 }

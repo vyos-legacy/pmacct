@@ -1,5 +1,14 @@
 #!/bin/sh
 
+### BEGIN INIT INFO
+# Provides: pmacct
+# Required-start: $network $syslog
+# Required-stop: $network $syslog
+# Default-start: 2 3 4 5
+# Default-stop: 0 1 6
+# Short-Description: promiscuous mode accounting daemon
+### END INIT INFO
+
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 DAEMON=/usr/sbin/pmacctd
 NAME=pmacctd

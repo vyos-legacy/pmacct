@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -18,6 +18,13 @@
     along with this program; if not, write to the Free Software
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
+
+#ifndef _IP_FLOW_H_
+#define _IP_FLOW_H_
+
+#if defined ENABLE_THREADS
+#include "thread_pool.h"
+#endif
 
 /* defines */
 #define FLOW_TABLE_HASHSZ 256 
@@ -122,11 +129,19 @@ EXT void prune_old_flows6(struct timeval *);
 #endif
 
 /* global vars */
-EXT struct ip_flow *ip_flow_table[FLOW_TABLE_HASHSZ];
+EXT struct ip_flow **ip_flow_table;
 EXT struct flow_lru_l flow_lru_list;
 
+#if defined ENABLE_THREADS
+pthread_mutex_t *ip_flow_table_mutex;
+pthread_mutex_t *flow_lru_list_mutex;
+EXT void t_ip_flow_handler(struct packet_ptrs *);
+#endif
+
 #if defined ENABLE_IPV6
-EXT struct ip_flow6 *ip_flow_table6[FLOW_TABLE_HASHSZ];
+EXT struct ip_flow6 **ip_flow_table6;
 EXT struct flow_lru_l6 flow_lru_list6;
 #endif
 #undef EXT
+
+#endif /* _IP_FLOW_H_ */

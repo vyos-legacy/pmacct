@@ -1,5 +1,5 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 
 A brief preamble: this FAQ document is pretty young and fresh. Because of this you
 should not expect to find all possible answers here, that is, please don't take it
@@ -20,7 +20,18 @@ A: 'pmacct' is intended to be the name of the project; 'pmacctd' is the name of 
    and aggregation daemon which entered the project starting from version 0.9.0.  
 
 
-Q3: I use flow-tools since many years and, because of the actual working environment,
+Q3: What does pmacct offer, what can it do for me, what are its main features ? 
+A: pmacct can collect and export network data. Collect in memory tables, SQL databases
+   (MySQL, PostgreSQL, SQLite 3.x). Export data speaking sFlow v5 and NetFlow v1/v5/v9.
+   pmacct is suitable to aggregate data. It can perform tagging, to mark data subsets
+   (up to singular flow granularity), classification (ie. this is Kazaa, that http and
+   that eDonkey), filtering, random sampling and renormalization. It's actually not
+   suitable to log raw data (ie. packet-by-packet as tcpdump does or flow-by-flow as
+   flow-tools or sflowtool do). And finally it has not been thought to write into flat
+   files.
+
+
+Q4: I use flow-tools since many years and, because of the actual working environment,
    i cannot simply replace the flow-capture with nfacctd as NetFlow collector. So, do
    i have any change to let flow-tools and pmacct work together ?
 A: Yes. Some reasonable approaches follow:
@@ -43,7 +54,8 @@ A: Yes. Some reasonable approaches follow:
    is, not limited to just pmacct and flow-tools) and should be lighter (because of no
    PDU verificaiton, no time handling, etc.). 
 
-Q4: When using the libpcap-based daemon, 'pmacctd', i feel the sensation of an high
+
+Q5: When using the libpcap-based daemon, 'pmacctd', i feel the sensation of an high
    CPU usage: i see the 'pmacctd' process lurking a great CPU share. Any chance to
    reduce it ?  
 A: Yes, there are good chances to reduce the CPU usage, posed that the CPU you are
@@ -83,7 +95,7 @@ A: Yes, there are good chances to reduce the CPU usage, posed that the CPU you a
    '4096000' are sufficient for most common environments. 
 
 
-Q5: I wish to account all traffic of my network, with an host breakdown; but i'm not
+Q6: I wish to account all traffic of my network, with an host breakdown; but i'm not
    interested in having the DB polluted from statistics about 'internet' hosts. Do
    i'm really forced to waste system resources and space ? Do i necessarily need to
    run more daemon instances ? 
@@ -118,7 +130,7 @@ A: No, you will be able to run a single daemon, attaching multiple plugins to it
    Where 'networks.lst' is a (local) networks definition file.  
 
 
-Q6: I'm intimately fashioned by the idea of seeing all traffic flows in my network; i wish
+Q7: I'm intimately fashioned by the idea of seeing all traffic flows in my network; i wish
    to aggregate my data enabling 'src_host,dst_host' primitives and run without any filter.
    I wish to see *EVERYTHING* !
 A: Many technical consideration may be spent on this topic but they all have a common root: 
@@ -130,7 +142,7 @@ A: Many technical consideration may be spent on this topic but they all have a c
    in SQL queries each few minutes. 
 
 
-Q7: I use 'pmacctd', the libpcap-based daemon. What portion of the packets being captured from
+Q8: I use 'pmacctd', the libpcap-based daemon. What portion of the packets being captured from
    the network is included into the bytes counter ?
 A: The portion of the packet accounted starts from the IPv4/IPv6 header (inclusive) and ends
    with the last bit of the packet payload. This means that are excluded from the accounting:
@@ -149,14 +161,14 @@ A: The portion of the packet accounted starts from the IPv4/IPv6 header (inclusi
    directly by pmacct via the 'adjb' action, inside a 'sql_preprocess' directive.
 
 
-Q8: How to get the historical accounting enabled ? I see the SQL table having 'stamp_inserted'
+Q9: How to get the historical accounting enabled ? I see the SQL table having 'stamp_inserted'
    and 'stamp_updated' fields but they do not get any value. 
 A: Historical accounting gets enabled by adding to the configuration a 'sql_history' directive.
    It's also highly adviceable to associate a 'sql_history_roundoff' to it. For details about
    the syntax of the two directives and some examples, take a look to the CONFIG-KEYS document. 
 
 
-Q9: While giving a look to the ugly 'numbers' returned by either a SQL query or pmacct
+Q10: While giving a look to the ugly 'numbers' returned by either a SQL query or pmacct
    client, i feel a deep sense of 'pretty useless'. Do i have any chance to graph them ?
 A: RRDtool, MRTG and GNUplot are just some tools which could be easily integrated with pmacct
    operations. 'Memory plugin' is suitable as temporary storage and allows to easily retrieve
@@ -211,7 +223,7 @@ A: RRDtool, MRTG and GNUplot are just some tools which could be easily integrate
    bare shell scripts that could be taken as reference to accomplish this kind of tasks.
 
 
-Q10: I wish to use NetFlow accounting; but my router generates times in seconds rather than
+Q11: I wish to use NetFlow accounting; but my router generates times in seconds rather than
    in msecs. What to do ?
 A: You have to use nfacctd together with a configuration file; then you have to insert the
    'nfacctd_time_secs: true' line in it. Remember that 'nfacctd' is also able to generate
@@ -220,7 +232,7 @@ A: You have to use nfacctd together with a configuration file; then you have to 
    configuration file. 
 
 
-Q11: The network equipment i'm using supports sFlow but i don't know how to enable it. I'm 
+Q12: The network equipment i'm using supports sFlow but i don't know how to enable it. I'm 
    unable to find any sflow-related command. What to do ?
 A: If you are unable to enable sFlow commandline, you have to resort to the SNMP way. The
    sFlow MIB is documented into the RFC 3176; all you will need is to enable a SNMP community
@@ -228,7 +240,7 @@ A: If you are unable to enable sFlow commandline, you have to resort to the SNMP
    the following URL: http://www.inmon.com/technology/sflowenable 
 
 
-Q12: I've configured the pmacct package in order to support IPv6 via the '--enable-ipv6' switch.
+Q13: I've configured the pmacct package in order to support IPv6 via the '--enable-ipv6' switch.
    Now, when i launch either nfacctd or sfacctd i receive the following error message:
    ERROR ( default/core ): socket() failed. What to do ? 
 A: When IPv6 code is enabled, both sfacctd and nfacctd will try to fire up an IPv6 socket. The
@@ -238,7 +250,7 @@ A: When IPv6 code is enabled, both sfacctd and nfacctd will try to fire up an IP
    a commandline like the following: 'nfacctd [ ... options ... ] -L 192.168.0.14'.  
 
 
-Q13: I'm using the memory plugin to store data temporarily. Each bunch of seconds i use the
+Q14: I'm using the memory plugin to store data temporarily. Each bunch of seconds i use the
    pmacct client to gather statistics and then resetting them. The problem is the volume of
    data exchanged often makes not suitable the use of 32bit counters. What to do ?
 A: pmacct >= 0.9.2 sports a new configure switch '--enable-64bit'; by supplying it, the source
@@ -249,7 +261,7 @@ A: pmacct >= 0.9.2 sports a new configure switch '--enable-64bit'; by supplying 
    one or more rollovers. 
  
 
-Q14: SQL table versions, what they are -- why and when do i need them ?  
+Q15: SQL table versions, what they are -- why and when do i need them ?  
 A: You need to get involved with SQL tables when you use a SQL plugin (*astonishment and
    surprise*); pmacct gets shipped with so called 'default' tables; they are built by SQL
    scripts in 'sql/' section of the distritubtion tarball. Default tables enable you to
@@ -276,7 +288,7 @@ A: You need to get involved with SQL tables when you use a SQL plugin (*astonish
    configuration:  'sql_table_version: [1|2|3|4|5]'
 
 
-Q15: What is the best way to kill a running instance of pmacct avoiding data loss ?
+Q16: What is the best way to kill a running instance of pmacct avoiding data loss ?
 A: You have two chances. a) just kill a specific plugin that you need no more: you will have
    to identify it and fire the 'kill -INT <process number> command; b) kill the whole pmacct
    instance: you can either fire the 'killall -INT <daemon name>' command or identify the Core
@@ -285,7 +297,38 @@ A: You have two chances. a) just kill a specific plugin that you need no more: y
    the exit to the running plugins (which in turn will clear cached data as needed - eg. the 
    SQL plugins case) and finally will nicely take the exit lane itself. To identify the Core
    Process you can either take a look to the process list (where setproctitle() is supported
-   by pmacct) or use the 'pidfile' (-F) directive.  
+   by pmacct) or use the 'pidfile' (-F) directive. Note also that shutting down nicely the
+   daemon improves restart turn-around times: the existing daemon will, first thing, close
+   its listening socket while the newly launched one will take advantage of the SO_REUSEADDR
+   socket option. 
+
+
+Q17: I find interesting store network data in a SQL database. But i'm actually hitting poor 
+   performances. Do you have any tips to improve/optimize things ?
+A: Few simple hints are summed here in order to improve SQL database performances. They are
+   not really tailored to a specific SQL engine (ie. just MySQL, PostgreSQL) but of generic
+   use. Many thanks to Wim Kerkhoff for the many suggestions he gathered on this topic over
+   the time: 
+
+   * Keep only necessary fields in the schema, remove all unused. Use sql_optimize_clauses 
+     in order to reflect this scenario.
+   * Try avoid using UPDATEs, thus enabling an INSERT-only scenario. Give a closer look to
+     sql_dont_try_update. Holding sql_history == sql_refresh_time will be a pre-condition. 
+   * If the previous point holds, then look for and enable database-specific directives
+     aimed to optimize performances ie. sql_multi_values for MySQL and sql_use_copy for
+     PostgreSQL.
+   * Don't rely automagically on standard indexes but enable optimal indexes based on queries
+     spawned by a) pmacct daemon and b) SQL reports (ie. external tools, web pages, scripts,
+     etc.) to SELECT data. Then remove each unused index as they would negatively affect
+     performances.  
+   * Run all SELECT and UPDATE queries under the "EXPLAIN ANALYZE ..." method to see if they
+     are actually hitting the indexes. If not, you need to build indexes that better fit the
+     actual scenario. See the point above.
+   * Sometimes run "SET enable_seqscan=no;" before a SELECT query can make a big difference.
+     Don't underestimate the importance of daily VACUUM queries: 3-5 VACUUMs + 1 VACUUM FULL
+     is generally a good idea. These tips hold for PostgreSQL.
+   * Disabling fsync() does improve performance. But remember this will have almost horrible
+     consequences in the case of not-proper shutdowns (remember power/UPS failures ..). 
 
 
 /* EOF */

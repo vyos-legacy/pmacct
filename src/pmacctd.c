@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -32,6 +32,7 @@
 #include "ip_frag.h"
 #include "ip_flow.h"
 #include "net_aggr.h"
+#include "thread_pool.h"
 
 /* variables to be exported away */
 int debug;
@@ -52,12 +53,12 @@ void usage_daemon(char *prog_name)
   printf("\nGeneral options:\n");
   printf("  -h  \tShow this page\n");
   printf("  -f  \tLoad configuration from the specified file\n");
-  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t flows | class | none ] \n\tAggregation string (DEFAULT: src_host)\n");
+  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t flows | class | tcpflags | none ] \n\tAggregation string (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
   printf("  -N  \tDisable promiscuous mode\n");
   printf("  -n  \tPath to a file containing Network definitions\n");
   printf("  -o  \tPath to a file containing Port definitions\n");
-  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 ] \n\tActivate plugin\n"); 
+  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | nfprobe | sfprobe ] \n\tActivate plugin\n"); 
   printf("  -d  \tEnable debug\n");
   printf("  -i  \tListen on the specified interface\n");
   printf("  -I  \tRead packets from the specified savefile\n");
@@ -72,7 +73,7 @@ void usage_daemon(char *prog_name)
   printf("  -s  \tMemory pool size\n");
   printf("\nPostgreSQL (-P pgsql)/MySQL (-P mysql)/SQLite (-P sqlite3) plugin options:\n");
   printf("  -r  \tRefresh time (in seconds)\n");
-  printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 ] \n\tTable version\n");
+  printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 | 7 ] \n\tTable version\n");
   printf("\n");
   printf("Examples:\n");
   printf("  Daemonize the process; listen on eth0; write stats in a MySQL database\n"); 
@@ -125,6 +126,7 @@ int main(int argc,char **argv, char **envp)
   config.acct_type = ACCT_PM;
 
   rows = 0;
+  glob_pcapt = NULL;
 
   /* getting commandline values */
   while (!errflag && ((cp = getopt(argc, argv, ARGS_PMACCTD)) != -1)) {
@@ -267,6 +269,7 @@ int main(int argc,char **argv, char **envp)
 
   /* Let's check whether we need superuser privileges */
   if (config.snaplen) psize = config.snaplen;
+  else config.snaplen = psize;
 
   if (!config.pcap_savefile) {
     if (getuid() != 0) {
@@ -298,45 +301,103 @@ int main(int argc,char **argv, char **envp)
     Log(LOG_INFO, "INFO ( default/core ): Start logging ...\n");
   }
 
-  if (config.classifiers_path && config.sampling_rate) {
-    Log(LOG_ERR, "ERROR: Packet sampling and classification are actually mutual exclusive.\n");
-    exit(1);
-  }
+  if (config.logfile) config.logfile_fd = open_logfile(config.logfile);
 
   /* Enforcing policies over aggregation methods */
   list = plugins_list;
   while (list) {
-    if (strcmp(list->type.string, "core")) {
-      evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
-      if (list->cfg.what_to_count & (COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_SUM_PORT))
+    if (list->type.id != PLUGIN_ID_CORE) {
+      if (list->type.id == PLUGIN_ID_NFPROBE) {
+	if (config.classifiers_path && list->cfg.sampling_rate) {
+	  Log(LOG_ERR, "ERROR: Packet sampling and classification are actually mutual exclusive.\n");
+	  exit(1);
+	}
 	config.handle_fragments = TRUE;
-      if (list->cfg.what_to_count & COUNT_FLOWS) {
-	config.handle_fragments = TRUE;
-	config.handle_flows = TRUE;
-      }
-      if (list->cfg.what_to_count & COUNT_CLASS) {
-        config.handle_fragments = TRUE;
-        config.handle_flows = TRUE;
-      }
-      if (!list->cfg.what_to_count) {
-	Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
+	list->cfg.nfprobe_what_to_count = list->cfg.what_to_count;
+	list->cfg.what_to_count = 0;
+#if defined (HAVE_L2)
+	if (list->cfg.nfprobe_version == 9) {
+	  list->cfg.what_to_count |= COUNT_SRC_MAC;
+	  list->cfg.what_to_count |= COUNT_DST_MAC;
+	  list->cfg.what_to_count |= COUNT_VLAN;
+	}
+#endif
 	list->cfg.what_to_count |= COUNT_SRC_HOST;
+	list->cfg.what_to_count |= COUNT_DST_HOST;
+	list->cfg.what_to_count |= COUNT_SRC_PORT;
+	list->cfg.what_to_count |= COUNT_DST_PORT;
+	list->cfg.what_to_count |= COUNT_IP_TOS;
+	list->cfg.what_to_count |= COUNT_IP_PROTO;
+	if (list->cfg.networks_file) {
+	  list->cfg.what_to_count |= COUNT_SRC_AS;
+	  list->cfg.what_to_count |= COUNT_DST_AS;
+	}
+	if (list->cfg.nfprobe_version == 9 && list->cfg.classifiers_path) {
+	  list->cfg.what_to_count |= COUNT_CLASS; 
+	  config.handle_flows = TRUE;
+	}
+	if (list->cfg.nfprobe_version == 9 && list->cfg.pre_tag_map)
+	  list->cfg.what_to_count |= COUNT_ID;
+	list->cfg.what_to_count |= COUNT_COUNTERS;
+
+	list->cfg.data_type = PIPE_TYPE_METADATA;
+	list->cfg.data_type |= PIPE_TYPE_EXTRAS;
       }
-      if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file) { 
-        Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
-        exit(1);
+      else if (list->type.id == PLUGIN_ID_SFPROBE) {
+        config.handle_fragments = FALSE;
+	if (psize < 128) psize = config.snaplen = 128; /* SFL_DEFAULT_HEADER_SIZE */
+	list->cfg.what_to_count = COUNT_PAYLOAD;
+	if (list->cfg.classifiers_path) {
+	  list->cfg.what_to_count |= COUNT_CLASS;
+	  config.handle_fragments = TRUE;
+	  config.handle_flows = TRUE;
+	}
+	if (list->cfg.pre_tag_map) list->cfg.what_to_count |= COUNT_ID;
+
+	list->cfg.data_type = PIPE_TYPE_PAYLOAD;
       }
-      if ((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) && !list->cfg.networks_file && !list->cfg.networks_mask) {
-	Log(LOG_ERR, "ERROR ( %s/%s ): NET aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
-	exit(1);
+      else {
+        if (config.classifiers_path && list->cfg.sampling_rate) {
+	  Log(LOG_ERR, "ERROR: Packet sampling and classification are actually mutual exclusive.\n");
+	  exit(1);
+        }
+	evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
+	if (list->cfg.what_to_count & (COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_SUM_PORT|COUNT_TCPFLAGS))
+	  config.handle_fragments = TRUE;
+	if (list->cfg.what_to_count & COUNT_FLOWS) {
+	  config.handle_fragments = TRUE;
+	  config.handle_flows = TRUE;
+	}
+	if (list->cfg.what_to_count & COUNT_CLASS) {
+	  config.handle_fragments = TRUE;
+	  config.handle_flows = TRUE;
+	}
+	if (!list->cfg.what_to_count) {
+	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
+	  list->cfg.what_to_count |= COUNT_SRC_HOST;
+	}
+	if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file) { 
+	  Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
+	  exit(1);
+	}
+	if ((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) && !list->cfg.networks_file && !list->cfg.networks_mask) {
+	  Log(LOG_ERR, "ERROR ( %s/%s ): NET aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
+	  exit(1);
+	}
+	if (list->cfg.what_to_count & COUNT_CLASS && !list->cfg.classifiers_path) {
+	  Log(LOG_ERR, "ERROR ( %s/%s ): 'class' aggregation selected but NO 'classifiers' key specified. Exiting...\n\n", list->name, list->type.string);
+	  exit(1);
+	}
+	list->cfg.what_to_count |= COUNT_COUNTERS;
+	list->cfg.data_type = PIPE_TYPE_METADATA;
       }
-      if (list->cfg.what_to_count & COUNT_CLASS && !list->cfg.classifiers_path) {
-        Log(LOG_ERR, "ERROR ( %s/%s ): 'class' aggregation selected but NO 'classifiers' key specified. Exiting...\n\n", list->name, list->type.string);
-        exit(1);
-      }
-    } 
+    }
     list = list->next;
   }
+
+#if defined ENABLE_THREADS
+  if (!config.flow_handling_threads) config.flow_handling_threads = DEFAULT_TH_NUM; 
+#endif
 
   /* plugins glue: creation (since 094) */
   if (config.classifiers_path) {
@@ -406,6 +467,7 @@ int main(int argc,char **argv, char **envp)
     if (device.link_type == _devices[index].link_type)
       device.data = &_devices[index];
   }
+  load_plugin_filters(device.link_type);
 
   /* we need to solve some link constraints */
   if (device.data == NULL) {
@@ -472,7 +534,10 @@ int main(int argc,char **argv, char **envp)
 
   /* When reading packets from a savefile, things are lightning fast; we will sit 
      here just few seconds, thus allowing plugins to complete their startup operations */ 
-  if (config.pcap_savefile) sleep(2);
+  if (config.pcap_savefile) {
+    Log(LOG_INFO, "INFO ( default/core ): PCAP capture file, sleeping for 2 seconds\n");
+    sleep(2);
+  }
 
   /* Main loop: if pcap_loop() exits maybe an error occurred; we will try closing
      and reopening again our listening device */
@@ -492,6 +557,7 @@ int main(int argc,char **argv, char **envp)
     if (config.pcap_savefile) {
       if (config.sf_wait) {
 	fill_pipe_buffer();
+	Log(LOG_INFO, "INFO ( default/core ): finished reading PCAP capture file\n");
 	wait(NULL);
       }
       stop_all_childs();
@@ -513,13 +579,20 @@ void pcap_cb(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *buf)
     pptrs.pkthdr = (struct pcap_pkthdr *) pkthdr;
     pptrs.packet_ptr = (u_char *) buf;
     pptrs.mac_ptr = 0; pptrs.vlan_ptr = 0; pptrs.mpls_ptr = 0;
-    pptrs.pf = 0;
+    pptrs.pf = 0; pptrs.shadow = 0; pptrs.tag_dist = 1; pptrs.tag = 0;
+    pptrs.class = 0;
     pptrs.idtable = cb_data->idt;
     (*device->data->handler)(pkthdr, &pptrs);
     if (pptrs.iph_ptr) {
       if ((*pptrs.l3_handler)(&pptrs)) {
 	if (config.pre_tag_map) pptrs.tag = PM_find_id(&pptrs);
+#ifdef ENABLE_THREADS
+	/* If we are not calling t_ip_flow_handler(), ie. not using classification
+	   or counting flows, we still need to give a kick to exec_plugins() here */ 
+	if ( !(config.what_to_count & COUNT_FLOWS) ) exec_plugins(&pptrs); 
+#else
 	exec_plugins(&pptrs); 
+#endif
       }
     }
   }
@@ -598,8 +671,17 @@ int ip_handler(register struct packet_ptrs *pptrs)
 	if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_ACK && pptrs->tcp_flags) pptrs->tcp_flags |= TH_ACK; 
       }
 
+#if defined ENABLE_THREADS
+      t_ip_flow_handler(pptrs);
+#else
       ip_flow_handler(pptrs);
+#endif
     }
+
+    /* XXX: optimize/short circuit here! */
+    pptrs->tcp_flags = FALSE;
+    if (pptrs->l4_proto == IPPROTO_TCP && off_l4+TCPFlagOff+1 <= caplen)
+      pptrs->tcp_flags = ((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags; 
   }
 
   quit:
@@ -708,8 +790,17 @@ int ip6_handler(register struct packet_ptrs *pptrs)
         if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_ACK && pptrs->tcp_flags) pptrs->tcp_flags |= TH_ACK;
       }
 
+#if defined ENABLE_THREADS
+      t_ip_flow6_handler(pptrs);
+#else
       ip_flow6_handler(pptrs);
+#endif
     }
+
+    /* XXX: optimize/short circuit here! */
+    pptrs->tcp_flags = FALSE;
+    if (pptrs->l4_proto == IPPROTO_TCP && off_l4+TCPFlagOff+1 <= caplen)
+      pptrs->tcp_flags = ((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags;
   }
 
   quit:
@@ -725,7 +816,21 @@ int PM_find_id(struct packet_ptrs *pptrs)
   id = 0;
   for (x = 0; x < t->ipv4_num; x++) {
     for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
-    if (id) break;
+    if (id) {
+      if (t->e[x].stack.func) id = (*t->e[x].stack.func)(id, pptrs->tag);
+      pptrs->tag = id;
+      pptrs->tag_dist = t->e[x].ret; 
+
+      if (t->e[x].jeq.ptr) {
+	exec_plugins(pptrs);
+
+	x = t->e[x].jeq.ptr->pos;
+	x--; /* yes, it will be automagically incremented by the for() cycle */
+	if (t->e[x].ret) set_shadow_status(pptrs);
+	id = 0;
+      }
+      else break;
+    }
   }
 
   return id;
@@ -737,6 +842,8 @@ void compute_once()
 
   CounterSz = sizeof(dummy.pkt_len);
   PdataSz = sizeof(struct pkt_data);
+  PpayloadSz = sizeof(struct pkt_payload);
+  PextrasSz = sizeof(struct pkt_extras);
   ChBufHdrSz = sizeof(struct ch_buf_hdr);
   CharPtrSz = sizeof(char *);
   IP4HdrSz = sizeof(struct my_iphdr);

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -21,25 +21,62 @@
 
 /* Pre-Tag map stuff */
 #define N_MAP_HANDLERS 10 
+#define MAX_LABEL_LEN 32
+#define MAX_PRETAG_MAP_ENTRIES 384 
 
 typedef int (*pretag_handler) (struct packet_ptrs *, void *, void *);
+typedef pm_id_t (*pretag_stack_handler) (pm_id_t, pm_id_t);
+
+typedef struct {
+  u_int8_t neg;
+  u_int8_t n;
+} pt_uint8_t;
+
+typedef struct {
+  u_int8_t neg;
+  u_int16_t n;
+} pt_uint16_t;
+
+typedef struct {
+  u_int8_t neg;
+  u_int32_t n;
+} pt_uint32_t;
+
+typedef struct {
+  u_int8_t neg;
+  struct host_addr a;
+} pt_hostaddr_t;
+
+typedef struct {
+  char *label;
+  struct id_entry *ptr;
+} pt_jeq_t;
+
+typedef struct {
+  pretag_stack_handler func; 
+} pt_stack_t;
 
 struct id_entry {
   pm_id_t id;
-  struct host_addr agent_ip;
-  struct host_addr nexthop;
-  struct host_addr bgp_nexthop;
-  u_int32_t input; /* input interface index */
-  u_int32_t output; /* output interface index */
-  u_int8_t engine_type;
-  u_int8_t engine_id;
-  u_int32_t agent_id; /* applies to sFlow's agentSubId */
-  u_int32_t sampling_rate; /* applies to sFlow's sampling rate */
-  u_int16_t src_as;
-  u_int16_t dst_as; 
+  pm_id_t pos;
+  pt_hostaddr_t agent_ip;
+  pt_hostaddr_t nexthop;
+  pt_hostaddr_t bgp_nexthop;
+  pt_uint32_t input; /* input interface index */
+  pt_uint32_t output; /* output interface index */
+  pt_uint8_t engine_type;
+  pt_uint8_t engine_id;
+  pt_uint32_t agent_id; /* applies to sFlow's agentSubId */
+  pt_uint32_t sampling_rate; /* applies to sFlow's sampling rate */
+  pt_uint16_t src_as;
+  pt_uint16_t dst_as; 
   struct bpf_program filter;
-  u_int8_t v8agg;
+  pt_uint8_t v8agg;
   pretag_handler func[N_MAP_HANDLERS];
+  char label[MAX_LABEL_LEN];
+  pt_jeq_t jeq;
+  u_int8_t ret;
+  pt_stack_t stack;
 };
 
 struct id_table {
@@ -50,7 +87,7 @@ struct id_table {
   struct id_entry *ipv6_base;
   unsigned short int ipv6_num;
 #endif
-  struct id_entry e[MAX_MAP_ENTRIES];
+  struct id_entry *e;
   time_t timestamp;
 };
 
@@ -61,7 +98,7 @@ struct _map_dictionary_line {
 
 struct pretag_filter {
   u_int16_t num;
-  u_int16_t table[MAX_MAP_ENTRIES/4];
+  pt_uint16_t table[MAX_PRETAG_MAP_ENTRIES/4];
 };
 
 /* prototypes */
@@ -71,5 +108,6 @@ struct pretag_filter {
 #define EXT
 #endif
 EXT void load_id_file(int, char *, struct id_table *, struct plugin_requests *);
+EXT u_int8_t pt_check_neg(char **);
 
 #undef EXT

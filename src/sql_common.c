@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -26,7 +26,6 @@
 #include "pmacct-data.h"
 #include "plugin_hooks.h"
 #include "sql_common.h"
-#include "util.h"
 #include "crc32.c"
 #include "sql_common_m.c"
 
@@ -38,11 +37,11 @@ void sql_set_signals()
   signal(SIGUSR1, SIG_IGN);
   signal(SIGUSR2, reload_maps);
   signal(SIGPIPE, SIG_IGN);
-#if !defined FBSD4
-  signal(SIGCHLD, SIG_IGN);
-#else
+//#if !defined FBSD4
+//  signal(SIGCHLD, SIG_IGN);
+//#else
   signal(SIGCHLD, ignore_falling_child);
-#endif
+//#endif
 }
 
 void sql_set_insert_func()
@@ -75,23 +74,24 @@ void sql_init_global_buffers()
   memset(lock_clause, 0, sizeof(lock_clause));
   memset(unlock_clause, 0, sizeof(unlock_clause));
   memset(update_clause, 0, sizeof(update_clause));
-  memset(update_negative_clause, 0, sizeof(update_negative_clause));
   memset(set_clause, 0, sizeof(set_clause));
-  memset(set_negative_clause, 0, sizeof(set_negative_clause));
-  memset(delete_shadows_clause, 0, sizeof(delete_shadows_clause));
+  memset(copy_clause, 0, sizeof(copy_clause));
   memset(insert_clause, 0, sizeof(insert_clause));
   memset(where, 0, sizeof(where));
   memset(values, 0, sizeof(values));
+  memset(set, 0, sizeof(set));
   memset(&lru_head, 0, sizeof(lru_head));
   lru_tail = &lru_head;
 
   pipebuf = (unsigned char *) malloc(config.buffer_size);
   cache = (struct db_cache *) malloc(config.sql_cache_entries*sizeof(struct db_cache));
   queries_queue = (struct db_cache **) malloc(qq_size*sizeof(struct db_cache *));
+  pending_queries_queue = (struct db_cache **) malloc(qq_size*sizeof(struct db_cache *));
 
   memset(pipebuf, 0, config.buffer_size);
   memset(cache, 0, config.sql_cache_entries*sizeof(struct db_cache));
   memset(queries_queue, 0, qq_size*sizeof(struct db_cache *));
+  memset(pending_queries_queue, 0, qq_size*sizeof(struct db_cache *));
 }
 
 void sql_init_default_values()
@@ -99,19 +99,33 @@ void sql_init_default_values()
   /* being the first routine to be called by each SQL plugin, this is
      also the place for some initial common configuration consistency
      check */ 
-  if (config.what_to_count & COUNT_CLASS && config.sql_recovery_logfile) {
-    Log(LOG_ERR, "ERROR: Recovery logfile and classifiers are mutually exclusive. Try with a backup DB.\n");
+  if ( (config.what_to_count & COUNT_CLASS ||
+	config.what_to_count & COUNT_TCPFLAGS ||
+	config.nfacctd_sql_log) &&
+       config.sql_recovery_logfile) {
+    Log(LOG_ERR, "ERROR: sql_recovery_logfile is not compatible with: classifiers, TCP flags and nfacctd_sql_log. Try configuring a backup DB.\n");
     exit_plugin(1);
   }
 
   if (!config.sql_refresh_time) config.sql_refresh_time = DEFAULT_DB_REFRESH_TIME;
   if (!config.sql_table_version) config.sql_table_version = DEFAULT_SQL_TABLE_VERSION;
   if (!config.sql_cache_entries) config.sql_cache_entries = CACHE_ENTRIES;
+  if (!config.sql_max_writers) config.sql_max_writers = DEFAULT_SQL_WRITERS_NO;
+  if (config.nfacctd_sql_log && config.acct_type != ACCT_NF) config.nfacctd_sql_log = FALSE; 
 
-  qq_ptr = 0;
+  if (config.sql_aggressive_classification) {
+    if (config.acct_type == ACCT_PM && config.what_to_count & COUNT_CLASS);
+    else config.sql_aggressive_classification = FALSE;
+  }
+
+  qq_ptr = 0; 
+  pqq_ptr = 0;
   qq_size = config.sql_cache_entries+(config.sql_refresh_time*REASONABLE_NUMBER);
   pp_size = sizeof(struct pkt_primitives);
   dbc_size = sizeof(struct db_cache);
+  glob_nfacctd_sql_log = config.nfacctd_sql_log;
+
+  memset(&sql_writers, 0, sizeof(sql_writers));
 }
 
 void sql_init_historical_acct(time_t now, struct insert_data *idata)
@@ -230,12 +244,48 @@ void sql_cache_modulo(struct pkt_primitives *srcdst, struct insert_data *idata)
   idata->modulo = idata->hash % config.sql_cache_entries;
 }
 
-int sql_cache_flush(struct db_cache *queue[], int index)
+int sql_cache_flush(struct db_cache *queue[], int index, struct insert_data *idata)
 {
-  int j;
+  int j, tmp_retired = sql_writers.retired;
 
-  for (j = 0; j < index; j++) queue[j]->valid = FALSE;
-  index = 0;
+  /* If aggressive classification is enabled and there are still
+     chances for the stream to be classified - ie. tentatives is
+     non-zero - let's leave it in SQL_CACHE_INUSE state */
+  if (config.sql_aggressive_classification) {
+    for (j = 0, pqq_ptr = 0; j < index; j++) {
+      if (!queue[j]->primitives.class && queue[j]->tentatives && (queue[j]->start_tag > (idata->now - ((STALE_M-1) * config.sql_refresh_time))) ) {
+        pending_queries_queue[pqq_ptr] = queue[j];
+        pqq_ptr++;
+      }
+      else queue[j]->valid = SQL_CACHE_COMMITTED;
+    }
+  }
+  else {
+    for (j = 0; j < index; j++) queue[j]->valid = SQL_CACHE_COMMITTED;
+  }
+
+  /* Imposing maximum number of writers */
+  sql_writers.active -= MIN(sql_writers.active, tmp_retired);
+  sql_writers.retired -= tmp_retired;
+
+  if (sql_writers.active < config.sql_max_writers) {
+    /* If we are very near to our maximum writers threshold, let's resort to any configured
+       recovery mechanism - SQL_CACHE_COMMITTED => SQL_CACHE_ERROR; otherwise, will proceed
+       as usual */
+    if (sql_writers.active == config.sql_max_writers-1) {
+      for (j = 0; j < index; j++) {
+	if (queue[j]->valid == SQL_CACHE_COMMITTED) queue[j]->valid = SQL_CACHE_ERROR;
+      }
+      sql_writers.flags = CHLD_WARNING;
+    }
+    else sql_writers.flags = 0; /* everything is just fine */
+
+    sql_writers.active++;
+  }
+  else {
+    Log(LOG_WARNING, "WARN ( %s/%s ): Maximum number of SQL writer processes reached (%d).\n", config.name, config.type, sql_writers.active);
+    sql_writers.flags = CHLD_ALERT;
+  }
 
   return index;
 }
@@ -253,7 +303,7 @@ struct db_cache *sql_cache_search(struct pkt_primitives *data, time_t basetime)
 
   start:
   if (idata.hash != Cursor->signature) {
-    if (Cursor->valid == TRUE) {
+    if (Cursor->valid == SQL_CACHE_INUSE) {
       follow_chain:
       if (Cursor->next) {
         Cursor = Cursor->next;
@@ -262,11 +312,11 @@ struct db_cache *sql_cache_search(struct pkt_primitives *data, time_t basetime)
     }
   }
   else {
-    if (Cursor->valid == TRUE) {
+    if (Cursor->valid == SQL_CACHE_INUSE) {
       /* additional check: pkt_primitives */
       if (!memcmp(&Cursor->primitives, data, sizeof(struct pkt_primitives))) {
         /* additional check: time */
-        if ((Cursor->basetime < basetime) && (config.sql_history))
+        if ((Cursor->basetime < basetime) && (config.sql_history || config.nfacctd_sql_log))
           goto follow_chain;
         else return Cursor;
       }
@@ -284,15 +334,15 @@ void sql_cache_insert(struct pkt_data *data, struct insert_data *idata)
   struct pkt_primitives *srcdst = &data->primitives;
   struct db_cache *Cursor, *newElem, *SafePtr = NULL, *staleElem = NULL;
 
-  if (data->pkt_time && config.sql_history) {
-    while (basetime > data->pkt_time) {
+  if (data->time_start && config.sql_history) {
+    while (basetime > data->time_start) {
       if (config.sql_history != COUNT_MONTHLY) basetime -= timeslot;
       else {
         timeslot = calc_monthly_timeslot(basetime, config.sql_history_howmany, SUB);
         basetime -= timeslot;
       }
     }
-    while ((basetime+timeslot) < data->pkt_time) {
+    while ((basetime+timeslot) < data->time_start) {
       if (config.sql_history != COUNT_MONTHLY) basetime += timeslot;
       else {
         basetime += timeslot;
@@ -304,7 +354,6 @@ void sql_cache_insert(struct pkt_data *data, struct insert_data *idata)
   /* We are classifing packets. We have a non-zero bytes accumulator (ba)
      and a non-zero class. Before accounting ba to this class, we have to
      remove ba from class zero. */
-  idata->pending_accumulators = FALSE;
   if (config.what_to_count & COUNT_CLASS && data->cst.ba && data->primitives.class) {
     pm_class_t lclass = data->primitives.class;
 
@@ -319,20 +368,13 @@ void sql_cache_insert(struct pkt_data *data, struct insert_data *idata)
 
     if (Cursor) {
       if (timeval_cmp(&data->cst.stamp, &idata->flushtime) >= 0) { 
-        Cursor->bytes_counter -= data->cst.ba;
-        Cursor->packet_counter -= data->cst.pa;
-        Cursor->flows_counter -= data->cst.fa;
-	idata->pending_accumulators = FALSE;
+        Cursor->bytes_counter -= MIN(Cursor->bytes_counter, data->cst.ba);
+        Cursor->packet_counter -= MIN(Cursor->packet_counter, data->cst.pa);
+        Cursor->flows_counter -= MIN(Cursor->flows_counter, data->cst.fa);
       }
-      else {
-        if (!config.sql_aggressive_classification) memset(&data->cst, 0, CSSz);
-	else idata->pending_accumulators = TRUE;
-      }
+      else memset(&data->cst, 0, CSSz);
     }
-    else {
-      if (!config.sql_aggressive_classification) memset(&data->cst, 0, CSSz); 
-      else idata->pending_accumulators = TRUE;
-    }
+    else memset(&data->cst, 0, CSSz); 
   }
 
   sql_cache_modulo(&data->primitives, idata);
@@ -346,7 +388,7 @@ void sql_cache_insert(struct pkt_data *data, struct insert_data *idata)
 
   start:
   if (idata->hash != Cursor->signature) {
-    if (Cursor->valid == TRUE) {
+    if (Cursor->valid == SQL_CACHE_INUSE) {
       follow_chain:
       if (Cursor->next) {
         Cursor = Cursor->next;
@@ -374,11 +416,11 @@ void sql_cache_insert(struct pkt_data *data, struct insert_data *idata)
     else goto insert; /* we found a no more valid entry; let's insert here our data */
   }
   else {
-    if (Cursor->valid == TRUE) {
+    if (Cursor->valid == SQL_CACHE_INUSE) {
       /* additional check: pkt_primitives */
       if (!memcmp(&Cursor->primitives, srcdst, sizeof(struct pkt_primitives))) {
         /* additional check: time */
-        if ((Cursor->basetime < basetime) && (config.sql_history)) {
+        if ((Cursor->basetime < basetime) && (config.sql_history || config.nfacctd_sql_log)) {
           if (!staleElem && Cursor->chained) staleElem = Cursor;
           goto follow_chain;
         }
@@ -406,23 +448,23 @@ void sql_cache_insert(struct pkt_data *data, struct insert_data *idata)
   Cursor->packet_counter = data->pkt_num;
   Cursor->flows_counter = data->flo_num;
   Cursor->bytes_counter = data->pkt_len;
+  Cursor->tcp_flags = data->tcp_flags;
   if (config.what_to_count & COUNT_CLASS) {
-    if (!idata->pending_accumulators) {
-      Cursor->bytes_counter += data->cst.ba;
-      Cursor->packet_counter += data->cst.pa;
-      Cursor->flows_counter += data->cst.fa;
-      Cursor->ba = 0;
-      Cursor->pa = 0;
-      Cursor->fa = 0;
-    }
-    else {
-      Cursor->ba = data->cst.ba;
-      Cursor->pa = data->cst.pa;
-      Cursor->fa = data->cst.fa;
-    }
+    Cursor->bytes_counter += data->cst.ba;
+    Cursor->packet_counter += data->cst.pa;
+    Cursor->flows_counter += data->cst.fa;
+    Cursor->tentatives = data->cst.tentatives;
   }
-  Cursor->valid = TRUE;
-  Cursor->basetime = basetime;
+  Cursor->valid = SQL_CACHE_INUSE;
+  if (!config.nfacctd_sql_log) {
+    Cursor->basetime = basetime;
+    Cursor->endtime = 0;
+  }
+  else {
+    Cursor->basetime = data->time_start;
+    Cursor->endtime = data->time_end;
+  }
+  Cursor->start_tag = idata->now;
   Cursor->lru_tag = idata->now;
   Cursor->signature = idata->hash;
   if (Cursor->chained) AddToLRUTail(Cursor); /* we cannot reuse not-malloc()'ed elements */
@@ -434,38 +476,36 @@ void sql_cache_insert(struct pkt_data *data, struct insert_data *idata)
   Cursor->packet_counter += data->pkt_num;
   Cursor->flows_counter += data->flo_num;
   Cursor->bytes_counter += data->pkt_len;
+  Cursor->tcp_flags |= data->tcp_flags;
   if (config.what_to_count & COUNT_CLASS) {
-    if (!idata->pending_accumulators) {
-      Cursor->bytes_counter += data->cst.ba;
-      Cursor->packet_counter += data->cst.pa;
-      Cursor->flows_counter += data->cst.fa;
-    }
-    else {
-      Cursor->ba += data->cst.ba;
-      Cursor->pa += data->cst.pa;
-      Cursor->fa += data->cst.fa;
-    }
+    Cursor->bytes_counter += data->cst.ba;
+    Cursor->packet_counter += data->cst.pa;
+    Cursor->flows_counter += data->cst.fa;
+    Cursor->tentatives = data->cst.tentatives;
   }
   return;
 
   safe_action:
   Log(LOG_DEBUG, "DEBUG ( %s/%s ): purging process (CAUSE: safe action)\n", config.name, config.type);
 
+  if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, idata); 
   switch (fork()) {
   case 0: /* Child */
     signal(SIGINT, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
     pm_setproctitle("%s [%s]", "SQL Plugin -- DB Writer (urgent)", config.name);
 
-    memset(&p, 0, sizeof(p));
-    memset(&b, 0, sizeof(b));
+    if (qq_ptr && sql_writers.flags != CHLD_ALERT) {
+      if (sql_writers.flags == CHLD_WARNING) sql_db_fail(&p);
+      (*sqlfunc_cbr.connect)(&p, config.sql_host);
+      (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, idata);
+      (*sqlfunc_cbr.close)(&bed);
+    }
 
-    (*sqlfunc_cbr.connect)(&p, config.sql_host);
-    (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, idata);
-    (*sqlfunc_cbr.close)(&bed);
     exit(0);
   default: /* Parent */
-    qq_ptr = sql_cache_flush(queries_queue, qq_ptr);
+    qq_ptr = pqq_ptr;
+    memcpy(queries_queue, pending_queries_queue, sizeof(queries_queue));
     break;
   }
   if (SafePtr) {
@@ -598,10 +638,15 @@ void sql_exit_gracefully(int signum)
   idata.dyn_table = glob_dyn_table;
   idata.new_basetime = glob_new_basetime;
   if (config.sql_backup_host || config.sql_recovery_logfile) idata.recover = TRUE;
+  if (config.what_to_count & COUNT_CLASS) config.sql_aggressive_classification = FALSE;
 
-  (*sqlfunc_cbr.connect)(&p, config.sql_host);
-  (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, &idata);
-  (*sqlfunc_cbr.close)(&bed);
+  sql_cache_flush(queries_queue, qq_ptr, &idata);
+  if (sql_writers.flags != CHLD_ALERT) {
+    if (sql_writers.flags == CHLD_WARNING) sql_db_fail(&p);
+    (*sqlfunc_cbr.connect)(&p, config.sql_host);
+    (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, &idata);
+    (*sqlfunc_cbr.close)(&bed);
+  }
 
   exit_plugin(0);
 }
@@ -610,6 +655,7 @@ int sql_evaluate_primitives(int primitive)
 {
   u_int32_t what_to_count = 0, fakes = 0;
   short int assume_custom_table = FALSE; 
+  char *insert_clause_start_ptr = insert_clause + strlen(insert_clause);
 
   /* SQL tables < v6 multiplex IP addresses and AS numbers on the same field, thus are
      unable to use both them for a same direction (ie. src, dst). Tables v6 break such
@@ -676,7 +722,7 @@ int sql_evaluate_primitives(int primitive)
 
     if (config.what_to_count & COUNT_SUM_PORT) what_to_count |= COUNT_SUM_PORT;
 
-    what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_IP_PROTO|COUNT_ID|COUNT_CLASS|COUNT_VLAN|COUNT_IP_TOS;
+    what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_TCPFLAGS|COUNT_IP_PROTO|COUNT_ID|COUNT_CLASS|COUNT_VLAN|COUNT_IP_TOS;
   }
 
   /* 1st part: arranging pointers to an opaque structure and 
@@ -863,6 +909,31 @@ int sql_evaluate_primitives(int primitive)
     values[primitive].type = where[primitive].type = COUNT_DST_PORT;
     values[primitive].handler = where[primitive].handler = count_dst_port_handler;
     primitive++;
+  }
+
+  if (what_to_count & COUNT_TCPFLAGS) {
+    int count_it = FALSE;
+
+    if ((config.sql_table_version < 7) && !assume_custom_table) {
+      if (config.what_to_count & COUNT_TCPFLAGS) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): The use of TCP flags accounting requires SQL table v7. Exiting.\n", config.name, config.type);
+	exit_plugin(1);
+      }
+      else what_to_count ^= COUNT_TCPFLAGS;
+    }
+    else count_it = TRUE;
+
+    if (count_it) {
+      if (primitive) {
+	strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      }
+      strncat(insert_clause, "tcp_flags", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_TCPFLAGS;
+      values[primitive].handler = where[primitive].handler = count_tcpflags_handler;
+      primitive++;
+    }
   }
 
   if (what_to_count & COUNT_IP_TOS) {
@@ -1067,15 +1138,22 @@ int sql_evaluate_primitives(int primitive)
     primitive++;
   }
 
+  strncat(copy_clause, insert_clause_start_ptr, SPACELEFT(copy_clause));
+
   return primitive;
 }
 
 int sql_query(struct BE_descs *bed, struct db_cache *elem, struct insert_data *idata)
 {
-  if (!bed->p->fail && (elem->valid > 0)) {
-    if ((*sqlfunc_cbr.op)(bed->p, elem, idata)); /* don't return */ 
-    else return FALSE;
+  if (!bed->p->fail && elem->valid == SQL_CACHE_COMMITTED) {
+    if ((*sqlfunc_cbr.op)(bed->p, elem, idata)); /* failed */
+    else {
+      idata->qn++;
+      return FALSE;
+    }
   }
+
+  if ( elem->valid == SQL_CACHE_ERROR || (bed->p->fail && !(elem->valid == SQL_CACHE_INUSE)) ) {
 
   if (config.sql_backup_host) {
     if (!bed->b->fail) {
@@ -1112,6 +1190,8 @@ int sql_query(struct BE_descs *bed, struct db_cache *elem, struct insert_data *i
 	}
       }
     }
+  }
+
   }
 
   quit:
@@ -1219,7 +1299,66 @@ void sql_invalidate_shadow_entries(struct db_cache *queue[], int *num)
 
   for (x = 0; x < *num; x++) {
     if (!queue[x]->bytes_counter && !queue[x]->packet_counter && !queue[x]->flows_counter)
-      queue[x]->valid = FALSE;
+      queue[x]->valid = SQL_CACHE_FREE;
   }
 }
 
+int sql_select_locking_style(char *lock)
+{
+  int i = 0, len = strlen(lock);
+
+  while (i < len) {
+    lock[i] = tolower(lock[i]);
+    i++;
+  }
+
+  if (!strcmp(lock, "table")) return PM_LOCK_EXCLUSIVE;
+  else if (!strcmp(lock, "row")) return PM_LOCK_ROW_EXCLUSIVE;
+
+  Log(LOG_WARNING, "WARN ( %s/%s ): sql_locking_style value '%s' is unknown. Ignored.\n", config.name, config.type, lock);
+
+  return PM_LOCK_EXCLUSIVE;
+}
+
+int sql_compose_static_set(int have_flows)
+{
+  int set_primitives=0;
+
+#if defined HAVE_64BIT_COUNTERS
+  strncpy(set[set_primitives].string, "SET packets=packets+%llu, bytes=bytes+%llu", SPACELEFT(set[set_primitives].string));
+  set[set_primitives].type = COUNT_COUNTERS;
+  set[set_primitives].handler = count_counters_setclause_handler;
+  set_primitives++;
+
+  if (have_flows) {
+    strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+    strncat(set[set_primitives].string, "flows=flows+%llu", SPACELEFT(set[set_primitives].string));
+    set[set_primitives].type = COUNT_FLOWS;
+    set[set_primitives].handler = count_flows_setclause_handler;
+    set_primitives++;
+  }
+#else
+  strncpy(set[set_primitives].string, "SET packets=packets+%u, bytes=bytes+%u", SPACELEFT(set[set_primitives].string));
+  set[set_primitives].type = COUNT_COUNTERS;
+  set[set_primitives].handler = count_counters_setclause_handler;
+  set_primitives++;
+
+  if (have_flows) {
+    strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+    strncat(set[set_primitives].string, "flows=flows+%u", SPACELEFT(set[set_primitives].string));
+    set[set_primitives].type = COUNT_FLOWS;
+    set[set_primitives].handler = count_flows_setclause_handler;
+    set_primitives++;
+  }
+#endif
+
+  if (config.what_to_count & COUNT_TCPFLAGS) {
+    strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+    strncat(set[set_primitives].string, "tcp_flags=tcp_flags|%u", SPACELEFT(set[set_primitives].string));
+    set[set_primitives].type = COUNT_TCPFLAGS;
+    set[set_primitives].handler = count_tcpflags_setclause_handler;
+    set_primitives++;
+  }
+
+  return set_primitives;
+}

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -34,13 +34,16 @@ struct configuration {
   char *name;
   char *type;
   u_int32_t what_to_count;
+  int sock;
   int acct_type; 
+  int data_type; 
   int pipe_size;
   int buffer_size;
   int handle_fragments;
   int handle_flows;
   int frag_bufsz;
   int flow_bufsz;
+  int flow_hashsz;
   int conntrack_bufsz;
   int flow_lifetime;
   char *imt_plugin_path;
@@ -58,11 +61,13 @@ struct configuration {
   int sql_refresh_time;
   int sql_history;
   int sql_history_howmany; /* internal */
+  int sql_history_since_epoch;
   int sql_startup_delay;
   int sql_cache_entries;
   int sql_dont_try_update;
   char *sql_history_roundoff;
   char *sql_recovery_logfile;
+  int sql_max_writers;
   int sql_trigger_time;
   int sql_trigger_time_howmany; /* internal */
   char *sql_trigger_exec;
@@ -71,6 +76,8 @@ struct configuration {
   int sql_preprocess_type;
   int sql_multi_values;
   int sql_aggressive_classification;
+  char *sql_locking_style;
+  int sql_use_copy;
   int print_refresh_time;
   int print_cache_entries;
   int print_markers;
@@ -80,6 +87,8 @@ struct configuration {
   int nfacctd_time;
   int nfacctd_as;
   int sfacctd_renormalize;
+  int nfacctd_disable_checks;
+  int nfacctd_sql_log;
   int promisc; /* pcap_open_live() promisc parameter */
   char *clbuf; /* pcap filter */
   char *pcap_savefile;
@@ -91,6 +100,8 @@ struct configuration {
   int buckets;
   int daemon;
   int active_plugins;
+  char *logfile; 
+  FILE *logfile_fd; 
   char *pidfile; 
   int networks_mask;
   char *networks_file;
@@ -98,9 +109,11 @@ struct configuration {
   char *ports_file;
   int refresh_maps;
   char *a_filter;
-  struct bpf_program bpfp_a_filter;
+  int bpfp_a_num;
+  struct bpf_program *bpfp_a_table[AGG_FILTER_ENTRIES];
   struct pretag_filter ptf;
   char *pre_tag_map;
+  int pre_tag_map_entries;
   int post_tag;
   int sampling_rate;
   char *syslog;
@@ -109,9 +122,22 @@ struct configuration {
   char *classifiers_path;
   int classifier_tentatives;
   int classifier_table_num;
+  u_int32_t nfprobe_what_to_count;
+  char *nfprobe_timeouts;
+  int nfprobe_id;
+  int nfprobe_hoplimit;
+  int nfprobe_maxflows;
+  char *nfprobe_receiver;
+  int nfprobe_version;
+  char *nfprobe_engine;
+  char *sfprobe_receiver;
+  char *sfprobe_agentip;
+  int sfprobe_agentsubid;
+	int flow_handling_threads;
 };
 
 struct plugin_type_entry {
+  int id;
   char string[10];
   void (*func)(int, struct configuration *, void *);
 };

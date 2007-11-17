@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -82,6 +82,17 @@ int cfg_key_syslog(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_logfile(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.logfile = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'logfile'. Globalized.\n", filename);
+
+  return changes;
+}
+
 int cfg_key_pidfile(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -141,6 +152,7 @@ int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
     else if (!strcmp(count_token, "tag")) value |= COUNT_ID;
     else if (!strcmp(count_token, "flows")) value |= COUNT_FLOWS;
     else if (!strcmp(count_token, "class")) value |= COUNT_CLASS;
+    else if (!strcmp(count_token, "tcpflags")) value |= COUNT_TCPFLAGS;
     else Log(LOG_WARNING, "WARN ( %s ): ignoring unknown aggregation method: %s.\n", filename, count_token);
   }
 
@@ -202,6 +214,7 @@ int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
   struct plugins_list_entry *list = plugins_list;
   char *count_token;
   int value, changes = 0;
+  u_int8_t neg;
 
   if (!name) {
     Log(LOG_ERR, "ERROR ( %s ): ID filter cannot be global. Not loaded.\n", filename);
@@ -214,13 +227,15 @@ int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
 
 	list->cfg.ptf.num = 0;
 	while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_MAP_ENTRIES/4) {
+	  neg = pt_check_neg(&count_token);
 	  value = atoi(count_token);
 	  if ((value < 0) || (value > 65535)) {
 	    Log(LOG_ERR, "WARN ( %s ): 'pre_tag_filter' values has to be in the range 0-65535. '%d' not loaded.\n", filename, value);
 	    changes++;
 	  }
 	  else {
-            list->cfg.ptf.table[list->cfg.ptf.num] = value;
+            list->cfg.ptf.table[list->cfg.ptf.num].neg = neg;
+            list->cfg.ptf.table[list->cfg.ptf.num].n = value;
 	    list->cfg.ptf.num++;
             changes++;
 	  }
@@ -470,6 +485,9 @@ int cfg_key_sql_table(char *filename, char *name, char *value_ptr)
       case 'Y':
 	num++;
 	break;
+      case 's':
+	num++;
+	break;
       default:
 	Log(LOG_ERR, "ERROR ( %s ): sql_table, %%%c not supported.\n", filename, *c);
 	exit(1);
@@ -603,6 +621,31 @@ int cfg_key_sql_recovery_backup_host(char *filename, char *name, char *value_ptr
   return changes;
 }
 
+int cfg_key_sql_max_writers(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < 1 || value >= 100) {
+    Log(LOG_WARNING, "WARN ( %s ): invalid 'sql_max_writers' value). Allowed values are: 1 <= sql_max_writers < 100.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sql_max_writers = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.sql_max_writers = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_sql_trigger_exec(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -690,7 +733,14 @@ int cfg_key_sql_passwd(char *filename, char *name, char *value_ptr)
 int cfg_key_sql_refresh_time(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
-  int value, changes = 0;
+  int value, changes = 0, i, len = strlen(value_ptr);
+
+  for (i = 0; i < len; i++) {
+    if (!isdigit(value_ptr[i]) && !isspace(value_ptr[i])) {
+      Log(LOG_ERR, "WARN ( %s ): 'sql_refresh_time' is expected in secs but contains non-digit chars: '%c'\n", filename, value_ptr[i]);
+      return ERR;
+    }
+  }
 
   value = atoi(value_ptr);
   if (value <= 0) {
@@ -836,6 +886,28 @@ int cfg_key_sql_history(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_sql_history_since_epoch(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sql_history_since_epoch = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.sql_history_since_epoch = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_sql_cache_entries(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -964,6 +1036,47 @@ int cfg_key_sql_aggressive_classification(char *filename, char *name, char *valu
         list->cfg.sql_aggressive_classification = value;
         changes++;
         break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_sql_locking_style(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sql_locking_style = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+	list->cfg.sql_locking_style = value_ptr;
+	changes++;
+	break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_sql_use_copy(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sql_use_copy = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.sql_use_copy = value;
+	changes++;
+	break;
       }
     }
   }
@@ -1238,7 +1351,7 @@ int cfg_key_sampling_rate(char *filename, char *name, char *value_ptr)
     return ERR;
   }
 
-  if (!name) for (; list; list = list->next, changes++) list->cfg.sampling_rate = value-1;
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sampling_rate = value;
   else {
     for (; list; list = list->next) {
       if (!strcmp(name, list->name)) {
@@ -1298,6 +1411,23 @@ int cfg_key_pre_tag_map(char *filename, char *name, char *value_ptr)
 
   for (; list; list = list->next, changes++) list->cfg.pre_tag_map = value_ptr;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pre_tag_map'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_pre_tag_map_entries(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value <= 0) {
+    Log(LOG_ERR, "WARN ( %s ): 'pre_tag_map_entries' has to be > 0.\n", filename);
+    return ERR;
+  }
+
+  for (; list; list = list->next, changes++) list->cfg.pre_tag_map_entries = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pre_tag_map_entries'. Globalized.\n", filename);
 
   return changes;
 }
@@ -1362,6 +1492,28 @@ int cfg_key_nfacctd_mcast_groups(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_nfacctd_sql_log(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.nfacctd_sql_log = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.nfacctd_sql_log = value;
+        changes++;
+	break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_pmacctd_force_frag_handling(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1406,6 +1558,23 @@ int cfg_key_pmacctd_flow_buffer_size(char *filename, char *name, char *value_ptr
 
   for (; list; list = list->next, changes++) list->cfg.flow_bufsz = value;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pmacctd_flow_buffer_size'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_pmacctd_flow_buffer_buckets(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value <= 0) {
+    Log(LOG_WARNING, "WARN ( %s ): 'flow_buffer_buckets' has to be > 0.\n", filename);
+    return ERR;
+  }
+
+  for (; list; list = list->next, changes++) list->cfg.flow_hashsz = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pmacctd_flow_buffer_buckets'. Globalized.\n", filename);
 
   return changes;
 }
@@ -1483,6 +1652,21 @@ int cfg_key_nfacctd_as_new(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_nfacctd_disable_checks(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_disable_checks = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key '[ns]facctd_disable_checks'. Globalized.\n", filename);
+
+  return changes;
+}
+
+
 int cfg_key_classifiers(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1527,6 +1711,224 @@ int cfg_key_classifier_table_num(char *filename, char *name, char *value_ptr)
 
   return changes;
 }
+
+int cfg_key_nfprobe_timeouts(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.nfprobe_timeouts = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+	list->cfg.nfprobe_timeouts = value_ptr;
+	changes++;
+	break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_nfprobe_hoplimit(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if ((value < 1) || (value > 255)) {
+    Log(LOG_ERR, "WARN ( %s ): 'nfprobe_hoplimit' has to be in the range 1-255.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.nfprobe_hoplimit = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.nfprobe_hoplimit = value;
+	changes++;
+	break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_nfprobe_maxflows(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < 1) {
+    Log(LOG_ERR, "WARN ( %s ): 'nfprobe_maxflows' has to be >= 1.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.nfprobe_maxflows = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+	list->cfg.nfprobe_maxflows = value;
+	changes++;
+	break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_nfprobe_receiver(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.nfprobe_receiver = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.nfprobe_receiver = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_nfprobe_version(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value != 1 && value != 5 && value != 9) {
+    Log(LOG_ERR, "WARN ( %s ): 'nfprobe_version' has to be either 1/5/9.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.nfprobe_version = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.nfprobe_version = value;
+        changes++;
+	break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_nfprobe_engine(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.nfprobe_engine = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.nfprobe_engine = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_sfprobe_receiver(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sfprobe_receiver = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.sfprobe_receiver = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_sfprobe_agentip(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sfprobe_agentip = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.sfprobe_agentip = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_sfprobe_agentsubid(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < 0) {
+    Log(LOG_ERR, "WARN ( %s ): 'sfprobe_agentsubid' has to be >= 0.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sfprobe_agentsubid = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.sfprobe_agentsubid = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_flow_handling_threads(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+  int value;
+
+  value = atoi(value_ptr);
+  if (!name) for (; list; list = list->next, changes++) list->cfg.flow_handling_threads = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.flow_handling_threads = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+
 
 void parse_time(char *filename, char *value, int *mu, int *howmany)
 {

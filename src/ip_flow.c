@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -28,7 +28,6 @@
 #include "ip_flow.h"
 #include "classifier.h"
 #include "jhash.h"
-#include "util.h"
 
 u_int32_t flt_total_nodes;  
 time_t flt_prune_deadline;
@@ -43,20 +42,43 @@ time_t flt6_prune_deadline;
 time_t flt6_emergency_prune;
 #endif
 
+#if defined ENABLE_THREADS
+thread_pool_t *flow_pool;
+#endif
+
 void init_ip_flow_handler()
 {
   init_ip4_flow_handler();
 #if defined ENABLE_IPV6
   init_ip6_flow_handler();
 #endif
+#if defined ENABLE_THREADS
+  /* initialize threads pools */
+  flow_pool = allocate_thread_pool(config.flow_handling_threads);
+  assert(flow_pool);
+  Log(LOG_INFO, "INFO ( default/core ): %d threads initialized\n", config.flow_handling_threads);
+#endif
 }
 
 void init_ip4_flow_handler()
 {
+  int size;
+
   if (config.flow_bufsz) flt_total_nodes = config.flow_bufsz / sizeof(struct ip_flow);
   else flt_total_nodes = DEFAULT_FLOW_BUFFER_SIZE / sizeof(struct ip_flow); 
 
-  memset(ip_flow_table, 0, sizeof(ip_flow_table));
+  if (!config.flow_hashsz) config.flow_hashsz = FLOW_TABLE_HASHSZ; 
+  size = sizeof(struct ip_flow) * config.flow_hashsz;
+  ip_flow_table = (struct ip_flow **) malloc(size);
+  assert(ip_flow_table);
+
+#if defined ENABLE_THREADS
+  ip_flow_table_mutex = malloc(sizeof(pthread_mutex_t));
+  assert(ip_flow_table_mutex);
+  pthread_mutex_init(ip_flow_table_mutex, NULL);
+#endif
+
+  memset(ip_flow_table, 0, size);
   flow_lru_list.root = (struct ip_flow *) malloc(sizeof(struct ip_flow)); 
   flow_lru_list.last = flow_lru_list.root;
   memset(flow_lru_list.root, 0, sizeof(struct ip_flow));
@@ -75,6 +97,9 @@ void ip_flow_handler(struct packet_ptrs *pptrs)
   struct timeval now;
   struct timezone tz;
 
+#if defined ENABLE_THREADS
+  pthread_mutex_lock(ip_flow_table_mutex);
+#endif
   gettimeofday(&now, &tz);
 
   if (now.tv_sec > flt_prune_deadline) {
@@ -83,7 +108,23 @@ void ip_flow_handler(struct packet_ptrs *pptrs)
   }
 
   find_flow(&now, pptrs);
+#if defined ENABLE_THREADS
+  exec_plugins(pptrs);
+  free_packet_ptrs(pptrs);
+#endif
 }
+
+#if defined ENABLE_THREADS
+void t_ip_flow_handler(struct packet_ptrs *pptrs)
+{
+  struct packet_ptrs *priv_pptrs;
+
+  priv_pptrs = copy_packet_ptrs(pptrs);
+  assert(priv_pptrs);
+
+  send_to_pool(flow_pool, ip_flow_handler, priv_pptrs);
+}
+#endif
 
 void evaluate_tcp_flags(struct timeval *now, struct packet_ptrs *pptrs, struct ip_flow_common *fp, unsigned int idx)
 {
@@ -152,6 +193,9 @@ void find_flow(struct timeval *now, struct packet_ptrs *pptrs)
 	fp->cmn.last[idx].tv_sec = now->tv_sec;
 	fp->cmn.last[idx].tv_usec = now->tv_usec;
 	pptrs->new_flow = FALSE; 
+#if defined ENABLE_THREADS
+  pthread_mutex_unlock(ip_flow_table_mutex);
+#endif
 	if (config.classifiers_path) evaluate_classifiers(pptrs, &fp->cmn, idx);
 	return;
       }
@@ -162,6 +206,9 @@ void find_flow(struct timeval *now, struct packet_ptrs *pptrs)
 	fp->cmn.last[idx].tv_sec = now->tv_sec;
 	fp->cmn.last[idx].tv_usec = now->tv_usec;
 	pptrs->new_flow = TRUE;
+#if defined ENABLE_THREADS
+  pthread_mutex_unlock(ip_flow_table_mutex);
+#endif
 	if (config.classifiers_path) evaluate_classifiers(pptrs, &fp->cmn, idx);
 	return;
       } 
@@ -170,7 +217,6 @@ void find_flow(struct timeval *now, struct packet_ptrs *pptrs)
     last_seen = fp;
   } 
 
-  create:
   if (candidate) create_flow(now, candidate, TRUE, bucket, pptrs, iphp, tlhp, idx);
   else create_flow(now, last_seen, FALSE, bucket, pptrs, iphp, tlhp, idx); 
 }
@@ -187,6 +233,9 @@ void create_flow(struct timeval *now, struct ip_flow *fp, u_int8_t is_candidate,
       prune_old_flows(now);
     }
     pptrs->new_flow = FALSE; 
+#if defined ENABLE_THREADS
+    pthread_mutex_unlock(ip_flow_table_mutex);
+#endif
     return;
   }
 
@@ -202,6 +251,9 @@ void create_flow(struct timeval *now, struct ip_flow *fp, u_int8_t is_candidate,
 	  prune_old_flows(now);
 	}
 	pptrs->new_flow = FALSE;
+#if defined ENABLE_THREADS
+    pthread_mutex_unlock(ip_flow_table_mutex);
+#endif
 	return;
       }
       else flt_total_nodes--;
@@ -239,6 +291,9 @@ void create_flow(struct timeval *now, struct ip_flow *fp, u_int8_t is_candidate,
         prune_old_flows(now);
       }
       pptrs->new_flow = FALSE;
+#if defined ENABLE_THREADS
+    pthread_mutex_unlock(ip_flow_table_mutex);
+#endif
       return;
     }
     else flt_total_nodes--;
@@ -261,6 +316,9 @@ void create_flow(struct timeval *now, struct ip_flow *fp, u_int8_t is_candidate,
 
   pptrs->new_flow = TRUE;
   if (config.classifiers_path) evaluate_classifiers(pptrs, &fp->cmn, idx); 
+#if defined ENABLE_THREADS
+  pthread_mutex_unlock(ip_flow_table_mutex);
+#endif
 }
 
 void prune_old_flows(struct timeval *now)
@@ -346,7 +404,7 @@ unsigned int normalize_flow(u_int32_t *ip_src, u_int32_t *ip_dst,
 unsigned int hash_flow(u_int32_t ip_src, u_int32_t ip_dst,
 		u_int16_t port_src, u_int16_t port_dst, u_int8_t proto)
 {
-  return jhash_3words((u_int32_t)(port_src ^ port_dst) << 16 | proto, ip_src, ip_dst, flt_trivial_hash_rnd) & (FLOW_TABLE_HASHSZ-1);
+  return jhash_3words((u_int32_t)(port_src ^ port_dst) << 16 | proto, ip_src, ip_dst, flt_trivial_hash_rnd) & (config.flow_hashsz-1);
 }
 
 /* is_expired() checks for the expiration of the bi-directional flow; returns: TRUE if
@@ -389,10 +447,16 @@ unsigned int is_expired_uni(struct timeval *now, struct ip_flow_common *fp, unsi
 #if defined ENABLE_IPV6
 void init_ip6_flow_handler()
 {
+  int size;
+
   if (config.frag_bufsz) flt6_total_nodes = config.frag_bufsz / sizeof(struct ip_flow6);
   else flt6_total_nodes = DEFAULT_FLOW_BUFFER_SIZE / sizeof(struct ip_flow6);
 
-  memset(ip_flow_table6, 0, sizeof(ip_flow_table6));
+  if (!config.flow_hashsz) config.flow_hashsz = FLOW_TABLE_HASHSZ;
+  size = sizeof(struct ip_flow6) * config.flow_hashsz;
+  ip_flow_table6 = (struct ip_flow6 **) malloc(size);
+
+  memset(ip_flow_table6, 0, size);
   flow_lru_list6.root = (struct ip_flow6 *) malloc(sizeof(struct ip_flow6));
   flow_lru_list6.last = flow_lru_list6.root;
   memset(flow_lru_list6.root, 0, sizeof(struct ip_flow6));
@@ -411,6 +475,9 @@ void ip_flow6_handler(struct packet_ptrs *pptrs)
   struct timeval now;
   struct timezone tz;
 
+#if defined ENABLE_THREADS
+  pthread_mutex_lock(ip_flow_table_mutex);
+#endif
   gettimeofday(&now, &tz);
 
   if (now.tv_sec > flt6_prune_deadline) {
@@ -419,7 +486,23 @@ void ip_flow6_handler(struct packet_ptrs *pptrs)
   }
 
   find_flow6(&now, pptrs);
+#if defined ENABLE_THREADS
+  exec_plugins(pptrs);
+  free_packet_ptrs(pptrs);
+#endif
 }
+
+#if defined ENABLE_THREADS
+void t_ip_flow6_handler(struct packet_ptrs *pptrs)
+{
+  struct packet_ptrs *priv_pptrs;
+
+  priv_pptrs = copy_packet_ptrs(pptrs);
+  assert(priv_pptrs);
+
+  send_to_pool(flow_pool, ip_flow6_handler, priv_pptrs);
+}
+#endif
 
 unsigned int hash_flow6(u_int32_t id, struct in6_addr *saddr, struct in6_addr *daddr)
 {
@@ -445,7 +528,7 @@ unsigned int hash_flow6(u_int32_t id, struct in6_addr *saddr, struct in6_addr *d
         c += id;
         __jhash_mix(a, b, c);
 
-        return c & (FLOW_TABLE_HASHSZ - 1);
+        return c & (config.flow_hashsz - 1);
 }
 
 unsigned int normalize_flow6(struct in6_addr *saddr, struct in6_addr *daddr,
@@ -504,6 +587,9 @@ void find_flow6(struct timeval *now, struct packet_ptrs *pptrs)
 	fp->cmn.last[idx].tv_sec = now->tv_sec;
 	fp->cmn.last[idx].tv_usec = now->tv_usec;
 	pptrs->new_flow = FALSE;
+#if defined ENABLE_THREADS
+  pthread_mutex_unlock(ip_flow_table_mutex);
+#endif
 	if (config.classifiers_path) evaluate_classifiers(pptrs, &fp->cmn, idx);
 	return;
       }
@@ -514,6 +600,9 @@ void find_flow6(struct timeval *now, struct packet_ptrs *pptrs)
 	fp->cmn.last[idx].tv_sec = now->tv_sec;
 	fp->cmn.last[idx].tv_usec = now->tv_usec;
 	pptrs->new_flow = TRUE;
+#if defined ENABLE_THREADS
+  pthread_mutex_unlock(ip_flow_table_mutex);
+#endif
 	if (config.classifiers_path) evaluate_classifiers(pptrs, &fp->cmn, idx);
 	return;
       }

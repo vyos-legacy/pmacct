@@ -1,3 +1,59 @@
+pmacct (0.11.4-1) unstable; urgency=low
+
+  * New upstream version.  (Closes: #407320)
+  * Bug fix: "pmacct: Please remove postgresql-dev from your build-depends
+    as it doesn&#39;t exist in the archive", thanks to Lior Kaplan
+    (Closes: #429975).
+  * Bug fix: "pmacct is missing dependency for iproute package", thanks to
+    f.arthofer@lagis.at (Closes: #423032).
+  * Added lsb section to initscript.
+  * Don't ignore errors from make clean.
+  * Updated standards version to 3.7.2
+
+ -- Jamie Wilkinson <jaq@debian.org>  Sat, 17 Nov 2007 12:46:13 +1100
+
+pmacct (0.11.3-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Sat, 17 Nov 2007 12:30:27 +1100
+
+pmacct (0.11.2-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Sat, 17 Nov 2007 12:29:58 +1100
+
+pmacct (0.11.1-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Sat, 17 Nov 2007 12:29:12 +1100
+
+pmacct (0.11.0-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Sat, 17 Nov 2007 12:28:41 +1100
+
+pmacct (0.10.3-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Sat, 17 Nov 2007 12:28:09 +1100
+
+pmacct (0.10.2-1) unstable; urgency=low
+
+  * New upstream version.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Sat, 17 Nov 2007 12:27:35 +1100
+
+pmacct (0.10.1-2) unstable; urgency=low
+
+  * Fix regex in watch file to only match pmacct tarball.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Sat, 17 Nov 2007 12:23:44 +1100
+
 pmacct (0.10.1-1) unstable; urgency=low
 
   * New upstream release.
@@ -99,7 +155,7 @@ pmacct (0.8.5-1) unstable; urgency=low
 pmacct (0.8.4-1) unstable; urgency=low
 
   * New upstream release.
-  * Added UPGRADE to docs. 
+  * Added UPGRADE to docs.
 
  -- Jamie Wilkinson <jaq@debian.org>  Sun, 24 Apr 2005 12:43:26 +1000
 

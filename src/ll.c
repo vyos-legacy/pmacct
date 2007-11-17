@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -376,6 +376,41 @@ void raw_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs
     pptrs->l3_handler = NULL; 
     return;
   }
+}
+
+void null_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs)
+{
+  register u_int32_t *family;
+  u_int caplen = h->caplen;
+  u_char *p;
+
+  if (caplen < 4) {
+    pptrs->iph_ptr = NULL;
+    return;
+  }
+
+  family = (u_int32_t *) pptrs->packet_ptr;
+  p = pptrs->packet_ptr;
+
+  if (*family == AF_INET || ntohl(*family) == AF_INET ) {
+    pptrs->l3_proto = ETHERTYPE_IP;
+    pptrs->l3_handler = ip_handler;
+    pptrs->iph_ptr = (u_char *)(pptrs->packet_ptr + 4);
+    return;
+  }
+
+#if defined ENABLE_IPV6
+  if (*family == AF_INET6 || ntohl(*family) == AF_INET6 ) {
+    pptrs->l3_proto = ETHERTYPE_IPV6;
+    pptrs->l3_handler = ip6_handler;
+    pptrs->iph_ptr = (u_char *)(pptrs->packet_ptr + 4);
+    return;
+  }
+#endif
+
+  pptrs->l3_proto = 0;
+  pptrs->l3_handler = NULL;
+  pptrs->iph_ptr = NULL;
 }
 
 void sll_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs)

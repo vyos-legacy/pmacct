@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -28,13 +28,15 @@
 #include "pretag_handlers.h"
 #include "pretag-data.h"
 
+int pre_tag_map_allocated = FALSE;
+
 void load_id_file(int acct_type, char *filename, struct id_table *t, struct plugin_requests *req)
 {
   struct id_table tmp;
-  struct id_entry *ptr;
+  struct id_entry *ptr, *ptr2;
   FILE *file;
   char buf[SRVBUFLEN];
-  int v4_num = 0, x, tot_lines = 0, err, index;
+  int v4_num = 0, x, tot_lines = 0, err, index, label_solved, sz;
   struct stat st;
 
 #if defined ENABLE_IPV6
@@ -47,6 +49,8 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 
   memset(&st, 0, sizeof(st));
 
+  if (!config.pre_tag_map_entries) config.pre_tag_map_entries = MAX_PRETAG_MAP_ENTRIES;
+
   if (filename) {
     if ((file = fopen(filename, "r")) == NULL) {
       Log(LOG_ERR, "ERROR: Pre-Tagging map '%s' not found.\n", filename);
@@ -56,10 +60,20 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
     memset(t, 0, sizeof(struct id_table));
     memset(&tmp, 0, sizeof(struct id_table));
 
+    sz = sizeof(struct id_entry)*config.pre_tag_map_entries;
+    if (!pre_tag_map_allocated) {
+      tmp.e = (struct id_entry *) malloc(sz);
+      t->e = (struct id_entry *) malloc(sz);
+      pre_tag_map_allocated = TRUE;
+    }
+
+    memset(tmp.e, 0, sz);
+    memset(t->e, 0, sz);
+
     /* first stage: reading Agent ID file and arranging it in a temporary memory table */
     while (!feof(file)) {
       tot_lines++;
-      if (tmp.num >= MAX_MAP_ENTRIES) break; /* XXX: we shouldn't exit silently */
+      if (tmp.num >= config.pre_tag_map_entries) break; /* XXX: we shouldn't exit silently */
       memset(buf, 0, SRVBUFLEN);
       if (fgets(buf, SRVBUFLEN, file)) {
         if (!iscomment(buf) && !isblankline(buf)) {
@@ -68,7 +82,10 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
             trim_all_spaces(buf);
 	    strip_quotes(buf);
 
+	    /* resetting the entry and enforcing defaults */
             memset(&tmp.e[tmp.num], 0, sizeof(struct id_entry));
+	    tmp.e[tmp.num].ret = TRUE;
+
             err = FALSE; key = NULL; value = NULL;
             start = buf;
             len = strlen(buf);
@@ -116,30 +133,30 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
             }
             /* verifying errors and required fields */
 	    if (acct_type == ACCT_NF || acct_type == ACCT_SF) {
-              if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].agent_ip.family) {
+              if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].agent_ip.a.family) {
                 int j;
 
                 for (j = 0; tmp.e[tmp.num].func[j]; j++);
                 tmp.e[tmp.num].func[j] = pretag_id_handler;
-	        if (tmp.e[tmp.num].agent_ip.family == AF_INET) v4_num++;
+	        if (tmp.e[tmp.num].agent_ip.a.family == AF_INET) v4_num++;
 #if defined ENABLE_IPV6
-	        else if (tmp.e[tmp.num].agent_ip.family == AF_INET6) v6_num++;
+	        else if (tmp.e[tmp.num].agent_ip.a.family == AF_INET6) v6_num++;
 #endif
                 tmp.num++;
               }
 	      /* if any required field is missing and other errors have been signalled
 	         before we will trap an error message */
-	      else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.family) && !err)
+	      else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.a.family) && !err)
 	        Log(LOG_ERR, "ERROR ( %s ): required key missing at line: %d. Required keys are: 'id', 'ip'.\n", filename, tot_lines); 
 	    }
 	    else if (acct_type == ACCT_PM) {
-	      if (tmp.e[tmp.num].agent_ip.family)
+	      if (tmp.e[tmp.num].agent_ip.a.family)
 		Log(LOG_ERR, "ERROR ( %s ): key 'ip' not applicable here. Invalid line: %d.\n", filename, tot_lines);
 	      else if (!err && tmp.e[tmp.num].id) {
                 int j;
 
 		for (j = 0; tmp.e[tmp.num].func[j]; j++);
-		tmp.e[tmp.num].agent_ip.family = AF_INET; /* we emulate a dummy '0.0.0.0' IPv4 address */
+		tmp.e[tmp.num].agent_ip.a.family = AF_INET; /* we emulate a dummy '0.0.0.0' IPv4 address */
 		tmp.e[tmp.num].func[j] = pretag_id_handler;
 		v4_num++; tmp.num++;
 	      } 
@@ -154,47 +171,78 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
     stat(filename, &st);
     t->timestamp = st.st_mtime;
 
-    /* second stage: rearranging things in a sorted memory table
-       we will break the process into two parts: IPv4 and IPv6 */
+    /* second stage: segregating IPv4, IPv6. No further reordering
+       in order to deal smoothly with jumps (ie. JEQs) */
 
     x = 0;
     t->num = tmp.num;
     t->ipv4_num = v4_num; 
     t->ipv4_base = &t->e[x];
-    while (v4_num) {
-      for (index = 0, ptr = NULL; index < tmp.num; index++) {
-        if (!ptr) {
-          if (tmp.e[index].id && tmp.e[index].agent_ip.family == AF_INET) ptr = &tmp.e[index];
-        }
-        else {
-	  if (tmp.e[index].id && (tmp.e[index].agent_ip.family == AF_INET)) { 
-            if (ptr->agent_ip.address.ipv4.s_addr > tmp.e[index].agent_ip.address.ipv4.s_addr)
-	      ptr = &tmp.e[index];
-	  }
-        }
+    for (index = 0; index < tmp.num; index++) {
+      if (tmp.e[index].agent_ip.a.family == AF_INET) { 
+        memcpy(&t->e[x], &tmp.e[index], sizeof(struct id_entry));
+	t->e[x].pos = x;
+	x++;
       }
-      memcpy(&t->e[x], ptr, sizeof(struct id_entry));
-      ptr->id = FALSE;
-      v4_num--; x++;
     }
 #if defined ENABLE_IPV6
     t->ipv6_num = v6_num;
     t->ipv6_base = &t->e[x];
-    while (v6_num) {
-      for (index = 0, ptr = NULL; index < tmp.num; index++) {
-        if (!ptr) {
-          if (tmp.e[index].id && tmp.e[index].agent_ip.family == AF_INET6) ptr = &tmp.e[index];
-        }
-        else {
-          if (tmp.e[index].id && (tmp.e[index].agent_ip.family == AF_INET6)) {
-            if (ip6_addr_cmp(&ptr->agent_ip.address.ipv6, &tmp.e[index].agent_ip.address.ipv6) > 0)
-              ptr = &tmp.e[index];
+    for (index = 0; index < tmp.num; index++) {
+      if (tmp.e[index].agent_ip.a.family == AF_INET6) {
+        memcpy(&t->e[x], &tmp.e[index], sizeof(struct id_entry));
+	t->e[x].pos = x;
+        x++;
+      }
+    }
+#endif
+
+    /* third stage: building short circuits basing on jumps and labels. Only
+       forward references are solved. Backward and unsolved references will
+       generate errors. */
+    for (ptr = t->ipv4_base, x = 0; x < t->ipv4_num; ptr++, x++) {
+      if (ptr->jeq.label) {
+	label_solved = FALSE;
+
+	/* honouring reserved labels (ie. "next"). Then resolving unknown labels */
+	if (!strcmp(ptr->jeq.label, "next")) {
+	  ptr->jeq.ptr = ptr+1;
+	  label_solved = TRUE;
+	}
+	else {
+	  for (ptr2 = ptr+1, index = x+1; index < t->ipv4_num; ptr2++, index++) {
+	    if (!strcmp(ptr->jeq.label, ptr2->label)) {
+	      ptr->jeq.ptr = ptr2;
+	      label_solved = TRUE;
+	    }
+	  }
+	}
+	if (!label_solved) {
+	  ptr->jeq.ptr = NULL;
+	  Log(LOG_ERR, "ERROR ( %s ): Unresolved label '%s'. Ignoring it.\n", filename, ptr->jeq.label);
+	}
+	free(ptr->jeq.label);
+	ptr->jeq.label = NULL;
+      }
+    }
+
+#if defined ENABLE_IPV6
+    for (ptr = t->ipv6_base, x = 0; x < t->ipv6_num; ptr++, x++) {
+      if (ptr->jeq.label) {
+        label_solved = FALSE;
+        for (ptr2 = ptr+1, index = x+1; index < t->ipv6_num; ptr2++, index++) {
+          if (!strcmp(ptr->jeq.label, ptr2->label)) {
+            ptr->jeq.ptr = ptr2;
+            label_solved = TRUE;
           }
         }
+        if (!label_solved) {
+          ptr->jeq.ptr = NULL;
+          Log(LOG_ERR, "ERROR ( %s ): Unresolved label '%s'. Ignoring it.\n", filename, ptr->jeq.label);
+        }
+        free(ptr->jeq.label);
+        ptr->jeq.label = NULL;
       }
-      memcpy(&t->e[x], ptr, sizeof(struct id_entry));
-      ptr->id = FALSE;
-      v6_num--; x++;
     }
 #endif
   }
@@ -212,3 +260,11 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
   else exit_all(1);
 }
 
+u_int8_t pt_check_neg(char **value)
+{
+  if (**value == '-') {
+    (*value)++;
+    return TRUE;
+  }
+  else return FALSE;
+}

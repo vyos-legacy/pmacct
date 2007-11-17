@@ -44,6 +44,7 @@ struct pkt_classifier {
 /* prototypes */
 EXT void init_classifiers(char *);
 EXT void evaluate_classifiers(struct packet_ptrs *, struct ip_flow_common *, unsigned int);
+EXT pm_class_t NF_evaluate_classifiers(char *);
 EXT int parse_pattern_file(char *, struct pkt_classifier *);
 EXT int parse_shared_object(char *, struct pkt_classifier *);
 EXT int dot_pat(char *);

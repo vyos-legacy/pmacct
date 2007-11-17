@@ -1,5 +1,291 @@
-pmacct (Promiscuous mode IP Accounting package) v0.10.1
-pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+pmacct (Promiscuous mode IP Accounting package) v0.11.4
+pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+
+0.11.4 -- 25-04-2007
+  + support for TCP flags has been introduced. Flags are ORed on a
+    per-aggregate basis (same as what NetFlow does on a per-flow
+    basis). The 'aggregate' directive now supports the 'tcpflags'
+    keyword. SQL tables v7 have also been introduced in order to
+    support the feature inside the SQL plugins. 
+  + 'nfacctd_sql_log' directive is being introduced. In nfacctd,
+    it makes SQL plugins to use a) NetFlow's First Switched value
+    as "stamp_inserted" timestamp and b) Last Switched value as
+    "stamp_updated" timestamp. Then, a) by not aggregating flows
+    and b) not making use of timeslots, this directive allows to
+    log singular flows in the SQL database.
+  + sfprobe and nfprobe plugins are now able to propagate tags to
+    remote collectors through sFlow v5 and NetFlow v9 protocols. 
+    The 'tag' key must be appended to sfprobe/nfprobe 'aggregate'
+    config directives.
+  + pmacct memory client is now able to output either TopN bytes,
+    flows or packets statistics. The feature is enabled by a new
+    '-T' commandline switch.
+  + The Pre-Tagging map is now dynamically allocated and a new
+    'pre_tag_map_entries' config directive allows to set the size
+    of the map. Its default value (384) should be suitable for
+    most common scenarios.
+  ! Bugfix in nfprobe plugin: struct cb_ctxt was not initialized
+    thus causing the application to exit prematurely (thinking it
+    finished available memory). Thanks to Elio Eraseo for fixing
+    the issue.
+  ! Some misplaced defines were preventing 0.11.3 code to compile
+    smoothly on OpenBSD boxes. Thanks to Dmitry Moshkov for fixing
+    it.
+  ! Bugfix in SQL handlers, MY_count_ip_proto_handler(): an array
+    boundary was not properly checked and could cause the daemon
+    to SEGV receiving certain packets. Thanks to Dmitry Frolov for 
+    debugging and fixing the issue.
+  ! NF_counters_renormalize_handler() renormalizes sampled NetFlow
+    v5 flows. It now checks whether a positive Sampling Rate value
+    is defined rather than looking for the Sampling Mode. It makes
+    the feature working on Juniper routers. Thanks once again to
+    Inge Bjornvall Arnesen.
+
+0.11.3 -- 31-01-2007
+  + 'aggregate_filter' directive now supports multiple pcap-style
+    filters, comma separated. This, in turn, allows to bind up to
+    128 filters to each activated plugin.
+  + nfacctd and sfacctd turn-back time when restarting the daemon
+    has been significantly improved by both creating new listening
+    sockets with SO_REUSEADDR option and disassociating them first
+    thing on receiving SIGINT signal. 
+  + A new threaded version of pmacctd stream classification engine  
+    is being introduced. Code status is experimental and disabled
+    by default; it could be enabled by providing --enable-threads
+    at configure time. Many thanks to Francois Deppierraz and Eneo
+    Tecnologia for contributing this useful piece of code. 
+  + A new 'flow_handling_threads' configuration directive allows to
+    set the number of threads of the stream classification engine,
+    by default 10.
+  + A couple new '[ns]facctd_disable_checks' config directives aim
+    to disable health checks over incoming NetFlow/sFlow streams
+    (ie. in cases of non-standard vendor's implementations). Many 
+    thanks to Andrey Chernomyrdin for his patch.
+  ! sfv245_check_status() was running checks (ie. verify sequence
+    numbers) using sender's IP address. More correctly, it has to
+    look at the Agent Address field included in sFlow datagrams.
+    Many thanks to Juraj Sucik for spotting the issue. 
+  ! nfprobe plugin was not compiling properly in conjunction with
+    --disable-l2 configure switch. Many thanks to Inge Bjornvall
+    Arnesen for submitting the patch.
+  ! sfacctd: fixed a bug which was preventing 'aggregate_filter'
+    to match values properly in src_port, dst_port, ip proto and
+    tos fields. Thanks to Chris Fletcher for spotting the issue.
+  ! SQL cache: fixed a bug preventing safe actions to take place
+    correctly. It has arisen in version 0.11.2 and hadn't severe
+    impact.
+
+0.11.2 -- 28-11-2006
+  + 'sql_max_writers' configuration directive is being introduced:
+    sets the maximum number of concurrent writer processes the SQL
+    plugin can fire, allowing the daemon to degrade gracefully in
+    case of major database unavailibility.
+  + 'sql_history_since_epoch' is being introduced: enables the use
+    of timestamps (stamp_inserted, stamp_updated) in the standard
+    seconds since the Epoch format as an alternative to the default
+    date-time format. 
+  + 'sql_aggressive_classification' behaviour is changed: simpler
+    more effective. It now operates by delaying cache-to-DB purge
+    of unknown traffic streams - which would still have chances to
+    be correctly classified - for a few 'sql_refresh_time' slots.
+    The old mechanism was making use of negative UPDATE queries.
+  + The way SQL writer processes are spawned by the SQL plugin has
+    slightly changed in order to better exploit fork()'s copy-on-
+    write behaviour: the writer now is mostly read-only while the
+    plugin does most write operations before spawning the writer.
+  ! The list of environment variables passed to the SQL triggers,
+    'sql_trigger_exec', has been updated.
+  ! Fixed a bug related to sequence number checks for NetFlow v5
+    datagrams. Thanks very much to Peter Nixon for reporting it.
+
+0.11.1 -- 25-10-2006
+  + PostgreSQL plugin: 'sql_use_copy' configuration directive has
+    been introduced; instructs the plugin to build non-UPDATE SQL
+    queries using COPY (in place of INSERT). While providing same
+    functionalities of INSERT, COPY is more efficient. It requires
+    'sql_dont_try_update' to be enabled. Thanks to Arturas Lapiene
+    for his support during the development.
+  + nfprobe plugin: support for IPv4 ToS/DSCP, IPv6 CoS and MPLS
+    top-most label has been introduced. 
+  ! Some alignment issues concerning both pkt_extras structure and
+    Core process to Plugins memory rings have been fixed. Daemons
+    are now reported to be running ok on MIPS/SPARC architectures.
+    Many thanks to Michal Krzysztofowicz for his strong support.
+  ! sfprobe plugin: a maximum default limit of 256 bytes is set
+    on packet payload copy when building Flow Samples in pmacctd
+    (ie. if capturing full packets through libpcap, we don't want
+    them to be entirely copied into sFlow datagrams).
+  ! Sanity checks now take place when processing 'sql_refresh_time'
+    values and error messages are thrown out.
+  ! Fixes have been committed to IPv6 code in xflow_status.c as it
+    was not compiling properly on both Solaris and IRIX.
+
+0.11.0 -- 27-09-2006
+  + NetFlow v5 sampling and renormalization are now supported:
+    a) 'nfacctd' is able to renormalize bytes/packets counters and
+    apply Pre-Tagging basing on the sampling rate specified in the
+    datagram; b) 'sampling_rate' config key applies to 'nfprobe'
+    plugin which is now able to generate sampling informations.
+  + 'nfacctd' and 'sfacctd' are now able to give out informations
+    about the status of active NetFlow/sFlow streams in terms of
+    good/bad/missing datagrams. Whenever an anomaly happens (ie.
+    missing or bad packets) a detailed message is logged; overral
+    reports are logged by sending SIGUSR1 signals to the daemon. 
+  + 'logfile' configuration directive is introduced: it allows to
+    log directly to custom files. This adds to console and syslog
+    logging options.
+  ! Old renormalization structure, renorm_table, has been dropped;
+    the new one, which applies to both NetFlow and sFlow, is tied
+    into the brand new xflow_status_table structure. 
+  ! When 'nfacctd_as_new' was not in use, NetFlow v5 src_as/dst_as
+    values were erroneously swapped. Thanks to Thomas Stegbauer
+    for reporting the bug.
+  ! Incorrect timeout value for poll() has been fixed in 'sfprobe'
+    plugin. It was leading the plugin to take too much resources.
+  ! 'nfprobe' plugin was inserting jumps while generating sequence
+    numbers.
+  ! 'nfprobe' plugin behaviour in handling 'networks_file' content
+    has been changed and now equals 'sfprobe': IP addresses which
+    are not belonging to known networks/ASNs are no longer zeroed. 
+  ! 'sfprobe' was not generating correct sample_pool values.
+    
+0.11.0rc3 -- 30-08-2006
+  + 'sfprobe' plugin can now transport packet/flow classification
+    tags inside sFlow v5 datagrams. Then, such tags can be read by
+    the sFlow collector, sfacctd. 
+  + 'sfprobe' plugin is able to encapsulate basic Extended Gateway
+    informations (src_as, dst_as) into sFlow v5 datagrams starting
+    from a Networks File - networks_file configuration directive.
+  + 'nfprobe' now supports network data coming from libpcap/tcpdump
+    style savefile ('pcap_savefile', -I). 
+  + pmacctd is now able to capture packets from DLT_NULL, which is
+    BSD loopback encapsulation link type. Thanks to Gert Burger for
+    his support.
+  + Sampling layer has been improved: it's now able to sample flows
+    from NetFlow datagrams (not only packets arriving through sFlow
+    or libpcap); 'sfprobe' sampling layer has been tied into this
+    mechanism and as a result, 'sfprobe_sampling_rate' is now an
+    alias for 'sampling_rate' and its default value is 1 (ie. no
+    sampling). This change will benefit 'sfprobe' in terms of better
+    efficiency.
+  + A new 'pmacctd_flow_buffer_buckets' directive defines the number
+    of buckets of the Flow Buffer. This value has to scale to higher
+    power of 2 accordingly to the link traffic rate and is useful
+    when packet classification is enabled. Many thanks for testing,
+    debugging and support go to Steve Cliffe. 
+  + A new 'sql_locking_style' directive allows to choose among two
+    types of locking: "table" (default) and "row". More details are
+    in the CONFIG-KEYS document. "row" locking has to be considered
+    as experimental. Many thanks go to Aaron Glenn and Peter Nixon
+    for their close support, work and thoughts.
+  ! IPv6 support is now working; it was broken in 0.11.0rc2; thanks
+    to Nigel Roberts for signalling and fixing the issue. 
+  ! Fixed a few issues concerning the building system and related to 
+    the introduction of some new subtrees. Thanks to Kirill Ponomarew
+    and Peter Nixon for signalling them.
+  ! Fixed some signal()-related issues when running the package under
+    DragonflyBSD. Being fork of FreeBSD 4.x, it needs same cautions. 
+    Thanks to Aaron Glenn for his support.
+
+0.11.0rc2 -- 08-08-2006
+  + 'nfprobe' plugin can now transport packet/flow classification
+    tags inside NetFlow v9 datagrams, using custom field type 200.
+    Then, such tags can be read by the NetFlow collector, nfacctd.  
+  + 'nfprobe' plugin has now ability to select a Engine Type/Engine 
+    ID through a newly introduced 'nfprobe_engine' config directive.
+    It will mainly allow a collector to distinguish between distinct
+    probe instances originating from the same IP address.
+  + 'nfprobe' plugin now can automagically select different NetFlow
+    v9 template IDs, useful when multiple 'nfprobe' plugins run as
+    part of the same daemon instance. 
+  + 'sfprobe' plugin is now able to redistribute NetFlow flows into
+    sFlow samples. This adds to sFlow -> sFlow and libpcap -> sFlow.
+  + A new data structure to pass extended data to specific plugins
+    has been added. It is placed on the ring, next to pkt_data. It
+    is meant to pass extra data to plugins and, same time, avoiding
+    to inflate the main data structure.
+  ! Wrong arguments were injected into a recently introduced Log()
+    call in plugin_hooks.c; it's now fixed: under certain conditions,
+    this was generating SEGV at startup while using 'sfprobe' plugin.  
+  ! Updated documentation; examples and quickstart guides for using
+    pmacct as both emitter and collector of NetFlow and sFlow have 
+    been added.
+  - Hooks to compile pmacct the no-mmap() style have been removed.
+
+0.11.0rc1 -- 20-07-2006
+  + pmacct DAEMONS ARE NOW ABLE TO CREATE AND EXPORT NETFLOW PACKETS:
+    a new 'nfprobe' plugin is available and allows to create NetFlow
+    v1/v5/v9 datagrams and export them to a IPv4/IPv6 collector. The
+    work is based on softflowd 0.9.7 software. A set of configuration
+    directives allows to tune timeouts (nfprobe_timeouts), cache size
+    (nfprobe_maxflows), collector parameters (nfprobe_receiver), TTL
+    value (nfprobe_hoplimit) and NetFlow version of the datagrams to
+    be exported (nfprobe_version). Many thanks to Ivan A. Beveridge,
+    Peter Nixon and Sven Anderson for their support and thoughts and
+    to Damien Miller, author of softflowd.
+  + pmacct DAEMONS ARE NOW ABLE TO CREATE AND EXPORT SFLOW PACKETS:  
+    a new 'sfprobe' plugin is available and allows to create sFlow 
+    v5 datagrams and export them to a IPv4 collector. The work is
+    based on InMon sFlow Agent 5.6 software. A set of configuration
+    directives allows to tune sampling rate (sfprobe_sampling_rate),
+    sFlow agent IP address (sfprobe_agentip), collector parameters
+    (sfprobe_receiver) and agentSubId value (sfprobe_agentsubid). 
+    Many thanks to InMon for their software and Ivan A. Beveridge
+    for his support.
+  ! An incorrect pointer to the received packet was preventing Pre-
+    Tagging filters to work correctly against DLT_LINUX_SLL links.
+    Many thanks to Zhuang Yuyao for reporting the issue.
+  ! Proper checks on protocol number were missing in pmacct client
+    program, allowing to look further the bounds of the _protocols
+    array. Many thanks to Denis N. Voituk for patching the issue.
+
+0.10.3 -- 21-06-2006 
+  + New Pre-Tagging key 'label': mark the rule with label's value.
+    Labels don't need to be unique: when jumping, the first matching
+    label wins. 
+  + New Pre-Tagging key 'jeq': Jump on EQual. Jumps to the supplied
+    label in case of rule match. Before jumping, the tagged flow is
+    returned to active plugins, as it happens for any regular match
+    (set return=false to change this). In case of multiple matches
+    for a signle flow, plugins showing 'tag' key inside 'aggregate'
+    directive will receive each tagged copy; plugins not receiving
+    tags will still receive unique copy of the flow. 
+    sFlow and NetFlow are usually uni-directional, ie. ingress-only
+    or egress-only (to avoid duplicates). Meaningful application of
+    JEQs is tagging flows two times: by incoming interface and by
+    outgoing one. Only forward jumps are allowed. "next" is reserved
+    label and causes to jump to the next rule. Many thanks to Aaron 
+    Glenn for brainstormings about this point. 
+  + New Pre-Tagging key 'return': if set to 'true' (which is default
+    behaviour) returns the current packet/flow to active plugins, in
+    case of match. If switched to 'false', it will prevent this to
+    happen. It might be thought either as an extra filtering layer
+    (bound to explicit Pre-Tagging rules) or (also in conjunction with
+    'stack') as a way to add flexibility to JEQs.
+  + New Pre-Tagging key 'stack': actually '+' (ie. sum symbol) is the
+    unique supported value. This key makes sense only if JEQs are in
+    use. When matching, accumulate IDs, using the specified operator/
+    function. For example, usually <tag>=<currentID>. By setting
+    'stack=+' you will be able to get <tag>=<previousID + currentID>.
+  ! Pre-Tagging table now supports a maximum of 384 rules. Because
+    of the newly introduced flow alteration features, tables are
+    no longer internally re-ordered. However, IPv4 and IPv6 stacks
+    are still segregated each other.
+
+0.10.2 -- 16-05-2006
+  + A new '-l' option is supported by pmacct client tool: it allows
+    to enable locking of the memory table explicitely, when serving
+    the requested operation. 
+  + Pre-Tagging infrastructure is now featuring negations for almost
+    all supported keys with the exclusion of id, ip and filter. To
+    negate, the '-' (minus symbol) need to be prepended; eg.: id=X
+    ip=Y in=-1 means tag with X, data received from Net/sFlow agent
+    with IP address Y and not coming from interface 1.
+  + pre_tag_filter config directive is now featuring same negation
+    capabilities as Pre-Tagging infrastructure.
+  + Q16 added to FAQS document: a sum of tips for running smoothly
+    SQL tables. Many thanks to Wim Kerkhoff and Sven Anderson for
+    bringing up the points. 
 
 0.10.1 -- 18-04-2006
   + AS numbers and IP addresses are no more multiplexed into the same
