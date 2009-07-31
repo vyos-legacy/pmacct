@@ -22,13 +22,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow5.c,v 1.2 2009/07/30 12:41:26 paolo Exp $ */
+/* $Id: netflow5.c,v 1.3 2009/07/31 10:13:38 paolo Exp $ */
 
 #include "common.h"
 #include "treetype.h"
 #include "nfprobe_plugin.h"
 
-RCSID("$Id: netflow5.c,v 1.2 2009/07/30 12:41:26 paolo Exp $");
+RCSID("$Id: netflow5.c,v 1.3 2009/07/31 10:13:38 paolo Exp $");
 
 /*
  * This is the Cisco Netflow(tm) version 5 packet format
@@ -120,9 +120,12 @@ send_netflow_v5(struct FLOW **flows, int num_flows, int nfsock,
 			  as_t tmp_as;
 
 			  tmp_as = ntohl(flows[i]->as[0]);
-			  flw->src_as = htons(tmp_as);
+			  if (tmp_as > 65535) flw->src_as = htons(23456);
+			  else flw->src_as = tmp_as;
+
 			  tmp_as = ntohl(flows[i]->as[1]);
-			  flw->dest_as = htons(tmp_as);
+			  if (tmp_as > 65535) flw->dest_as = htons(23456);
+			  else flw->dest_as = htons(tmp_as);
 			}
 			flw->flow_packets = htonl(flows[i]->packets[0]);
 			flw->flow_octets = htonl(flows[i]->octets[0]);
@@ -150,9 +153,12 @@ send_netflow_v5(struct FLOW **flows, int num_flows, int nfsock,
 			  as_t tmp_as;
 			  
 			  tmp_as = ntohl(flows[i]->as[1]);
-			  flw->src_as = htons(tmp_as);
+			  if (tmp_as > 65535) flw->src_as = htons(23456);
+			  else flw->src_as = htons(tmp_as);
+
 			  tmp_as = ntohl(flows[i]->as[0]);
-			  flw->dest_as = htons(tmp_as);
+			  if (tmp_as > 65535) flw->dest_as = htons(23456);
+			  else flw->dest_as = htons(tmp_as);
 			}
 			flw->flow_packets = htonl(flows[i]->packets[1]);
 			flw->flow_octets = htonl(flows[i]->octets[1]);
