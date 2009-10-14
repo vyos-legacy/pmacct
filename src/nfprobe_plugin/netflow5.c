@@ -22,13 +22,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow5.c,v 1.4 2009/08/13 19:20:52 paolo Exp $ */
+/* $Id: netflow5.c,v 1.5 2009/10/14 16:45:33 paolo Exp $ */
 
 #include "common.h"
 #include "treetype.h"
 #include "nfprobe_plugin.h"
 
-RCSID("$Id: netflow5.c,v 1.4 2009/08/13 19:20:52 paolo Exp $");
+RCSID("$Id: netflow5.c,v 1.5 2009/10/14 16:45:33 paolo Exp $");
 
 /*
  * This is the Cisco Netflow(tm) version 5 packet format
@@ -102,7 +102,10 @@ send_netflow_v5(struct FLOW **flows, int num_flows, int nfsock,
 			hdr->flow_sequence = htonl(*flows_exported);
 			hdr->engine_type = engine_type;
 			hdr->engine_id = engine_id;
-			hdr->sampling = htons(config.sampling_rate & 0x3FFF); 
+			if (config.sampling_rate) 
+			  hdr->sampling = htons(config.sampling_rate & 0x3FFF); 
+			else if (config.ext_sampling_rate) 
+			  hdr->sampling = htons(config.ext_sampling_rate & 0x3FFF); 
 			if (hdr->sampling) hdr->sampling |= (htons(1) >> 2);
 			offset = sizeof(*hdr);
 		}		

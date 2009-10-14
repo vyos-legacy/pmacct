@@ -22,7 +22,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow9.c,v 1.5 2009/10/11 15:56:07 paolo Exp $ */
+/* $Id: netflow9.c,v 1.6 2009/10/14 16:45:33 paolo Exp $ */
 
 #define __NFPROBE_NETFLOW9_C
 
@@ -487,7 +487,7 @@ nf9_init_template(void)
           v4_int_template.r[rcount].length = 4;
           rcount++;
         }
-        if (config.sampling_rate) {
+        if (config.sampling_rate || config.ext_sampling_rate) {
           v4_template.r[rcount].type = htons(NF9_FLOW_SAMPLER_ID);
           v4_template.r[rcount].length = htons(1);
           v4_int_template.r[rcount].handler = flow_to_flowset_sampler_id_handler;
@@ -646,7 +646,7 @@ nf9_init_template(void)
           v6_int_template.r[rcount].length = 4;
           rcount++;
         }
-        if (config.sampling_rate) {
+        if (config.sampling_rate || config.ext_sampling_rate) {
           v6_template.r[rcount].type = htons(NF9_FLOW_SAMPLER_ID);
           v6_template.r[rcount].length = htons(1);
           v6_int_template.r[rcount].handler = flow_to_flowset_sampler_id_handler;
@@ -810,7 +810,10 @@ nf_options_to_flowset(u_char *packet, u_int len, const struct timeval *system_bo
         memcpy(ftoft_ptr_0, &rec8, 1);
         ftoft_ptr_0 += 1;
 
-        rec32 = htonl(config.sampling_rate); /* NF9_FLOW_SAMPLER_INTERVAL */
+	if (config.sampling_rate)
+          rec32 = htonl(config.sampling_rate); /* NF9_FLOW_SAMPLER_INTERVAL */
+	else if (config.ext_sampling_rate)
+          rec32 = htonl(config.ext_sampling_rate); /* NF9_FLOW_SAMPLER_INTERVAL */
         memcpy(ftoft_ptr_0, &rec32, 4);
         ftoft_ptr_0 += 4;
 
@@ -880,7 +883,7 @@ send_netflow_v9(struct FLOW **flows, int num_flows, int nfsock,
 			memcpy(packet + offset, &v6_template, v6_template.tot_len);
 			offset += v6_template.tot_len; 
 			nf9->flows++;
-			if (config.sampling_rate) {
+			if (config.sampling_rate || config.ext_sampling_rate) {
                           memcpy(packet + offset, &options_template, options_template.tot_len);
                           offset += options_template.tot_len;
 			  nf9->flows++;
