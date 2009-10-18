@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -25,6 +25,7 @@
 /* includes */
 #include "pmacct.h"
 #include "pmacct-data.h"
+#include "pmacct-dlt.h"
 #include "pretag_handlers.h"
 #include "pretag-data.h"
 #include "plugin_hooks.h"
@@ -123,6 +124,7 @@ int main(int argc,char **argv, char **envp)
   memset(&failed_plugins, 0, sizeof(failed_plugins));
   memset(&req, 0, sizeof(req));
   memset(dummy_tlhdr, 0, sizeof(dummy_tlhdr));
+  memset(sll_mac, 0, sizeof(sll_mac));
   config.acct_type = ACCT_PM;
 
   rows = 0;
@@ -133,106 +135,106 @@ int main(int argc,char **argv, char **envp)
     cfg_cmdline[rows] = malloc(SRVBUFLEN);
     switch (cp) {
     case 'P':
-      strcpy(cfg_cmdline[rows], "plugins: ");
+      strlcpy(cfg_cmdline[rows], "plugins: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'D':
-      strcpy(cfg_cmdline[rows], "daemonize: true");
+      strlcpy(cfg_cmdline[rows], "daemonize: true", SRVBUFLEN);
       rows++;
       break;
     case 'd':
       debug = TRUE;
-      strcpy(cfg_cmdline[rows], "debug: true");
+      strlcpy(cfg_cmdline[rows], "debug: true", SRVBUFLEN);
       rows++;
       break;
     case 'n':
-      strcpy(cfg_cmdline[rows], "networks_file: ");
+      strlcpy(cfg_cmdline[rows], "networks_file: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'o':
-      strcpy(cfg_cmdline[rows], "ports_file: ");
+      strlcpy(cfg_cmdline[rows], "ports_file: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break; 
     case 'N':
-      strcpy(cfg_cmdline[rows], "promisc: false");
+      strlcpy(cfg_cmdline[rows], "promisc: false", SRVBUFLEN);
       rows++;
       break;
     case 'f':
       strlcpy(config_file, optarg, sizeof(config_file));
       break;
     case 'F':
-      strcpy(cfg_cmdline[rows], "pidfile: ");
+      strlcpy(cfg_cmdline[rows], "pidfile: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'c':
-      strcpy(cfg_cmdline[rows], "aggregate: ");
+      strlcpy(cfg_cmdline[rows], "aggregate: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'b':
-      strcpy(cfg_cmdline[rows], "imt_buckets: ");
+      strlcpy(cfg_cmdline[rows], "imt_buckets: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'm':
-      strcpy(cfg_cmdline[rows], "imt_mem_pools_number: ");
+      strlcpy(cfg_cmdline[rows], "imt_mem_pools_number: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       have_num_memory_pools = TRUE;
       rows++;
       break;
     case 'p':
-      strcpy(cfg_cmdline[rows], "imt_path: ");
+      strlcpy(cfg_cmdline[rows], "imt_path: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'r':
-      strcpy(cfg_cmdline[rows], "sql_refresh_time: ");
+      strlcpy(cfg_cmdline[rows], "sql_refresh_time: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       cfg_cmdline[rows] = malloc(SRVBUFLEN);
-      strcpy(cfg_cmdline[rows], "print_refresh_time: ");
+      strlcpy(cfg_cmdline[rows], "print_refresh_time: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'v':
-      strcpy(cfg_cmdline[rows], "sql_table_version: ");
+      strlcpy(cfg_cmdline[rows], "sql_table_version: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 's':
-      strcpy(cfg_cmdline[rows], "imt_mem_pools_size: ");
+      strlcpy(cfg_cmdline[rows], "imt_mem_pools_size: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'S':
-      strcpy(cfg_cmdline[rows], "syslog: ");
+      strlcpy(cfg_cmdline[rows], "syslog: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'i':
-      strcpy(cfg_cmdline[rows], "interface: ");
+      strlcpy(cfg_cmdline[rows], "interface: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'I':
-      strcpy(cfg_cmdline[rows], "pcap_savefile: ");
+      strlcpy(cfg_cmdline[rows], "pcap_savefile: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'w':
-      strcpy(cfg_cmdline[rows], "interface_wait: true");
+      strlcpy(cfg_cmdline[rows], "interface_wait: true", SRVBUFLEN);
       rows++;
       break;
     case 'W':
-      strcpy(cfg_cmdline[rows], "savefile_wait: true");
+      strlcpy(cfg_cmdline[rows], "savefile_wait: true", SRVBUFLEN);
       rows++;
       break;
     case 'L':
-      strcpy(cfg_cmdline[rows], "snaplen: ");
+      strlcpy(cfg_cmdline[rows], "snaplen: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
@@ -301,7 +303,15 @@ int main(int argc,char **argv, char **envp)
     Log(LOG_INFO, "INFO ( default/core ): Start logging ...\n");
   }
 
-  if (config.logfile) config.logfile_fd = open_logfile(config.logfile);
+  if (config.logfile)
+  {
+    config.logfile_fd = open_logfile(config.logfile);
+    list = plugins_list;
+    while (list) {
+      list->cfg.logfile_fd = config.logfile_fd ;
+      list = list->next;
+    }
+  }
 
   /* Enforcing policies over aggregation methods */
   list = plugins_list;
@@ -476,7 +486,7 @@ int main(int argc,char **argv, char **envp)
   }
   else Log(LOG_INFO, "OK ( default/core ): link type is: %d\n", device.link_type); 
 
-  if (device.link_type != DLT_EN10MB && device.link_type != DLT_IEEE802) {
+  if (device.link_type != DLT_EN10MB && device.link_type != DLT_IEEE802 && device.link_type != DLT_LINUX_SLL) {
     list = plugins_list;
     while (list) {
       if ((list->cfg.what_to_count & COUNT_SRC_MAC) || (list->cfg.what_to_count & COUNT_DST_MAC)) {

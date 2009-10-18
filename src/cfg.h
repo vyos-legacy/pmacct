@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -161,7 +161,6 @@ struct plugins_list_entry {
 EXT void evaluate_configuration(char *, int);
 EXT int parse_configuration_file(char *);
 EXT int parse_plugin_names(char *, int, int);
-EXT void debug_configuration_file(char *, int);
 EXT int create_plugin(char *, char *, char *);
 EXT int delete_plugin_by_id(int);
 EXT struct plugins_list_entry *search_plugin_by_pipe(int);

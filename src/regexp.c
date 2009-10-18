@@ -1,5 +1,5 @@
 /*
- * regcomp and regexec -- regsub and regerror are elsewhere
+ * regcomp and regexec -- regsub regerror are elsewhere
  * @(#)regexp.c	1.3 of 18 April 87
  *
  *	Copyright (c) 1986 by University of Toronto.
@@ -34,7 +34,7 @@
 #include "regexp.h"
 #include "regmagic.h"
 
-void regerror(char * s)
+void pm_regerror(char * s)
 {
         printf("<3>Regexp: %s\n", s);
         /* NOTREACHED */
@@ -143,7 +143,7 @@ void regerror(char * s)
 #define	UCHARAT(p)	((int)*(p)&CHARBITS)
 #endif
 
-#define	FAIL(m)	{ regerror(m); return(NULL); }
+#define	FAIL(m)	{ pm_regerror(m); return(NULL); }
 #define	ISMULT(c)	((c) == '*' || (c) == '+' || (c) == '?')
 #define	META	"^$.[()|?+*\\"
 
@@ -214,7 +214,7 @@ size_t my_strcspn(const char *s1,const char *s2)
  * of the structure of the compiled regexp.
  */
 regexp *
-regcomp(char *exp,int *patternsize)
+pm_regcomp(char *exp,int *patternsize)
 {
 	register regexp *r;
 	register char *scan;
@@ -715,7 +715,7 @@ STATIC char *regprop(char *op);
  - regexec - match a regexp against a string
  */
 int
-regexec(regexp *prog, char *string)
+pm_regexec(regexp *prog, char *string)
 {
 	register char *s;
 

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -77,7 +77,7 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
       rows = 0;
       /* 1st step: count rows for table allocation */
       while (!feof(file)) {
-        if (fgets(buf, SRVBUFLEN, file)) rows++; 
+	if (fgets(buf, SRVBUFLEN, file) && !iscomment(buf)) rows++;
       }
       /* 2nd step: loading data into a temporary table */
       freopen(filename, "r", file);
@@ -106,6 +106,8 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
 	bufptr = buf;
 	memset(buf, 0, SRVBUFLEN);
         if (fgets(buf, SRVBUFLEN, file)) { 
+	  if (iscomment(buf))
+	    continue;
 	  if (delim = strchr(buf, ',')) {
 	    as = buf;
 	    *delim = '\0';
@@ -807,6 +809,8 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
               Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%d'.\n", filename, index);
               goto cycle_end;
             }
+
+	    memset(&tmpmask, 0, sizeof(tmpmask));
 
 	    for (j = 0; j < 4 && index >= 32; j++, index -= 32) tmpmask[j] = 0xffffffffU; 
 	    if (j < 4 && index) tmpmask[j] = ~(0xffffffffU >> index);

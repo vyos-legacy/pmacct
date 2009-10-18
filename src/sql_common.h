@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -81,6 +81,7 @@ struct insert_data {
   int num_primitives;
   int dyn_table;
   int recover;
+  int locks;
   int new_basetime;
   int current_queue_elem;
   struct multi_values mv;

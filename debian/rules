@@ -38,6 +38,7 @@ config.status: configure
 		--with-pgsql-includes=`pg_config --includedir` \
 		--enable-mysql \
 		--enable-sqlite3 \
+		--enable-ipv6 \
 		|| cat config.log
 
 build: build-stamp

@@ -347,14 +347,12 @@ struct template_field_v9 {
 }; 
 
 struct template_hdr_v9 {
-  u_int16_t flow_id; /* 0 */
-  u_int16_t flow_len;
   u_int16_t template_id;
   u_int16_t num;
 };
 
 struct data_hdr_v9 {
-  u_int16_t flow_id; /* >= 256 */
+  u_int16_t flow_id; /* == 0: template; >= 256: data */
   u_int16_t flow_len;
 };
 

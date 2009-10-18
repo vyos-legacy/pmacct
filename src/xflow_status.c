@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -99,11 +99,18 @@ void update_status_table(struct xflow_status_entry *entry, u_int32_t seqno)
       entry->counters.good++;
     }
     else {
-      char ip_address[INET6_ADDRSTRLEN];
+      char agent_ip_address[INET6_ADDRSTRLEN];
+      char collector_ip_address[INET6_ADDRSTRLEN];
+      char null_ip_address[] = "0.0.0.0";
 
-      addr_to_str(ip_address, &entry->agent_addr);
+      addr_to_str(agent_ip_address, &entry->agent_addr);
+      if (config.nfacctd_ip)
+	memcpy(collector_ip_address, config.nfacctd_ip, MAX(strlen(config.nfacctd_ip), INET6_ADDRSTRLEN));
+      else
+	strcpy(collector_ip_address, null_ip_address);
+
       Log(LOG_WARNING, "WARN: expecting flow '%u' but received '%u' collector=%s:%u agent=%s:%u\n",
-		      entry->seqno, seqno, config.nfacctd_ip, config.nfacctd_port, ip_address, entry->aux1);
+		      entry->seqno+entry->inc, seqno, collector_ip_address, config.nfacctd_port, agent_ip_address, entry->aux1);
       if (seqno > entry->seqno+entry->inc) {
         // entry->counters.missed += (seqno-entry->seqno);
         entry->counters.jumps_f++;

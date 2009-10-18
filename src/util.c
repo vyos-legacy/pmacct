@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -169,44 +169,41 @@ char *copy_argv(register char **argv)
 
 void trim_spaces(char *buf)
 {
-  char *ptr;
   int i, len;
 
-  ptr = buf;
   len = strlen(buf);
    
   /* trimming spaces at beginning of the string */
   for (i = 0; i <= len; i++) {
-    if (!isspace(ptr[i])) {
-      strcpy(buf, &ptr[i]); 
+    if (!isspace(buf[i])) {
+      if (i != 0)
+        strlcpy(buf, &buf[i], len+1-i);
       break;
     } 
   }
 
   /* trimming spaces at the end of the string */
   for (i = strlen(buf)-1; i >= 0; i--) { 
-    if (isspace(ptr[i]))
-      ptr[i] = '\0';
+    if (isspace(buf[i]))
+      buf[i] = '\0';
     else break;
   }
 }
 
 void trim_all_spaces(char *buf)
 {
-  char *ptr;
   int i = 0, len, quotes = FALSE;
 
-  ptr = buf;
   len = strlen(buf);
 
   /* trimming all spaces */
   while (i <= len) {
-    if (ptr[i] == '\'') {
+    if (buf[i] == '\'') {
       if (!quotes) quotes = TRUE;
       else if (quotes) quotes = FALSE;
     }
-    if (isspace(ptr[i]) && !quotes) {
-      strcpy(&buf[i], &ptr[i+1]);
+    if (isspace(buf[i]) && !quotes) {
+      strlcpy(&buf[i], &buf[i+1], len);
       len--;
     }
     else i++;

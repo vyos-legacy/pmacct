@@ -33,9 +33,9 @@ typedef struct regexp {
 	char program[1];	/* Unwarranted chumminess with compiler. */
 } regexp;
 
-regexp * regcomp(char *exp, int *patternsize);
-int regexec(regexp *prog, char *string);
-void regsub(regexp *prog, char *source, char *dest);
-void regerror(char *s);
+regexp * pm_regcomp(char *exp, int *patternsize);
+int pm_regexec(regexp *prog, char *string);
+void pm_regsub(regexp *prog, char *source, char *dest);
+void pm_regerror(char *s);
 
 #endif

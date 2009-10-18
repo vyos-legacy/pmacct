@@ -647,8 +647,10 @@ DESC:		it expects one or more ID (when multiple ID are supplied, they need to be
 		has to be bound to a plugin (that is, it cannot be global) and is suitable to split tagged data
 		among the active plugins. While the IDs need to be in the range 1-65535, this directive also
 		allows to specify an ID '0' - which intercepts non-tagged aggregates - thus allowing to split
-		tagged traffic from untagged one. It makes sense if coupled with 'pre_tag_map'; it could be
-		used in conjunction with 'aggregate_filter'.
+		tagged traffic from untagged one. It also allows negations by pre-pending a minus sign to the
+		tag value (ie. '-6' would send everything but traffic tagged as '6') and ranges (ie. '10-20'
+		would send over traffic tagged in the range 10..20) and combination of these. This directive
+		makes sense if coupled with 'pre_tag_map'; it could be used in conjunction with 'aggregate_filter'.
 
 KEY:            post_tag 
 VALUES:         [1-65535]
@@ -757,8 +759,9 @@ DESC:		defines the locking style for the SQL table. Supported values are: "table
 		UPDATE/DELETE. It results in better overral performances but has some noticeable drawbacks in
 		dealing with transactions and making the UPDATE-then-INSERT mechanism work smoothly. The user
 		need to take cares on his own; a simple and safe enough protection can be tagging uniquely
-		data coming from each plugin (see pre_tag_map, post_tag). Actually, this config directive
-		applies only to PostgreSQL plugin. (default: table)
+		data coming from each plugin (see pre_tag_map, post_tag). In MySQL the use of an InnoDB table
+		is mandatory. This config directive currently applies only to PostgreSQL and MySQL plugins.
+		(default: table)
 
 KEY:		classifier_tentatives [GLOBAL, NO_NFACCTD, NO_SFACCTD]
 DESC:		number of tentatives to classify a stream. Usually 5 "full" (ie. carrying payload) packets are

@@ -304,8 +304,8 @@ l2_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *extra
 #if defined HAVE_L2
   struct pkt_primitives *p = &data->primitives;
 
-  memcpy(&flow->mac[ndx], &p->eth_shost, 6);
-  memcpy(&flow->mac[ndx ^ 1], &p->eth_dhost, 6);
+  memcpy(&flow->mac[ndx][0], &p->eth_shost, 6);
+  memcpy(&flow->mac[ndx ^ 1][0], &p->eth_dhost, 6);
   flow->vlan = p->vlan_id;
   flow->mpls_label[ndx] = extras->mpls_top_label;
 #endif
@@ -1398,7 +1398,7 @@ read_data:
 
           for (num = 0; net_funcs[num]; num++) (*net_funcs[num])(&nt, &nc, &dummy.primitives);
 
-	  if ((config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) && config.nfacctd_as != NF_AS_KEEP) {
+	  if (((config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) && config.nfacctd_as != NF_AS_KEEP) || config.acct_type == ACCT_PM) {
 	    data->primitives.src_as = dummy.primitives.src_as;
 	    data->primitives.dst_as = dummy.primitives.dst_as;
 	  }

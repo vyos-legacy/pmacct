@@ -36,19 +36,11 @@
 #define	UCHARAT(p)	((int)*(p)&CHARBITS)
 #endif
 
-#if 0
-//void regerror(char * s)
-//{
-//        printk("regexp(3): %s", s);
-//        /* NOTREACHED */
-//}
-#endif
-
 /*
  - regsub - perform substitutions after a regexp match
  */
 void
-regsub(regexp * prog, char * source, char * dest)
+pm_regsub(regexp * prog, char * source, char * dest)
 {
 	register char *src;
 	register char *dst;
@@ -60,11 +52,11 @@ regsub(regexp * prog, char * source, char * dest)
 	/*extern char *strncpy();*/
 
 	if (prog == NULL || source == NULL || dest == NULL) {
-		regerror("NULL parm to regsub");
+		pm_regerror("NULL parm to regsub");
 		return;
 	}
 	if (UCHARAT(prog->program) != MAGIC) {
-		regerror("damaged regexp fed to regsub");
+		pm_regerror("damaged regexp fed to regsub");
 		return;
 	}
 
@@ -87,7 +79,7 @@ regsub(regexp * prog, char * source, char * dest)
 			(void) strncpy(dst, prog->startp[no], len);
 			dst += len;
 			if (len != 0 && *(dst-1) == '\0') {	/* strncpy hit NUL. */
-				regerror("damaged match string");
+				pm_regerror("damaged match string");
 				return;
 			}
 		}

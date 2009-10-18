@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -395,7 +395,7 @@ struct chained_cache *P_cache_attach_new_node(struct chained_cache *elem)
 void P_cache_purge(struct chained_cache *queue[], int index)
 {
   struct pkt_primitives *data = NULL;
-  char src_mac[17], dst_mac[17], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
+  char src_mac[18], dst_mac[18], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
   int j;
 
   if (config.print_markers) printf("--START (%u+%u)--\n", refresh_deadline-config.print_refresh_time,

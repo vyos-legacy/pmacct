@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -56,6 +56,13 @@ typedef struct {
   pretag_stack_handler func; 
 } pt_stack_t;
 
+/* Pre-Tag table (ptt) element definition */
+typedef struct {
+  u_int8_t neg;
+  u_int16_t n;
+  u_int16_t r;
+} ptt_uint16_t;
+
 struct id_entry {
   pm_id_t id;
   pm_id_t pos;
@@ -98,7 +105,7 @@ struct _map_dictionary_line {
 
 struct pretag_filter {
   u_int16_t num;
-  pt_uint16_t table[MAX_PRETAG_MAP_ENTRIES/4];
+  ptt_uint16_t table[MAX_PRETAG_MAP_ENTRIES/4];
 };
 
 /* prototypes */
@@ -109,5 +116,6 @@ struct pretag_filter {
 #endif
 EXT void load_id_file(int, char *, struct id_table *, struct plugin_requests *);
 EXT u_int8_t pt_check_neg(char **);
+EXT char * pt_check_range(char *);
 
 #undef EXT

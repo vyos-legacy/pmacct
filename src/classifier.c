@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -157,7 +157,7 @@ void evaluate_classifiers(struct packet_ptrs *pptrs, struct ip_flow_common *fp, 
     payload[y] = '\0';
 
     while (class[j].id && j < max) {
-      if (class[j].pattern) ret = regexec(class[j].pattern, payload);
+      if (class[j].pattern) ret = pm_regexec(class[j].pattern, payload);
       else if (*class[j].func) {
 	cc_node = search_context_chain(fp, idx, class[j].protocol);
 	cc_rev_node = search_context_chain(fp, reverse, class[j].protocol);
@@ -370,7 +370,7 @@ int parse_pattern_file(char *fname, struct pkt_classifier *css)
         Log(LOG_ERR, "ERROR: Pattern in %s too long. A maximum of %d chars is allowed.\n", fname, MAX_PATTERN_LEN);
 	return 0;
       }
-      css->pattern = regcomp(pre_process(line), &linelen);
+      css->pattern = pm_regcomp(pre_process(line), &linelen);
       if (!css->pattern) {
 	Log(LOG_ERR, "ERROR: Failed compiling regular expression for protocol '%s'\n", css->protocol);
 	return 0;
