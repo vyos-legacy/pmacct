@@ -1,3 +1,13 @@
+pmacct (0.11.6-2) unstable; urgency=low
+
+  * Updated standards version to 3.8.3.
+  * Fixed path to GPLv2 in debian/copyright.
+  * Bumped debian/compat to 7.
+   - Replace dh_clean -k with dh_prep.
+   - Add versioned depends on debhelper 7.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Mon, 19 Oct 2009 17:34:36 +1100
+
 pmacct (0.11.6-1) unstable; urgency=low
 
   * New upstream version.
