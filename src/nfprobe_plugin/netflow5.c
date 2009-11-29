@@ -22,13 +22,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow5.c,v 1.5 2009/10/14 16:45:33 paolo Exp $ */
+/* $Id: netflow5.c,v 1.6 2009/11/29 13:45:52 paolo Exp $ */
 
 #include "common.h"
 #include "treetype.h"
 #include "nfprobe_plugin.h"
 
-RCSID("$Id: netflow5.c,v 1.5 2009/10/14 16:45:33 paolo Exp $");
+RCSID("$Id: netflow5.c,v 1.6 2009/11/29 13:45:52 paolo Exp $");
 
 /*
  * This is the Cisco Netflow(tm) version 5 packet format
@@ -119,6 +119,8 @@ send_netflow_v5(struct FLOW **flows, int num_flows, int nfsock,
 			flw->dest_ip = flows[i]->addr[1].v4.s_addr;
 			flw->src_port = flows[i]->port[0];
 			flw->dest_port = flows[i]->port[1];
+                        flw->if_index_in = htons(flows[i]->ifindex[0]);
+                        flw->if_index_out = htons(flows[i]->ifindex[1]);
 			{
 			  as_t tmp_as;
 
@@ -152,6 +154,8 @@ send_netflow_v5(struct FLOW **flows, int num_flows, int nfsock,
 			flw->dest_ip = flows[i]->addr[0].v4.s_addr;
 			flw->src_port = flows[i]->port[1];
 			flw->dest_port = flows[i]->port[0];
+                        flw->if_index_in = htons(flows[i]->ifindex[1]);
+                        flw->if_index_out = htons(flows[i]->ifindex[0]);
 			{
 			  as_t tmp_as;
 			  
