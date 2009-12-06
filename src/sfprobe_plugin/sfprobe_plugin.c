@@ -445,7 +445,7 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   /* XXX: glue */
   memcpy(&config, cfgptr, sizeof(struct configuration));
   recollect_pipe_memory(ptr);
-  pm_setproctitle("%s [%s]", "sFlow Probe Plugin", config.name);
+  pm_setproctitle("%s [%s-%s]", "sFlow Probe Plugin", config.dev, config.name);
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
 
   reload_map = FALSE;

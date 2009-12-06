@@ -1245,7 +1245,7 @@ void nfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   /* XXX: glue */
   memcpy(&config, cfgptr, sizeof(struct configuration));
   recollect_pipe_memory(ptr);
-  pm_setproctitle("%s [%s]", "Netflow Probe Plugin", config.name);
+  pm_setproctitle("%s [%s-%s]", "Netflow Probe Plugin", config.dev, config.name);
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
   Log(LOG_INFO, "INFO ( %s/%s ): NetFlow probe plugin is based on softflowd 0.9.7 software, Copyright 2002 Damien Miller <djm@mindrot.org> All rights reserved.\n",
 		  config.name, config.type);
