@@ -8,6 +8,7 @@
 *~
 .*.swp
 TAGS
+ID
 /aclocal.m4
 /autom4te.cache
 /build-stamp
@@ -34,3 +35,4 @@ TAGS
 /src/pmacctd
 /src/pmpgplay
 /src/sfacctd
+/src/uacctd
