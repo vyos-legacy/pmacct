@@ -1,0 +1,4 @@
+usr/bin
+usr/sbin
+etc/pmacct
+var/lib/pmacct

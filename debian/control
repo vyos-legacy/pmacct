@@ -1,0 +1,19 @@
+Source: pmacct
+Section: net
+Priority: optional
+Maintainer: Vyatta Package Maintainers <maintainers@vyatta.com>
+Build-Depends: debhelper (>= 4.0.0), zlib1g-dev, libpcap-dev
+Standards-Version: 3.7.2
+
+Package: pmacct
+Architecture: any
+Depends: ${shlibs:Depends}, iproute
+Description: promiscuous mode traffic accountant
+ pmacct is a tool designed to gather traffic information (bytes and number
+ of packets) by listening on a promiscuous interface or for Netflow data,
+ which may facilitate billing, bandwidth management, traffic analysis, or
+ creating usage graphs.
+ .
+ Data can be stored in memory and queried, displayed directly, or written
+ to a database; storage methods are quite flexible and may aggregate totals
+ or keep them separate.
