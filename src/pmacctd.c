@@ -652,7 +652,7 @@ int main(int argc,char **argv, char **envp)
 
   /* plugins glue: creation (until 093) */
   evaluate_packet_handlers();
-  pm_setproctitle("%s [%s-%s]", "Core Process", config.dev, "default");
+  pm_setproctitle("%s [%s]", "Core Process", "default");
   if (config.pidfile) write_pid_file(config.pidfile);  
 
   /* signals to be handled only by pmacctd;
