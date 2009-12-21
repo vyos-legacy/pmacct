@@ -95,6 +95,8 @@ int main(int argc,char **argv, char **envp)
   int psize = ULOG_BUFLEN;
 
   struct id_table bpas_table;
+  struct id_table blp_table;
+  struct id_table bmed_table;
   struct id_table bta_table;
   struct id_table idt;
   struct pcap_callback_data cb_data;
@@ -132,6 +134,8 @@ int main(int argc,char **argv, char **envp)
   reload_map = FALSE;
   tag_map_allocated = FALSE;
   bpas_map_allocated = FALSE;
+  blp_map_allocated = FALSE;
+  bmed_map_allocated = FALSE;
   find_id_func = PM_find_id;
 
   errflag = 0;
@@ -145,6 +149,8 @@ int main(int argc,char **argv, char **envp)
   memset(dummy_tlhdr, 0, sizeof(dummy_tlhdr));
   memset(sll_mac, 0, sizeof(sll_mac));
   memset(&bpas_table, 0, sizeof(bpas_table));
+  memset(&blp_table, 0, sizeof(blp_table));
+  memset(&bmed_table, 0, sizeof(bmed_table));
   memset(&bta_table, 0, sizeof(bta_table));
   memset(&client, 0, sizeof(client));
   memset(&cb_data, 0, sizeof(cb_data));
@@ -410,6 +416,13 @@ int main(int argc,char **argv, char **envp)
 	  list->cfg.what_to_count |= COUNT_ID;
 	  list->cfg.what_to_count |= COUNT_ID2;
 	}
+        if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
+                                       COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
+                                       COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
+                                       COUNT_SRC_LOCAL_PREF)) {
+          Log(LOG_ERR, "ERROR: 'src_as' and 'dst_as' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n");
+          exit(1);
+        }
 
 	list->cfg.data_type = PIPE_TYPE_PAYLOAD;
       }
@@ -456,33 +469,9 @@ int main(int argc,char **argv, char **envp)
 	  Log(LOG_ERR, "ERROR ( %s/%s ): 'class' aggregation selected but NO 'classifiers' key specified. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
 	}
-        if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
-                                       COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
-				       COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
-				       COUNT_SRC_LOCAL_PREF)) {
-          /* Sanitizing the aggregation method */
-          if ( ((list->cfg.what_to_count & COUNT_STD_COMM) && (list->cfg.what_to_count & COUNT_EXT_COMM)) ||
-	       ((list->cfg.what_to_count & COUNT_SRC_STD_COMM) && (list->cfg.what_to_count & COUNT_SRC_EXT_COMM)) ) {
-            Log(LOG_ERR, "ERROR ( %s/%s ): The use of STANDARD and EXTENDED BGP communitities is mutual exclusive.\n", list->name, list->type.string);
-            exit(1);
-          }
-          if ( (list->cfg.what_to_count & COUNT_SRC_STD_COMM && !config.nfacctd_bgp_src_std_comm_type) ||
-               (list->cfg.what_to_count & COUNT_SRC_EXT_COMM && !config.nfacctd_bgp_src_ext_comm_type) ||
-               (list->cfg.what_to_count & COUNT_SRC_AS_PATH && !config.nfacctd_bgp_src_as_path_type ) ||
-               (list->cfg.what_to_count & COUNT_SRC_LOCAL_PREF && !config.nfacctd_bgp_src_local_pref_type ) ||
-               (list->cfg.what_to_count & COUNT_SRC_MED && !config.nfacctd_bgp_src_med_type ) ||
-               (list->cfg.what_to_count & COUNT_PEER_SRC_AS && !config.nfacctd_bgp_peer_as_src_type ) ) {
-            printf("ERROR: At least one of the following primitives is in use but its source type is not specified:\n");
-            printf("       peer_src_as     =>  bgp_peer_src_as_type\n");
-            printf("       src_as_path     =>  bgp_src_as_path_type\n");
-            printf("       src_std_comm    =>  bgp_src_std_comm_type\n");
-            printf("       src_ext_comm    =>  bgp_src_ext_comm_type\n");
-            printf("       src_local_pref  =>  bgp_src_local_pref_type\n");
-            printf("       src_med         =>  bgp_src_med_type\n");
-            exit(1);
-          }
-          list->cfg.data_type |= PIPE_TYPE_BGP;
-        }
+
+	bgp_config_checks(&list->cfg);
+
 	list->cfg.what_to_count |= COUNT_COUNTERS;
 	list->cfg.data_type |= PIPE_TYPE_METADATA;
       }
@@ -574,8 +563,37 @@ int main(int argc,char **argv, char **envp)
         load_id_file(MAP_BGP_PEER_AS_SRC, config.nfacctd_bgp_peer_as_src_map, &bpas_table, &req, &bpas_map_allocated);
 	cb_data.bpas_table = (u_char *) &bpas_table;
       }
-      else cb_data.bpas_table = NULL;
+      else {
+        Log(LOG_ERR, "ERROR: bgp_peer_as_src_type set to 'map' but no map defined. Exiting.\n");
+        exit(1);
+      }
     }
+    else cb_data.bpas_table = NULL;
+
+    if (config.nfacctd_bgp_src_local_pref_type == BGP_SRC_PRIMITIVES_MAP) {
+      if (config.nfacctd_bgp_src_local_pref_map) {
+        load_id_file(MAP_BGP_SRC_LOCAL_PREF, config.nfacctd_bgp_src_local_pref_map, &blp_table, &req, &blp_map_allocated);
+        cb_data.blp_table = (u_char *) &blp_table;
+      }
+      else {
+        Log(LOG_ERR, "ERROR: bgp_src_local_pref_type set to 'map' but no map defined. Exiting.\n");
+        exit(1);
+      }
+    }
+    else cb_data.bpas_table = NULL;
+
+    if (config.nfacctd_bgp_src_med_type == BGP_SRC_PRIMITIVES_MAP) {
+      if (config.nfacctd_bgp_src_med_map) {
+        load_id_file(MAP_BGP_SRC_MED, config.nfacctd_bgp_peer_as_src_map, &bmed_table, &req, &bmed_map_allocated);
+        cb_data.bmed_table = (u_char *) &bmed_table;
+      }
+      else {
+        Log(LOG_ERR, "ERROR: bgp_src_med_type set to 'map' but no map defined. Exiting.\n");
+        exit(1);
+      }
+    }
+    else cb_data.bmed_table = NULL;
+
     if (config.nfacctd_bgp_to_agent_map) {
       load_id_file(MAP_BGP_TO_XFLOW_AGENT, config.nfacctd_bgp_to_agent_map, &bta_table, &req, &bta_map_allocated);
       cb_data.bta_table = (u_char *) &bta_table;

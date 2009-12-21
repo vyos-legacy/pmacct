@@ -55,13 +55,13 @@
 #define LARGEBUFLEN (8192+MOREBUFSZ)
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.12.0-cvs"
-#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.12.0-cvs"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.12.0-cvs"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.12.0-cvs"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.12.0-cvs"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.12.0-cvs"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.12.0-cvs"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.12.0rc4-cvs"
+#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.12.0rc4-cvs"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.12.0rc4-cvs"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.12.0rc4-cvs"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.12.0rc4-cvs"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.12.0rc4-cvs"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.12.0rc4-cvs"
 
 #ifndef TRUE
 #define TRUE 1
@@ -88,9 +88,10 @@
 
 /* map type */
 #define MAP_TAG 		0	/* pre_tag_map */
-#define MAP_BGP_PEER_AS_SRC	100	/* bgp_peer_as_src */
+#define MAP_BGP_PEER_AS_SRC	100	/* bgp_peer_src_as_map */
 #define MAP_BGP_TO_XFLOW_AGENT	101	/* bgp_to_agent_map */
-
+#define MAP_BGP_SRC_LOCAL_PREF	102	/* bgp_src_local_pref_map */
+#define MAP_BGP_SRC_MED		103	/* bgp_src_med_map */
 
 /* 41 primitives currently defined */
 #define COUNT_SRC_HOST		0x0000000000000001ULL

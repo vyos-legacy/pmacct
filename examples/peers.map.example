@@ -8,7 +8,9 @@
 !
 ! list of currently supported keys follow:
 !
-! 'id'			ID value to assign to a matching packet or flow
+! 'id'			ID value to assign to a matching packet or flow. Other than AS
+!			numbers, this field accepts also the 'bgp' keyword which triggers
+!			a BGP lookup and returns its result: useful to handle exceptions.
 ! 'ip'			IP address of the device which is originating sFlow or NetFlow
 !			datagrams (router, probe, etc.)
 ! 'in'  		Input interface 
@@ -23,7 +25,7 @@
 !
 ! A few examples follow.
 !
-! Private peering with AS12345 on router with IP address 192.168.2.1, SNMP ifIndex 4 
+! Private peering with AS12345 on router with IP address 192.168.2.1, SNMP ifIndex 7 
 !
 id=12345	ip=192.168.2.1	in=7
 
@@ -43,4 +45,8 @@ id=56789	ip=192.168.1.1 	in=7
 ! 
 id=34567        ip=192.168.1.1  in=7    src_mac=00:01:02:03:04:05
 id=45678        ip=192.168.1.1  in=7    src_mac=00:01:02:03:04:06
+
+! A simple example on how to trigger BGP lookups rather than returning a fixed result.
+! This allows to handle exceptions to static mapping
+id=bgp		ip=192.168.2.1  in=7
 

@@ -1,0 +1,38 @@
+! 
+! BGP source local preferecence map 
+!
+! File syntax is key-based. Read full syntax rules in 'pretag.map.example' in this same
+! directory.
+!
+! nfacctd, sfacctd: valid keys: id, ip, in, bgp_nexthop, src_mac.
+!
+! list of currently supported keys follow:
+!
+! 'id'			ID value to assign to a matching packet or flow. Other than AS
+!			numbers, this field accepts also the 'bgp' keyword which triggers
+!			a BGP lookup and returns its result: useful to handle exceptions.
+! 'ip'			IP address of the device which is originating sFlow or NetFlow
+!			datagrams (router, probe, etc.)
+! 'in'  		Input interface 
+! 'bgp_nexthop'		BGP next-hop of the flow source IP address (RPF-like). This value
+!			is compared against the BGP RIB of the device originating the sFlow
+!			or NetFlow datagram (see 'nfacctd_bgp' directive).
+! 'peer_dst_as'		First AS hop within the AS-PATH of the source IP address (RPF-like).
+!			This value is compared against the BGP RIB of the device originating
+!			the sFlow or NetFlow datagram (see 'nfacctd_bgp' directive). 
+! 'src_mac'		Source MAC address of the flow. Requires NetFlow v9 or sFlow as
+!			NetFlow v5 lacks of such support.
+!
+! A few examples follow. Let's define: LP=100 identifies customers, LP=80 identifies peers
+! and LP=50 identifies IP transit.
+!
+! Customer connected to router with IP address 192.168.2.1, SNMP ifIndex 7 
+!
+id=100		ip=192.168.2.1	in=7
+
+! A way to model multiple services, ie. IP transit and peering, off the same interface.
+! Realistically services should be delivered off different sub-interfaces, but still ... 
+! 
+id=50		ip=192.168.1.1 	in=7	bgp_nexthop=1.2.3.4.5
+id=80		ip=192.168.1.1 	in=7	bgp_nexthop=1.2.3.4.6
+

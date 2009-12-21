@@ -853,8 +853,11 @@ DESC:		defines the remote IP address/hostname and port to which NetFlow dagagram
 		The value is expected to be in the usual form 'address:port'. (default: 127.0.0.1:2100)
 
 KEY:		nfprobe_version
-VALUES:		[1,5,9]
-DESC:		version of outgoing NetFlow datagrams. Actually, NetFlow v1/v5/v9 are supported. (default: 5)
+VALUES:		[5,9]
+DESC:		version of outgoing NetFlow datagrams. NetFlow v5/v9 are supported. NetFlow v5 features a fixed
+		record structure and if not specifying an 'aggregate' directive it gets populated as much as
+		possible; NetFlow v9 features a dynamic template-based structure instead and by default it is
+		populated as: 'src_host, dst_host, src_port, dst_Port, proto, tos'. (default: 5)
 
 KEY:            nfprobe_engine
 DESC:           allows to define Engine ID and Engine Type fields. It applies only to NetFlow v5 and v9. In v9,
@@ -863,6 +866,12 @@ DESC:           allows to define Engine ID and Engine Type fields. It applies on
 		distinct probe instances running on the same box; this is also important for letting NetFlow v9
 		templates to work correctly: in fact, template IDs get automatically selected only inside single
 		daemon instances. (default: 0:0)
+
+KEY:		[ nfprobe_peer_as | sfprobe_peer_as ]
+VALUES:         [true|false]
+DESC:		includes peer-AS rather than origin-AS as part of the NetFlow/sFlow export. Requirements to
+		enable this feature are: a) one of the nfacctd_as_new/sfacctd_as_new/pmacctd_as/uacctd_as set
+		to 'bgp' and b) a fully functional BGP daemon (bgp_daemon). (default: false)
 
 KEY:		sfprobe_receiver
 DESC:           defines the remote IP address/hostname and port to which sFlow dagagrams are to be exported.
@@ -931,6 +940,13 @@ DESC:           filters BGP standard communities against the supplied pattern. T
 		or connected redistributed in BGP. Example: BGP standard community XXXXX:YYYYY is mapped as:
 		Peer-AS=XXXXX, Origin-AS=YYYYY.
 
+KEY:		bgp_peer_as_skip_subas
+VALUES:		[true|false]
+DESC:		When determining the peer AS (source and destination), skip potential confederated sub-AS
+		and report the first ASN external to the routing domain. When enabled if no external ASNs
+		are found on the AS-PATH except the confederated sub-ASes, the first sub-AS is reported.
+		(default: false)
+
 KEY:		bgp_peer_src_as_type
 VALUES:		[ map | bgp ]
 DESC:		Defines the method to use to map incoming traffic to a source peer ASN. "map" selects a
@@ -940,10 +956,10 @@ DESC:		Defines the method to use to map incoming traffic to a source peer ASN. "
 
 KEY:		bgp_peer_src_as_map
 DESC:		full pathname to a file containing source peer AS mappings. The AS can be mapped to one or
-		a combination of: ifIndex, source MAC address and BGP next-hop (query against the BGP RIB to
-		look up the source IP prefix). This is sufficient to model popular tecniques for both public
-		and private BGP peerings. Number of map entries (by default 384) can be modified via 
-		pre_tag_map_entries.
+		a combination of: ifIndex, source MAC address and BGP next-hop (query against the BGP RIB
+		to look up the source IP prefix). This is sufficient to model popular tecniques for both
+		public and private BGP peerings. Number of map entries (by default 384) can be modified via 
+		pre_tag_map_entries. Sample map in 'examples/peers.map.example'.
 
 KEY:            bgp_src_std_comm_type
 VALUES:         [ bgp ]
@@ -964,16 +980,29 @@ DESC:           Defines the method to use to map incoming traffic to an AS-PATH.
 		case, affecting their accuracy.
 
 KEY:            bgp_src_local_pref_type
-VALUES:         [ bgp ]
+VALUES:         [ map | bgp ]
 DESC:           Defines the method to use to map incoming traffic to a local preference. Only naive BGP
 		RIB lookups are currenntly supported. BGP lookups assume traffic is symmtric, which is
 		often not the case, affecting their accuracy.
 
+KEY:            bgp_src_local_pref_map
+DESC:           full pathname to a file containing source local preference mappings. The LP value can be
+		mapped to one or a combination of: ifIndex, source MAC address and BGP next-hop (query
+		against the BGP RIB to look up the source IP prefix). Number of map entries (by default
+		384) can be modified via pre_tag_map_entries. Sample map in 'examples/lpref.map.example'.
+
 KEY:            bgp_src_med_type
-VALUES:         [ bgp ]
+VALUES:         [ map | bgp ]
 DESC:           Defines the method to use to map incoming traffic to a MED value. Only naive BGP RIB
                 lookups are currenntly supported. BGP lookups assume traffic is symmtric, which is often
                 not the case, affecting their accuracy.
+
+KEY:            bgp_src_med_map
+DESC:           full pathname to a file containing source MED (Multi Exit Discriminator) mappings. The
+		MED value can be mapped to one or a combination of: ifIndex, source MAC address and BGP
+		next-hop (query against the BGP RIB to look up the source IP prefix). Number of map
+		entries (by default 384) can be modified via pre_tag_map_entries. Sample map in
+		'examples/med.map.example'.
 
 KEY:		bgp_agent_map
 DESC:		full pathname to a file to map source IP addresses of NetFlow/sFlow agents to BGP peers'
@@ -1006,11 +1035,12 @@ KEY:            bgp_follow_nexthop
 DESC:		expects an IP prefix, ie. 192.168.0.0/16. It follows the BGP next-hop up (using each next-
 		hop as BGP source-address for the next BGP RIB lookup), returning the last next-hop part of
 		the supplied IP prefix as value for the 'peer_ip_dst' primitive. bgp_agent_map is supported
-		at each recursion. This feature is aimed at networks not running MPLS or BGP confederations;
-		underlying target being to see the routing-domain "exit-point" (which is what easily happens
-		with MPLS LSPs in conjunction with BGP). The feature is internally protected against routing
-		loops with an hardcoded limit of 20 lookups; pmacctd, uacctd daemons are internally limited
-		to only two BGP peers hence this feature can't properly work. (default: none)
+		at each recursion. This feature is aimed at networks not running MPLS or being based on BGP
+		confederations; underlying goal being to see the routing-domain "exit-point" (which is
+		what is easily seen with MPLS LSPs in conjunction with BGP). The feature is internally
+		protected against routing loops with an hardcoded limit of 20 lookups; pmacctd, uacctd
+		daemons are internally limited to only two BGP peers hence this feature can't properly
+		work. (default: none)
 
 KEY:            bgp_neighbors_file
 DESC:		writes a list of the BGP neighbors in the established state to the specified file, one

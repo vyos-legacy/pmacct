@@ -136,6 +136,9 @@ void evaluate_packet_handlers()
 	if (channels_list[index].plugin->type.id == PLUGIN_ID_SFPROBE) { 
 	  channels_list[index].phandler[primitives] = sfprobe_bgp_ext_handler;
 	}
+        else if (channels_list[index].plugin->type.id == PLUGIN_ID_NFPROBE) {
+          channels_list[index].phandler[primitives] = nfprobe_bgp_ext_handler;
+        }
 	else {
           channels_list[index].phandler[primitives] = bgp_ext_handler;
 	}
@@ -153,8 +156,10 @@ void evaluate_packet_handlers()
 
     if (channels_list[index].aggregation & COUNT_PEER_SRC_AS) {
       if (config.acct_type == ACCT_PM && config.nfacctd_bgp) {
-        channels_list[index].phandler[primitives] = bgp_peer_src_as_frommap_handler;
-        primitives++;
+	if (config.nfacctd_bgp_peer_as_src_type == BGP_SRC_PRIMITIVES_MAP) {
+          channels_list[index].phandler[primitives] = bgp_peer_src_as_frommap_handler;
+          primitives++;
+	}
       }
       else if (config.acct_type == ACCT_NF && config.nfacctd_bgp) {
         if (config.nfacctd_bgp_peer_as_src_type == BGP_SRC_PRIMITIVES_MAP) {
@@ -165,6 +170,48 @@ void evaluate_packet_handlers()
       else if (config.acct_type == ACCT_SF && config.nfacctd_bgp) {
         if (config.nfacctd_bgp_peer_as_src_type == BGP_SRC_PRIMITIVES_MAP) {
           channels_list[index].phandler[primitives] = bgp_peer_src_as_frommap_handler;
+          primitives++;
+        }
+      }
+    }
+
+    if (channels_list[index].aggregation & COUNT_SRC_LOCAL_PREF) {
+      if (config.acct_type == ACCT_PM && config.nfacctd_bgp) {
+        if (config.nfacctd_bgp_src_local_pref_type == BGP_SRC_PRIMITIVES_MAP) {
+          channels_list[index].phandler[primitives] = bgp_src_local_pref_frommap_handler;
+          primitives++;
+        }
+      }
+      else if (config.acct_type == ACCT_NF && config.nfacctd_bgp) {
+        if (config.nfacctd_bgp_src_local_pref_type == BGP_SRC_PRIMITIVES_MAP) {
+          channels_list[index].phandler[primitives] = bgp_src_local_pref_frommap_handler;
+          primitives++;
+        }
+      }
+      else if (config.acct_type == ACCT_SF && config.nfacctd_bgp) {
+        if (config.nfacctd_bgp_src_local_pref_type == BGP_SRC_PRIMITIVES_MAP) {
+          channels_list[index].phandler[primitives] = bgp_src_local_pref_frommap_handler;
+          primitives++;
+        }
+      }
+    }
+
+    if (channels_list[index].aggregation & COUNT_SRC_MED) {
+      if (config.acct_type == ACCT_PM && config.nfacctd_bgp) {
+        if (config.nfacctd_bgp_src_med_type == BGP_SRC_PRIMITIVES_MAP) {
+          channels_list[index].phandler[primitives] = bgp_src_med_frommap_handler;
+          primitives++;
+        }
+      }
+      else if (config.acct_type == ACCT_NF && config.nfacctd_bgp) {
+        if (config.nfacctd_bgp_src_med_type == BGP_SRC_PRIMITIVES_MAP) {
+          channels_list[index].phandler[primitives] = bgp_src_med_frommap_handler;
+          primitives++;
+        }
+      }
+      else if (config.acct_type == ACCT_SF && config.nfacctd_bgp) {
+        if (config.nfacctd_bgp_src_med_type == BGP_SRC_PRIMITIVES_MAP) {
+          channels_list[index].phandler[primitives] = bgp_src_med_frommap_handler;
           primitives++;
         }
       }
@@ -527,8 +574,10 @@ void sfprobe_payload_handler(struct channels_list_entry *chptr, struct packet_pt
 {
   struct pkt_payload *payload = (struct pkt_payload *) *data;
   struct pkt_data tmp;
+  struct eth_header eh;
   char *buf = (char *) *data, *tmpp = (char *) &tmp;
   int space = (chptr->bufend - chptr->bufptr) - PpayloadSz;
+  int ethHdrLen = 0;
 
   if (chptr->plugin->cfg.networks_file) {
     src_host_handler(chptr, pptrs, &tmpp);
@@ -544,13 +593,28 @@ void sfprobe_payload_handler(struct channels_list_entry *chptr, struct packet_pt
   payload->class = pptrs->class;
   payload->tag = pptrs->tag;
   payload->tag2 = pptrs->tag2;
+  if (pptrs->ifindex_in > 0)  payload->ifindex_in  = pptrs->ifindex_in;
+  if (pptrs->ifindex_out > 0) payload->ifindex_out = pptrs->ifindex_out;
+
+  /* Typically don't have L2 info under ULOG */
+  if (!pptrs->mac_ptr) {
+    ethHdrLen = sizeof(struct eth_header);
+    memset(&eh, 0, ethHdrLen);
+    eh.ether_type = htons(pptrs->l3_proto);
+    payload->cap_len += ethHdrLen;
+    payload->pkt_len += ethHdrLen;
+  }
 
   /* We could be capturing the entire packet; DEFAULT_PLOAD_SIZE is our cut-off point */
   if (payload->cap_len > DEFAULT_PLOAD_SIZE) payload->cap_len = DEFAULT_PLOAD_SIZE;
 
   if (space >= payload->cap_len) {
     buf += PpayloadSz;
-    memcpy(buf, pptrs->packet_ptr, payload->cap_len);
+    if (!pptrs->mac_ptr) {
+      memcpy(buf, &eh, ethHdrLen);
+      buf += ethHdrLen;
+    }
+    memcpy(buf, pptrs->packet_ptr, payload->cap_len-ethHdrLen);
     chptr->bufptr += payload->cap_len; /* don't count pkt_payload here */ 
 #if NEED_ALIGN
     while (chptr->bufptr % 4 != 0) chptr->bufptr++; /* Don't worry, it's harmless increasing here */
@@ -1752,7 +1816,10 @@ void sfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_pt
     if (info && info->attr) {
       if (config.nfacctd_as == NF_AS_BGP) {
 	if (chptr->aggregation & COUNT_SRC_AS && info->attr->aspath) {
-	  payload->src_ip.address.ipv4.s_addr = evaluate_last_asn(info->attr->aspath);
+	  if (!chptr->plugin->cfg.nfprobe_peer_as)
+	    payload->src_ip.address.ipv4.s_addr = evaluate_last_asn(info->attr->aspath);
+	  else
+            payload->src_ip.address.ipv4.s_addr = evaluate_first_asn(info->attr->aspath->str);
 	}
       }
     }
@@ -1763,8 +1830,48 @@ void sfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_pt
     if (info && info->attr) {
       if (config.nfacctd_as == NF_AS_BGP) {
         if (chptr->aggregation & COUNT_DST_AS && info->attr->aspath) {
-          payload->dst_ip.address.ipv4.s_addr = evaluate_last_asn(info->attr->aspath);
+	  if (!chptr->plugin->cfg.nfprobe_peer_as)
+            payload->dst_ip.address.ipv4.s_addr = evaluate_last_asn(info->attr->aspath);
+          else
+	    payload->dst_ip.address.ipv4.s_addr = evaluate_first_asn(info->attr->aspath->str);
 	}
+      }
+    }
+  }
+}
+
+void nfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_node *dst_ret = (struct bgp_node *) pptrs->bgp_dst;
+  struct bgp_peer *peer = (struct bgp_peer *) pptrs->bgp_peer;
+  struct bgp_info *info;
+
+  if (src_ret) {
+    info = (struct bgp_info *) src_ret->info;
+    if (info && info->attr) {
+      if (config.nfacctd_as == NF_AS_BGP) {
+        if (chptr->aggregation & COUNT_SRC_AS && info->attr->aspath) {
+          if (!chptr->plugin->cfg.nfprobe_peer_as)
+            pdata->primitives.src_as = evaluate_last_asn(info->attr->aspath);
+          else
+            pdata->primitives.src_as = evaluate_first_asn(info->attr->aspath->str);
+        }
+      }
+    }
+  }
+
+  if (dst_ret) {
+    info = (struct bgp_info *) dst_ret->info;
+    if (info && info->attr) {
+      if (config.nfacctd_as == NF_AS_BGP) {
+        if (chptr->aggregation & COUNT_DST_AS && info->attr->aspath) {
+          if (!chptr->plugin->cfg.nfprobe_peer_as)
+            pdata->primitives.dst_as = evaluate_last_asn(info->attr->aspath);
+          else
+            pdata->primitives.dst_as = evaluate_first_asn(info->attr->aspath->str);
+        }
       }
     }
   }
@@ -1795,6 +1902,30 @@ void bgp_peer_src_as_frommap_handler(struct channels_list_entry *chptr, struct p
       }
     }
   }
+}
+
+void bgp_src_local_pref_frommap_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct pkt_bgp_primitives *pbgp = (struct pkt_bgp_primitives *) ++pdata;
+  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_info *info;
+
+  --pdata; /* Bringing back to original place */
+
+  pbgp->src_local_pref = pptrs->blp;
+}
+
+void bgp_src_med_frommap_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct pkt_bgp_primitives *pbgp = (struct pkt_bgp_primitives *) ++pdata;
+  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_info *info;
+
+  --pdata; /* Bringing back to original place */
+
+  pbgp->src_med = pptrs->bmed;
 }
 
 #if defined (HAVE_L2)
