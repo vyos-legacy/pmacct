@@ -1,3 +1,27 @@
+pmacct (0.12.0.r4+vyatta+3) unstable; urgency=low
+
+  [ paolo ]
+  * * bgp_peer_src_as_map: implemented 'bgp' keyword (ie. id='bgp') to
+    trigger
+  * * Implemented a new bgp_peer_as_skip_subas feature: when determining
+    the
+  * * bgp/bgp.c: centralized sanity checks against BGP primitives
+    configuration
+  * * A new [nfprobe|sfprobe]_peer_as feature is introduced: includes
+    peer-AS
+  * * uacctd: sfprobe plugin (sFlow probe) is now linked to uacctd (the
+    pmacct
+  * * fix, pkt_handlers.c: uacctd was not factoring L2 header length in
+    packets
+  * * Introduced static mapping feature for both source BGP-related
+    primitives
+  * *** empty log message ***
+  * * Documentation updated
+
+  [ Stig Thormodsrud ]
+
+ -- Stig Thormodsrud <stig@vyatta.com>  Tue, 22 Dec 2009 11:06:10 -0800
+
 pmacct (0.12.0+vyatta+2) unstable; urgency=low
 
   * UNRELEASED
