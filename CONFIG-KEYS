@@ -31,7 +31,7 @@ VALUES:		[src_mac, dst_mac, vlan, src_host, dst_host, src_net, dst_net, src_as, 
 		 src_port, dst_port, tos, proto, none, sum_mac, sum_host, sum_net, sum_as, 
 		 sum_port, flows, tag, tag2, class, tcpflags, std_comm, ext_comm, as_path,
 		 peer_src_ip, peer_dst_ip, peer_src_as, peer_dst_as, local_pref, med,
-		 src_as_path, src_std_comm, src_ext_comm, src_local_pref, src_med ]
+		 src_as_path, src_std_comm, src_ext_comm, src_local_pref, src_med, is_symmetric]
 FOREWORDS:	individual IP packets are uniquely identified by their header fields values (a
 		rather large set of primitives!). Same applies to uni-directional IP flows, as
 		they have at least enough information to discriminate where packets are coming
@@ -608,8 +608,8 @@ DESC:		defines the IPv4/IPv6 address where to bind the 'nfacctd' daemon (default
 KEY:		nfacctd_allow_file [GLOBAL, NO_PMACCTD]
 DESC:		full pathname to a file containing the list of IPv4/IPv6 addresses (one for each line) allowed
 		to send NetFlow packets to 'nfacctd'. Current syntax does not implement network masks but only
-		individual IP addresses. The Allow List is intended to be small. If you really need complex,
-		network-prefixed filters, you may prefer a few firewall rules instead. (default: allow all) 
+		individual IP addresses. The Allow List is intended to be small; firewall rules should be
+		preferred to long ACLs. (default: allow all) 
 
 KEY:		nfacctd_time_secs [GLOBAL, NO_PMACCTD]
 VALUES:		[true|false]
@@ -754,12 +754,15 @@ KEY:            [ pmacctd_flow_lifetime | uacctd_flow_lifetime ] [GLOBAL, NO_NFA
 DESC:           defines how long a flow could remain inactive (ie. no packets belonging to such flow are received)
 		before considering it expired. The value is expected in seconds. (default: 60 secs) 
 
-KEY:		[ pmacctd_ext_sampling_rate | uacctd_ext_sampling_rate ] [GLOBAL, NO_NFACCTD]
+KEY:		[ pmacctd_ext_sampling_rate | uacctd_ext_sampling_rate nfacctd_ext_sampling_rate |
+		  sfacctd_ext_sampling_rate ] [GLOBAL]
 		flags pmacctd that captured traffic is being sampled at the specified rate. Such rate can then
 		be renormalized by using 'pmacctd_renormalize' or otherwise is propagated by the NetFlow/sFlow
 		probe plugins, if any of them is activated. External sampling might be performed by capturing
 		frameworks the daemon is linked against (ie. PF_RING, ULOG) or appliances (ie. sampled packet
-		mirroring). (default: no sampling) 
+		mirroring).
+		In nfacctd and sfacctd daemons this directive can be used to tackle corner cases, ie. sampling
+		rate reported by the NetFlow/sFlow agent is missing or not correct. (default: no sampling) 
 
 KEY:            sfacctd_port (-l) [GLOBAL, NO_PMACCTD]
 DESC:           defines the UDP port where to bind the 'sfacctd' daemon (default: 6343).
@@ -770,8 +773,8 @@ DESC:           defines the IPv4/IPv6 address where to bind the 'sfacctd' daemon
 KEY:            sfacctd_allow_file [GLOBAL, NO_PMACCTD]
 DESC:           full pathname to a file containing the list of IPv4/IPv6 addresses (one for each line) allowed
 		to send NetFlow packets to 'sfacctd'. Current syntax does not implement network masks but only
-		individual IP addresses. The Allow List is intended to be small. If you really need complex,
-		network-prefixed filters, you may prefer a few firewall rules instead. (default: allow all)
+		individual IP addresses. The Allow List is intended to be small; firewall rules should be
+		preferred to long ACLs. (default: allow all)
 
 KEY:		[ sfacctd_renormalize | nfacctd_renormalize | pmacctd_renormalize | uacctd_renormalize ] (-R)
 VALUES:		[true|false]
@@ -851,6 +854,11 @@ DESC:		maximum number of flows that can be tracked simultaneously. (default: 819
 KEY:		nfprobe_receiver
 DESC:		defines the remote IP address/hostname and port to which NetFlow dagagrams are to be exported.
 		The value is expected to be in the usual form 'address:port'. (default: 127.0.0.1:2100)
+
+KEY:            nfprobe_source_ip
+DESC:           defines the local IP address from which NetFlow dagagrams are to be exported. Only a numerical
+		IPv4/IPv6 address is expected. The supplied IP address is required to be already configured on
+		one of the interfaces. (default: IP address is selected by the OS)
 
 KEY:		nfprobe_version
 VALUES:		[5,9]
@@ -1004,6 +1012,13 @@ DESC:           full pathname to a file containing source MED (Multi Exit Discri
 		entries (by default 384) can be modified via pre_tag_map_entries. Sample map in
 		'examples/med.map.example'.
 
+KEY:            bgp_is_symmetric_map
+DESC:           full pathname to a file defining for each edge device local traffic paths out of the
+		observed routing domain by using a combination of ingress ifIndex, source MAC address,
+		BGP next-hop (query against the BGP RIB to look up the source IP prefix). Number of
+		map entries (by default 384) can be modified via pre_tag_map_entries. Sample map in
+		'examples/is_symmetric.map.example'.
+
 KEY:		bgp_agent_map
 DESC:		full pathname to a file to map source IP addresses of NetFlow/sFlow agents to BGP peers'
 		ones. It is particularly aimed as a resource-savy alternative to have N agents but only a
@@ -1032,12 +1047,13 @@ DESC:		expects positive number value which instructs how many times a default ro
 		can't properly work. (default: 0)
 
 KEY:            bgp_follow_nexthop
-DESC:		expects an IP prefix, ie. 192.168.0.0/16. It follows the BGP next-hop up (using each next-
-		hop as BGP source-address for the next BGP RIB lookup), returning the last next-hop part of
-		the supplied IP prefix as value for the 'peer_ip_dst' primitive. bgp_agent_map is supported
-		at each recursion. This feature is aimed at networks not running MPLS or being based on BGP
-		confederations; underlying goal being to see the routing-domain "exit-point" (which is
-		what is easily seen with MPLS LSPs in conjunction with BGP). The feature is internally
+DESC:		expects one or more IP prefix(es), ie. 192.168.0.0/16, comma separated. A maximum of 32
+		IP prefixes is supported. It follows the BGP next-hop up (using each next-hop as BGP
+		source-address for the next BGP RIB lookup), returning the last next-hop part of the
+		supplied IP prefix as value for the 'peer_ip_dst' primitive. bgp_agent_map is supported
+		at each recursion. This feature is aimed at networks not running MPLS or being based on
+		BGP confederations; underlying goal being to see the routing-domain "exit-point" (which
+		is what is easily seen with MPLS LSPs in conjunction with BGP). The feature is internally
 		protected against routing loops with an hardcoded limit of 20 lookups; pmacctd, uacctd
 		daemons are internally limited to only two BGP peers hence this feature can't properly
 		work. (default: none)
@@ -1046,6 +1062,12 @@ KEY:            bgp_neighbors_file
 DESC:		writes a list of the BGP neighbors in the established state to the specified file, one
 		per line. This gets particularly useful for automation purposes (ie. auto-discovery of
 		devices to poll via SNMP). (default: none)
+
+KEY:            bgp_daemon_allow_file [GLOBAL]
+DESC:           full pathname to a file containing the list of IP addresses (one for each line) allowed
+                to establish a BGP session packets to the BGP thread. Current syntax does not implement
+		network masks but only individual IP addresses. The Allow List is intended to be small;
+		firewall rules should be preferred to long ACLs. (default: allow all)
 
 KEY:		uacctd_group
 DESC:		Sets the Linux Netlink ULOG multicast group to be joined. (default: 1)

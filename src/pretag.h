@@ -86,7 +86,10 @@ struct id_entry {
   pt_uint32_t dst_as; 
   pt_uint32_t peer_src_as;
   pt_uint32_t peer_dst_as;
+  pt_uint32_t src_local_pref;
   pt_uint32_t local_pref;
+  char *src_comms[16]; /* XXX: MAX_BGP_COMM_PATTERNS = 16 */
+  char *comms[16]; /* XXX: MAX_BGP_COMM_PATTERNS = 16 */
   struct bpf_program filter;
   pt_uint8_t v8agg;
   pretag_handler func[N_MAP_HANDLERS];
@@ -132,6 +135,7 @@ EXT int tag_map_allocated;
 EXT int bpas_map_allocated;
 EXT int blp_map_allocated;
 EXT int bmed_map_allocated;
+EXT int biss_map_allocated;
 EXT int bta_map_allocated;
 EXT void (*find_id_func)(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 

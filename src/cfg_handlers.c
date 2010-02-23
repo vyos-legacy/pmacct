@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -169,6 +169,7 @@ int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
     else if (!strcmp(count_token, "src_ext_comm")) value |= COUNT_SRC_EXT_COMM;
     else if (!strcmp(count_token, "src_local_pref")) value |= COUNT_SRC_LOCAL_PREF;
     else if (!strcmp(count_token, "src_med")) value |= COUNT_SRC_MED;
+    else if (!strcmp(count_token, "is_symmetric")) value |= COUNT_IS_SYMMETRIC;
     else Log(LOG_WARNING, "WARN ( %s ): ignoring unknown aggregation method: %s.\n", filename, count_token);
   }
 
@@ -1569,6 +1570,17 @@ int cfg_key_nfacctd_allow_file(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_nfacctd_bgp_allow_file(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_allow_file = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon_allow_file'. Globalized.\n", filename);
+
+  return changes;
+}
+
 int cfg_key_pre_tag_map(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1891,6 +1903,17 @@ int cfg_key_nfacctd_bgp_src_med_map(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_nfacctd_bgp_is_symmetric_map(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_is_symmetric_map = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_is_symmetric_map'. Globalized.\n", filename);
+
+  return changes;
+}
+
 int cfg_key_nfacctd_bgp_to_agent_map(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1918,11 +1941,23 @@ int cfg_key_nfacctd_bgp_follow_default(char *filename, char *name, char *value_p
 int cfg_key_nfacctd_bgp_follow_nexthop(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
-  int changes = 0;
+  char *count_token;
+  int changes = 0, idx = 0, valid;
 
-  str2prefix(value_ptr, &list->cfg.nfacctd_bgp_follow_nexthop);
+  trim_all_spaces(value_ptr);
 
-  for (; list; list = list->next, changes++) str2prefix(value_ptr, &list->cfg.nfacctd_bgp_follow_nexthop);
+  while ((count_token = extract_token(&value_ptr, ',')) && idx < FOLLOW_BGP_NH_ENTRIES) {
+    for (list = plugins_list; list; list = list->next) {
+      valid = str2prefix(count_token, &list->cfg.nfacctd_bgp_follow_nexthop[idx]);
+      if (!valid) {
+	Log(LOG_WARNING, "WARN ( %s ): bgp_follow_nexthop: invalid IP prefix '%s'.\n", filename, count_token);
+	break;
+      }
+    }
+    if (valid) idx++;
+  }
+
+  changes = idx;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_follow_nexthop'. Globalized.\n", filename);
 
   return changes;
@@ -2093,9 +2128,6 @@ int cfg_key_pmacctd_ext_sampling_rate(char *filename, char *name, char *value_pt
     Log(LOG_ERR, "WARN ( %s ): 'pmacctd_ext_sampling_rate' has to be >= 1.\n", filename);
     return ERR;
   }
-
-  /* directive supported only in ACCT_PM, ie. pmacctd */
-  if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) value = 0;
 
   for (; list; list = list->next, changes++) list->cfg.ext_sampling_rate = value;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pmacctd_ext_sampling_rate'. Globalized.\n", filename);
@@ -2313,6 +2345,25 @@ int cfg_key_nfprobe_receiver(char *filename, char *name, char *value_ptr)
     for (; list; list = list->next) {
       if (!strcmp(name, list->name)) {
         list->cfg.nfprobe_receiver = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_nfprobe_source_ip(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.nfprobe_source_ip = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.nfprobe_source_ip = value_ptr;
         changes++;
         break;
       }

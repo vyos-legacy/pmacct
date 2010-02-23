@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -217,6 +217,13 @@ void evaluate_packet_handlers()
       }
     }
 
+    if (channels_list[index].aggregation & COUNT_IS_SYMMETRIC) {
+      if (config.nfacctd_bgp && config.nfacctd_bgp_is_symmetric_map) {
+        channels_list[index].phandler[primitives] = bgp_is_symmetric_frommap_handler;
+        primitives++;
+      }
+    }
+
     if (channels_list[index].aggregation & (COUNT_SRC_PORT|COUNT_SUM_PORT)) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = src_port_handler;
       else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_src_port_handler;
@@ -268,7 +275,7 @@ void evaluate_packet_handlers()
     if (channels_list[index].aggregation & COUNT_COUNTERS) {
       if (config.acct_type == ACCT_PM) {
 	channels_list[index].phandler[primitives] = counters_handler;
-	if (config.sfacctd_renormalize) {
+	if (config.sfacctd_renormalize && config.ext_sampling_rate) {
 	  primitives++;
 	  channels_list[index].phandler[primitives] = counters_renormalize_handler;
 	}
@@ -279,14 +286,16 @@ void evaluate_packet_handlers()
 	else channels_list[index].phandler[primitives] = NF_counters_msecs_handler; /* default */
 	if (config.sfacctd_renormalize) {
 	  primitives++;
-	  channels_list[index].phandler[primitives] = NF_counters_renormalize_handler;
+	  if (config.ext_sampling_rate) channels_list[index].phandler[primitives] = counters_renormalize_handler;
+	  else channels_list[index].phandler[primitives] = NF_counters_renormalize_handler;
 	}
       }
       else if (config.acct_type == ACCT_SF) {
 	channels_list[index].phandler[primitives] = SF_counters_new_handler;
 	if (config.sfacctd_renormalize) {
 	  primitives++;
-	  channels_list[index].phandler[primitives] = SF_counters_renormalize_handler;
+	  if (config.ext_sampling_rate) channels_list[index].phandler[primitives] = counters_renormalize_handler;
+	  else channels_list[index].phandler[primitives] = SF_counters_renormalize_handler;
 	}
       }
       primitives++;
@@ -646,7 +655,7 @@ void NF_src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *p
 
   switch(hdr->version) {
   case 9:
-    memcpy(&pdata->primitives.eth_shost, pptrs->f_data+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
+    memcpy(&pdata->primitives.eth_shost, pptrs->f_data+tpl->tpl[NF9_SRC_MAC].off, MIN(tpl->tpl[NF9_SRC_MAC].len, 6));
     break;
   default:
     break;
@@ -661,7 +670,7 @@ void NF_dst_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *p
 
   switch(hdr->version) {
   case 9:
-    memcpy(&pdata->primitives.eth_dhost, pptrs->f_data+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
+    memcpy(&pdata->primitives.eth_dhost, pptrs->f_data+tpl->tpl[NF9_DST_MAC].off, MIN(tpl->tpl[NF9_DST_MAC].len, 6));
     break;
   default:
     break;
@@ -676,7 +685,7 @@ void NF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
 
   switch(hdr->version) {
   case 9:
-    memcpy(&pdata->primitives.vlan_id, pptrs->f_data+tpl->tpl[NF9_SRC_VLAN].off, tpl->tpl[NF9_SRC_VLAN].len);
+    memcpy(&pdata->primitives.vlan_id, pptrs->f_data+tpl->tpl[NF9_SRC_VLAN].off, MIN(tpl->tpl[NF9_SRC_VLAN].len, 2));
     pdata->primitives.vlan_id = ntohs(pdata->primitives.vlan_id);
     break;
   default:
@@ -695,14 +704,14 @@ void NF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   switch(hdr->version) {
   case 9:
     if (pptrs->l3_proto == ETHERTYPE_IP) {
-      memcpy(&pdata->primitives.src_ip.address.ipv4, pptrs->f_data+tpl->tpl[NF9_IPV4_SRC_ADDR].off, tpl->tpl[NF9_IPV4_SRC_ADDR].len); 
+      memcpy(&pdata->primitives.src_ip.address.ipv4, pptrs->f_data+tpl->tpl[NF9_IPV4_SRC_ADDR].off, MIN(tpl->tpl[NF9_IPV4_SRC_ADDR].len, 4)); 
       memcpy(&src_mask, pptrs->f_data+tpl->tpl[NF9_SRC_MASK].off, tpl->tpl[NF9_SRC_MASK].len); 
       pdata->primitives.src_ip.family = AF_INET;
       break;
     }
 #if defined ENABLE_IPV6
     if (pptrs->l3_proto == ETHERTYPE_IPV6) {
-      memcpy(&pdata->primitives.src_ip.address.ipv6, pptrs->f_data+tpl->tpl[NF9_IPV6_SRC_ADDR].off, tpl->tpl[NF9_IPV6_SRC_ADDR].len);
+      memcpy(&pdata->primitives.src_ip.address.ipv6, pptrs->f_data+tpl->tpl[NF9_IPV6_SRC_ADDR].off, MIN(tpl->tpl[NF9_IPV6_SRC_ADDR].len, 16));
       memcpy(&src_mask, pptrs->f_data+tpl->tpl[NF9_IPV6_SRC_MASK].off, tpl->tpl[NF9_IPV6_SRC_MASK].len); 
       pdata->primitives.src_ip.family = AF_INET6;
       break;
@@ -790,14 +799,14 @@ void NF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   switch(hdr->version) {
   case 9:
     if (pptrs->l3_proto == ETHERTYPE_IP) {
-      memcpy(&pdata->primitives.dst_ip.address.ipv4, pptrs->f_data+tpl->tpl[NF9_IPV4_DST_ADDR].off, tpl->tpl[NF9_IPV4_DST_ADDR].len);
+      memcpy(&pdata->primitives.dst_ip.address.ipv4, pptrs->f_data+tpl->tpl[NF9_IPV4_DST_ADDR].off, MIN(tpl->tpl[NF9_IPV4_DST_ADDR].len, 4));
       memcpy(&dst_mask, pptrs->f_data+tpl->tpl[NF9_DST_MASK].off, tpl->tpl[NF9_DST_MASK].len);
       pdata->primitives.dst_ip.family = AF_INET;
       break;
     }
 #if defined ENABLE_IPV6
     if (pptrs->l3_proto == ETHERTYPE_IPV6) {
-      memcpy(&pdata->primitives.dst_ip.address.ipv6, pptrs->f_data+tpl->tpl[NF9_IPV6_DST_ADDR].off, tpl->tpl[NF9_IPV6_DST_ADDR].len);
+      memcpy(&pdata->primitives.dst_ip.address.ipv6, pptrs->f_data+tpl->tpl[NF9_IPV6_DST_ADDR].off, MIN(tpl->tpl[NF9_IPV6_DST_ADDR].len, 16));
       memcpy(&dst_mask, pptrs->f_data+tpl->tpl[NF9_IPV6_DST_MASK].off, tpl->tpl[NF9_IPV6_DST_MASK].len);
       pdata->primitives.dst_ip.family = AF_INET6;
       break;
@@ -989,7 +998,7 @@ void NF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   case 9:
     if (((u_int8_t)*(pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off) == IPPROTO_UDP) ||
         ((u_int8_t)*(pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off) == IPPROTO_TCP)) {
-      memcpy(&pdata->primitives.src_port, pptrs->f_data+tpl->tpl[NF9_L4_SRC_PORT].off, tpl->tpl[NF9_L4_SRC_PORT].len);
+      memcpy(&pdata->primitives.src_port, pptrs->f_data+tpl->tpl[NF9_L4_SRC_PORT].off, MIN(tpl->tpl[NF9_L4_SRC_PORT].len, 2));
       pdata->primitives.src_port = ntohs(pdata->primitives.src_port);
     }
     else pdata->primitives.src_port = 0;
@@ -1041,7 +1050,7 @@ void NF_dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   case 9:
     if (((u_int8_t)*(pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off) == IPPROTO_UDP) ||
         ((u_int8_t)*(pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off) == IPPROTO_TCP)) {
-      memcpy(&pdata->primitives.dst_port, pptrs->f_data+tpl->tpl[NF9_L4_DST_PORT].off, tpl->tpl[NF9_L4_DST_PORT].len);
+      memcpy(&pdata->primitives.dst_port, pptrs->f_data+tpl->tpl[NF9_L4_DST_PORT].off, MIN(tpl->tpl[NF9_L4_DST_PORT].len, 2));
       pdata->primitives.dst_port = ntohs(pdata->primitives.dst_port);
     }
     else pdata->primitives.dst_port = 0;
@@ -1090,7 +1099,7 @@ void NF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
 
   switch(hdr->version) {
   case 9:
-    memcpy(&pdata->primitives.tos, pptrs->f_data+tpl->tpl[NF9_SRC_TOS].off, tpl->tpl[NF9_SRC_TOS].len);
+    memcpy(&pdata->primitives.tos, pptrs->f_data+tpl->tpl[NF9_SRC_TOS].off, MIN(tpl->tpl[NF9_SRC_TOS].len, 1));
     break;
   case 8:
     switch(hdr->aggregation) {
@@ -1140,7 +1149,7 @@ void NF_ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *
 
   switch(hdr->version) {
   case 9:
-    memcpy(&pdata->primitives.proto, pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off, tpl->tpl[NF9_L4_PROTOCOL].len);
+    memcpy(&pdata->primitives.proto, pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off, MIN(tpl->tpl[NF9_L4_PROTOCOL].len, 1));
     break;
   case 8:
     switch(hdr->aggregation) {
@@ -1177,7 +1186,7 @@ void NF_tcp_flags_handler(struct channels_list_entry *chptr, struct packet_ptrs 
   switch(hdr->version) {
   case 9:
     if ((u_int8_t)*(pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off) == IPPROTO_TCP) {
-      memcpy(&tcp_flags, pptrs->f_data+tpl->tpl[NF9_TCP_FLAGS].off, tpl->tpl[NF9_TCP_FLAGS].len);
+      memcpy(&tcp_flags, pptrs->f_data+tpl->tpl[NF9_TCP_FLAGS].off, MIN(tpl->tpl[NF9_TCP_FLAGS].len, 1));
       pdata->tcp_flags = tcp_flags;
     }
     break;
@@ -1514,7 +1523,7 @@ void NF_nfprobe_extras_handler(struct channels_list_entry *chptr, struct packet_
   switch(hdr->version) {
   case 9:
     if (tpl->tpl[NF9_MPLS_LABEL_1].len)
-      memcpy(&pextras->mpls_top_label, pptrs->f_data+tpl->tpl[NF9_MPLS_LABEL_1].off, tpl->tpl[NF9_MPLS_LABEL_1].len);
+      memcpy(&pextras->mpls_top_label, pptrs->f_data+tpl->tpl[NF9_MPLS_LABEL_1].off, MIN(tpl->tpl[NF9_MPLS_LABEL_1].len, 4));
     if ((u_int8_t)*(pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off) == IPPROTO_TCP)
       memcpy(&pextras->tcp_flags, pptrs->f_data+tpl->tpl[NF9_TCP_FLAGS].off, tpl->tpl[NF9_TCP_FLAGS].len);
     break;
@@ -1604,7 +1613,7 @@ void NF_counters_renormalize_handler(struct channels_list_entry *chptr, struct p
 
   switch (hdr->version) {
   case 9:
-    memcpy(&sampler_id, pptrs->f_data+tpl->tpl[NF9_FLOW_SAMPLER_ID].off, tpl->tpl[NF9_FLOW_SAMPLER_ID].len);
+    memcpy(&sampler_id, pptrs->f_data+tpl->tpl[NF9_FLOW_SAMPLER_ID].off, MIN(tpl->tpl[NF9_FLOW_SAMPLER_ID].len, 1));
     sentry = search_smp_id_status_table(entry->sampling, sampler_id);
     if (sentry) {
       pdata->pkt_len = pdata->pkt_len * sentry->sample_pool;
@@ -1926,6 +1935,18 @@ void bgp_src_med_frommap_handler(struct channels_list_entry *chptr, struct packe
   --pdata; /* Bringing back to original place */
 
   pbgp->src_med = pptrs->bmed;
+}
+
+void bgp_is_symmetric_frommap_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct pkt_bgp_primitives *pbgp = (struct pkt_bgp_primitives *) ++pdata;
+  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_info *info;
+
+  --pdata; /* Bringing back to original place */
+
+  pbgp->is_symmetric = pptrs->biss;
 }
 
 #if defined (HAVE_L2)

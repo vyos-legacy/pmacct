@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -104,7 +104,7 @@ void sql_init_default_values()
   if (!(config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                 COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
 				COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
-				COUNT_SRC_LOCAL_PREF)))
+				COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC)))
     PbgpSz = 0;
 
   if ( (config.what_to_count & COUNT_CLASS ||
@@ -306,7 +306,7 @@ int sql_cache_flush(struct db_cache *queue[], int index, struct insert_data *ida
   /* If aggressive classification is enabled and there are still
      chances for the stream to be classified - ie. tentatives is
      non-zero - let's leave it in SQL_CACHE_INUSE state */
-  if (!exiting) {
+  if (!exiting && !config.nfacctd_sql_log) {
     if (config.sql_aggressive_classification) {
       for (j = 0, pqq_ptr = 0; j < index; j++) {
         if (!queue[j]->primitives.class && queue[j]->tentatives && (queue[j]->start_tag > (idata->now - ((STALE_M-1) * config.sql_refresh_time))) ) {
@@ -338,7 +338,7 @@ int sql_cache_flush(struct db_cache *queue[], int index, struct insert_data *ida
       }
     }
   }
-  /* If exiting commit everything is still in the cache */
+  /* If exiting or logging commit everything is still in the cache */
   else {
     for (j = 0; j < index; j++) queue[j]->valid = SQL_CACHE_COMMITTED; 
   } 
@@ -886,6 +886,7 @@ int sql_evaluate_primitives(int primitive)
 
     if (config.what_to_count & COUNT_SRC_LOCAL_PREF) what_to_count |= COUNT_SRC_LOCAL_PREF;
     if (config.what_to_count & COUNT_SRC_MED) what_to_count |= COUNT_SRC_MED;
+    if (config.what_to_count & COUNT_IS_SYMMETRIC) what_to_count |= COUNT_IS_SYMMETRIC;
 
     if (config.sql_table_version < 6) {
       if (config.what_to_count & COUNT_SRC_AS) what_to_count |= COUNT_SRC_AS;
@@ -1279,6 +1280,20 @@ int sql_evaluate_primitives(int primitive)
     strncat(where[primitive].string, "med_src=%u", SPACELEFT(where[primitive].string));
     values[primitive].type = where[primitive].type = COUNT_SRC_MED;
     values[primitive].handler = where[primitive].handler = count_src_med_handler;
+    primitive++;
+  }
+
+  if (what_to_count & COUNT_IS_SYMMETRIC) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
+    }
+    strncat(insert_clause, "is_symmetric", SPACELEFT(insert_clause));
+    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "is_symmetric=%u", SPACELEFT(where[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_IS_SYMMETRIC;
+    values[primitive].handler = where[primitive].handler = count_is_symmetric_handler;
     primitive++;
   }
 

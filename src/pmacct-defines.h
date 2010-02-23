@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -25,12 +25,13 @@
 #define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:wWL:R"
 #define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:v:o:Rg:L:"
 #define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:"
-#define N_PRIMITIVES 41
+#define N_PRIMITIVES 42
 #define N_FUNCS 10 
 #define MAX_N_PLUGINS 32
 #define PROTO_LEN 12
 #define MAX_MAP_ENTRIES 128
 #define AGG_FILTER_ENTRIES 128 
+#define FOLLOW_BGP_NH_ENTRIES 32 
 #define UINT32T_THRESHOLD 4290000000UL
 #define UINT64T_THRESHOLD 18446744073709551360ULL
 #ifndef UINT8_MAX
@@ -55,13 +56,13 @@
 #define LARGEBUFLEN (8192+MOREBUFSZ)
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.12.0rc4-cvs"
-#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.12.0rc4-cvs"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.12.0rc4-cvs"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.12.0rc4-cvs"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.12.0rc4-cvs"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.12.0rc4-cvs"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.12.0rc4-cvs"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.12.1-cvs"
+#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.12.1-cvs"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.12.1-cvs"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.12.1-cvs"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.12.1-cvs"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.12.1-cvs"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.12.1-cvs"
 
 #ifndef TRUE
 #define TRUE 1
@@ -92,8 +93,9 @@
 #define MAP_BGP_TO_XFLOW_AGENT	101	/* bgp_to_agent_map */
 #define MAP_BGP_SRC_LOCAL_PREF	102	/* bgp_src_local_pref_map */
 #define MAP_BGP_SRC_MED		103	/* bgp_src_med_map */
+#define MAP_BGP_IS_SYMMETRIC    104	/* bgp_is_symmetric_map */
 
-/* 41 primitives currently defined */
+/* 42 primitives currently defined */
 #define COUNT_SRC_HOST		0x0000000000000001ULL
 #define COUNT_DST_HOST		0x0000000000000002ULL
 #define COUNT_SUM_HOST          0x0000000000000004ULL
@@ -135,6 +137,7 @@
 #define COUNT_SRC_EXT_COMM	0x0000004000000000ULL
 #define COUNT_SRC_LOCAL_PREF	0x0000008000000000ULL
 #define COUNT_SRC_MED		0x0000010000000000ULL
+#define COUNT_IS_SYMMETRIC	0x0000020000000000ULL
 
 /* BYTES and PACKETS are used into templates; we let their values to
    overlap with some values we will not need into templates */ 

@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -50,7 +50,7 @@ void nfacctd_bgp_wrapper()
 
 void skinny_bgp_daemon()
 {
-  int slen, ret, sock, rc, peers_idx;
+  int slen, ret, sock, rc, peers_idx, allowed;
   struct host_addr addr;
   struct bgp_header bhdr;
   struct bgp_peer *peer;
@@ -69,6 +69,7 @@ void skinny_bgp_daemon()
   u_int16_t remote_as = 0;
   u_int32_t remote_as4 = 0;
   time_t now;
+  struct hosts_table allow;
 
   /* select() stuff */
   fd_set read_descs, bkp_read_descs; 
@@ -78,6 +79,7 @@ void skinny_bgp_daemon()
   memset(&server, 0, sizeof(server));
   memset(&client, 0, sizeof(client));
   memset(bgp_packet, 0, BGP_MAX_PACKET_SIZE);
+  memset(&allow, 0, sizeof(struct hosts_table));
   bgp_attr_init();
 
   /* socket creation for BGP server: IPv4 only */
@@ -145,6 +147,9 @@ void skinny_bgp_daemon()
     Log(LOG_INFO, "INFO ( default/core/BGP ): waiting for BGP data on %s:%u\n", srv_string, srv_port);
   }
 
+  /* Preparing ACL, if any */
+  if (config.nfacctd_bgp_allow_file) load_allow_file(config.nfacctd_bgp_allow_file, &allow);
+
   for (;;) {
     select_again:
     select_fd = sock;
@@ -177,6 +182,16 @@ void skinny_bgp_daemon()
 	goto select_again;
       }
       peer->fd = accept(sock, (struct sockaddr *) &client, &clen);
+
+      /* If an ACL is defined, here we check against and enforce it */
+      if (allow.num) allowed = check_allow(&allow, (struct sockaddr *)&client);
+      else allowed = TRUE;
+
+      if (!allowed) {
+	bgp_peer_close(peer);
+	goto select_again;
+      }
+
       FD_SET(peer->fd, &bkp_read_descs);
       peer->addr.family = AF_INET;
       peer->addr.address.ipv4.s_addr = ((struct sockaddr_in *)&client)->sin_addr.s_addr;
@@ -1657,7 +1672,7 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs)
         }
       }
     }
-    if (config.nfacctd_bgp_follow_nexthop.family && pptrs->bgp_dst)
+    if (config.nfacctd_bgp_follow_nexthop[0].family && pptrs->bgp_dst)
       bgp_follow_nexthop_lookup(pptrs);
   }
 
@@ -1672,6 +1687,7 @@ void bgp_follow_nexthop_lookup(struct packet_ptrs *pptrs)
   struct bgp_info *info;
   char *result = NULL, *saved_result = NULL;
   int peers_idx, ttl = MAX_HOPS_FOLLOW_NH, self = MAX_NH_SELF_REFERENCES;
+  int nh_idx, matched = 0;
   struct prefix nh, ch;
   struct in_addr pref4;
 #if defined ENABLE_IPV6
@@ -1730,7 +1746,12 @@ void bgp_follow_nexthop_lookup(struct packet_ptrs *pptrs)
 	nh.prefixlen = 32;
 	memcpy(&nh.u.prefix4, &info->attr->mp_nexthop.address.ipv4, 4);
 
-	if (prefix_match(&config.nfacctd_bgp_follow_nexthop, &nh) && self > 0 && ttl > 0) { 
+	for (nh_idx = 0; config.nfacctd_bgp_follow_nexthop[nh_idx].family && nh_idx < FOLLOW_BGP_NH_ENTRIES; nh_idx++) {
+	  matched = prefix_match(&config.nfacctd_bgp_follow_nexthop[nh_idx], &nh);
+	  if (matched) break;
+	}
+
+	if (matched && self > 0 && ttl > 0) { 
 	  if (prefix_match(&ch, &nh)) self--;
           sa = &sa_local;
           pptrs->f_agent = (char *) &sa_local;
@@ -1749,7 +1770,12 @@ void bgp_follow_nexthop_lookup(struct packet_ptrs *pptrs)
 	nh.prefixlen = 128;
 	memcpy(&nh.u.prefix6, &info->attr->mp_nexthop.address.ipv6, 16);
 
-	if (prefix_match(&config.nfacctd_bgp_follow_nexthop, &nh) && self > 0 && ttl > 0) {
+        for (nh_idx = 0; config.nfacctd_bgp_follow_nexthop[nh_idx].family && nh_idx < FOLLOW_BGP_NH_ENTRIES; nh_idx++) {
+          matched = prefix_match(&config.nfacctd_bgp_follow_nexthop[nh_idx], &nh);
+          if (matched) break;
+        }
+
+	if (matched && self > 0 && ttl > 0) {
 	  if (prefix_match(&ch, &nh)) self--;
           sa = &sa_local;
           pptrs->f_agent = (char *) &sa_local;
@@ -1768,7 +1794,12 @@ void bgp_follow_nexthop_lookup(struct packet_ptrs *pptrs)
 	nh.prefixlen = 32;
 	memcpy(&nh.u.prefix4, &info->attr->nexthop, 4);
 
-	if (prefix_match(&config.nfacctd_bgp_follow_nexthop, &nh) && self > 0 && ttl > 0) {
+        for (nh_idx = 0; config.nfacctd_bgp_follow_nexthop[nh_idx].family && nh_idx < FOLLOW_BGP_NH_ENTRIES; nh_idx++) {
+          matched = prefix_match(&config.nfacctd_bgp_follow_nexthop[nh_idx], &nh);
+          if (matched) break;
+        }
+
+	if (matched && self > 0 && ttl > 0) {
 	  if (prefix_match(&ch, &nh)) self--;
           sa = &sa_local;
           pptrs->f_agent = (char *) &sa_local;
@@ -1885,6 +1916,7 @@ void pkt_to_cache_bgp_primitives(struct cache_bgp_primitives *c, struct pkt_bgp_
     }
     c->src_local_pref = p->src_local_pref;
     c->src_med = p->src_med;
+    c->is_symmetric = p->is_symmetric;
   }
 }
 
@@ -1907,6 +1939,7 @@ void cache_to_pkt_bgp_primitives(struct pkt_bgp_primitives *p, struct cache_bgp_
     if (c->src_as_path) memcpy(p->src_as_path, c->src_as_path, MAX_BGP_ASPATH);
     p->src_local_pref = c->src_local_pref;
     p->src_med = c->src_med;
+    p->is_symmetric = c->is_symmetric;
   }
 }
 
@@ -1915,7 +1948,7 @@ void bgp_config_checks(struct configuration *c)
   if (c->what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
 			  COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
 			  COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
-			  COUNT_SRC_LOCAL_PREF)) {
+			  COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC)) {
     /* Sanitizing the aggregation method */
     if ( ((c->what_to_count & COUNT_STD_COMM) && (c->what_to_count & COUNT_EXT_COMM)) ||
          ((c->what_to_count & COUNT_SRC_STD_COMM) && (c->what_to_count & COUNT_SRC_EXT_COMM)) ) {

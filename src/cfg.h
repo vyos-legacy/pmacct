@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -100,6 +100,7 @@ struct configuration {
   int nfacctd_bgp_msglog;
   char *nfacctd_bgp_ip;
   int nfacctd_bgp_port;
+  char *nfacctd_bgp_allow_file;
   int nfacctd_bgp_max_peers;
   int nfacctd_bgp_aspath_radius;
   char *nfacctd_bgp_stdcomm_pattern;
@@ -115,9 +116,10 @@ struct configuration {
   char *nfacctd_bgp_peer_as_src_map;
   char *nfacctd_bgp_src_local_pref_map;
   char *nfacctd_bgp_src_med_map;
+  char *nfacctd_bgp_is_symmetric_map;
   char *nfacctd_bgp_to_agent_map;
   int nfacctd_bgp_follow_default;
-  struct prefix nfacctd_bgp_follow_nexthop;
+  struct prefix nfacctd_bgp_follow_nexthop[FOLLOW_BGP_NH_ENTRIES];
   char *nfacctd_bgp_neighbors_file;
   int promisc; /* pcap_open_live() promisc parameter */
   char *clbuf; /* pcap filter */
@@ -162,6 +164,7 @@ struct configuration {
   int nfprobe_version;
   char *nfprobe_engine;
   int nfprobe_peer_as;
+  char *nfprobe_source_ip;
   char *sfprobe_receiver;
   char *sfprobe_agentip;
   int sfprobe_agentsubid;

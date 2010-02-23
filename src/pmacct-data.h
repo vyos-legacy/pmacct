@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -289,6 +289,8 @@ static const struct _dictionary_line dictionary[] = {
   {"uacctd_conntrack_buffer_size", cfg_key_pmacctd_conntrack_buffer_size},
   {"uacctd_flow_lifetime", cfg_key_pmacctd_flow_lifetime},
   {"uacctd_ext_sampling_rate", cfg_key_pmacctd_ext_sampling_rate},
+  {"nfacctd_ext_sampling_rate", cfg_key_pmacctd_ext_sampling_rate},
+  {"sfacctd_ext_sampling_rate", cfg_key_pmacctd_ext_sampling_rate},
   {"pcap_savefile", cfg_key_pcap_savefile},
   {"pre_tag_map", cfg_key_pre_tag_map},	
   {"pre_tag_map_entries", cfg_key_pre_tag_map_entries},	
@@ -318,6 +320,7 @@ static const struct _dictionary_line dictionary[] = {
   {"nfprobe_engine", cfg_key_nfprobe_engine},
   {"nfprobe_version", cfg_key_nfprobe_version},
   {"nfprobe_peer_as", cfg_key_nfprobe_peer_as},
+  {"nfprobe_source_ip", cfg_key_nfprobe_source_ip},
   {"sfprobe_receiver", cfg_key_sfprobe_receiver},
   {"sfprobe_agentip", cfg_key_sfprobe_agentip},
   {"sfprobe_agentsubid", cfg_key_sfprobe_agentsubid},
@@ -327,6 +330,7 @@ static const struct _dictionary_line dictionary[] = {
   {"bgp_daemon_port", cfg_key_nfacctd_bgp_port},
   {"bgp_daemon_max_peers", cfg_key_nfacctd_bgp_max_peers},
   {"bgp_daemon_msglog", cfg_key_nfacctd_bgp_msglog},
+  {"bgp_daemon_allow_file", cfg_key_nfacctd_bgp_allow_file},
   {"bgp_aspath_radius", cfg_key_nfacctd_bgp_aspath_radius},
   {"bgp_stdcomm_pattern", cfg_key_nfacctd_bgp_stdcomm_pattern},
   {"bgp_extcomm_pattern", cfg_key_nfacctd_bgp_extcomm_pattern},
@@ -335,6 +339,7 @@ static const struct _dictionary_line dictionary[] = {
   {"bgp_peer_src_as_map", cfg_key_nfacctd_bgp_peer_src_as_map},
   {"bgp_src_local_pref_map", cfg_key_nfacctd_bgp_src_local_pref_map},
   {"bgp_src_med_map", cfg_key_nfacctd_bgp_src_med_map},
+  {"bgp_is_symmetric_map", cfg_key_nfacctd_bgp_is_symmetric_map},
   {"bgp_peer_src_as_type", cfg_key_nfacctd_bgp_peer_src_as_type},
   {"bgp_src_std_comm_type", cfg_key_nfacctd_bgp_src_std_comm_type},
   {"bgp_src_ext_comm_type", cfg_key_nfacctd_bgp_src_ext_comm_type},
