@@ -18,7 +18,7 @@
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
  *
- * @(#) $Header: /home/repo/pmacct/include/llc.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ (LBL)
+ * @(#) $Header: /home/repo-0.12/pmacct/include/llc.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ (LBL)
  */
 
 /*

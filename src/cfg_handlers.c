@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -122,7 +122,8 @@ int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   char *count_token;
-  u_int32_t value = 0, changes = 0; 
+  u_int64_t value = 0;
+  u_int32_t changes = 0; 
 
   trim_all_spaces(value_ptr);
 
@@ -150,9 +151,25 @@ int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
     else if (!strcmp(count_token, "sum_as")) value |= COUNT_SUM_AS;
     else if (!strcmp(count_token, "sum_port")) value |= COUNT_SUM_PORT;
     else if (!strcmp(count_token, "tag")) value |= COUNT_ID;
+    else if (!strcmp(count_token, "tag2")) value |= COUNT_ID2;
     else if (!strcmp(count_token, "flows")) value |= COUNT_FLOWS;
     else if (!strcmp(count_token, "class")) value |= COUNT_CLASS;
     else if (!strcmp(count_token, "tcpflags")) value |= COUNT_TCPFLAGS;
+    else if (!strcmp(count_token, "std_comm")) value |= COUNT_STD_COMM;
+    else if (!strcmp(count_token, "ext_comm")) value |= COUNT_EXT_COMM;
+    else if (!strcmp(count_token, "as_path")) value |= COUNT_AS_PATH;
+    else if (!strcmp(count_token, "local_pref")) value |= COUNT_LOCAL_PREF;
+    else if (!strcmp(count_token, "med")) value |= COUNT_MED;
+    else if (!strcmp(count_token, "peer_src_as")) value |= COUNT_PEER_SRC_AS;
+    else if (!strcmp(count_token, "peer_dst_as")) value |= COUNT_PEER_DST_AS;
+    else if (!strcmp(count_token, "peer_src_ip")) value |= COUNT_PEER_SRC_IP;
+    else if (!strcmp(count_token, "peer_dst_ip")) value |= COUNT_PEER_DST_IP;
+    else if (!strcmp(count_token, "src_as_path")) value |= COUNT_SRC_AS_PATH;
+    else if (!strcmp(count_token, "src_std_comm")) value |= COUNT_SRC_STD_COMM;
+    else if (!strcmp(count_token, "src_ext_comm")) value |= COUNT_SRC_EXT_COMM;
+    else if (!strcmp(count_token, "src_local_pref")) value |= COUNT_SRC_LOCAL_PREF;
+    else if (!strcmp(count_token, "src_med")) value |= COUNT_SRC_MED;
+    else if (!strcmp(count_token, "is_symmetric")) value |= COUNT_IS_SYMMETRIC;
     else Log(LOG_WARNING, "WARN ( %s ): ignoring unknown aggregation method: %s.\n", filename, count_token);
   }
 
@@ -213,11 +230,13 @@ int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   char *count_token, *range_ptr;
-  int value, range = 0, changes = 0;
+  pm_id_t value, range = 0;
+  int changes = 0;
+  char *endptr_v, *endptr_r;
   u_int8_t neg;
 
   if (!name) {
-    Log(LOG_ERR, "ERROR ( %s ): ID filter cannot be global. Not loaded.\n", filename);
+    Log(LOG_ERR, "ERROR ( %s ): TAG filter cannot be global. Not loaded.\n", filename);
     changes++;
   }
   else {
@@ -229,27 +248,14 @@ int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
 	while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_MAP_ENTRIES/4) {
 	  neg = pt_check_neg(&count_token);
 	  range_ptr = pt_check_range(count_token); 
-	  value = atoi(count_token);
-	  if (range_ptr) range = atoi(range_ptr);
+	  value = strtoul(count_token, &endptr_v, 10);
+	  if (range_ptr) range = strtoul(range_ptr, &endptr_r, 10);
 	  else range = value;
 
-	  if ((value < 0) || (value > 65535)) {
-	    Log(LOG_ERR, "WARN ( %s ): 'pre_tag_filter' values has to be in the range 0-65535. '%d' not loaded.\n", filename, value);
-	    changes++;
-	    break;
-	  }
-
-	  if (range_ptr) { 
-	    if ((range < 1) || (range > 65535)) {
-	      Log(LOG_ERR, "WARN ( %s ): Range values has to be in the range 1-65535. '%d' not loaded.\n", filename, range);
-	      changes++;
-	      break;
-	    }
-	    if (range <= value) {
+	  if (range_ptr && range <= value) {
 	      Log(LOG_ERR, "WARN ( %s ): Range value is expected in the format low-high. '%d-%d' not loaded.\n", filename, value, range);
 	      changes++;
 	      break;
-	    }
 	  }
 
           list->cfg.ptf.table[list->cfg.ptf.num].neg = neg;
@@ -258,6 +264,52 @@ int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
 	  list->cfg.ptf.num++;
           changes++;
 	}
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_pre_tag2_filter(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  char *count_token, *range_ptr;
+  pm_id_t value, range = 0;
+  int changes = 0;
+  char *endptr_v, *endptr_r;
+  u_int8_t neg;
+
+  if (!name) {
+    Log(LOG_ERR, "ERROR ( %s ): TAG2 filter cannot be global. Not loaded.\n", filename);
+    changes++;
+  }
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        trim_all_spaces(value_ptr);
+
+        list->cfg.pt2f.num = 0;
+        while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_MAP_ENTRIES/4) {
+          neg = pt_check_neg(&count_token);
+          range_ptr = pt_check_range(count_token);
+          value = strtoul(count_token, &endptr_v, 10);
+          if (range_ptr) range = strtoul(range_ptr, &endptr_r, 10);
+          else range = value;
+
+          if (range_ptr && range <= value) {
+              Log(LOG_ERR, "WARN ( %s ): Range value is expected in the format low-high. '%d-%d' not loaded.\n", filename, value, range);
+              changes++;
+              break;
+          }
+
+          list->cfg.pt2f.table[list->cfg.pt2f.num].neg = neg;
+          list->cfg.pt2f.table[list->cfg.pt2f.num].n = value;
+          list->cfg.pt2f.table[list->cfg.pt2f.num].r = range;
+          list->cfg.pt2f.num++;
+          changes++;
+        }
         break;
       }
     }
@@ -285,6 +337,82 @@ int cfg_key_interface(char *filename, char *name, char *value_ptr)
 
   for (; list; list = list->next, changes++) list->cfg.dev = value_ptr;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'interface'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_files_umask(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+  char *endp;
+
+  value = strtoul(value_ptr, &endp, 8);
+  if (value < 2) {
+    Log(LOG_WARNING, "WARN ( %s ): 'files_umask' has to be >= '002'.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.files_umask = value & 0666;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.files_umask = value & 0666;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_files_uid(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < 1) {
+    Log(LOG_ERR, "WARN ( %s ): 'files_uid' has to be >= 1.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.files_uid = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.files_uid = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_files_gid(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < 1) {
+    Log(LOG_ERR, "WARN ( %s ): 'files_gid' has to be >= 1.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.files_gid = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.files_gid = value;
+        changes++;
+        break;
+      }
+    }
+  }
 
   return changes;
 }
@@ -573,6 +701,25 @@ int cfg_key_sql_table_version(char *filename, char *name, char *value_ptr)
     for (; list; list = list->next) {
       if (!strcmp(name, list->name)) {
         list->cfg.sql_table_version = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_sql_table_type(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sql_table_type = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.sql_table_type = value_ptr;
         changes++;
         break;
       }
@@ -1336,11 +1483,12 @@ int cfg_key_print_markers(char *filename, char *name, char *value_ptr)
 int cfg_key_post_tag(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
-  int value, changes = 0;
+  pm_id_t value, changes = 0;
+  char *endptr;
 
-  value = atoi(value_ptr);
-  if ((value < 1) || (value > 65535)) {
-    Log(LOG_ERR, "WARN ( %s ): 'post_tag' has to be in the range 1-65535.\n", filename);
+  value = strtoul(value_ptr, &endptr, 10);
+  if (value < 1) {
+    Log(LOG_ERR, "WARN ( %s ): 'post_tag' cannot be zero.\n", filename);
     return ERR;
   }
 
@@ -1418,6 +1566,17 @@ int cfg_key_nfacctd_allow_file(char *filename, char *name, char *value_ptr)
 
   for (; list; list = list->next, changes++) list->cfg.nfacctd_allow_file = value_ptr;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'nfacctd_allow_file'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_allow_file(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_allow_file = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon_allow_file'. Globalized.\n", filename);
 
   return changes;
 }
@@ -1532,6 +1691,334 @@ int cfg_key_nfacctd_sql_log(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_nfacctd_bgp(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp = TRUE;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_msglog(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_msglog = TRUE;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon_msglog'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_aspath_radius(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < 1) {
+        Log(LOG_ERR, "WARN ( %s ): 'bgp_aspath_radius' has to be >= 1.\n", filename);
+        return ERR;
+  }
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_aspath_radius = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_aspath_radius'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_stdcomm_pattern(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_stdcomm_pattern = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_stdcomm_pattern'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_extcomm_pattern(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_extcomm_pattern = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_extcomm_pattern'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_stdcomm_pattern_to_asn(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_stdcomm_pattern_to_asn = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_stdcomm_pattern_to_asn'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_peer_src_as_type(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  if (!strncmp(value_ptr, "map", strlen("map"))) value = BGP_SRC_PRIMITIVES_MAP;
+  else if (!strncmp(value_ptr, "bgp", strlen("bgp"))) value = BGP_SRC_PRIMITIVES_BGP;
+  else Log(LOG_WARNING, "WARN ( %s ): Ignoring uknown 'bgp_peer_src_as_type' value.\n", filename);
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_peer_as_src_type = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_peer_src_as_type'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_src_std_comm_type(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  if (!strncmp(value_ptr, "bgp", strlen("bgp"))) value = BGP_SRC_PRIMITIVES_BGP;
+  else Log(LOG_WARNING, "WARN ( %s ): Ignoring uknown 'bgp_src_std_comm_type' value.\n", filename);
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_src_std_comm_type = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_src_std_comm_type'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_src_ext_comm_type(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  if (!strncmp(value_ptr, "bgp", strlen("bgp"))) value = BGP_SRC_PRIMITIVES_BGP;
+  else Log(LOG_WARNING, "WARN ( %s ): Ignoring uknown 'bgp_src_ext_comm_type' value.\n", filename);
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_src_ext_comm_type = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_src_ext_comm_type'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_src_as_path_type(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  if (!strncmp(value_ptr, "bgp", strlen("bgp"))) value = BGP_SRC_PRIMITIVES_BGP;
+  else Log(LOG_WARNING, "WARN ( %s ): Ignoring uknown 'bgp_src_as_path_type' value.\n", filename);
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_src_as_path_type = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_src_as_path_type'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_src_local_pref_type(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  if (!strncmp(value_ptr, "map", strlen("map"))) value = BGP_SRC_PRIMITIVES_MAP;
+  else if (!strncmp(value_ptr, "bgp", strlen("bgp"))) value = BGP_SRC_PRIMITIVES_BGP;
+  else Log(LOG_WARNING, "WARN ( %s ): Ignoring uknown 'bgp_src_local_pref_type' value.\n", filename);
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_src_local_pref_type = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_src_local_pref_type'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_src_med_type(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  if (!strncmp(value_ptr, "map", strlen("map"))) value = BGP_SRC_PRIMITIVES_MAP;
+  else if (!strncmp(value_ptr, "bgp", strlen("bgp"))) value = BGP_SRC_PRIMITIVES_BGP;
+  else Log(LOG_WARNING, "WARN ( %s ): Ignoring uknown 'bgp_src_med_type' value.\n", filename);
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_src_med_type = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_src_med_type'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_peer_as_skip_subas(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_peer_as_skip_subas = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_peer_as_skip_subas'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_src_local_pref_map(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_src_local_pref_map = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_src_local_pref_map'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_peer_src_as_map(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_peer_as_src_map = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_peer_src_as_map'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_src_med_map(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_src_med_map = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_src_med_map'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_is_symmetric_map(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_is_symmetric_map = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_is_symmetric_map'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_to_agent_map(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_to_agent_map = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_to_agent_map'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_follow_default(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_follow_default = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_follow_default'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_follow_nexthop(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  char *count_token;
+  int changes = 0, idx = 0, valid;
+
+  trim_all_spaces(value_ptr);
+
+  while ((count_token = extract_token(&value_ptr, ',')) && idx < FOLLOW_BGP_NH_ENTRIES) {
+    for (list = plugins_list; list; list = list->next) {
+      valid = str2prefix(count_token, &list->cfg.nfacctd_bgp_follow_nexthop[idx]);
+      if (!valid) {
+	Log(LOG_WARNING, "WARN ( %s ): bgp_follow_nexthop: invalid IP prefix '%s'.\n", filename, count_token);
+	break;
+      }
+    }
+    if (valid) idx++;
+  }
+
+  changes = idx;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_follow_nexthop'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_neighbors_file(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_neighbors_file = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_neighbors_file'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_max_peers(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < 1) {
+        Log(LOG_ERR, "WARN ( %s ): 'nfacctd_bgp_max_peers' has to be >= 1.\n", filename);
+        return ERR;
+  }
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_max_peers = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon_max_peers'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_ip(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_ip = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon_ip'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_port(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if ((value <= 0) || (value > 65535)) {
+    Log(LOG_ERR, "WARN ( %s ): 'bgp_daemon_port' has to be in the range 0-65535.\n", filename);
+    return ERR;
+  }
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_port = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon_port'. Globalized.\n", filename);
+
+  return changes;
+}
+
 int cfg_key_pmacctd_force_frag_handling(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1631,6 +2118,23 @@ int cfg_key_pmacctd_flow_lifetime(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_pmacctd_ext_sampling_rate(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < 1) {
+    Log(LOG_ERR, "WARN ( %s ): 'pmacctd_ext_sampling_rate' has to be >= 1.\n", filename);
+    return ERR;
+  }
+
+  for (; list; list = list->next, changes++) list->cfg.ext_sampling_rate = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pmacctd_ext_sampling_rate'. Globalized.\n", filename);
+
+  return changes;
+}
+
 int cfg_key_sfacctd_renormalize(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1661,11 +2165,43 @@ int cfg_key_nfacctd_as_new(char *filename, char *name, char *value_ptr)
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
 
-  value = parse_truefalse(value_ptr);
-  if (value < 0) return ERR;
+  if (!strcmp(value_ptr, "false"))
+    value = NF_AS_KEEP;
+  else if (!strcmp(value_ptr, "true") || !strcmp(value_ptr, "file"))
+    value = NF_AS_NEW;
+  else if (!strcmp(value_ptr, "bgp"))
+    value = NF_AS_BGP;
+  else {
+    Log(LOG_ERR, "WARN ( %s ): Invalid AS aggregation value '%s'\n", filename, value_ptr);
+    return ERR;
+  } 
 
-  for (; list; list = list->next, changes++) list->cfg.nfacctd_as = NF_AS_NEW;
-  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'nfacctd_as_new'. Globalized.\n", filename);
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_as = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key '[nf|pm|sf|ua]acctd_as_new'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_net(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  if (!strcmp(value_ptr, "sflow") || !strcmp(value_ptr, "netflow"))
+    value = NF_NET_KEEP;
+  else if (!strcmp(value_ptr, "file"))
+    value = NF_NET_NEW;
+  else if (!strcmp(value_ptr, "mask"))
+    value = NF_NET_STATIC;
+  else if (!strcmp(value_ptr, "bgp"))
+    value = NF_NET_BGP;
+  else {
+    Log(LOG_ERR, "WARN ( %s ): Invalid network aggregation value '%s'\n", filename, value_ptr);
+    return ERR;
+  } 
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_net = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key '[nf|pm|sf|ua]acctd_net'. Globalized.\n", filename);
 
   return changes;
 }
@@ -1862,6 +2398,28 @@ int cfg_key_nfprobe_engine(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_nfprobe_peer_as(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.nfprobe_peer_as = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.nfprobe_peer_as = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_sfprobe_receiver(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1925,29 +2483,6 @@ int cfg_key_sfprobe_agentsubid(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_flow_handling_threads(char *filename, char *name, char *value_ptr)
-{
-  struct plugins_list_entry *list = plugins_list;
-  int changes = 0;
-  int value;
-
-  value = atoi(value_ptr);
-  if (!name) for (; list; list = list->next, changes++) list->cfg.flow_handling_threads = value;
-  else {
-    for (; list; list = list->next) {
-      if (!strcmp(name, list->name)) {
-        list->cfg.flow_handling_threads = value;
-        changes++;
-        break;
-      }
-    }
-  }
-
-  return changes;
-}
-
-
-
 void parse_time(char *filename, char *value, int *mu, int *howmany)
 {
   int k, j, len;
@@ -1981,3 +2516,25 @@ void parse_time(char *filename, char *value, int *mu, int *howmany)
   }
 }
 
+int cfg_key_uacctd_group(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < 1 || value > 32) return ERR;
+
+  for (; list; list = list->next, changes++) list->cfg.uacctd_group = (1 << (value-1));
+  return changes;
+}
+
+int cfg_key_uacctd_nl_size(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+
+  for (; list; list = list->next, changes++) list->cfg.uacctd_nl_size = value;
+  return changes;
+}

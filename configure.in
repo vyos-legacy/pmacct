@@ -1,8 +1,8 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl configuration file for pmacct
 
-AC_INIT([src/pmacctd.c], [0.11.6], [paolo@pmacct.net])
-AM_INIT_AUTOMAKE([pmacctd], [0.11.6])
+AC_INIT([src/pmacctd.c], [0.12.0], [paolo@pmacct.net])
+AM_INIT_AUTOMAKE([pmacctd], [0.12.0])
 AC_PREFIX_DEFAULT([/usr/local])
 
 dnl Checks for programs.
@@ -474,7 +474,12 @@ AC_ARG_ENABLE(mysql,
       ])])
     else
       LIBS="${LIBS} -lmysqlclient"
-    fi
+      case "$host_os" in
+        Sun*)
+	  LIBS="${LIBS} -lrt"
+	  ;;
+      esac
+    fi 
 
     AC_ARG_WITH(mysql-includes,
       [  --with-mysql-includes=DIR        Search for MySQL includes in the specified directory],
@@ -841,6 +846,19 @@ AC_ARG_ENABLE(threads,
         AC_MSG_RESULT(no)
 )
 
+AC_MSG_CHECKING(whether to enable ULOG support)
+AC_ARG_ENABLE(ulog,
+  [  --enable-ulog                    Enable ULOG support],
+       if test "x$enableval" = xyes ; then
+               AC_MSG_RESULT(yes)
+               CFLAGS="${CFLAGS} -DENABLE_ULOG"
+       else
+               AC_MSG_RESULT(no)
+       fi
+       ,
+       AC_MSG_RESULT(no)
+)
+
 dnl Checks for library functions.
 AC_TYPE_SIGNAL
 
@@ -858,7 +876,7 @@ case "$host_os" in
     ;;
 esac
 
-LIBS="${LIBS} -lnfprobe_plugin -Lnfprobe_plugin/ -lsfprobe_plugin -Lsfprobe_plugin/"
+LIBS="${LIBS} -lnfprobe_plugin -Lnfprobe_plugin/ -lsfprobe_plugin -Lsfprobe_plugin/ -lbgp -Lbgp/"
 
 echo "
 PLATFORM ..... : `uname -m`
@@ -870,8 +888,11 @@ LDFLAGS ...... : ${LDFLAGS}
 
 Now type 'make' to compile the source code.
 
-Are you willing to get in touch with other pmacct users ?
+Are you willing to get in touch with other pmacct users?
 Join the pmacct mailing-list by sending a message to pmacct-discussion-subscribe@pmacct.net
+
+Need for documentation and examples?
+Read the README file or go to http://wiki.pmacct.net/
 
 "
 AC_SUBST([PLUGINS])
@@ -879,4 +900,5 @@ AC_SUBST([THREADS_SOURCES])
 AC_SUBST([EXTRABIN])
 AC_OUTPUT([ Makefile \
 	    src/Makefile src/nfprobe_plugin/Makefile \
-	    src/sfprobe_plugin/Makefile ])
+	    src/sfprobe_plugin/Makefile 
+		src/bgp/Makefile ])

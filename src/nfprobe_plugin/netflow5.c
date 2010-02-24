@@ -22,13 +22,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow5.c,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ */
+/* $Id: netflow5.c,v 1.6 2009/11/29 13:45:52 paolo Exp $ */
 
 #include "common.h"
 #include "treetype.h"
 #include "nfprobe_plugin.h"
 
-RCSID("$Id: netflow5.c,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $");
+RCSID("$Id: netflow5.c,v 1.6 2009/11/29 13:45:52 paolo Exp $");
 
 /*
  * This is the Cisco Netflow(tm) version 5 packet format
@@ -102,7 +102,10 @@ send_netflow_v5(struct FLOW **flows, int num_flows, int nfsock,
 			hdr->flow_sequence = htonl(*flows_exported);
 			hdr->engine_type = engine_type;
 			hdr->engine_id = engine_id;
-			hdr->sampling = htons(config.sampling_rate & 0x3FFF); 
+			if (config.sampling_rate) 
+			  hdr->sampling = htons(config.sampling_rate & 0x3FFF); 
+			else if (config.ext_sampling_rate) 
+			  hdr->sampling = htons(config.ext_sampling_rate & 0x3FFF); 
 			if (hdr->sampling) hdr->sampling |= (htons(1) >> 2);
 			offset = sizeof(*hdr);
 		}		
@@ -116,8 +119,19 @@ send_netflow_v5(struct FLOW **flows, int num_flows, int nfsock,
 			flw->dest_ip = flows[i]->addr[1].v4.s_addr;
 			flw->src_port = flows[i]->port[0];
 			flw->dest_port = flows[i]->port[1];
-			flw->src_as = flows[i]->as[0];
-			flw->dest_as = flows[i]->as[1];
+                        flw->if_index_in = htons(flows[i]->ifindex[0]);
+                        flw->if_index_out = htons(flows[i]->ifindex[1]);
+			{
+			  as_t tmp_as;
+
+			  tmp_as = ntohl(flows[i]->as[0]);
+			  if (tmp_as > 65535) flw->src_as = htons(23456);
+			  else flw->src_as = htons(tmp_as);
+
+			  tmp_as = ntohl(flows[i]->as[1]);
+			  if (tmp_as > 65535) flw->dest_as = htons(23456);
+			  else flw->dest_as = htons(tmp_as);
+			}
 			flw->flow_packets = htonl(flows[i]->packets[0]);
 			flw->flow_octets = htonl(flows[i]->octets[0]);
 			flw->flow_start =
@@ -140,8 +154,19 @@ send_netflow_v5(struct FLOW **flows, int num_flows, int nfsock,
 			flw->dest_ip = flows[i]->addr[0].v4.s_addr;
 			flw->src_port = flows[i]->port[1];
 			flw->dest_port = flows[i]->port[0];
-			flw->src_as = flows[i]->as[1];
-			flw->dest_as = flows[i]->as[0];
+                        flw->if_index_in = htons(flows[i]->ifindex[1]);
+                        flw->if_index_out = htons(flows[i]->ifindex[0]);
+			{
+			  as_t tmp_as;
+			  
+			  tmp_as = ntohl(flows[i]->as[1]);
+			  if (tmp_as > 65535) flw->src_as = htons(23456);
+			  else flw->src_as = htons(tmp_as);
+
+			  tmp_as = ntohl(flows[i]->as[0]);
+			  if (tmp_as > 65535) flw->dest_as = htons(23456);
+			  else flw->dest_as = htons(tmp_as);
+			}
 			flw->flow_packets = htonl(flows[i]->packets[1]);
 			flw->flow_octets = htonl(flows[i]->octets[1]);
 			flw->flow_start =

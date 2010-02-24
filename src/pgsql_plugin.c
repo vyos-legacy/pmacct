@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -43,6 +43,8 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
+  struct pkt_bgp_primitives *pbgp;
+  char *dataptr;
 
   unsigned char *rgptr;
   int pollagain = TRUE;
@@ -63,15 +65,14 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   /* some LOCAL initialization AFTER setting some default values */
   reload_map = FALSE;
-  timeout = config.sql_refresh_time*1000; /* dirty */
-  now = time(NULL);
-  refresh_deadline = now;
+  idata.now = time(NULL);
+  refresh_deadline = idata.now;
 
   sql_init_maps(&nt, &nc, &pt);
   sql_init_global_buffers();
   sql_init_pipe(&pfd, pipe_fd);
-  sql_init_historical_acct(now, &idata);
-  sql_init_triggers(now, &idata);
+  sql_init_historical_acct(idata.now, &idata);
+  sql_init_triggers(idata.now, &idata);
   sql_init_refresh_deadline(&refresh_deadline);
 
   /* building up static SQL clauses */
@@ -94,6 +95,7 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   for(;;) {
     poll_again:
     status->wakeup = TRUE;
+    sql_calc_refresh_timeout(refresh_deadline, idata.now, &timeout);
     ret = poll(&pfd, 1, timeout);
     if (ret < 0) goto poll_again;
 
@@ -102,7 +104,7 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
     switch (ret) {
     case 0: /* poll(): timeout */
-      if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata);
+      if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata, FALSE);
       switch (fork()) {
       case 0: /* Child */
 	/* we have to ignore signals to avoid loops:
@@ -124,9 +126,11 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
         exit(0);
       default: /* Parent */
+	if (pqq_ptr) sql_cache_flush_pending(pending_queries_queue, pqq_ptr, &idata);
 	gettimeofday(&idata.flushtime, &tz);
-	refresh_deadline += config.sql_refresh_time; 
-	if (idata.now > idata.triggertime) {
+	while (idata.now > refresh_deadline)
+	  refresh_deadline += config.sql_refresh_time; 
+	while (idata.now > idata.triggertime && idata.t_timeslot > 0) {
 	  idata.triggertime  += idata.t_timeslot;
 	  if (config.sql_trigger_time == COUNT_MONTHLY)
 	    idata.t_timeslot = calc_monthly_timeslot(idata.triggertime, config.sql_trigger_time_howmany, ADD);
@@ -134,7 +138,7 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	idata.new_basetime = FALSE;
 	glob_new_basetime = FALSE;
 	qq_ptr = pqq_ptr;
-	memcpy(queries_queue, pending_queries_queue, sizeof(queries_queue));
+	memcpy(queries_queue, pending_queries_queue, qq_ptr*sizeof(struct db_cache *));
 
 	if (reload_map) {
 	  load_networks(config.networks_file, &nt, &nc);
@@ -183,7 +187,7 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
       /* lazy sql refresh handling */ 
       if (idata.now > refresh_deadline) {
-        if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata);
+        if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata, FALSE);
         switch (fork()) {
         case 0: /* Child */
           /* we have to ignore signals to avoid loops:
@@ -205,9 +209,11 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
           exit(0);
         default: /* Parent */
+	  if (pqq_ptr) sql_cache_flush_pending(pending_queries_queue, pqq_ptr, &idata);
 	  gettimeofday(&idata.flushtime, &tz);
-	  refresh_deadline += config.sql_refresh_time; 
-	  if (idata.now > idata.triggertime) {
+	  while (idata.now > refresh_deadline)
+	    refresh_deadline += config.sql_refresh_time; 
+	  while (idata.now > idata.triggertime && idata.t_timeslot > 0) {
             idata.triggertime  += idata.t_timeslot;
             if (config.sql_trigger_time == COUNT_MONTHLY)
               idata.t_timeslot = calc_monthly_timeslot(idata.triggertime, config.sql_trigger_time_howmany, ADD);
@@ -215,7 +221,7 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	  idata.new_basetime = FALSE;
 	  glob_new_basetime = FALSE;
 	  qq_ptr = pqq_ptr;
-	  memcpy(queries_queue, pending_queries_queue, sizeof(queries_queue));
+	  memcpy(queries_queue, pending_queries_queue, qq_ptr*sizeof(struct db_cache *));
 
 	  if (reload_map) {
 	    load_networks(config.networks_file, &nt, &nc);
@@ -227,7 +233,7 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       } 
       else {
         if (config.sql_trigger_exec) {
-          if (idata.now > idata.triggertime) {
+          while (idata.now > idata.triggertime && idata.t_timeslot > 0) {
             sql_trigger_exec(config.sql_trigger_exec);
 	    idata.triggertime += idata.t_timeslot;
 	    if (config.sql_trigger_time == COUNT_MONTHLY)
@@ -237,13 +243,17 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
-      if (idata.now > (idata.basetime + idata.timeslot)) {
-	idata.basetime += idata.timeslot;
-	if (config.sql_history == COUNT_MONTHLY)
-	  idata.timeslot = calc_monthly_timeslot(idata.basetime, config.sql_history_howmany, ADD);
-	glob_basetime = idata.basetime;
-	idata.new_basetime = TRUE;
-	glob_new_basetime = TRUE;
+      if (config.sql_history) {
+        while (idata.now > (idata.basetime + idata.timeslot)) {
+	  time_t saved_basetime = idata.basetime;
+
+	  idata.basetime += idata.timeslot;
+	  if (config.sql_history == COUNT_MONTHLY)
+	    idata.timeslot = calc_monthly_timeslot(idata.basetime, config.sql_history_howmany, ADD);
+	  glob_basetime = idata.basetime;
+	  idata.new_basetime = saved_basetime;
+	  glob_new_basetime = saved_basetime;
+	}
       }
 
       while (((struct ch_buf_hdr *)pipebuf)->num) {
@@ -255,10 +265,17 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           if (!pt.table[data->primitives.dst_port]) data->primitives.dst_port = 0;
         }
 
-        (*insert_func)(data, &idata); 
+        if (PbgpSz) pbgp = (struct pkt_bgp_primitives *) ((u_char *)data+PdataSz);
+        else pbgp = NULL;
 
-	((struct ch_buf_hdr *)pipebuf)->num--;
-	if (((struct ch_buf_hdr *)pipebuf)->num) data++;
+        (*insert_func)(data, pbgp, &idata);
+
+        ((struct ch_buf_hdr *)pipebuf)->num--;
+        if (((struct ch_buf_hdr *)pipebuf)->num) {
+          dataptr = (unsigned char *) data;
+          dataptr += PdataSz + PbgpSz;
+          data = (struct pkt_data *) dataptr;
+	}
       }
       goto read_data;
     }
@@ -395,7 +412,7 @@ void PG_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
   bed.lf = &lf;
 
   for (j = 0, stop = 0; (!stop) && preprocess_funcs[j]; j++) 
-    stop = preprocess_funcs[j](queue, &index);
+    stop = preprocess_funcs[j](queue, &index, j);
   if (config.what_to_count & COUNT_CLASS)
     sql_invalidate_shadow_entries(queue, &index);
   idata->ten = index;
@@ -534,11 +551,13 @@ int PG_compose_static_queries()
 {
   int primitives=0, set_primitives=0, have_flows=0, lock=0;
 
-  if (config.what_to_count & COUNT_FLOWS || (config.sql_table_version >= 4 && !config.sql_optimize_clauses)) {
+  if (config.what_to_count & COUNT_FLOWS || (config.sql_table_version >= 4 &&
+                                             config.sql_table_version < SQL_TABLE_VERSION_BGP &&
+                                             !config.sql_optimize_clauses)) {
     config.what_to_count |= COUNT_FLOWS;
     have_flows = TRUE;
 
-    if (config.sql_table_version < 4 && !config.sql_optimize_clauses) {
+    if ((config.sql_table_version < 4 || config.sql_table_version >= SQL_TABLE_VERSION_BGP) && !config.sql_optimize_clauses) {
       Log(LOG_ERR, "ERROR ( %s/%s ): The accounting of flows requires SQL table v4. Exiting.\n", config.name, config.type);
       exit_plugin(1);
     }
@@ -787,7 +806,8 @@ void PG_init_default_values(struct insert_data *idata)
     }
 
     if (typed) {
-      if (config.sql_table_version == 7) config.sql_table = pgsql_table_v7;
+      if (config.sql_table_version == (SQL_TABLE_VERSION_BGP+1)) config.sql_table = pgsql_table_bgp;
+      else if (config.sql_table_version == 7) config.sql_table = pgsql_table_v7;
       else if (config.sql_table_version == 6) config.sql_table = pgsql_table_v6; 
       else if (config.sql_table_version == 5) {
         if (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) config.sql_table = pgsql_table_as_v5;

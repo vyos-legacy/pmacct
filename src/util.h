@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -54,7 +54,7 @@ EXT void mark_columns(char *);
 EXT int Setsocksize(int, int, int, void *, int);
 EXT void *map_shared(void *, size_t, int, int, int, off_t);
 EXT void lower_string(char *);
-EXT void evaluate_sums(u_int32_t *, char *, char *);
+EXT void evaluate_sums(u_int64_t *, char *, char *);
 EXT int file_archive(const char *, int);
 EXT void stop_all_childs();
 EXT int file_lock(int);
@@ -67,9 +67,13 @@ EXT void exit_all(int);
 EXT void exit_plugin(int);
 EXT void reset_tag_status(struct packet_ptrs_vector *);
 EXT void reset_shadow_status(struct packet_ptrs_vector *);
-EXT void reset_tagdist_status(struct packet_ptrs_vector *);
 EXT void set_shadow_status(struct packet_ptrs *);
 EXT FILE *open_logfile(char *);
+EXT void evaluate_bgp_aspath_radius(char *, int, int);
+EXT void copy_stdcomm_to_asn(char *, as_t *, int);
+EXT void *Malloc(unsigned int);
+EXT void load_allow_file(char *, struct hosts_table *);
+EXT int check_allow(struct hosts_table *, struct sockaddr *);
 
 EXT unsigned int str_to_addr(const char *, struct host_addr *);
 

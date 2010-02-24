@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -48,6 +48,7 @@ EXT void ip_tos_handler(struct channels_list_entry *, struct packet_ptrs *, char
 EXT void ip_proto_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void tcp_flags_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void counters_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void counters_renormalize_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void id_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void flows_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void class_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
@@ -72,9 +73,20 @@ EXT void NF_counters_new_handler(struct channels_list_entry *, struct packet_ptr
 EXT void NF_flows_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_class_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_id_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void NF_id2_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_sfprobe_payload_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_nfprobe_extras_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_counters_renormalize_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+
+EXT void bgp_ext_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void nfprobe_bgp_ext_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void sfprobe_bgp_ext_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void bgp_peer_src_as_frommap_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void bgp_src_local_pref_frommap_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void bgp_src_med_frommap_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void bgp_is_symmetric_frommap_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void bgp_src_net_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void bgp_dst_net_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 
 EXT void SF_src_mac_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_dst_mac_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
@@ -91,12 +103,16 @@ EXT void SF_tcp_flags_handler(struct channels_list_entry *, struct packet_ptrs *
 EXT void SF_counters_new_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_counters_renormalize_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_id_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void SF_id2_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_sfprobe_payload_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_nfprobe_extras_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_class_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_sampling_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void SF_bgp_peer_src_as_fromext_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void SF_bgp_peer_src_as_fromstd_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 
 EXT void ptag_id_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void ptag_id2_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void sampling_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void sfprobe_sampling_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 #undef EXT

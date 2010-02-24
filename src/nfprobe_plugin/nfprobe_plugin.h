@@ -152,16 +152,18 @@ struct FLOW {
 	u_int8_t tos[2];			/* ToS/DSCP */
 
 	/* ASN stuff */
-	u_int16_t as[2];			/* Autonomous System numbers */
+	as_t as[2];				/* Autonomous System numbers */
 
 	/* L2 stuff */
 	u_int8_t mac[2][6];			/* Endpoint L2/Ethernet MAC addresses */
 	u_int16_t vlan;				/* VLAN ID */
 	u_int32_t mpls_label[2];		/* MPLS top label */
+        u_int16_t ifindex[2];			/* input/output ifindex */
 
 	/* classification stuff */
 	pm_class_t class;			/* Classification internal ID */
-	pm_id_t tag;				/* Tag */
+	pm_id_t tag[2];				/* Tag */
+	pm_id_t tag2[2];			/* Tag2 */
 
 	/* Per-flow statistics (all in _host_ byte order) */
 	u_int64_t flow_seq;			/* Flow ID */

@@ -1,6 +1,6 @@
 /* Copyright (C) InMon Corporation 2002-2003 ALL RIGHTS RESERVED */
 
-/* $Header: /home/repo/pmacct/src/sflow.h,v 1.2 2007/02/24 23:00:05 paolo Exp $ */
+/* $Header: /home/repo-0.12/pmacct/src/sflow.h,v 1.1.1.1 2007/02/24 23:00:05 paolo Exp $ */
 
 /////////////////////////////////////////////////////////////////////////////////
 /////////////////////// sFlow Sampling Packet Data Types ////////////////////////

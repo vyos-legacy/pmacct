@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -23,6 +23,10 @@
 #define N_MAP_HANDLERS 10 
 #define MAX_LABEL_LEN 32
 #define MAX_PRETAG_MAP_ENTRIES 384 
+
+#define PRETAG_MAP_RCODE_ID  100
+#define PRETAG_MAP_RCODE_ID2 101
+#define BPAS_MAP_RCODE_BGP   102
 
 typedef int (*pretag_handler) (struct packet_ptrs *, void *, void *);
 typedef pm_id_t (*pretag_stack_handler) (pm_id_t, pm_id_t);
@@ -59,12 +63,14 @@ typedef struct {
 /* Pre-Tag table (ptt) element definition */
 typedef struct {
   u_int8_t neg;
-  u_int16_t n;
-  u_int16_t r;
-} ptt_uint16_t;
+  pm_id_t n;
+  pm_id_t r;
+} ptt_t;
 
 struct id_entry {
   pm_id_t id;
+  pm_id_t id2;
+  pm_id_t flags;
   pm_id_t pos;
   pt_hostaddr_t agent_ip;
   pt_hostaddr_t nexthop;
@@ -75,8 +81,15 @@ struct id_entry {
   pt_uint8_t engine_id;
   pt_uint32_t agent_id; /* applies to sFlow's agentSubId */
   pt_uint32_t sampling_rate; /* applies to sFlow's sampling rate */
-  pt_uint16_t src_as;
-  pt_uint16_t dst_as; 
+  pt_uint8_t direction;
+  pt_uint32_t src_as;
+  pt_uint32_t dst_as; 
+  pt_uint32_t peer_src_as;
+  pt_uint32_t peer_dst_as;
+  pt_uint32_t src_local_pref;
+  pt_uint32_t local_pref;
+  char *src_comms[16]; /* XXX: MAX_BGP_COMM_PATTERNS = 16 */
+  char *comms[16]; /* XXX: MAX_BGP_COMM_PATTERNS = 16 */
   struct bpf_program filter;
   pt_uint8_t v8agg;
   pretag_handler func[N_MAP_HANDLERS];
@@ -100,12 +113,12 @@ struct id_table {
 
 struct _map_dictionary_line {
   char key[SRVBUFLEN];
-  int (*func)(char *, struct id_entry *, char *, struct plugin_requests *);
+  int (*func)(char *, struct id_entry *, char *, struct plugin_requests *, int);
 };
 
 struct pretag_filter {
   u_int16_t num;
-  ptt_uint16_t table[MAX_PRETAG_MAP_ENTRIES/4];
+  ptt_t table[MAX_PRETAG_MAP_ENTRIES/4];
 };
 
 /* prototypes */
@@ -114,8 +127,16 @@ struct pretag_filter {
 #else
 #define EXT
 #endif
-EXT void load_id_file(int, char *, struct id_table *, struct plugin_requests *);
+EXT void load_id_file(int, char *, struct id_table *, struct plugin_requests *, int *);
 EXT u_int8_t pt_check_neg(char **);
 EXT char * pt_check_range(char *);
+
+EXT int tag_map_allocated;
+EXT int bpas_map_allocated;
+EXT int blp_map_allocated;
+EXT int bmed_map_allocated;
+EXT int biss_map_allocated;
+EXT int bta_map_allocated;
+EXT void (*find_id_func)(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 
 #undef EXT

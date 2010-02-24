@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -26,24 +26,73 @@
 #include "sflow.h"
 #include "sfacctd.h"
 #include "pretag_handlers.h"
-#include "pretag-data.h"
 #include "net_aggr.h"
+#include "bgp/bgp.h"
 
-int PT_map_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
-  int j;
+  struct host_addr a;
+  char *endptr = NULL;
+  pm_id_t j = 0;
 
-  j = atoi(value);
-  if (!j || j > 65535) {
-    Log(LOG_ERR, "ERROR ( %s ): Agent ID '%d' is invalid (range: 0 > ID > 65535). ", filename, j);
-    return TRUE;
-  } 
+  e->id = 0;
+  e->flags = FALSE;
+
+  /* If we spot a '.' within the string let's see if we are given a vaild
+      IPv4 address; by default we would treat it as an unsigned integer */
+  if (strchr(value, '.')) {
+    if (acct_type != MAP_BGP_TO_XFLOW_AGENT) {
+      Log(LOG_ERR, "ERROR ( %s ): Invalid Agent ID specified. ", filename);
+      return TRUE;
+    } 
+    memset(&a, 0, sizeof(a));
+    str_to_addr(value, &a);
+    if (a.family == AF_INET) j = a.address.ipv4.s_addr;
+    else {
+      Log(LOG_ERR, "ERROR ( %s ): Agent ID does not appear to be a valid IPv4 address. ", filename);
+      return TRUE;
+    }
+  }
+  /* If we spot the word "bgp", let's check this is a BPAS map */
+  else if (!strncmp(value, "bgp", strlen("bgp"))) {
+    if (acct_type != MAP_BGP_PEER_AS_SRC && acct_type != MAP_BGP_SRC_LOCAL_PREF && acct_type != MAP_BGP_SRC_MED) {
+      Log(LOG_ERR, "ERROR ( %s ): Invalid Agent ID specified. ", filename);
+      return TRUE;
+    }
+    e->flags = BPAS_MAP_RCODE_BGP;
+  }
+  else {
+    j = strtoul(value, &endptr, 10);
+    if (!j) {
+      Log(LOG_ERR, "ERROR ( %s ): Invalid Agent ID specified. ", filename);
+      return TRUE;
+    } 
+    else if (acct_type == MAP_BGP_IS_SYMMETRIC && j > 1) {
+      Log(LOG_ERR, "ERROR ( %s ): Invalid Agent ID specified. ", filename);
+      return TRUE;
+    }
+  }
   e->id = j; 
 
   return FALSE;
 }
 
-int PT_map_ip_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_id2_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  char *endptr = NULL;
+  pm_id_t j;
+
+  j = strtoul(value, &endptr, 10);
+  if (!j) {
+    Log(LOG_ERR, "ERROR ( %s ): Invalid Agent ID2 specified. ", filename);
+    return TRUE;
+  }
+  e->id2 = j;
+
+  return FALSE;
+}
+
+int PT_map_ip_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   if (!str_to_addr(value, &e->agent_ip.a)) {
     Log(LOG_ERR, "ERROR ( %s ): Bad IP address '%s'. ", filename, value);
@@ -53,9 +102,10 @@ int PT_map_ip_handler(char *filename, struct id_entry *e, char *value, struct pl
   return FALSE;
 }
 
-int PT_map_input_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_input_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int x = 0, len;
+  char *endptr;
 
   e->input.neg = pt_check_neg(&value);
   len = strlen(value);
@@ -68,17 +118,19 @@ int PT_map_input_handler(char *filename, struct id_entry *e, char *value, struct
     x++;
   }
   
-  e->input.n = atoi(value);
+  e->input.n = strtoul(value, &endptr, 10);
   for (x = 0; e->func[x]; x++);
   if (config.acct_type == ACCT_NF) e->func[x] = pretag_input_handler; 
   else if (config.acct_type == ACCT_SF) e->func[x] = SF_pretag_input_handler; 
+  else if (config.acct_type == ACCT_PM) e->func[x] = PM_pretag_input_handler; 
 
   return FALSE;
 }
 
-int PT_map_output_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_output_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int x = 0, len;
+  char *endptr;
 
   e->output.neg = pt_check_neg(&value);
   len = strlen(value);
@@ -91,15 +143,16 @@ int PT_map_output_handler(char *filename, struct id_entry *e, char *value, struc
     x++;
   }
 
-  e->output.n = atoi(value);
+  e->output.n = strtoul(value, &endptr, 10);
   for (x = 0; e->func[x]; x++);
   if (config.acct_type == ACCT_NF) e->func[x] = pretag_output_handler;
   else if (config.acct_type == ACCT_SF) e->func[x] = SF_pretag_output_handler;
+  else if (config.acct_type == ACCT_PM) e->func[x] = PM_pretag_output_handler;
 
   return FALSE;
 }
 
-int PT_map_nexthop_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_nexthop_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int x = 0;
 
@@ -117,7 +170,7 @@ int PT_map_nexthop_handler(char *filename, struct id_entry *e, char *value, stru
   return FALSE;
 }
 
-int PT_map_bgp_nexthop_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_bgp_nexthop_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int x = 0;
 
@@ -129,13 +182,89 @@ int PT_map_bgp_nexthop_handler(char *filename, struct id_entry *e, char *value, 
   }
 
   for (x = 0; e->func[x]; x++);
-  if (config.acct_type == ACCT_NF) e->func[x] = pretag_bgp_nexthop_handler;
-  else if (config.acct_type == ACCT_SF) e->func[x] = SF_pretag_bgp_nexthop_handler;
+
+  if (config.nfacctd_as == NF_AS_KEEP && config.acct_type == ACCT_NF) {
+    e->func[x] = pretag_bgp_nexthop_handler;
+    return FALSE;
+  }
+  else if (config.nfacctd_as == NF_AS_KEEP && config.acct_type == ACCT_SF) {
+    e->func[x] = SF_pretag_bgp_nexthop_handler;
+    return FALSE;
+  }
+  else if (config.nfacctd_as == NF_AS_BGP) {
+    e->func[x] = pretag_bgp_bgp_nexthop_handler;
+    return FALSE;
+  }
+
+  Log(LOG_ERR, "ERROR ( %s ): 'bgp_nexthop' is not supported when a 'networks_file' is specified or by the 'pmacctd' daemon. ", filename);
+
+  return TRUE;
+}
+
+int BPAS_map_bgp_nexthop_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  int x = 0;
+
+  e->bgp_nexthop.neg = pt_check_neg(&value);
+
+  if (!str_to_addr(value, &e->bgp_nexthop.a)) {
+    Log(LOG_ERR, "ERROR ( %s ): Bad BGP nexthop address '%s'. ", filename, value);
+    return TRUE;
+  }
+
+  for (x = 0; e->func[x]; x++);
+  if (config.nfacctd_bgp) e->func[x] = BPAS_bgp_nexthop_handler;
 
   return FALSE;
 }
 
-int PT_map_engine_type_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int BPAS_map_bgp_peer_dst_as_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  as_t tmp;
+  int x = 0;
+  char *endptr;
+
+  e->peer_dst_as.neg = pt_check_neg(&value);
+
+  tmp = strtoul(value, &endptr, 10);
+  e->peer_dst_as.n = tmp;
+
+  for (x = 0; e->func[x]; x++);
+  if (config.nfacctd_bgp) e->func[x] = BPAS_bgp_peer_dst_as_handler; 
+
+  return FALSE;
+}
+
+int BPAS_map_src_mac_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  struct pcap_device device;
+  bpf_u_int32 localnet, netmask;  /* pcap library stuff */
+  char errbuf[PCAP_ERRBUF_SIZE];
+  char filter_str[28];
+  int x, link_type;
+
+  memset(&device, 0, sizeof(struct pcap_device));
+  if (glob_pcapt) device.link_type = pcap_datalink(glob_pcapt);
+  else device.link_type = 1;
+  device.dev_desc = pcap_open_dead(device.link_type, 128); /* snaplen=eth_header+my_iphdr+my_tlhdr */
+
+  pcap_lookupnet(config.dev, &localnet, &netmask, errbuf);
+
+  memset(filter_str, 0, sizeof(filter_str));
+  snprintf(filter_str, sizeof(filter_str), "ether src %s", value);
+  if (pcap_compile(device.dev_desc, &e->filter, filter_str, 0, netmask) < 0) {
+    Log(LOG_ERR, "ERROR ( %s ): malformed src_mac filter: %s\n", filename, pcap_geterr(device.dev_desc));
+    return TRUE;
+  }
+
+  pcap_close(device.dev_desc);
+  for (x = 0; e->func[x]; x++);
+  e->func[x] = pretag_filter_handler;
+  req->bpf_filter = TRUE;
+  return FALSE;
+}
+
+int PT_map_engine_type_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int x = 0, j, len;
 
@@ -162,7 +291,7 @@ int PT_map_engine_type_handler(char *filename, struct id_entry *e, char *value, 
   return FALSE;
 }
 
-int PT_map_engine_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_engine_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int x = 0, j, len;
 
@@ -189,7 +318,7 @@ int PT_map_engine_id_handler(char *filename, struct id_entry *e, char *value, st
   return FALSE;
 }
 
-int PT_map_filter_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_filter_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   struct pcap_device device;
   bpf_u_int32 localnet, netmask;  /* pcap library stuff */
@@ -198,6 +327,7 @@ int PT_map_filter_handler(char *filename, struct id_entry *e, char *value, struc
 
   memset(&device, 0, sizeof(struct pcap_device));
   if (glob_pcapt) device.link_type = pcap_datalink(glob_pcapt);
+  else if (config.uacctd_group) device.link_type = DLT_RAW;
   else device.link_type = 1;
   device.dev_desc = pcap_open_dead(device.link_type, 128); /* snaplen=eth_header+my_iphdr+my_tlhdr */
 
@@ -214,7 +344,7 @@ int PT_map_filter_handler(char *filename, struct id_entry *e, char *value, struc
   return FALSE;
 }
 
-int PT_map_v8agg_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_v8agg_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int tmp, x = 0, len;
 
@@ -241,7 +371,7 @@ int PT_map_v8agg_handler(char *filename, struct id_entry *e, char *value, struct
   return FALSE;
 }
 
-int PT_map_agent_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_agent_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int x = 0;
 
@@ -253,7 +383,7 @@ int PT_map_agent_id_handler(char *filename, struct id_entry *e, char *value, str
   return FALSE;
 }
 
-int PT_map_sampling_rate_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_sampling_rate_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int x = 0;
 
@@ -266,18 +396,27 @@ int PT_map_sampling_rate_handler(char *filename, struct id_entry *e, char *value
   return FALSE;
 }
 
-int PT_map_src_as_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_direction_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
-  int tmp;
   int x = 0;
+
+  e->direction.neg = pt_check_neg(&value);
+  e->direction.n = atoi(value);
+  for (x = 0; e->func[x]; x++);
+  if (config.acct_type == ACCT_NF) e->func[x] = pretag_direction_handler;
+
+  return FALSE;
+}
+
+int PT_map_src_as_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  as_t tmp;
+  int x = 0;
+  char *endptr;
 
   e->src_as.neg = pt_check_neg(&value);
 
-  tmp = atoi(value);
-  if (tmp < 1 || tmp > 65535) {
-    Log(LOG_ERR, "ERROR ( %s ): 'src_as' need to be in the following range: 0 > value > 65536. ", filename);
-    return TRUE;
-  }
+  tmp = strtoul(value, &endptr, 10);
 
   e->src_as.n = tmp;
   for (x = 0; e->func[x]; x++);
@@ -295,24 +434,25 @@ int PT_map_src_as_handler(char *filename, struct id_entry *e, char *value, struc
     e->func[x] = SF_pretag_src_as_handler;
     return FALSE;
   }
+  else if (config.nfacctd_as == NF_AS_BGP) {
+    e->func[x] = pretag_bgp_src_as_handler;
+    return FALSE;
+  }
 
   Log(LOG_ERR, "ERROR ( %s ): 'src_as' requires either 'networks_file' or 'nf|sfacctd_as_new: false' to be specified. ", filename);
 
   return TRUE;
 }
 
-int PT_map_dst_as_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_dst_as_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
-  int tmp;
+  as_t tmp;
   int x = 0;
+  char *endptr;
 
   e->dst_as.neg = pt_check_neg(&value);
 
-  tmp = atoi(value);
-  if (tmp < 1 || tmp > 65535) {
-    Log(LOG_ERR, "ERROR ( %s ): 'dst_as' need to be in the following range: 0 > value > 65536. ", filename);
-    return TRUE;
-  }
+  tmp = strtoul(value, &endptr, 10);
 
   e->dst_as.n = tmp;
   for (x = 0; e->func[x]; x++);
@@ -330,20 +470,172 @@ int PT_map_dst_as_handler(char *filename, struct id_entry *e, char *value, struc
     e->func[x] = SF_pretag_dst_as_handler;
     return FALSE;
   }
+  else if (config.nfacctd_as == NF_AS_BGP) {
+    e->func[x] = pretag_bgp_dst_as_handler;
+    return FALSE;
+  }
 
   Log(LOG_ERR, "ERROR ( %s ): 'dst_as' requires either 'networks_file' or 'nf|sfacctd_as_new: false' to be specified. ", filename);
 
   return TRUE;
 }
 
-int PT_map_label_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_peer_src_as_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  as_t tmp;
+  int x = 0;
+  char *endptr;
+
+  e->peer_src_as.neg = pt_check_neg(&value);
+
+  tmp = strtoul(value, &endptr, 10);
+
+  e->peer_src_as.n = tmp;
+  for (x = 0; e->func[x]; x++);
+
+  if (config.nfacctd_as == NF_AS_BGP) {
+    e->func[x] = pretag_peer_src_as_handler;
+    return FALSE;
+  }
+
+  Log(LOG_ERR, "ERROR ( %s ): 'peer_src_as' requires 'nfacctd_as_new: bgp' to be specified. ", filename);
+
+  return TRUE;
+}
+
+int PT_map_peer_dst_as_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  as_t tmp;
+  int x = 0;
+  char *endptr;
+
+  e->peer_dst_as.neg = pt_check_neg(&value);
+
+  tmp = strtoul(value, &endptr, 10);
+
+  e->peer_dst_as.n = tmp;
+  for (x = 0; e->func[x]; x++);
+
+  if (config.nfacctd_as == NF_AS_BGP) {
+    e->func[x] = pretag_peer_dst_as_handler;
+    return FALSE;
+  } 
+
+  Log(LOG_ERR, "ERROR ( %s ): 'peer_dst_as' requires 'nfacctd_as_new: bgp' to be specified. ", filename);
+
+  return TRUE;
+}
+
+int PT_map_src_local_pref_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  u_int32_t tmp;
+  int x = 0;
+  char *endptr;
+
+  e->src_local_pref.neg = pt_check_neg(&value);
+
+  tmp = strtoul(value, &endptr, 10);
+
+  e->src_local_pref.n = tmp;
+  for (x = 0; e->func[x]; x++);
+
+  if (config.nfacctd_as == NF_AS_BGP) {
+    e->func[x] = pretag_src_local_pref_handler;
+    return FALSE;
+  }
+
+  Log(LOG_ERR, "ERROR ( %s ): 'src_local_pref' requires 'nfacctd_as_new: bgp' to be specified. ", filename);
+
+  return TRUE;
+}
+
+int PT_map_local_pref_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  u_int32_t tmp;
+  int x = 0;
+  char *endptr;
+
+  e->local_pref.neg = pt_check_neg(&value);
+
+  tmp = strtoul(value, &endptr, 10);
+
+  e->local_pref.n = tmp;
+  for (x = 0; e->func[x]; x++);
+
+  if (config.nfacctd_as == NF_AS_BGP) {
+    e->func[x] = pretag_local_pref_handler;
+    return FALSE;
+  }
+
+  Log(LOG_ERR, "ERROR ( %s ): 'local_pref' requires 'nfacctd_as_new: bgp' to be specified. ", filename);
+
+  return TRUE;
+}
+
+int PT_map_src_comms_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  int x = 0, idx = 0;
+  char *endptr, *token;
+
+  memset(e->src_comms, 0, sizeof(e->src_comms));
+
+  /* Negation not supported here */
+
+  while ( (token = extract_token(&value, ',')) && idx < MAX_BGP_COMM_PATTERNS ) {
+    e->src_comms[idx] = malloc(MAX_BGP_STD_COMMS);
+    strlcpy(e->src_comms[idx], token, MAX_BGP_STD_COMMS);
+    trim_spaces(e->src_comms[idx]);
+    idx++;
+  }
+
+  for (x = 0; e->func[x]; x++);
+
+  if (config.nfacctd_as == NF_AS_BGP && e->src_comms[0]) {
+    e->func[x] = pretag_src_comms_handler;
+    return FALSE;
+  }
+
+  Log(LOG_ERR, "ERROR ( %s ): 'src_comms' requires 'nfacctd_as_new: bgp' to be specified. ", filename);
+
+  return TRUE;
+}
+
+int PT_map_comms_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  int x = 0, idx = 0;
+  char *endptr, *token;
+
+  memset(e->comms, 0, sizeof(e->comms));
+
+  /* Negation not supported here */
+
+  while ( (token = extract_token(&value, ',')) && idx < MAX_BGP_COMM_PATTERNS ) {
+    e->comms[idx] = malloc(MAX_BGP_STD_COMMS);
+    strlcpy(e->comms[idx], token, MAX_BGP_STD_COMMS);
+    trim_spaces(e->comms[idx]);
+    idx++;
+  }
+
+  for (x = 0; e->func[x]; x++);
+
+  if (config.nfacctd_as == NF_AS_BGP && e->comms[0]) {
+    e->func[x] = pretag_comms_handler;
+    return FALSE;
+  }
+
+  Log(LOG_ERR, "ERROR ( %s ): 'comms' requires 'nfacctd_as_new: bgp' to be specified. ", filename);
+
+  return TRUE;
+}
+
+int PT_map_label_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   strlcpy(e->label, value, MAX_LABEL_LEN); 
 
   return FALSE;
 }
 
-int PT_map_jeq_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_jeq_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   e->jeq.label = malloc(MAX_LABEL_LEN);
   if (e->jeq.label) strlcpy(e->jeq.label, value, MAX_LABEL_LEN);
@@ -352,7 +644,7 @@ int PT_map_jeq_handler(char *filename, struct id_entry *e, char *value, struct p
   return FALSE;
 }
 
-int PT_map_return_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_return_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int res = parse_truefalse(value);
   if (res < 0) Log(LOG_ERR, "ERROR ( %s ): Unknown RETURN value: '%s'. Ignoring.\n", filename, value);
@@ -361,7 +653,7 @@ int PT_map_return_handler(char *filename, struct id_entry *e, char *value, struc
   return FALSE;
 }
 
-int PT_map_stack_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
+int PT_map_stack_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   e->stack.func = NULL;
 
@@ -376,50 +668,58 @@ int pretag_input_handler(struct packet_ptrs *pptrs, void *unused, void *e)
   struct id_entry *entry = e;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
-  u_int16_t input = htons(entry->input.n);
+  u_int16_t input16 = htons(entry->input.n);
+  u_int32_t input32 = htonl(entry->input.n);
   u_int8_t neg = entry->input.neg;
 
   switch(hdr->version) {
   case 9:
-    if (!memcmp(&input, pptrs->f_data+tpl->tpl[NF9_INPUT_SNMP].off, tpl->tpl[NF9_INPUT_SNMP].len)) return (FALSE | neg);
+    if (tpl->tpl[NF9_INPUT_SNMP].len == 2) { 
+      if (!memcmp(&input16, pptrs->f_data+tpl->tpl[NF9_INPUT_SNMP].off, tpl->tpl[NF9_INPUT_SNMP].len))
+	return (FALSE | neg);
+    }
+    else if (tpl->tpl[NF9_INPUT_SNMP].len == 4) { 
+      if (!memcmp(&input32, pptrs->f_data+tpl->tpl[NF9_INPUT_SNMP].off, tpl->tpl[NF9_INPUT_SNMP].len))
+	return (FALSE | neg);
+    }
     else return (TRUE ^ neg);
   case 8: 
     switch(hdr->aggregation) {
       case 1:
-	if (input == ((struct struct_export_v8_1 *)pptrs->f_data)->input) return (FALSE | neg);
+	if (input16 == ((struct struct_export_v8_1 *)pptrs->f_data)->input) return (FALSE | neg);
 	else return (TRUE ^ neg);
       case 3:
-	if (input == ((struct struct_export_v8_3 *)pptrs->f_data)->input) return (FALSE | neg);
+	if (input16 == ((struct struct_export_v8_3 *)pptrs->f_data)->input) return (FALSE | neg);
 	else return (TRUE ^ neg);
       case 5:
-        if (input == ((struct struct_export_v8_5 *)pptrs->f_data)->input) return (FALSE | neg);
+        if (input16 == ((struct struct_export_v8_5 *)pptrs->f_data)->input) return (FALSE | neg);
 	else return (TRUE ^ neg);
       case 7:
-	if (input == ((struct struct_export_v8_7 *)pptrs->f_data)->input) return (FALSE | neg);
+	if (input16 == ((struct struct_export_v8_7 *)pptrs->f_data)->input) return (FALSE | neg);
 	else return (TRUE ^ neg);
       case 8:
-        if (input == ((struct struct_export_v8_8 *)pptrs->f_data)->input) return (FALSE | neg);
+        if (input16 == ((struct struct_export_v8_8 *)pptrs->f_data)->input) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 9:
-        if (input == ((struct struct_export_v8_9 *)pptrs->f_data)->input) return (FALSE | neg);
+        if (input16 == ((struct struct_export_v8_9 *)pptrs->f_data)->input) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 10:
-        if (input == ((struct struct_export_v8_10 *)pptrs->f_data)->input) return (FALSE | neg);
+        if (input16 == ((struct struct_export_v8_10 *)pptrs->f_data)->input) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 11: 
-        if (input == ((struct struct_export_v8_11 *)pptrs->f_data)->input) return (FALSE | neg);
+        if (input16 == ((struct struct_export_v8_11 *)pptrs->f_data)->input) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 13:
-        if (input == ((struct struct_export_v8_13 *)pptrs->f_data)->input) return (FALSE | neg);
+        if (input16 == ((struct struct_export_v8_13 *)pptrs->f_data)->input) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 14:
-        if (input == ((struct struct_export_v8_14 *)pptrs->f_data)->input) return (FALSE | neg);
+        if (input16 == ((struct struct_export_v8_14 *)pptrs->f_data)->input) return (FALSE | neg);
         else return (TRUE ^ neg);
       default:
 	return (TRUE ^ neg);
     }
   default:
-    if (input == ((struct struct_export_v5 *)pptrs->f_data)->input) return (FALSE | neg);
+    if (input16 == ((struct struct_export_v5 *)pptrs->f_data)->input) return (FALSE | neg);
     else return (TRUE ^ neg); 
   }
 }
@@ -429,53 +729,61 @@ int pretag_output_handler(struct packet_ptrs *pptrs, void *unused, void *e)
   struct id_entry *entry = e;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
-  u_int16_t output = htons(entry->output.n);
+  u_int16_t output16 = htons(entry->output.n);
+  u_int32_t output32 = htonl(entry->output.n);
   u_int8_t neg = entry->output.neg;
 
   switch(hdr->version) {
   case 9:
-    if (!memcmp(&output, pptrs->f_data+tpl->tpl[NF9_OUTPUT_SNMP].off, tpl->tpl[NF9_OUTPUT_SNMP].len)) return (FALSE | neg);
+    if (tpl->tpl[NF9_OUTPUT_SNMP].len == 2) {
+      if (!memcmp(&output16, pptrs->f_data+tpl->tpl[NF9_OUTPUT_SNMP].off, tpl->tpl[NF9_OUTPUT_SNMP].len))
+	return (FALSE | neg);
+    }
+    else if (tpl->tpl[NF9_OUTPUT_SNMP].len == 4) {
+      if (!memcmp(&output32, pptrs->f_data+tpl->tpl[NF9_OUTPUT_SNMP].off, tpl->tpl[NF9_OUTPUT_SNMP].len))
+	return (FALSE | neg);
+    }
     else return (TRUE ^ neg);
   case 8:
     switch(hdr->aggregation) {
       case 1:
-        if (output == ((struct struct_export_v8_1 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_1 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 4:
-        if (output == ((struct struct_export_v8_4 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_4 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 5:
-        if (output == ((struct struct_export_v8_5 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_5 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 6:
-        if (output == ((struct struct_export_v8_6 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_6 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 7:
-        if (output == ((struct struct_export_v8_7 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_7 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 8:
-        if (output == ((struct struct_export_v8_8 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_8 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 9:
-        if (output == ((struct struct_export_v8_9 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_9 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 10:
-        if (output == ((struct struct_export_v8_10 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_10 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 12:
-        if (output == ((struct struct_export_v8_12 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_12 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 13:
-        if (output == ((struct struct_export_v8_13 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_13 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       case 14:
-        if (output == ((struct struct_export_v8_14 *)pptrs->f_data)->output) return (FALSE | neg);
+        if (output16 == ((struct struct_export_v8_14 *)pptrs->f_data)->output) return (FALSE | neg);
         else return (TRUE ^ neg);
       default:
         return (TRUE ^ neg);
     }
   default:
-    if (output == ((struct struct_export_v5 *)pptrs->f_data)->output) return (FALSE | neg);
+    if (output16 == ((struct struct_export_v5 *)pptrs->f_data)->output) return (FALSE | neg);
     else return (TRUE ^ neg);
   }
 }
@@ -534,6 +842,37 @@ int pretag_bgp_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
     if (entry->bgp_nexthop.a.address.ipv4.s_addr == ((struct struct_export_v5 *)pptrs->f_data)->nexthop.s_addr) return (FALSE | entry->bgp_nexthop.neg);
     else return (TRUE ^ entry->bgp_nexthop.neg);
   }
+}
+
+int pretag_bgp_bgp_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *dst_ret = (struct bgp_node *) pptrs->bgp_dst;
+  struct bgp_info *info;
+  int ret = -1;
+
+  /* bgp_follow_nexthop hook */
+  if (pptrs->bgp_nexthop) dst_ret = (struct bgp_node *) pptrs->bgp_nexthop;
+
+  if (dst_ret) {
+    info = (struct bgp_info *) dst_ret->info;
+    if (info && info->attr) {
+      if (info->attr->mp_nexthop.family == AF_INET) {
+        ret = memcmp(&entry->bgp_nexthop.a.address.ipv4, &info->attr->mp_nexthop.address.ipv4, 4);
+      }
+#if defined ENABLE_IPV6
+      else if (info->attr->mp_nexthop.family == AF_INET6) {
+        ret = memcmp(&entry->bgp_nexthop.a.address.ipv6, &info->attr->mp_nexthop.address.ipv6, 16);
+      }
+#endif
+      else {
+	ret = memcmp(&entry->bgp_nexthop.a.address.ipv4, &info->attr->nexthop, 4);
+      }
+    }
+  }
+
+  if (!ret) return (FALSE | entry->bgp_nexthop.neg);
+  else return (TRUE ^ entry->bgp_nexthop.neg);
 }
 
 int pretag_engine_type_handler(struct packet_ptrs *pptrs, void *unused, void *e)
@@ -609,7 +948,7 @@ int pretag_v8agg_handler(struct packet_ptrs *pptrs, void *unused, void *e)
     if (entry->v8agg.n == ((struct struct_header_v8 *)pptrs->f_header)->aggregation) return (FALSE | entry->v8agg.neg);
     else return (TRUE ^ entry->v8agg.neg);
   default:
-    return (TRUE ^ entry->v8agg.neg); 
+    return TRUE; /* this field does not exist: condition is always true */
   }
 }
 
@@ -665,6 +1004,26 @@ int pretag_src_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
   else return (TRUE ^ entry->src_as.neg);
 }
 
+int pretag_bgp_src_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_info *info;
+  as_t asn = 0;
+
+  if (src_ret) {
+    info = (struct bgp_info *) src_ret->info;
+    if (info && info->attr) {
+      if (info->attr->aspath) {
+        asn = evaluate_last_asn(info->attr->aspath);
+      }
+    }
+  }
+
+  if (entry->src_as.n == asn) return (FALSE | entry->src_as.neg);
+  else return (TRUE ^ entry->src_as.neg);
+}
+
 int pretag_dst_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
@@ -717,6 +1076,152 @@ int pretag_dst_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
   else return (TRUE ^ entry->dst_as.neg);
 }
 
+int pretag_bgp_dst_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *dst_ret = (struct bgp_node *) pptrs->bgp_dst;
+  struct bgp_info *info;
+  as_t asn = 0;
+
+  if (dst_ret) {
+    info = (struct bgp_info *) dst_ret->info;
+    if (info && info->attr) {
+      if (info->attr->aspath) {
+        asn = evaluate_last_asn(info->attr->aspath);
+      }
+    }
+  }
+
+  if (entry->dst_as.n == asn) return (FALSE | entry->dst_as.neg);
+  else return (TRUE ^ entry->dst_as.neg);
+}
+
+int pretag_peer_src_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_info *info;
+  as_t asn = 0;
+
+  if (config.nfacctd_bgp_peer_as_src_type == BGP_SRC_PRIMITIVES_MAP) {
+    asn = pptrs->bpas;
+  }
+  else if (config.nfacctd_bgp_peer_as_src_type == BGP_SRC_PRIMITIVES_BGP) {
+    if (src_ret) {
+      info = (struct bgp_info *) src_ret->info;
+      if (info && info->attr) {
+	if (info->attr->aspath && info->attr->aspath->str) {
+	  asn = evaluate_first_asn(info->attr->aspath->str);
+	}
+      }
+    }
+  }
+
+  if (entry->peer_src_as.n == asn) return (FALSE | entry->peer_src_as.neg);
+  else return (TRUE ^ entry->peer_src_as.neg);
+}
+
+int pretag_peer_dst_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *dst_ret = (struct bgp_node *) pptrs->bgp_dst;
+  struct bgp_info *info;
+  as_t asn = 0;
+
+  if (dst_ret) {
+    info = (struct bgp_info *) dst_ret->info;
+    if (info && info->attr) {
+      if (info->attr->aspath && info->attr->aspath->str) {
+        asn = evaluate_first_asn(info->attr->aspath->str);
+      }
+    }
+  }
+
+  if (entry->peer_dst_as.n == asn) return (FALSE | entry->peer_dst_as.neg);
+  else return (TRUE ^ entry->peer_dst_as.neg);
+}
+
+int pretag_src_local_pref_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_info *info;
+  u_int32_t local_pref = 0;
+
+  if (config.nfacctd_bgp_src_local_pref_type == BGP_SRC_PRIMITIVES_MAP) {
+    local_pref = pptrs->blp;
+  }
+  else if (config.nfacctd_bgp_src_local_pref_type == BGP_SRC_PRIMITIVES_BGP) {
+    if (src_ret) {
+      info = (struct bgp_info *) src_ret->info;
+      if (info && info->attr) {
+	local_pref = info->attr->local_pref;
+      }
+    }
+  }
+
+  if (entry->src_local_pref.n == local_pref) return (FALSE | entry->src_local_pref.neg);
+  else return (TRUE ^ entry->src_local_pref.neg);
+}
+
+int pretag_local_pref_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *dst_ret = (struct bgp_node *) pptrs->bgp_dst;
+  struct bgp_info *info;
+  u_int32_t local_pref = 0;
+
+  if (dst_ret) {
+    info = (struct bgp_info *) dst_ret->info;
+    if (info && info->attr) {
+      local_pref = info->attr->local_pref;
+    }
+  }
+
+  if (entry->local_pref.n == local_pref) return (FALSE | entry->local_pref.neg);
+  else return (TRUE ^ entry->local_pref.neg);
+}
+
+int pretag_src_comms_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_info *info;
+  char tmp_stdcomms[MAX_BGP_STD_COMMS];
+
+  memset(tmp_stdcomms, 0, sizeof(tmp_stdcomms));
+
+  if (src_ret) {
+    info = (struct bgp_info *) src_ret->info;
+    if (info && info->attr && info->attr->community && info->attr->community->str) {
+      evaluate_comm_patterns(tmp_stdcomms, info->attr->community->str, entry->src_comms, MAX_BGP_STD_COMMS);
+    }
+  }
+
+  if (strlen(tmp_stdcomms)) return FALSE;
+  else return TRUE;
+}
+
+int pretag_comms_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *dst_ret = (struct bgp_node *) pptrs->bgp_dst;
+  struct bgp_info *info;
+  char tmp_stdcomms[MAX_BGP_STD_COMMS];
+
+  memset(tmp_stdcomms, 0, sizeof(tmp_stdcomms));
+
+  if (dst_ret) {
+    info = (struct bgp_info *) dst_ret->info;
+    if (info && info->attr && info->attr->community && info->attr->community->str) {
+      evaluate_comm_patterns(tmp_stdcomms, info->attr->community->str, entry->comms, MAX_BGP_STD_COMMS);
+    }
+  }
+
+  if (strlen(tmp_stdcomms)) return FALSE;
+  else return TRUE;
+}
+
 int pretag_sampling_rate_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
@@ -733,17 +1238,70 @@ int pretag_sampling_rate_handler(struct packet_ptrs *pptrs, void *unused, void *
     if (entry->sampling_rate.n == srate) return (FALSE | entry->sampling_rate.neg);
     else return (TRUE ^ entry->sampling_rate.neg);
   default:
-    break;
+    return TRUE; /* this field might not apply: condition is always true */
+  }
+}
+
+int pretag_direction_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_int16_t direction = 0;
+
+  switch (hdr->version) {
+  case 9:
+    if (tpl->tpl[NF9_DIRECTION].len == 1) {
+      memcpy(&direction, pptrs->f_data+tpl->tpl[NF9_DIRECTION].off, 1);
+    }
+    if (entry->direction.n == direction) return (FALSE | entry->direction.neg);
+    else return (TRUE ^ entry->direction.neg);
+  default:
+    return TRUE; /* this field does not exist: condition is always true */
   }
 }
 
 int pretag_id_handler(struct packet_ptrs *pptrs, void *id, void *e)
 {
   struct id_entry *entry = e;
+  pm_id_t *tid = id;
 
-  int *tid = id;
   *tid = entry->id;
-  return TRUE; /* cap */
+
+  if (!entry->id && entry->flags == BPAS_MAP_RCODE_BGP) {
+    struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+    struct bgp_info *info;
+
+    if (src_ret) {
+      info = (struct bgp_info *) src_ret->info;
+      if (info && info->attr) {
+	if (info->attr->aspath && info->attr->aspath->str) {
+	  *tid = evaluate_first_asn(info->attr->aspath->str);
+
+	  if (!(*tid) && config.nfacctd_bgp_stdcomm_pattern_to_asn) {
+	    char tmp_stdcomms[MAX_BGP_STD_COMMS];
+
+	    if (info->attr->community && info->attr->community->str) {
+	      evaluate_comm_patterns(tmp_stdcomms, info->attr->community->str, std_comm_patterns_to_asn, MAX_BGP_STD_COMMS);
+	      copy_stdcomm_to_asn(tmp_stdcomms, (as_t *)tid, FALSE);
+	    }
+          }
+        }
+      }
+    }
+  }
+
+  return PRETAG_MAP_RCODE_ID; /* cap */
+}
+
+int pretag_id2_handler(struct packet_ptrs *pptrs, void *id, void *e)
+{
+  struct id_entry *entry = e;
+  pm_id_t *tid = id;
+
+  *tid = entry->id2;
+
+  return PRETAG_MAP_RCODE_ID2; /* cap */
 }
 
 int SF_pretag_input_handler(struct packet_ptrs *pptrs, void *unused, void *e)
@@ -835,7 +1393,7 @@ int SF_pretag_dst_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 int PM_pretag_src_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
-  u_int16_t res = search_pretag_src_as(&nt, &nc, pptrs);
+  as_t res = search_pretag_src_as(&nt, &nc, pptrs);
 
   if (entry->src_as.n == res) return (FALSE | entry->src_as.neg);
   else return (TRUE ^ entry->src_as.neg);
@@ -844,13 +1402,89 @@ int PM_pretag_src_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 int PM_pretag_dst_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
-  u_int16_t res = search_pretag_dst_as(&nt, &nc, pptrs);
+  as_t res = search_pretag_dst_as(&nt, &nc, pptrs);
 
   if (entry->dst_as.n == res) return (FALSE | entry->dst_as.neg);
   else return (TRUE ^ entry->dst_as.neg);
 }
 
+int PM_pretag_input_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+
+  if (entry->input.n == pptrs->ifindex_in) return (FALSE | entry->input.neg);
+  else return (TRUE ^ entry->input.neg);
+}
+
+int PM_pretag_output_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+
+  if (entry->output.n == pptrs->ifindex_out) return (FALSE | entry->output.neg);
+  else return (TRUE ^ entry->output.neg);
+}
+
 pm_id_t PT_stack_sum(pm_id_t tag, pm_id_t pre)
 {
   return tag + pre;
+}
+
+int BPAS_bgp_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_info *info;
+
+  if (src_ret) {
+    info = (struct bgp_info *) src_ret->info;
+    if (info && info->attr) {
+      if (entry->bgp_nexthop.a.family == AF_INET) {
+	if (info->attr->mp_nexthop.family == AF_INET) {
+          if (!memcmp(&entry->bgp_nexthop.a.address.ipv4, &info->attr->mp_nexthop.address.ipv4, 4))
+            return (FALSE | entry->bgp_nexthop.neg);
+	}
+	else {
+          if (!memcmp(&entry->bgp_nexthop.a.address.ipv4, &info->attr->nexthop, 4))
+            return (FALSE | entry->bgp_nexthop.neg);
+	}
+      }
+#if defined ENABLE_IPV6
+      else if (entry->nexthop.a.family == AF_INET6) {
+	if (!memcmp(&entry->bgp_nexthop.a.address.ipv6, &info->attr->mp_nexthop.address.ipv6, 16))
+          return (FALSE | entry->bgp_nexthop.neg);
+      }
+#endif
+    }
+  }
+
+  return (TRUE ^ entry->bgp_nexthop.neg);
+}
+
+int BPAS_bgp_peer_dst_as_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_info *info;
+  as_t asn = 0;
+
+  if (src_ret) {
+    info = (struct bgp_info *) src_ret->info;
+    if (info && info->attr) {
+      if (info->attr->aspath && info->attr->aspath->str) {
+        asn = evaluate_first_asn(info->attr->aspath->str);
+
+        if (!asn && config.nfacctd_bgp_stdcomm_pattern_to_asn) {
+          char tmp_stdcomms[MAX_BGP_STD_COMMS];
+
+          if (info->attr->community && info->attr->community->str) {
+            evaluate_comm_patterns(tmp_stdcomms, info->attr->community->str, std_comm_patterns_to_asn, MAX_BGP_STD_COMMS);
+            copy_stdcomm_to_asn(tmp_stdcomms, &asn, FALSE);
+          }
+        }
+      }
+    }
+  }
+
+  if (entry->peer_dst_as.n == asn) return (FALSE | entry->peer_dst_as.neg);
+  else return (TRUE ^ entry->peer_dst_as.neg);
 }

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -48,10 +48,12 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   int pollagain = 0;
   u_int32_t seq = 0;
   int rg_err_count = 0;
+  struct pkt_bgp_primitives *pbgp;
 
   fd_set read_descs, bkp_read_descs; /* select() stuff */
   int select_fd, lock = FALSE;
   int cLen, num, sd, sd2;
+  char *dataptr;
 
   /* XXX: glue */
   memcpy(&config, cfgptr, sizeof(struct configuration));
@@ -77,6 +79,14 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   else if (config.what_to_count & COUNT_SUM_MAC) insert_func = sum_mac_insert;
 #endif
   else insert_func = insert_accounting_structure;
+
+  /* Dirty but allows to save some IFs, centralizes
+     checks and makes later comparison statements lean */
+  if (!(config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
+                                COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
+				COUNT_SRC_AS_PATH|COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_MED|
+				COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC))) 
+    PbgpSz = 0;
 
   memset(&nt, 0, sizeof(nt));
   memset(&nc, 0, sizeof(nc));
@@ -265,6 +275,9 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
     /* clearing stats if requested */
     if (go_to_clear) {
+      /* When using extended BGP features we need to
+	 free() up memory allocations before erasing */ 
+      if (PbgpSz) free_bgp_allocs(); 
       clear_memory_pool_table();
       current_pool = request_memory_pool(config.buckets*sizeof(struct acc));
       if (current_pool == NULL) {
@@ -323,10 +336,18 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	    if (!pt.table[data->primitives.dst_port]) data->primitives.dst_port = 0;
 	  }
 
-          (*insert_func)(data);
+	  /* XXX: can be optimized? */
+	  if (PbgpSz) pbgp = (struct pkt_bgp_primitives *) ((u_char *)data+PdataSz);
+	  else pbgp = NULL;
+
+          (*insert_func)(data, pbgp);
 
 	  ((struct ch_buf_hdr *)pipebuf)->num--;
-	  if (((struct ch_buf_hdr *)pipebuf)->num) data++;
+	  if (((struct ch_buf_hdr *)pipebuf)->num) {
+            dataptr = (unsigned char *) data;
+            dataptr += PdataSz + PbgpSz;
+            data = (struct pkt_data *) dataptr;
+	  }
         }
       }
     } 
@@ -344,7 +365,7 @@ void exit_now(int signum)
   exit_plugin(0);
 }
 
-void sum_host_insert(struct pkt_data *data)
+void sum_host_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp)
 {
   struct in_addr ip;
 #if defined ENABLE_IPV6
@@ -355,9 +376,9 @@ void sum_host_insert(struct pkt_data *data)
     ip.s_addr = data->primitives.dst_ip.address.ipv4.s_addr;
     data->primitives.dst_ip.address.ipv4.s_addr = 0;
     data->primitives.dst_ip.family = 0;
-    insert_accounting_structure(data);
+    insert_accounting_structure(data, pbgp);
     data->primitives.src_ip.address.ipv4.s_addr = ip.s_addr;
-    insert_accounting_structure(data);
+    insert_accounting_structure(data, pbgp);
     return;
   }
 #if defined ENABLE_IPV6
@@ -365,45 +386,77 @@ void sum_host_insert(struct pkt_data *data)
     memcpy(&ip6, &data->primitives.dst_ip.address.ipv6, sizeof(struct in6_addr));
     memset(&data->primitives.dst_ip.address.ipv6, 0, sizeof(struct in6_addr));
     data->primitives.dst_ip.family = 0;
-    insert_accounting_structure(data);
+    insert_accounting_structure(data, pbgp);
     memcpy(&data->primitives.src_ip.address.ipv6, &ip6, sizeof(struct in6_addr));
-    insert_accounting_structure(data);
+    insert_accounting_structure(data, pbgp);
     return;
   }
 #endif
 }
 
-void sum_port_insert(struct pkt_data *data)
+void sum_port_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp)
 {
   u_int16_t port;
 
   port = data->primitives.dst_port;
   data->primitives.dst_port = 0;
-  insert_accounting_structure(data);
+  insert_accounting_structure(data, pbgp);
   data->primitives.src_port = port;
-  insert_accounting_structure(data);
+  insert_accounting_structure(data, pbgp);
 }
 
-void sum_as_insert(struct pkt_data *data)
+void sum_as_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp)
 {
-  u_int16_t asn;
+  as_t asn;
 
   asn = data->primitives.dst_as;
   data->primitives.dst_as = 0;
-  insert_accounting_structure(data);
+  insert_accounting_structure(data, pbgp);
   data->primitives.src_as = asn;
-  insert_accounting_structure(data);
+  insert_accounting_structure(data, pbgp);
 }
 
 #if defined (HAVE_L2)
-void sum_mac_insert(struct pkt_data *data)
+void sum_mac_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp)
 {
   u_char macaddr[ETH_ADDR_LEN];
 
   memcpy(macaddr, &data->primitives.eth_dhost, ETH_ADDR_LEN);
   memset(data->primitives.eth_dhost, 0, ETH_ADDR_LEN);
-  insert_accounting_structure(data);
+  insert_accounting_structure(data, pbgp);
   memcpy(&data->primitives.eth_shost, macaddr, ETH_ADDR_LEN);
-  insert_accounting_structure(data);
+  insert_accounting_structure(data, pbgp);
 }
 #endif
+
+void free_bgp_allocs()
+{
+  struct acc *acc_elem = NULL;
+  unsigned char *elem;
+  int following_chain = FALSE;
+  unsigned int idx;
+
+  elem = (unsigned char *) a;
+
+  for (idx = 0; idx < config.buckets; idx++) {
+    if (!following_chain) acc_elem = (struct acc *) elem;
+    if (acc_elem->cbgp) {
+      if (acc_elem->cbgp->std_comms) free(acc_elem->cbgp->std_comms);
+      if (acc_elem->cbgp->ext_comms) free(acc_elem->cbgp->ext_comms);
+      if (acc_elem->cbgp->as_path) free(acc_elem->cbgp->as_path);
+      if (acc_elem->cbgp->src_std_comms) free(acc_elem->cbgp->src_std_comms);
+      if (acc_elem->cbgp->src_ext_comms) free(acc_elem->cbgp->src_ext_comms);
+      if (acc_elem->cbgp->src_as_path) free(acc_elem->cbgp->src_as_path);
+      free(acc_elem->cbgp);
+    }
+    if (acc_elem->next) {
+      acc_elem = acc_elem->next;
+      following_chain = TRUE;
+      idx--;
+    }
+    else {
+      elem += sizeof(struct acc);
+      following_chain = FALSE;
+    }
+  }
+}

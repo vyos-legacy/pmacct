@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -62,7 +62,7 @@ struct aggregate_filter {
 };
 
 struct channels_list_entry {
-  u_int32_t aggregation;
+  u_int64_t aggregation;
   u_int32_t buf;	/* buffer base */
   u_int32_t bufptr;	/* buffer current */
   u_int32_t bufend;	/* buffer end; max 4Gb */
@@ -76,17 +76,15 @@ struct channels_list_entry {
   int same_aggregate;
   pkt_handler phandler[N_PRIMITIVES];
   int pipe;
-  u_int16_t id;						/* post-tagging id */
+  pm_id_t id;						/* post-tagging id */
   struct pretag_filter tag_filter; 			/* filter aggregates basing on their tag */
+  struct pretag_filter tag2_filter; 			/* filter aggregates basing on their tag2 */
   struct aggregate_filter agg_filter; 			/* filter aggregates basing on L2-L4 primitives */
   struct sampling s;
   struct plugins_list_entry *plugin;			/* backpointer to the plugin the actual channel belongs to */
 };
 
 #if (defined __PLUGIN_HOOKS_C)
-#if (defined ENABLE_THREADS)
-pthread_mutex_t *channels_list_mutex;
-#endif
 extern struct channels_list_entry channels_list[MAX_N_PLUGINS];
 #endif
 
@@ -103,7 +101,7 @@ EXT struct channels_list_entry *insert_pipe_channel(struct configuration *, int)
 EXT void delete_pipe_channel(int);
 EXT void sort_pipe_channels();
 EXT void init_pipe_channels();
-EXT int evaluate_tags(struct pretag_filter *, u_int16_t);
+EXT int evaluate_tags(struct pretag_filter *, pm_id_t);
 EXT int evaluate_filters(struct aggregate_filter *, char *, struct pcap_pkthdr *);
 EXT void recollect_pipe_memory(struct channels_list_entry *);
 EXT void init_random_seed();
@@ -112,6 +110,7 @@ EXT int check_shadow_status(struct packet_ptrs *, struct channels_list_entry *);
 EXT int pkt_data_clean(void *);
 EXT int pkt_payload_clean(void *);
 EXT int pkt_extras_clean(void *);
+EXT int pkt_bgp_clean(void *);
 EXT void evaluate_sampling(struct sampling *, pm_counter_t *, pm_counter_t *, pm_counter_t *);
 EXT pm_counter_t take_simple_random_skip(pm_counter_t);
 EXT pm_counter_t take_simple_systematic_skip(pm_counter_t);

@@ -7,7 +7,26 @@
 #define NF_AS_KEEP 0 /* Keep AS numbers in NetFlow packets */
 #endif
 #if (!defined NF_AS_NEW)
-#define NF_AS_NEW 1 /* ignore AS numbers in NetFlow packets and generate new ones */
+#define NF_AS_NEW 1 /* ignore ASN from sFlow and generate from network files */ 
+#endif
+#if (!defined NF_AS_BGP)
+#define NF_AS_BGP 2 /* ignore ASN from sFlow and generate from BGP peerings */
+#endif
+
+#if (!defined NF_NET_COMPAT)
+#define NF_NET_COMPAT	0x00000000 /* Backward compatibility selection */
+#endif
+#if (!defined NF_NET_KEEP)
+#define NF_NET_KEEP	0x00000001 /* Determine IP network prefixes from NetFlow data */ 
+#endif
+#if (!defined NF_NET_NEW)
+#define NF_NET_NEW	0x00000002 /* Determine IP network prefixes from network files */
+#endif
+#if (!defined NF_NET_BGP)
+#define NF_NET_BGP	0x00000004 /* Determine IP network prefixes from BGP peerings */
+#endif
+#if (!defined NF_NET_STATIC)
+#define NF_NET_STATIC	0x00000008 /* Determine IP network prefixes from static mask */
 #endif
 
 #if (!defined NF9_FTYPE_IPV4)
@@ -188,6 +207,7 @@ typedef struct _SFSample {
   /* classification */
   pm_class_t class;
   pm_id_t tag;
+  pm_id_t tag2;
 
   SFLAddress ipsrc;
   SFLAddress ipdst;
@@ -243,15 +263,13 @@ struct SF_icmphdr
 #else
 #define EXT
 #endif
-EXT void load_allow_file(char *, struct hosts_table *);
-EXT int check_allow(struct hosts_table *, struct sockaddr *);
 EXT u_int16_t SF_evaluate_flow_type(struct packet_ptrs *);
 EXT void reset_mac(struct packet_ptrs *);
 EXT void reset_mac_vlan(struct packet_ptrs *);
 EXT void reset_ip4(struct packet_ptrs *);
 EXT void reset_ip6(struct packet_ptrs *);
 EXT void notify_malf_packet(short int, char *, struct sockaddr *);
-EXT int SF_find_id(struct packet_ptrs *);
+EXT void SF_find_id(struct id_table *t, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 
 EXT u_int32_t getData32(SFSample *);
 EXT u_int32_t getData32_nobswap(SFSample *);

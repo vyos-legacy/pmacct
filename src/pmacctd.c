@@ -27,7 +27,6 @@
 #include "pmacct-data.h"
 #include "pmacct-dlt.h"
 #include "pretag_handlers.h"
-#include "pretag-data.h"
 #include "plugin_hooks.h"
 #include "pkt_handlers.h"
 #include "ip_frag.h"
@@ -54,7 +53,7 @@ void usage_daemon(char *prog_name)
   printf("\nGeneral options:\n");
   printf("  -h  \tShow this page\n");
   printf("  -f  \tLoad configuration from the specified file\n");
-  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t flows | class | tcpflags | none ] \n\tAggregation string (DEFAULT: src_host)\n");
+  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | none ] \n\tAggregation string (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
   printf("  -N  \tDisable promiscuous mode\n");
   printf("  -n  \tPath to a file containing Network definitions\n");
@@ -67,6 +66,8 @@ void usage_daemon(char *prog_name)
   printf("  -F  \tWrite Core Process PID into the specified file\n");
   printf("  -w  \tWait for the listening interface to become available\n");
   printf("  -W  \tReading from a savefile, don't exit but sleep when finished\n");
+  printf("  -R  \tRenormalize sampled data\n");
+  printf("  -L  \tSet snapshot length\n");
   printf("\nMemory Plugin (-P memory) options:\n");
   printf("  -p  \tSocket for client-server communication (DEFAULT: /tmp/collect.pipe)\n");
   printf("  -b  \tNumber of buckets\n");
@@ -76,13 +77,7 @@ void usage_daemon(char *prog_name)
   printf("  -r  \tRefresh time (in seconds)\n");
   printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 | 7 ] \n\tTable version\n");
   printf("\n");
-  printf("Examples:\n");
-  printf("  Daemonize the process; listen on eth0; write stats in a MySQL database\n"); 
-  printf("  pmacctd -c src_host,dst_host -i eth0 -D -P mysql\n\n");
-  printf("  Print flows over the screen; listen on ee1; refresh data every 30 seconds\n");
-  printf("  pmacctd -c src_host,dst_host,proto -P print -i ee1 -r 30\n");
-  printf("\n");
-  printf("  See EXAMPLES for further hints\n");
+  printf("  See EXAMPLES or visit http://wiki.pmacct.net/ for examples.\n");
   printf("\n");
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
@@ -101,6 +96,11 @@ int main(int argc,char **argv, char **envp)
   char config_file[SRVBUFLEN];
   int psize = DEFAULT_SNAPLEN;
 
+  struct id_table bpas_table;
+  struct id_table blp_table;
+  struct id_table bmed_table;
+  struct id_table biss_table;
+  struct id_table bta_table;
   struct id_table idt;
   struct pcap_callback_data cb_data;
 
@@ -109,12 +109,26 @@ int main(int argc,char **argv, char **envp)
   extern int optind, opterr, optopt;
   int errflag, cp; 
 
+#if defined ENABLE_IPV6
+  struct sockaddr_storage client;
+#else
+  struct sockaddr client;
+#endif
+
+
   umask(077);
   compute_once();
 
   /* a bunch of default definitions */ 
   have_num_memory_pools = FALSE;
   reload_map = FALSE;
+  tag_map_allocated = FALSE;
+  bpas_map_allocated = FALSE;
+  blp_map_allocated = FALSE;
+  bmed_map_allocated = FALSE;
+  biss_map_allocated = FALSE;
+  find_id_func = PM_find_id;
+
   errflag = 0;
 
   memset(cfg_cmdline, 0, sizeof(cfg_cmdline));
@@ -125,6 +139,13 @@ int main(int argc,char **argv, char **envp)
   memset(&req, 0, sizeof(req));
   memset(dummy_tlhdr, 0, sizeof(dummy_tlhdr));
   memset(sll_mac, 0, sizeof(sll_mac));
+  memset(&bpas_table, 0, sizeof(bpas_table));
+  memset(&blp_table, 0, sizeof(blp_table));
+  memset(&bmed_table, 0, sizeof(bmed_table));
+  memset(&biss_table, 0, sizeof(biss_table));
+  memset(&bta_table, 0, sizeof(bta_table));
+  memset(&client, 0, sizeof(client));
+  memset(&cb_data, 0, sizeof(cb_data));
   config.acct_type = ACCT_PM;
 
   rows = 0;
@@ -238,6 +259,10 @@ int main(int argc,char **argv, char **envp)
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
+    case 'R':
+      strlcpy(cfg_cmdline[rows], "sfacctd_renormalize: true", SRVBUFLEN);
+      rows++;
+      break;
     case 'h':
       usage_daemon(argv[0]);
       exit(0);
@@ -268,6 +293,8 @@ int main(int argc,char **argv, char **envp)
       memcpy(&config, &list->cfg, sizeof(struct configuration)); 
     list = list->next;
   }
+
+  if (config.files_umask) umask(config.files_umask);
 
   /* Let's check whether we need superuser privileges */
   if (config.snaplen) psize = config.snaplen;
@@ -317,11 +344,20 @@ int main(int argc,char **argv, char **envp)
   list = plugins_list;
   while (list) {
     if (list->type.id != PLUGIN_ID_CORE) {
+      /* applies to all plugins */
+      if (config.classifiers_path && (list->cfg.sampling_rate || config.ext_sampling_rate)) {
+        Log(LOG_ERR, "ERROR: Packet sampling and classification are mutual exclusive.\n");
+        exit(1);
+      }
+      if (list->cfg.sampling_rate && config.ext_sampling_rate) {
+        Log(LOG_ERR, "ERROR: Internal packet sampling and external packet sampling are mutual exclusive.\n");
+        exit(1);
+      }
       if (list->type.id == PLUGIN_ID_NFPROBE) {
-	if (config.classifiers_path && list->cfg.sampling_rate) {
-	  Log(LOG_ERR, "ERROR: Packet sampling and classification are actually mutual exclusive.\n");
-	  exit(1);
-	}
+	/* If we already renormalizing an external sampling rate,
+	   we cancel the sampling information from the probe plugin */
+	if (config.sfacctd_renormalize && list->cfg.ext_sampling_rate) list->cfg.ext_sampling_rate = 0; 
+
 	config.handle_fragments = TRUE;
 	list->cfg.nfprobe_what_to_count = list->cfg.what_to_count;
 	list->cfg.what_to_count = 0;
@@ -338,7 +374,7 @@ int main(int argc,char **argv, char **envp)
 	list->cfg.what_to_count |= COUNT_DST_PORT;
 	list->cfg.what_to_count |= COUNT_IP_TOS;
 	list->cfg.what_to_count |= COUNT_IP_PROTO;
-	if (list->cfg.networks_file) {
+	if (list->cfg.networks_file || (list->cfg.nfacctd_bgp && list->cfg.nfacctd_as == NF_AS_BGP)) {
 	  list->cfg.what_to_count |= COUNT_SRC_AS;
 	  list->cfg.what_to_count |= COUNT_DST_AS;
 	}
@@ -346,15 +382,27 @@ int main(int argc,char **argv, char **envp)
 	  list->cfg.what_to_count |= COUNT_CLASS; 
 	  config.handle_flows = TRUE;
 	}
-	if (list->cfg.nfprobe_version == 9 && list->cfg.pre_tag_map)
+	if (list->cfg.nfprobe_version == 9 && list->cfg.pre_tag_map) {
 	  list->cfg.what_to_count |= COUNT_ID;
+	  list->cfg.what_to_count |= COUNT_ID2;
+	}
+	if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
+                                       COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
+				       COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
+				       COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC)) {
+	  Log(LOG_ERR, "ERROR: 'src_as' and 'dst_as' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n");
+	  exit(1);
+	}
 	list->cfg.what_to_count |= COUNT_COUNTERS;
 
 	list->cfg.data_type = PIPE_TYPE_METADATA;
 	list->cfg.data_type |= PIPE_TYPE_EXTRAS;
       }
       else if (list->type.id == PLUGIN_ID_SFPROBE) {
-        config.handle_fragments = FALSE;
+        /* If we already renormalizing an external sampling rate,
+           we cancel the sampling information from the probe plugin */
+        if (config.sfacctd_renormalize && list->cfg.ext_sampling_rate) list->cfg.ext_sampling_rate = 0;
+
 	if (psize < 128) psize = config.snaplen = 128; /* SFL_DEFAULT_HEADER_SIZE */
 	list->cfg.what_to_count = COUNT_PAYLOAD;
 	if (list->cfg.classifiers_path) {
@@ -362,15 +410,25 @@ int main(int argc,char **argv, char **envp)
 	  config.handle_fragments = TRUE;
 	  config.handle_flows = TRUE;
 	}
-	if (list->cfg.pre_tag_map) list->cfg.what_to_count |= COUNT_ID;
+        if (list->cfg.nfacctd_bgp && list->cfg.nfacctd_as == NF_AS_BGP) {
+          list->cfg.what_to_count |= COUNT_SRC_AS;
+          list->cfg.what_to_count |= COUNT_DST_AS;
+        }
+	if (list->cfg.pre_tag_map) {
+	  list->cfg.what_to_count |= COUNT_ID;
+	  list->cfg.what_to_count |= COUNT_ID2;
+	}
+        if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
+                                       COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
+                                       COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
+                                       COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC)) {
+          Log(LOG_ERR, "ERROR: 'src_as' and 'dst_as' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n");
+          exit(1);
+        }
 
 	list->cfg.data_type = PIPE_TYPE_PAYLOAD;
       }
       else {
-        if (config.classifiers_path && list->cfg.sampling_rate) {
-	  Log(LOG_ERR, "ERROR: Packet sampling and classification are actually mutual exclusive.\n");
-	  exit(1);
-        }
 	evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
 	if (list->cfg.what_to_count & (COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_SUM_PORT|COUNT_TCPFLAGS))
 	  config.handle_fragments = TRUE;
@@ -386,28 +444,42 @@ int main(int argc,char **argv, char **envp)
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	  list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
-	if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file) { 
-	  Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
+	if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file && list->cfg.nfacctd_as != NF_AS_BGP) { 
+	  Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation selected but NO 'networks_file' or 'pmacctd_as' are specified. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
 	}
-	if ((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) && !list->cfg.networks_file && !list->cfg.networks_mask) {
-	  Log(LOG_ERR, "ERROR ( %s/%s ): NET aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
-	  exit(1);
-	}
+        if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) {
+          if (!list->cfg.nfacctd_net) {
+            if (list->cfg.networks_file) list->cfg.nfacctd_net |= NF_NET_NEW;
+            if (list->cfg.networks_mask) list->cfg.nfacctd_net |= NF_NET_STATIC;
+            if (!list->cfg.nfacctd_net) {
+              Log(LOG_ERR, "ERROR ( %s/%s ): network aggregation selected but none of 'pmacctd_net', 'networks_file', 'networks_mask' is specified. Exiting ...\n\n", list->name, list->type.string);
+              exit(1);
+            }
+          }
+          else {
+            if ((list->cfg.nfacctd_net == NF_NET_NEW && !list->cfg.networks_file) ||
+                (list->cfg.nfacctd_net == NF_NET_STATIC && !list->cfg.networks_mask) ||
+                (list->cfg.nfacctd_net == NF_NET_BGP && !list->cfg.nfacctd_bgp) ||
+                (list->cfg.nfacctd_net == NF_NET_KEEP)) {
+              Log(LOG_ERR, "ERROR ( %s/%s ): network aggregation selected but none of 'bgp_daemon', 'networks_file', 'networks_mask' is specified. Exiting ...\n\n", list->name, list->type.string);
+              exit(1);
+            }
+          }
+        }
 	if (list->cfg.what_to_count & COUNT_CLASS && !list->cfg.classifiers_path) {
 	  Log(LOG_ERR, "ERROR ( %s/%s ): 'class' aggregation selected but NO 'classifiers' key specified. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
 	}
+
+	bgp_config_checks(&list->cfg);
+
 	list->cfg.what_to_count |= COUNT_COUNTERS;
-	list->cfg.data_type = PIPE_TYPE_METADATA;
+	list->cfg.data_type |= PIPE_TYPE_METADATA;
       }
     }
     list = list->next;
   }
-
-#if defined ENABLE_THREADS
-  if (!config.flow_handling_threads) config.flow_handling_threads = DEFAULT_TH_NUM; 
-#endif
 
   /* plugins glue: creation (since 094) */
   if (config.classifiers_path) {
@@ -522,13 +594,88 @@ int main(int argc,char **argv, char **envp)
 
   /* loading pre-tagging map, if any */
   if (config.pre_tag_map) {
-    load_id_file(config.acct_type, config.pre_tag_map, &idt, &req);
+    load_id_file(config.acct_type, config.pre_tag_map, &idt, &req, &tag_map_allocated);
     cb_data.idt = (u_char *) &idt;
   }
   else {
     memset(&idt, 0, sizeof(idt));
     cb_data.idt = NULL; 
   }
+
+#if defined ENABLE_THREADS
+  /* starting the BGP thread */
+  if (config.nfacctd_bgp) {
+    req.bpf_filter = TRUE;
+    load_comm_patterns(&config.nfacctd_bgp_stdcomm_pattern, &config.nfacctd_bgp_extcomm_pattern, &config.nfacctd_bgp_stdcomm_pattern_to_asn);
+
+    if (config.nfacctd_bgp_peer_as_src_type == BGP_SRC_PRIMITIVES_MAP) {
+      if (config.nfacctd_bgp_peer_as_src_map) {
+        load_id_file(MAP_BGP_PEER_AS_SRC, config.nfacctd_bgp_peer_as_src_map, &bpas_table, &req, &bpas_map_allocated);
+	cb_data.bpas_table = (u_char *) &bpas_table;
+      }
+      else {
+        Log(LOG_ERR, "ERROR: bgp_peer_as_src_type set to 'map' but no map defined. Exiting.\n");
+        exit(1);
+      }
+    }
+    else cb_data.bpas_table = NULL;
+
+    if (config.nfacctd_bgp_src_local_pref_type == BGP_SRC_PRIMITIVES_MAP) {
+      if (config.nfacctd_bgp_src_local_pref_map) {
+        load_id_file(MAP_BGP_SRC_LOCAL_PREF, config.nfacctd_bgp_src_local_pref_map, &blp_table, &req, &blp_map_allocated);
+        cb_data.blp_table = (u_char *) &blp_table;
+      }
+      else {
+        Log(LOG_ERR, "ERROR: bgp_src_local_pref_type set to 'map' but no map defined. Exiting.\n");
+        exit(1);
+      }
+    }
+    else cb_data.blp_table = NULL;
+
+    if (config.nfacctd_bgp_src_med_type == BGP_SRC_PRIMITIVES_MAP) {
+      if (config.nfacctd_bgp_src_med_map) {
+        load_id_file(MAP_BGP_SRC_MED, config.nfacctd_bgp_src_med_map, &bmed_table, &req, &bmed_map_allocated);
+        cb_data.bmed_table = (u_char *) &bmed_table;
+      }
+      else {
+        Log(LOG_ERR, "ERROR: bgp_src_med_type set to 'map' but no map defined. Exiting.\n");
+        exit(1);
+      }
+    }
+    else cb_data.bmed_table = NULL;
+
+    if (config.nfacctd_bgp_is_symmetric_map) {
+      load_id_file(MAP_BGP_IS_SYMMETRIC, config.nfacctd_bgp_is_symmetric_map, &biss_table, &req, &biss_map_allocated);
+      cb_data.biss_table = (u_char *) &biss_table;
+    }
+    else cb_data.biss_table = NULL;
+
+    if (config.nfacctd_bgp_to_agent_map) {
+      load_id_file(MAP_BGP_TO_XFLOW_AGENT, config.nfacctd_bgp_to_agent_map, &bta_table, &req, &bta_map_allocated);
+      cb_data.bta_table = (u_char *) &bta_table;
+    }
+    else {
+      Log(LOG_ERR, "ERROR ( default/core ): 'bgp_daemon' configured but no 'bgp_agent_map' has been specified. Exiting.\n");
+      exit(1);
+    }
+
+    /* Limiting BGP peers to only two: one would suffice in pmacctd
+       but in case maps are reloadable (ie. bta), it could be handy
+       to keep a backup feed in memory */
+    config.nfacctd_bgp_max_peers = 2;
+
+    cb_data.f_agent = (char *)&client;
+    nfacctd_bgp_wrapper();
+
+    /* Let's give the BGP thread some advantage to create its structures */
+    sleep(5);
+  }
+#else
+  if (config.nfacctd_bgp) {
+    Log(LOG_ERR, "ERROR ( default/core ): 'bgp_daemon' is available only with threads (--enable-threads). Exiting.\n");
+    exit(1);
+  }
+#endif
 
   /* plugins glue: creation (until 093) */
   evaluate_packet_handlers();
@@ -574,299 +721,4 @@ int main(int argc,char **argv, char **envp)
     }
     device.active = FALSE;
   }
-}
-
-void pcap_cb(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *buf)
-{
-  struct packet_ptrs pptrs;
-  struct pcap_callback_data *cb_data = (struct pcap_callback_data *) user;
-  struct pcap_device *device = cb_data->device; 
-  struct plugin_requests req;
-
-  /* We process the packet with the appropriate
-     data link layer function */
-  if (buf) {
-    pptrs.pkthdr = (struct pcap_pkthdr *) pkthdr;
-    pptrs.packet_ptr = (u_char *) buf;
-    pptrs.mac_ptr = 0; pptrs.vlan_ptr = 0; pptrs.mpls_ptr = 0;
-    pptrs.pf = 0; pptrs.shadow = 0; pptrs.tag_dist = 1; pptrs.tag = 0;
-    pptrs.class = 0;
-    pptrs.idtable = cb_data->idt;
-    (*device->data->handler)(pkthdr, &pptrs);
-    if (pptrs.iph_ptr) {
-      if ((*pptrs.l3_handler)(&pptrs)) {
-	if (config.pre_tag_map) pptrs.tag = PM_find_id(&pptrs);
-#ifdef ENABLE_THREADS
-	/* If we are not calling t_ip_flow_handler(), ie. not using classification
-	   or counting flows, we still need to give a kick to exec_plugins() here */ 
-	if ( !(config.what_to_count & COUNT_FLOWS) ) exec_plugins(&pptrs); 
-#else
-	exec_plugins(&pptrs); 
-#endif
-      }
-    }
-  }
-
-  if (reload_map) {
-    load_networks(config.networks_file, &nt, &nc);
-    load_id_file(config.acct_type, config.pre_tag_map, (struct id_table *) pptrs.idtable, &req);
-    reload_map = FALSE;
-  }
-} 
-
-int ip_handler(register struct packet_ptrs *pptrs)
-{
-  register u_int8_t len = 0;
-  register u_int16_t caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
-  register unsigned char *ptr;
-  register u_int16_t off = pptrs->iph_ptr-pptrs->packet_ptr, off_l4;
-  int ret = TRUE;
-
-  /* len: number of 32bit words forming the header */
-  len = IP_HL(((struct my_iphdr *) pptrs->iph_ptr));
-  len <<= 2;
-  ptr = pptrs->iph_ptr+len;
-  off += len;
-
-  /* check len */
-  if (off > caplen) return FALSE; /* IP packet truncated */
-  pptrs->l4_proto = ((struct my_iphdr *)pptrs->iph_ptr)->ip_p;
-  pptrs->payload_ptr = NULL; 
-  off_l4 = off;
-  
-  /* check fragments if needed */
-  if (config.handle_fragments) {
-    if (pptrs->l4_proto == IPPROTO_TCP || pptrs->l4_proto == IPPROTO_UDP) {
-      if (off+MyTLHdrSz > caplen) {
-	Log(LOG_INFO, "INFO ( default/core ): short IPv4 packet read (%u/%u/frags). Snaplen issue ?\n", caplen, off+MyTLHdrSz);
-	return FALSE; 
-      }
-      pptrs->tlh_ptr = ptr; 
-    
-      if (((struct my_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_MF|IP_OFFMASK)) {
-        ret = ip_fragment_handler(pptrs);
-	if (!ret) goto quit;
-      }
-
-      /* Let's handle both fragments and packets. If we are facing any subsequent frag
-	 our pointer is in place; we handle unknown L4 protocols likewise. In case of
-	 "entire" TCP/UDP packets we have to jump the L4 header instead */
-      if (((struct my_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_OFFMASK));
-      else if (pptrs->l4_proto == IPPROTO_UDP) {
-	ptr += UDPHdrSz;
-        off += UDPHdrSz;  
-      }
-      else if (pptrs->l4_proto == IPPROTO_TCP) {
-        ptr += ((struct my_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
-        off += ((struct my_tcphdr *)pptrs->tlh_ptr)->th_off << 2;  
-      }
-      if (off < caplen) pptrs->payload_ptr = ptr;
-    }
-    else {
-      pptrs->tlh_ptr = dummy_tlhdr;
-      if (off < caplen) pptrs->payload_ptr = ptr;
-    }
-
-    if (config.handle_flows) { 
-      pptrs->tcp_flags = FALSE;
-
-      if (pptrs->l4_proto == IPPROTO_TCP) {
-        if (off_l4+TCPFlagOff+1 > caplen) {
-	  Log(LOG_INFO, "INFO ( default/core ): short IPv4 packet read (%u/%u/flows). Snaplen issue ?\n", caplen, off_l4+TCPFlagOff+1); 
-	  return FALSE; 
-	}
-	if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_SYN) pptrs->tcp_flags |= TH_SYN;
-	if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_FIN) pptrs->tcp_flags |= TH_FIN;
-	if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_RST) pptrs->tcp_flags |= TH_RST;
-	if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_ACK && pptrs->tcp_flags) pptrs->tcp_flags |= TH_ACK; 
-      }
-
-#if defined ENABLE_THREADS
-      t_ip_flow_handler(pptrs);
-#else
-      ip_flow_handler(pptrs);
-#endif
-    }
-
-    /* XXX: optimize/short circuit here! */
-    pptrs->tcp_flags = FALSE;
-    if (pptrs->l4_proto == IPPROTO_TCP && off_l4+TCPFlagOff+1 <= caplen)
-      pptrs->tcp_flags = ((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags; 
-  }
-
-  quit:
-  return ret;
-}
-
-#if defined ENABLE_IPV6
-int ip6_handler(register struct packet_ptrs *pptrs)
-{
-  struct ip6_frag *fhdr = NULL;
-  register u_int16_t caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
-  u_int16_t len = 0, plen = ntohs(((struct ip6_hdr *)pptrs->iph_ptr)->ip6_plen);
-  u_int16_t off = pptrs->iph_ptr-pptrs->packet_ptr, off_l4;
-  u_int32_t advance;
-  u_int8_t nh, fragmented = 0;
-  u_char *ptr = pptrs->iph_ptr;
-  int ret = TRUE;
-
-  /* length checks */
-  if (off+IP6HdrSz > caplen) return FALSE; /* IP packet truncated */
-  if (plen == 0) { 
-    Log(LOG_INFO, "INFO ( default/core ): NULL IPv6 payload length. Jumbo packets are currently not supported.\n");
-    return FALSE;
-  }
-
-  pptrs->l4_proto = 0;
-  pptrs->payload_ptr = NULL;
-  nh = ((struct ip6_hdr *)pptrs->iph_ptr)->ip6_nxt; 
-  advance = IP6HdrSz;
-  
-  while ((off+advance <= caplen) && advance) {
-    off += advance;
-    ptr += advance;
-
-    switch(nh) {
-    case IPPROTO_HOPOPTS:
-    case IPPROTO_DSTOPTS:
-    case IPPROTO_ROUTING:
-    case IPPROTO_MOBILITY:
-      nh = ((struct ip6_ext *)ptr)->ip6e_nxt;
-      advance = (((struct ip6_ext *)ptr)->ip6e_len + 1) << 3; 
-      break;
-    case IPPROTO_AH:
-      nh = ((struct ip6_ext *)ptr)->ip6e_nxt;
-      advance = sizeof(struct ah)+(((struct ah *)ptr)->ah_len << 2); /* hdr + sumlen */
-      break;
-    case IPPROTO_FRAGMENT:
-      fhdr = (struct ip6_frag *) ptr;
-      nh = ((struct ip6_ext *)ptr)->ip6e_nxt;
-      advance = sizeof(struct ip6_frag);
-      break;
-    /* XXX: case IPPROTO_ESP: */
-    /* XXX: case IPPROTO_IPCOMP: */
-    default:
-      pptrs->tlh_ptr = ptr;
-      pptrs->l4_proto = nh;
-      goto end;
-    }
-  }
-
-  end:
-
-  off_l4 = off;
-  if (config.handle_fragments) { 
-    if (pptrs->l4_proto == IPPROTO_TCP || pptrs->l4_proto == IPPROTO_UDP) {
-      if (off+MyTLHdrSz > caplen) {
-	Log(LOG_INFO, "INFO ( default/core ): short IPv6 packet read (%u/%u/frags). Snaplen issue ?\n", caplen, off+MyTLHdrSz);
-	return FALSE;
-      }
-
-      if (fhdr && (fhdr->ip6f_offlg & htons(IP6F_MORE_FRAG|IP6F_OFF_MASK))) {
-        ret = ip6_fragment_handler(pptrs, fhdr);
-	if (!ret) goto quit;
-      }
-
-      /* Let's handle both fragments and packets. If we are facing any subsequent frag
-         our pointer is in place; we handle unknown L4 protocols likewise. In case of
-         "entire" TCP/UDP packets we have to jump the L4 header instead */
-      if (fhdr && (fhdr->ip6f_offlg & htons(IP6F_OFF_MASK))); 
-      else if (pptrs->l4_proto == IPPROTO_UDP) {
-        ptr += UDPHdrSz;
-        off += UDPHdrSz;
-      }
-      else if (pptrs->l4_proto == IPPROTO_TCP) {
-        ptr += ((struct my_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
-        off += ((struct my_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
-      }
-      if (off < caplen) pptrs->payload_ptr = ptr;
-    }
-    else {
-      pptrs->tlh_ptr = dummy_tlhdr;
-      if (off < caplen) pptrs->payload_ptr = ptr;
-    }
-
-    if (config.handle_flows) {
-      pptrs->tcp_flags = FALSE;
-
-      if (pptrs->l4_proto == IPPROTO_TCP) {
-	if (off_l4+TCPFlagOff+1 > caplen) {
-	  Log(LOG_INFO, "INFO ( default/core ): short IPv6 packet read (%u/%u/flows). Snaplen issue ?\n", caplen, off_l4+TCPFlagOff+1);
-	  return FALSE;
-	}
-        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_SYN) pptrs->tcp_flags |= TH_SYN;
-        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_FIN) pptrs->tcp_flags |= TH_FIN;
-        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_RST) pptrs->tcp_flags |= TH_RST;
-        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_ACK && pptrs->tcp_flags) pptrs->tcp_flags |= TH_ACK;
-      }
-
-#if defined ENABLE_THREADS
-      t_ip_flow6_handler(pptrs);
-#else
-      ip_flow6_handler(pptrs);
-#endif
-    }
-
-    /* XXX: optimize/short circuit here! */
-    pptrs->tcp_flags = FALSE;
-    if (pptrs->l4_proto == IPPROTO_TCP && off_l4+TCPFlagOff+1 <= caplen)
-      pptrs->tcp_flags = ((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags;
-  }
-
-  quit:
-  return TRUE;
-}
-#endif
-
-int PM_find_id(struct packet_ptrs *pptrs)
-{
-  struct id_table *t = (struct id_table *)pptrs->idtable;
-  int x, j, id, stop;
-
-  id = 0;
-  for (x = 0; x < t->ipv4_num; x++) {
-    for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
-    if (id) {
-      if (t->e[x].stack.func) id = (*t->e[x].stack.func)(id, pptrs->tag);
-      pptrs->tag = id;
-      pptrs->tag_dist = t->e[x].ret; 
-
-      if (t->e[x].jeq.ptr) {
-	exec_plugins(pptrs);
-
-	x = t->e[x].jeq.ptr->pos;
-	x--; /* yes, it will be automagically incremented by the for() cycle */
-	if (t->e[x].ret) set_shadow_status(pptrs);
-	id = 0;
-      }
-      else break;
-    }
-  }
-
-  return id;
-}
-
-void compute_once()
-{
-  struct pkt_data dummy;
-
-  CounterSz = sizeof(dummy.pkt_len);
-  PdataSz = sizeof(struct pkt_data);
-  PpayloadSz = sizeof(struct pkt_payload);
-  PextrasSz = sizeof(struct pkt_extras);
-  ChBufHdrSz = sizeof(struct ch_buf_hdr);
-  CharPtrSz = sizeof(char *);
-  IP4HdrSz = sizeof(struct my_iphdr);
-  MyTLHdrSz = sizeof(struct my_tlhdr);
-  TCPFlagOff = 13;
-  MyTCPHdrSz = TCPFlagOff+1; 
-  PptrsSz = sizeof(struct packet_ptrs);
-  UDPHdrSz = 8; 
-  CSSz = sizeof(struct class_st);
-  IpFlowCmnSz = sizeof(struct ip_flow_common);
-  HostAddrSz = sizeof(struct host_addr);
-#if defined ENABLE_IPV6
-  IP6HdrSz = sizeof(struct ip6_hdr);
-  IP6AddrSz = sizeof(struct in6_addr);
-#endif
 }

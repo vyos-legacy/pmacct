@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -20,6 +20,7 @@
 */
 
 #include "cfg_handlers.h"
+#include "bgp/bgp_prefix.h"
 
 /* defines */
 #define CFG_LINE_LEN(x) (SRVBUFLEN-strlen(x))
@@ -31,14 +32,18 @@ struct _dictionary_line {
 };
 
 struct configuration {
+  u_int64_t what_to_count;
+  u_int64_t nfprobe_what_to_count;
   char *name;
   char *type;
-  u_int32_t what_to_count;
   int sock;
   int acct_type; 
   int data_type; 
   int pipe_size;
   int buffer_size;
+  int files_umask;
+  int files_uid;
+  int files_gid;
   int handle_fragments;
   int handle_flows;
   int frag_bufsz;
@@ -52,6 +57,7 @@ struct configuration {
   char *sql_table;
   char *sql_table_schema;
   int sql_table_version;
+  char *sql_table_type;
   char *sql_user;
   char *sql_passwd;
   char *sql_host;
@@ -86,9 +92,35 @@ struct configuration {
   char *nfacctd_allow_file;
   int nfacctd_time;
   int nfacctd_as;
+  int nfacctd_net;
   int sfacctd_renormalize;
   int nfacctd_disable_checks;
   int nfacctd_sql_log;
+  int nfacctd_bgp;
+  int nfacctd_bgp_msglog;
+  char *nfacctd_bgp_ip;
+  int nfacctd_bgp_port;
+  char *nfacctd_bgp_allow_file;
+  int nfacctd_bgp_max_peers;
+  int nfacctd_bgp_aspath_radius;
+  char *nfacctd_bgp_stdcomm_pattern;
+  char *nfacctd_bgp_extcomm_pattern;
+  char *nfacctd_bgp_stdcomm_pattern_to_asn;
+  int nfacctd_bgp_peer_as_src_type;
+  int nfacctd_bgp_src_std_comm_type;
+  int nfacctd_bgp_src_ext_comm_type;
+  int nfacctd_bgp_src_as_path_type;
+  int nfacctd_bgp_src_local_pref_type;
+  int nfacctd_bgp_src_med_type;
+  int nfacctd_bgp_peer_as_skip_subas;
+  char *nfacctd_bgp_peer_as_src_map;
+  char *nfacctd_bgp_src_local_pref_map;
+  char *nfacctd_bgp_src_med_map;
+  char *nfacctd_bgp_is_symmetric_map;
+  char *nfacctd_bgp_to_agent_map;
+  int nfacctd_bgp_follow_default;
+  struct prefix nfacctd_bgp_follow_nexthop[FOLLOW_BGP_NH_ENTRIES];
+  char *nfacctd_bgp_neighbors_file;
   int promisc; /* pcap_open_live() promisc parameter */
   char *clbuf; /* pcap filter */
   char *pcap_savefile;
@@ -112,9 +144,11 @@ struct configuration {
   int bpfp_a_num;
   struct bpf_program *bpfp_a_table[AGG_FILTER_ENTRIES];
   struct pretag_filter ptf;
+  struct pretag_filter pt2f;
   char *pre_tag_map;
   int pre_tag_map_entries;
-  int post_tag;
+  pm_id_t post_tag;
+  int ext_sampling_rate;
   int sampling_rate;
   char *syslog;
   int debug;
@@ -122,7 +156,6 @@ struct configuration {
   char *classifiers_path;
   int classifier_tentatives;
   int classifier_table_num;
-  u_int32_t nfprobe_what_to_count;
   char *nfprobe_timeouts;
   int nfprobe_id;
   int nfprobe_hoplimit;
@@ -130,10 +163,12 @@ struct configuration {
   char *nfprobe_receiver;
   int nfprobe_version;
   char *nfprobe_engine;
+  int nfprobe_peer_as;
   char *sfprobe_receiver;
   char *sfprobe_agentip;
   int sfprobe_agentsubid;
-	int flow_handling_threads;
+  int uacctd_group;
+  int uacctd_nl_size;
 };
 
 struct plugin_type_entry {

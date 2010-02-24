@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -54,6 +54,7 @@ static char pgsql_table_v4[] = "acct_v4";
 static char pgsql_table_v5[] = "acct_v5";
 static char pgsql_table_v6[] = "acct_v6";
 static char pgsql_table_v7[] = "acct_v7";
+static char pgsql_table_bgp[] = "acct_bgp";
 static char pgsql_table_uni[] = "acct_uni";
 static char pgsql_table_uni_v2[] = "acct_uni_v2";
 static char pgsql_table_uni_v3[] = "acct_uni_v3";

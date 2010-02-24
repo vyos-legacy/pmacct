@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -35,6 +35,8 @@ Inline void AddToLRUTail(struct db_cache *Cursor)
 
 Inline void RetireElem(struct db_cache *Cursor)
 {
+  assert(Cursor->prev);
+
   Cursor->lru_prev->lru_next = Cursor->lru_next;
   if (Cursor->lru_next) Cursor->lru_next->lru_prev = Cursor->lru_prev;
   if (Cursor == lru_tail) lru_tail = &lru_head; 
@@ -45,6 +47,15 @@ Inline void RetireElem(struct db_cache *Cursor)
   }
   else Cursor->prev->next = NULL;
 
+  if (Cursor->cbgp) {
+    if (Cursor->cbgp->std_comms) free(Cursor->cbgp->std_comms);
+    if (Cursor->cbgp->ext_comms) free(Cursor->cbgp->ext_comms);
+    if (Cursor->cbgp->as_path) free(Cursor->cbgp->as_path);
+    if (Cursor->cbgp->src_std_comms) free(Cursor->cbgp->src_std_comms);
+    if (Cursor->cbgp->src_ext_comms) free(Cursor->cbgp->src_ext_comms);
+    if (Cursor->cbgp->src_as_path) free(Cursor->cbgp->src_as_path);
+    free(Cursor->cbgp);
+  }
   free(Cursor);
 }
 
@@ -57,6 +68,8 @@ Inline void BuildChain(struct db_cache *Cursor, struct db_cache *newElem)
 
 Inline void ReBuildChain(struct db_cache *Cursor, struct db_cache *newElem)
 {
+  assert(Cursor != newElem);
+
   if (newElem->next) {
     newElem->prev->next = newElem->next;
     newElem->next->prev = newElem->prev;
@@ -72,23 +85,41 @@ Inline void SwapChainedElems(struct db_cache *Cursor, struct db_cache *staleElem
 {
   struct db_cache *auxPtr;
 
-  auxPtr = Cursor->prev;
-  Cursor->prev = staleElem->prev;
-  Cursor->prev->next = Cursor;
-  if (auxPtr == staleElem) staleElem->prev = Cursor;
-  else {
-    staleElem->prev = auxPtr;
-    staleElem->prev->next = staleElem;
-  }
+  assert(Cursor != staleElem);
+  assert(Cursor->prev);
+  assert(staleElem->prev);
 
-  auxPtr = Cursor->next;
-  if (staleElem->next == Cursor) Cursor->next = staleElem;
-  else {
+  /* Specific cases first */
+  if (Cursor == staleElem->prev) {
+    staleElem->prev = Cursor->prev;
     Cursor->next = staleElem->next;
-    Cursor->next->prev = Cursor;
+    staleElem->next = Cursor;
+    Cursor->prev = staleElem;
+    staleElem->prev->next = staleElem;
+    if (Cursor->next) Cursor->next->prev = Cursor;
   }
-  staleElem->next = auxPtr;
-  if (auxPtr) staleElem->next->prev = staleElem;
+  else if (staleElem == Cursor->prev) {
+    Cursor->prev = staleElem->prev;
+    staleElem->next = Cursor->next;
+    Cursor->next = staleElem;
+    staleElem->prev = Cursor;
+    Cursor->prev->next = Cursor;
+    if (staleElem->next) staleElem->next->prev = staleElem;
+  }
+  /* General case */
+  else {
+    auxPtr = Cursor->prev;
+    Cursor->prev = staleElem->prev;
+    Cursor->prev->next = Cursor;
+    staleElem->prev = auxPtr;
+    staleElem->prev->next = staleElem; 
+
+    auxPtr = Cursor->next;
+    Cursor->next = staleElem->next;
+    if (Cursor->next) Cursor->next->prev = Cursor;
+    staleElem->next = auxPtr;
+    if (staleElem->next) staleElem->next->prev = staleElem;
+  }
 }
 
 Inline void SQL_SetENV()
@@ -142,12 +173,12 @@ Inline void SQL_SetENV()
     count++;
   }
 
-  if (config.sampling_rate >= 1) {
+  if (config.sampling_rate >= 1 || config.ext_sampling_rate >= 1) {
     u_char *tmpptr;
 
     strncat(envbuf.ptr, "SAMPLING_RATE=", envbuf.end-envbuf.ptr);
     tmpptr = envbuf.ptr + strlen(envbuf.ptr);
-    snprintf(tmpptr, envbuf.end-tmpptr, "%d", config.sampling_rate);
+    snprintf(tmpptr, envbuf.end-tmpptr, "%d", config.sampling_rate ? config.sampling_rate : config.ext_sampling_rate);
     ptrs[count] = envbuf.ptr;
     envbuf.ptr += strlen(envbuf.ptr)+1;
     count++;

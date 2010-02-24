@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 #include "../include/extract.h"
@@ -150,6 +150,11 @@ struct my_tlhdr {
    u_int16_t	dst_port;
 };
 
+/* typedefs */
+typedef u_int32_t as_t;
+typedef u_int16_t as16_t;
+
+
 /* class status */
 struct class_st {
    u_int8_t tentatives;	
@@ -167,12 +172,27 @@ struct packet_ptrs {
   u_char *f_tpl; /* ptr to NetFlow V9 template */
   u_char *f_status; /* ptr to status table entry */
   u_char *idtable; /* ptr to pretag table map */
+  u_char *bpas_table; /* ptr to bgp_peer_as_src table map */
+  u_char *blp_table; /* ptr to bgp_src_local_pref table map */
+  u_char *bmed_table; /* ptr to bgp_src_med table map */
+  u_char *biss_table; /* ptr to bgp_is_symmetric table map */
+  u_char *bta_table; /* ptr to bgp_to_agent table map */
   u_char *packet_ptr; /* ptr to the whole packet */
   u_char *mac_ptr; /* ptr to mac addresses */
   u_int16_t l3_proto; /* layer-3 protocol: IPv4, IPv6 */
   int (*l3_handler)(register struct packet_ptrs *); /* layer-3 protocol handler */
   u_int16_t l4_proto; /* layer-4 protocol */
-  u_int16_t tag; /* pre tag id */
+  pm_id_t tag; /* pre tag id */
+  pm_id_t tag2; /* pre tag id2 */
+  pm_id_t bpas; /* bgp_peer_as_src */
+  pm_id_t blp; /* bgp_src_local_pref */
+  pm_id_t bmed; /* bgp_src_med */
+  pm_id_t biss; /* bgp_is_symmetric */
+  pm_id_t bta; /* bgp_to_agent */
+  char *bgp_src; /* pointer to bgp_node structure for source prefix, if any */  
+  char *bgp_dst; /* pointer to bgp_node structure for destination prefix, if any */ 
+  char *bgp_peer; /* record BGP peer's Router-ID */
+  char *bgp_nexthop; /* record BGP next-hop in case of follow-up */
   u_int16_t pf; /* pending fragments or packets */
   u_int8_t new_flow; /* pmacctd flows: part of a new flow ? */
   u_int8_t tcp_flags; /* pmacctd flows: TCP packet flags; URG, PUSH filtered out */ 
@@ -185,7 +205,8 @@ struct packet_ptrs {
   struct class_st cst; /* classifiers: class status */
   u_int8_t shadow; /* 0=the packet is being distributed for the 1st time
 		      1=the packet is being distributed for the 2nd+ time */
-  u_int8_t tag_dist; /* tagged packet: 0=do not distribute the packet; 1=distribute it */
+  u_int16_t ifindex_in;  /* input ifindex; only used by ULOG for the time being */
+  u_int16_t ifindex_out; /* output ifindex; only used by ULOG for the time being */
 };
 
 struct host_addr {
@@ -206,13 +227,14 @@ struct pkt_primitives {
 #endif
   struct host_addr src_ip;
   struct host_addr dst_ip;
-  u_int16_t src_as;
-  u_int16_t dst_as;
+  as_t src_as;
+  as_t dst_as;
   u_int16_t src_port;
   u_int16_t dst_port;
   u_int8_t tos;
   u_int8_t proto;
-  u_int16_t id;
+  pm_id_t id;
+  pm_id_t id2;
   pm_class_t class;
 };
 
@@ -235,14 +257,62 @@ struct pkt_payload {
   u_int32_t time_start;
   pm_class_t class;
   pm_id_t tag;
+  pm_id_t tag2;
   struct host_addr src_ip;
   struct host_addr dst_ip;
+  u_int16_t ifindex_in;
+  u_int16_t ifindex_out;
 };
 
 struct pkt_extras {
   u_int8_t tcp_flags;
   u_int32_t mpls_top_label;
+  u_int16_t ifindex_in;
+  u_int16_t ifindex_out;
 };
+
+/* START: BGP section */
+#define MAX_BGP_STD_COMMS       96
+#define MAX_BGP_EXT_COMMS       96
+#define MAX_BGP_ASPATH          128
+
+struct pkt_bgp_primitives {
+  as_t peer_src_as;
+  as_t peer_dst_as;
+  struct host_addr peer_src_ip;
+  struct host_addr peer_dst_ip;
+  char std_comms[MAX_BGP_STD_COMMS];
+  char ext_comms[MAX_BGP_EXT_COMMS];
+  char as_path[MAX_BGP_ASPATH];
+  u_int32_t local_pref;
+  u_int32_t med;
+  char src_std_comms[MAX_BGP_STD_COMMS];
+  char src_ext_comms[MAX_BGP_EXT_COMMS];
+  char src_as_path[MAX_BGP_ASPATH];
+  u_int32_t src_local_pref;
+  u_int32_t src_med;
+  u_int32_t is_symmetric;
+};
+
+/* same as above but pointers in place of strings */
+struct cache_bgp_primitives {
+  as_t peer_src_as;
+  as_t peer_dst_as;
+  struct host_addr peer_src_ip;
+  struct host_addr peer_dst_ip;
+  char *std_comms;
+  char *ext_comms;
+  char *as_path;
+  u_int32_t local_pref;
+  u_int32_t med;
+  char *src_std_comms;
+  char *src_ext_comms;
+  char *src_as_path;
+  u_int32_t src_local_pref;
+  u_int32_t src_med;
+  u_int32_t is_symmetric;
+};
+/* END: BGP section */
 
 struct packet_ptrs_vector {
   struct packet_ptrs v4;
@@ -258,7 +328,7 @@ struct packet_ptrs_vector {
 };
 
 struct hosts_table {
-  unsigned short int num;
+  short int num;
   struct host_addr table[MAX_MAP_ENTRIES];
 };
 
