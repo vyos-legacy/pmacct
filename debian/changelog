@@ -1,3 +1,63 @@
+pmacct (0.12.1+vyatta+1) unstable; urgency=low
+
+  [ paolo ]
+  * * 'is_symmetric' primitive is being implemented: aimed to detect
+    asymmetric traffic by basing on definitions included in a
+    'bgp_is_symmetric_map' map file. * A few minor bugs related to
+    bgp_src_med_map, bgp_src_local_pref_map and bgp_peer_src_as_map have
+    been fixed. * Documentation updated.
+  * * Updated documentation and examples * bgp/bgp.c:
+    cache_to_pkt_bgp_primitives(), pkt_to_cache_bgp_primitives() have
+    been fixed: is_symmetric primitive value was not correctly copied.
+  * * Implementation of 'bgp_daemon_allow_file' to specify IP addresses
+    that can establish a BGP session with the BGP thread * util.c:
+    centralized daemons ACL set/check routines * Updated documentation
+  * * fix, util.c: load_allow_file(), empty allow file was allowing
+    every IP to connect - being confused with no map condition. Now this
+    condition is properly recognized and translates in reject all. *
+    fix, pmacct.c: is_symmetric printf formatting mistake corrected.
+  * * fix, pkt_handlers.c: check added to impose a maximum size while
+    copying NetFlow v9 fields to internal structures.
+  * * nfacctd_ext_sampling_rate and sfacctd_ext_sampling_rate are
+    introduced: flags the daemon that captured traffic is being sampled.
+    Useful to tackle corner cases, ie. sampling rate reported by the
+    NetFlow/sFlow agent is missing or not correct.
+  * * fix, sql_common.c: logging of NetFlow micro-flows to a SQL
+    database (nfacctd_sql_log directive) was not committing to the
+    backend, when sql_history was disabled. This is now fixed.
+  * * bgp_follow_nexthop: feature extended so that multiple IPv4/IPv6
+    prefixes can be supplied. Up to 32 prefixes are now supported; a
+    warning message is now generated if a supplied string fails parsing.
+  * * Pre-Tagging: introduced 'comms' key to tag basing on up to 16
+    standard BGP communities attached to the destination IP prefix. The
+    lookup is done against the BGP RIB of the exporting router. Either
+    match-any or match-all is available. Documentation and examples
+    updated. * fix, pretag.c: bug introduced in CVS version only as part
+    of 20091225 commit.
+  * * Pre-Tagging: implemented src_local_pref and src_comms keys. These
+    allow tagging on source IP prefix local_pref (sourced from either
+    map or BGP, ie. 'bgp_src_local_pref_type: map',
+    'bgp_src_local_pref_type: bgp') and standard BGP communities. * Pre-
+    Tagging: src_peer_as key has been extended to match on BGP-sourced
+    data (bgp_peer_src_as_type: bgp).
+  * * fix, mysql|pgsql|sqlite_plugin.c: 'flows' aggregation primitive
+    was not suitable to mix-and-match with BGP related primitives (ie.
+    peer_dst_as, etc.) due to an incorrect check. Thanks to Zenon
+    Mousmoulas for the bug report.
+  * * fix, pretag_handlers.c: tagging against NetFlow v9 4-bytes
+    input/output interfaces was not working properly. This is now fixed.
+    Many thanks to Zenon Mousmoulas for reporting the issue.
+  * * ChangeLog updated. * Version counter updated.
+  * * Refreshed ChangeLog.
+  * * 'nfprobe_source_ip' feature added: it allows to select the
+    IPv4/IPv6 address to be used to export NetFlow datagrams to the
+    collector.
+  * * Rolled version counters
+
+  [ Stig Thormodsrud ]
+
+ -- Stig Thormodsrud <stig@vyatta.com>  Wed, 24 Feb 2010 11:48:19 -0800
+
 pmacct (0.12.0.r4+vyatta+4) unstable; urgency=low
 
   * UNRELEASED
