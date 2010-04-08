@@ -164,11 +164,13 @@ struct configuration {
   int nfprobe_version;
   char *nfprobe_engine;
   int nfprobe_peer_as;
+  char *nfprobe_source_ip;
   char *sfprobe_receiver;
   char *sfprobe_agentip;
   int sfprobe_agentsubid;
   int uacctd_group;
   int uacctd_nl_size;
+  char *tunnel0;
 };
 
 struct plugin_type_entry {

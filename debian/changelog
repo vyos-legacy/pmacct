@@ -1,3 +1,14 @@
+pmacct (0.12.1-1) unstable; urgency=low
+
+  * New upstream release.
+  * Bumped standards version to 3.8.4.
+  * Added ${misc:Depends} to the dependencies line as requested by debhelper.
+  * Switch to dpkg-source 3.0 (quilt) format.
+  * Add initscript dependency on $remote_fs for /usr, the location of the pmacctd daemon.
+  * Remove exclusion of .arch directories from dh_installdocs as arch is way obsolete now.
+
+ -- Jamie Wilkinson <jaq@debian.org>  Thu, 08 Apr 2010 21:00:14 +1000
+
 pmacct (0.12.0-1) unstable; urgency=low
 
   * New upstream release.

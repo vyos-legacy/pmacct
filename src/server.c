@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -288,12 +288,16 @@ void mask_elem(struct pkt_primitives *d1, struct pkt_bgp_primitives *d2, struct 
 #endif
     d1->dst_ip.family = s1->dst_ip.family;
   }
+  if (w & COUNT_SRC_NMASK) d1->src_nmask = s1->src_nmask; 
+  if (w & COUNT_DST_NMASK) d1->dst_nmask = s1->dst_nmask; 
   if (w & COUNT_SRC_AS) d1->src_as = s1->src_as; 
   if (w & COUNT_DST_AS) d1->dst_as = s1->dst_as; 
   if (w & COUNT_SRC_PORT) d1->src_port = s1->src_port; 
   if (w & COUNT_DST_PORT) d1->dst_port = s1->dst_port; 
   if (w & COUNT_IP_TOS) d1->tos = s1->tos;
   if (w & COUNT_IP_PROTO) d1->proto = s1->proto; 
+  if (w & COUNT_IN_IFACE) d1->ifindex_in = s1->ifindex_in; 
+  if (w & COUNT_OUT_IFACE) d1->ifindex_out = s1->ifindex_out; 
   if (w & COUNT_ID) d1->id = s1->id; 
   if (w & COUNT_ID2) d1->id2 = s1->id2; 
   if (w & COUNT_CLASS) d1->class = s1->class; 

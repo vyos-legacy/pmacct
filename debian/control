@@ -3,11 +3,11 @@ Section: net
 Priority: optional
 Maintainer: Jamie Wilkinson <jaq@debian.org>
 Build-Depends: debhelper (>= 7), zlib1g-dev, libpcap-dev, libpq-dev, libmysqlclient15-dev, libsqlite3-dev
-Standards-Version: 3.8.3
+Standards-Version: 3.8.4
 
 Package: pmacct
 Architecture: any
-Depends: ${shlibs:Depends}, iproute
+Depends: ${shlibs:Depends}, ${misc:Depends}, iproute
 Description: promiscuous mode traffic accountant
  pmacct is a tool designed to gather traffic information (bytes and number
  of packets) by listening on a promiscuous interface or for Netflow data,

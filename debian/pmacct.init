@@ -2,8 +2,8 @@
 
 ### BEGIN INIT INFO
 # Provides: pmacct
-# Required-start: $network $syslog
-# Required-stop: $network $syslog
+# Required-start: $network $syslog $remote_fs
+# Required-stop: $network $syslog $remote_fs
 # Default-start: 2 3 4 5
 # Default-stop: 0 1 6
 # Short-Description: promiscuous mode accounting daemon

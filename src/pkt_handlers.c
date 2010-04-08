@@ -85,6 +85,34 @@ void evaluate_packet_handlers()
       }
       primitives++;
     }
+
+    if (channels_list[index].aggregation & COUNT_SRC_NMASK) {
+      if (channels_list[index].plugin->cfg.nfacctd_net == NF_NET_BGP)
+        channels_list[index].phandler[primitives] = bgp_src_nmask_handler;
+      else if (channels_list[index].plugin->cfg.nfacctd_net == NF_NET_KEEP) {
+        if (config.acct_type == ACCT_PM) primitives--; /* This is handled elsewhere */
+        else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_src_nmask_handler;
+        else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_src_nmask_handler;
+      }
+      else {
+	primitives--; /* This is handled elsewhere */
+      }
+      primitives++;
+    }
+
+    if (channels_list[index].aggregation & COUNT_DST_NMASK) {
+      if (channels_list[index].plugin->cfg.nfacctd_net == NF_NET_BGP)
+        channels_list[index].phandler[primitives] = bgp_dst_nmask_handler;
+      else if (channels_list[index].plugin->cfg.nfacctd_net == NF_NET_KEEP) {
+        if (config.acct_type == ACCT_PM) primitives--; /* This is handled elsewhere */
+        else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_dst_nmask_handler;
+        else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_dst_nmask_handler;
+      }
+      else {
+        primitives--; /* This is handled elsewhere */
+      }
+      primitives++;
+    }
     
     if (channels_list[index].aggregation & (COUNT_SRC_AS|COUNT_SUM_AS)) {
       if (config.acct_type == ACCT_PM) {
@@ -265,10 +293,25 @@ void evaluate_packet_handlers()
       else if (config.acct_type == ACCT_SF) primitives--; /* NO flows handling for sFlow */
       primitives++;
     }
+
     if (channels_list[index].aggregation & COUNT_CLASS) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = class_handler;
       else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_class_handler;
       else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_class_handler; 
+      primitives++;
+    }
+
+    if (channels_list[index].aggregation & COUNT_IN_IFACE) {
+      if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = in_iface_handler;
+      else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_in_iface_handler;
+      else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_in_iface_handler;
+      primitives++;
+    }
+
+    if (channels_list[index].aggregation & COUNT_OUT_IFACE) {
+      if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = out_iface_handler;
+      else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_out_iface_handler;
+      else if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_out_iface_handler;
       primitives++;
     }
 
@@ -445,6 +488,22 @@ void bgp_dst_net_handler(struct channels_list_entry *chptr, struct packet_ptrs *
 #endif
 }
 
+void bgp_src_nmask_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct bgp_node *ret = (struct bgp_node *) pptrs->bgp_src;
+
+  if (ret) pdata->primitives.src_nmask = ret->p.prefixlen;
+}
+
+void bgp_dst_nmask_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct bgp_node *ret = (struct bgp_node *) pptrs->bgp_dst;
+
+  if (ret) pdata->primitives.dst_nmask = ret->p.prefixlen;
+}
+
 void src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
   struct pkt_data *pdata = (struct pkt_data *) *data;
@@ -588,11 +647,21 @@ void sfprobe_payload_handler(struct channels_list_entry *chptr, struct packet_pt
   int space = (chptr->bufend - chptr->bufptr) - PpayloadSz;
   int ethHdrLen = 0;
 
-  if (chptr->plugin->cfg.networks_file) {
+  memset(&tmp, 0, sizeof(tmp));
+
+  if (chptr->plugin->cfg.nfacctd_as == NF_AS_NEW ||
+      chptr->plugin->cfg.nfacctd_net == NF_NET_NEW) {
     src_host_handler(chptr, pptrs, &tmpp);
     dst_host_handler(chptr, pptrs, &tmpp);
     memcpy(&payload->src_ip, &tmp.primitives.src_ip, HostAddrSz);
     memcpy(&payload->dst_ip, &tmp.primitives.dst_ip, HostAddrSz);
+  }
+
+  if (chptr->plugin->cfg.nfacctd_net == NF_NET_BGP) {
+    bgp_src_nmask_handler(chptr, pptrs, &tmpp);
+    bgp_dst_nmask_handler(chptr, pptrs, &tmpp);
+    payload->src_nmask = tmp.primitives.src_nmask;
+    payload->dst_nmask = tmp.primitives.dst_nmask;
   }
 
   payload->cap_len = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
@@ -642,8 +711,20 @@ void nfprobe_extras_handler(struct channels_list_entry *chptr, struct packet_ptr
 
   if (pptrs->mpls_ptr) memcpy(&pextras->mpls_top_label, pptrs->mpls_ptr, 4);
   if (pptrs->l4_proto == IPPROTO_TCP) pextras->tcp_flags = pptrs->tcp_flags;
-  if (pptrs->ifindex_in > 0)  pextras->ifindex_in  = pptrs->ifindex_in;
-  if (pptrs->ifindex_out > 0) pextras->ifindex_out = pptrs->ifindex_out;
+}
+
+void in_iface_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
+  if (pptrs->ifindex_in > 0)  pdata->primitives.ifindex_in  = pptrs->ifindex_in;
+}
+
+void out_iface_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+
+  if (pptrs->ifindex_out > 0) pdata->primitives.ifindex_out = pptrs->ifindex_out;
 }
 
 #if defined (HAVE_L2)
@@ -885,6 +966,82 @@ void NF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
       memcpy(&pdata->primitives.dst_ip.address.ipv6, (void *) pm_htonl6(addrh), IP6AddrSz);
     }
 #endif
+  }
+}
+
+void NF_src_nmask_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch(hdr->version) {
+  case 9:
+    memcpy(&pdata->primitives.src_nmask, pptrs->f_data+tpl->tpl[NF9_SRC_MASK].off, tpl->tpl[NF9_SRC_MASK].len); 
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 3:
+      pdata->primitives.src_nmask = ((struct struct_export_v8_3 *) pptrs->f_data)->src_mask;
+      break;
+    case 5:
+      pdata->primitives.src_nmask = ((struct struct_export_v8_5 *) pptrs->f_data)->src_mask;
+      break;
+    case 11:
+      pdata->primitives.src_nmask = ((struct struct_export_v8_11 *) pptrs->f_data)->src_mask;
+      break;
+    case 13:
+      pdata->primitives.src_nmask = ((struct struct_export_v8_13 *) pptrs->f_data)->src_mask;
+      break;
+    case 14:
+      pdata->primitives.src_nmask = ((struct struct_export_v8_14 *) pptrs->f_data)->src_mask;
+      break;
+    default:
+      pdata->primitives.src_nmask = 0;
+      break;
+    }  
+    break;
+  default:
+    pdata->primitives.src_nmask = ((struct struct_export_v5 *) pptrs->f_data)->src_mask;
+    break;
+  }
+}
+
+void NF_dst_nmask_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch(hdr->version) {
+  case 9:
+    memcpy(&pdata->primitives.dst_nmask, pptrs->f_data+tpl->tpl[NF9_DST_MASK].off, tpl->tpl[NF9_DST_MASK].len);
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 4:
+      pdata->primitives.dst_nmask = ((struct struct_export_v8_4 *) pptrs->f_data)->dst_mask;
+      break;
+    case 5:
+      pdata->primitives.dst_nmask = ((struct struct_export_v8_5 *) pptrs->f_data)->dst_mask;
+      break;
+    case 12:
+      pdata->primitives.dst_nmask = ((struct struct_export_v8_12 *) pptrs->f_data)->dst_mask;
+      break;
+    case 13:
+      pdata->primitives.dst_nmask = ((struct struct_export_v8_13 *) pptrs->f_data)->dst_mask;
+      break;
+    case 14:
+      pdata->primitives.dst_nmask = ((struct struct_export_v8_14 *) pptrs->f_data)->dst_mask;
+      break;
+    default:
+      pdata->primitives.dst_nmask = 0;
+      break;
+    }
+    break;
+  default:
+    pdata->primitives.dst_nmask = ((struct struct_export_v5 *) pptrs->f_data)->dst_mask;
+    break;
   }
 }
 
@@ -1499,8 +1656,11 @@ void NF_sfprobe_payload_handler(struct channels_list_entry *chptr, struct packet
   payload->class = tmp.primitives.class;
   payload->tag = tmp.primitives.id;
   payload->tag2 = tmp.primitives.id2;
-  memcpy(&payload->src_ip, &tmp.primitives.src_ip, HostAddrSz);
-  memcpy(&payload->dst_ip, &tmp.primitives.dst_ip, HostAddrSz);
+
+  if (chptr->plugin->cfg.nfacctd_as == NF_AS_NEW) {
+    memcpy(&payload->src_ip, &tmp.primitives.src_ip, HostAddrSz);
+    memcpy(&payload->dst_ip, &tmp.primitives.dst_ip, HostAddrSz);
+  }
 
   if (space >= payload->cap_len) {
     buf += PpayloadSz;
@@ -1531,6 +1691,156 @@ void NF_nfprobe_extras_handler(struct channels_list_entry *chptr, struct packet_
     pextras->mpls_top_label = 0;
     if (((struct struct_export_v5 *) pptrs->f_data)->prot == IPPROTO_TCP && hdr->version == 5)
       pextras->tcp_flags = ((struct struct_export_v5 *) pptrs->f_data)->tcp_flags;
+    break;
+  }
+}
+
+void NF_in_iface_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_int16_t iface16 = 0;
+  u_int32_t iface32 = 0;
+
+  switch(hdr->version) {
+  case 9:
+    if (tpl->tpl[NF9_INPUT_SNMP].len == 2) {
+      memcpy(&iface16, pptrs->f_data+tpl->tpl[NF9_INPUT_SNMP].off, 2);
+      pdata->primitives.ifindex_in = ntohs(iface16);
+    }
+    else if (tpl->tpl[NF9_INPUT_SNMP].len == 4) {
+      memcpy(&iface32, pptrs->f_data+tpl->tpl[NF9_INPUT_SNMP].off, 4);
+      pdata->primitives.ifindex_in = ntohl(iface32);
+    }
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 1:
+      iface16 = ntohs(((struct struct_export_v8_1 *) pptrs->f_data)->input);
+      pdata->primitives.ifindex_in = iface16;
+      break;
+    case 3:
+      iface16 = ntohs(((struct struct_export_v8_3 *) pptrs->f_data)->input);
+      pdata->primitives.ifindex_in = iface16;
+      break;
+    case 5:
+      iface16 = ntohs(((struct struct_export_v8_5 *) pptrs->f_data)->input);
+      pdata->primitives.ifindex_in = iface16;
+      break;
+    case 7:
+      iface16 = ntohs(((struct struct_export_v8_7 *) pptrs->f_data)->input);
+      pdata->primitives.ifindex_in = iface16;
+      break;
+    case 8:
+      iface16 = ntohs(((struct struct_export_v8_8 *) pptrs->f_data)->input);
+      pdata->primitives.ifindex_in = iface16;
+      break;
+    case 9:
+      iface16 = ntohs(((struct struct_export_v8_9 *) pptrs->f_data)->input);
+      pdata->primitives.ifindex_in = iface16;
+      break;
+    case 10:
+      iface16 = ntohs(((struct struct_export_v8_10 *) pptrs->f_data)->input);
+      pdata->primitives.ifindex_in = iface16;
+      break;
+    case 11:
+      iface16 = ntohs(((struct struct_export_v8_11 *) pptrs->f_data)->input);
+      pdata->primitives.ifindex_in = iface16;
+      break;
+    case 13:
+      iface16 = ntohs(((struct struct_export_v8_13 *) pptrs->f_data)->input);
+      pdata->primitives.ifindex_in = iface16;
+      break;
+    case 14:
+      iface16 = ntohs(((struct struct_export_v8_14 *) pptrs->f_data)->input);
+      pdata->primitives.ifindex_in = iface16;
+      break;
+    default:
+      pdata->primitives.ifindex_in = 0;
+      break;
+    }
+    break;
+  default:
+    iface16 = ntohs(((struct struct_export_v5 *) pptrs->f_data)->input);
+    pdata->primitives.ifindex_in = iface16;
+    break;
+  }
+}
+
+void NF_out_iface_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_int16_t iface16 = 0;
+  u_int32_t iface32 = 0;
+
+  switch(hdr->version) {
+  case 9:
+    if (tpl->tpl[NF9_OUTPUT_SNMP].len == 2) {
+      memcpy(&iface16, pptrs->f_data+tpl->tpl[NF9_OUTPUT_SNMP].off, 2);
+      pdata->primitives.ifindex_out = ntohs(iface16);
+    }
+    else if (tpl->tpl[NF9_OUTPUT_SNMP].len == 4) {
+      memcpy(&iface32, pptrs->f_data+tpl->tpl[NF9_OUTPUT_SNMP].off, 4);
+      pdata->primitives.ifindex_out = ntohl(iface32);
+    }
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 1:
+      iface16 = ntohs(((struct struct_export_v8_1 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    case 4:
+      iface16 = ntohs(((struct struct_export_v8_4 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    case 5:
+      iface16 = ntohs(((struct struct_export_v8_5 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    case 6:
+      iface16 = ntohs(((struct struct_export_v8_6 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    case 7:
+      iface16 = ntohs(((struct struct_export_v8_7 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    case 8:
+      iface16 = ntohs(((struct struct_export_v8_8 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    case 9:
+      iface16 = ntohs(((struct struct_export_v8_9 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    case 10:
+      iface16 = ntohs(((struct struct_export_v8_10 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    case 12:
+      iface16 = ntohs(((struct struct_export_v8_12 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    case 13:
+      iface16 = ntohs(((struct struct_export_v8_13 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    case 14:
+      iface16 = ntohs(((struct struct_export_v8_14 *) pptrs->f_data)->output);
+      pdata->primitives.ifindex_out = iface16;
+      break;
+    default:
+      pdata->primitives.ifindex_out = 0;
+      break;
+    }
+    break;
+  default:
+    iface16 = ntohs(((struct struct_export_v5 *) pptrs->f_data)->output);
+    pdata->primitives.ifindex_out = iface16;
     break;
   }
 }
@@ -1826,9 +2136,9 @@ void sfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_pt
       if (config.nfacctd_as == NF_AS_BGP) {
 	if (chptr->aggregation & COUNT_SRC_AS && info->attr->aspath) {
 	  if (!chptr->plugin->cfg.nfprobe_peer_as)
-	    payload->src_ip.address.ipv4.s_addr = evaluate_last_asn(info->attr->aspath);
+	    payload->src_as = evaluate_last_asn(info->attr->aspath);
 	  else
-            payload->src_ip.address.ipv4.s_addr = evaluate_first_asn(info->attr->aspath->str);
+            payload->src_as = evaluate_first_asn(info->attr->aspath->str);
 	}
       }
     }
@@ -1840,9 +2150,9 @@ void sfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_pt
       if (config.nfacctd_as == NF_AS_BGP) {
         if (chptr->aggregation & COUNT_DST_AS && info->attr->aspath) {
 	  if (!chptr->plugin->cfg.nfprobe_peer_as)
-            payload->dst_ip.address.ipv4.s_addr = evaluate_last_asn(info->attr->aspath);
+            payload->dst_as = evaluate_last_asn(info->attr->aspath);
           else
-	    payload->dst_ip.address.ipv4.s_addr = evaluate_first_asn(info->attr->aspath->str);
+	    payload->dst_as = evaluate_first_asn(info->attr->aspath->str);
 	}
       }
     }
@@ -2057,6 +2367,22 @@ void SF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   }
 }
 
+void SF_src_nmask_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  pdata->primitives.src_nmask = sample->srcMask;
+}
+
+void SF_dst_nmask_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  pdata->primitives.dst_nmask = sample->dstMask;
+}
+
 void SF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
   struct pkt_data *pdata = (struct pkt_data *) *data;
@@ -2181,10 +2507,12 @@ void SF_sfprobe_payload_handler(struct channels_list_entry *chptr, struct packet
   char *buf = (char *) *data, *tmpp = (char *) &tmp;
   int space = (chptr->bufend - chptr->bufptr) - PpayloadSz;
 
-  SF_src_host_handler(chptr, pptrs, &tmpp);
-  SF_dst_host_handler(chptr, pptrs, &tmpp);
-  memcpy(&payload->src_ip, &tmp.primitives.src_ip, HostAddrSz);
-  memcpy(&payload->dst_ip, &tmp.primitives.dst_ip, HostAddrSz);
+  if (chptr->plugin->cfg.nfacctd_as == NF_AS_NEW) {
+    SF_src_host_handler(chptr, pptrs, &tmpp);
+    SF_dst_host_handler(chptr, pptrs, &tmpp);
+    memcpy(&payload->src_ip, &tmp.primitives.src_ip, HostAddrSz);
+    memcpy(&payload->dst_ip, &tmp.primitives.dst_ip, HostAddrSz);
+  }
 
   payload->cap_len = sample->headerLen;
   payload->pkt_len = sample->sampledPacketSize;
@@ -2213,8 +2541,22 @@ void SF_nfprobe_extras_handler(struct channels_list_entry *chptr, struct packet_
 
   if (sample->lstk.depth) memcpy(&pextras->mpls_top_label, &sample->lstk.stack[0], 4);
   if (sample->dcd_ipProtocol == IPPROTO_TCP) pextras->tcp_flags = sample->dcd_tcpFlags;
-  if (pptrs->ifindex_in > 0)  pextras->ifindex_in  = pptrs->ifindex_in;
-  if (pptrs->ifindex_out > 0) pextras->ifindex_out = pptrs->ifindex_out;
+}
+
+void SF_in_iface_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  pdata->primitives.ifindex_in = sample->inputPort;
+}
+
+void SF_out_iface_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  pdata->primitives.ifindex_out = sample->outputPort;
 }
 
 void SF_class_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)

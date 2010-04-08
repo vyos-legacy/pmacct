@@ -9,11 +9,12 @@ for some examples.
 
 LEGEND of flags:
 
-GLOBAL		The option does not apply to single plugins
-NO_GLOBAL	The option has to be applied to single plugins
-NO_PMACCTD	The option does not apply to 'pmacctd' 
-NO_NFACCTD	The option does not apply to 'nfacctd' (and it's very likely it will not apply to 'sfacctd' too) 
-NO_SFACCTD	The option does not apply to 'sfacctd' 
+GLOBAL		Can't be configured on individual plugins
+NO_GLOBAL	Can't be configured globally
+NO_PMACCTD	Does not apply to 'pmacctd' (it's likely it will not apply to 'sfacctd' either)
+NO_UACCTD	Does not apply to 'uacctd' 
+NO_NFACCTD	Does not apply to 'nfacctd' (it's likely it will not apply to 'sfacctd' either) 
+NO_SFACCTD	Does not apply to 'sfacctd' 
 
 
 LIST OF DIRECTIVES:
@@ -27,11 +28,12 @@ VALUES:		[true|false]
 DESC:		daemonizes the process (default: false).
 
 KEY:		aggregate (-c)
-VALUES:		[src_mac, dst_mac, vlan, src_host, dst_host, src_net, dst_net, src_as, dst_as,
-		 src_port, dst_port, tos, proto, none, sum_mac, sum_host, sum_net, sum_as, 
-		 sum_port, flows, tag, tag2, class, tcpflags, std_comm, ext_comm, as_path,
-		 peer_src_ip, peer_dst_ip, peer_src_as, peer_dst_as, local_pref, med,
-		 src_as_path, src_std_comm, src_ext_comm, src_local_pref, src_med, is_symmetric]
+VALUES:		[src_mac, dst_mac, vlan, src_host, dst_host, src_net, dst_net, src_mask,
+		 dst_mask, src_as, dst_as, src_port, dst_port, tos, proto, none, sum_mac,
+		 sum_host, sum_net, sum_as, sum_port, flows, tag, tag2, class, tcpflags,
+		 in_iface, out_iface, std_comm, ext_comm, as_path, peer_src_ip, peer_dst_ip,
+		 peer_src_as, peer_dst_as, local_pref, med, src_as_path, src_std_comm,
+		 src_ext_comm, src_local_pref, src_med, is_symmetric]
 FOREWORDS:	individual IP packets are uniquely identified by their header fields values (a
 		rather large set of primitives!). Same applies to uni-directional IP flows, as
 		they have at least enough information to discriminate where packets are coming
@@ -630,22 +632,23 @@ DESC:		When 'false', it instructs [nf|sf]acctd to populate 'src_as' and 'dst_as'
 		the NetFlow and sFlow datagram respectively; when 'true' ('file' being an alias of 'true')
 		it instructs [nf|sf]acctd to generate ASNs by looking up source and destination IP addresses
 		against a 'networks_file' map. When 'bgp' is specified, ASNs are looked up against the BGP
-		RIB of the peer from which the NetFlow datagram was received. The assumption is: BGP Source
-		IP address equals to the sFlow/NetFlow source IP address.
+		RIB of the peer from which the NetFlow datagram was received. If not otherwise mapped via a
+		bgp_agent_map directive, the assumption is: BGP Source IP address equals to the sFlow/NetFlow
+		source IP address.
 		pmacctd and uacctd can't grasp ASNs from any protocol: 'false' (for backward compatibility),
 		'true' and 'file' expect a 'networks_file' to be defined. 'bgp' just works as described above.
 		(default: false) 
 
 KEY:            [ nfacctd_net | sfacctd_net | pmacctd_net | uacctd_net ] [GLOBAL]
 VALUES:         [ netflow | sflow | mask | file | bgp ]
-DESC:		Determines the source of data to perform network aggregation. 'netflow' and 'sflow' use 
-		netmask values carried within NetFlow and sFlow protocols; valid only in conjunction with
-		nfacctd and sfacctd. 'mask' selects a defined networks_mask; 'file' selects a defined
-		networks_file; 'bgp' uses netmask values carried within BGP protocol (not yet implemented).  
-		If this directive is not specified, the daemon falls back to compatibility mode, hence
-		enabling 'mask', if a networks_mask is defined, and 'file', if a networks_file. If both
-		are defined, the outcome will be the intersection of their definitions. (default: 'mask',
-		'file')
+DESC:		Determines the source of data to perform network aggregation - directly influencing 'src_net',
+		'dst_net', 'src_mask' and 'dst_mask' primitives. 'netflow' and 'sflow' use netmask values
+		carried within NetFlow and sFlow protocols; valid only in conjunction with nfacctd and sfacctd.
+		'mask' selects a defined networks_mask; 'file' selects a defined networks_file; 'bgp' uses
+		netmask values carried within BGP protocol (not yet implemented). If this directive is not
+		specified, the daemon falls back to backward compatibility mode, hence enabling 'mask', if a
+		networks_mask is defined, and 'file', if a networks_file. If both are defined, the outcome
+		will be the intersection of their definitions. (default: 'mask', 'file')
 
 KEY:		[ nfacctd_mcast_groups | sfacctd_mcast_groups ] [GLOBAL, NO_PMACCTD]
 DESC:		defines one or more IPv4/IPv6 multicast groups to be joined by the daemon. If more groups are
@@ -854,6 +857,11 @@ DESC:		maximum number of flows that can be tracked simultaneously. (default: 819
 KEY:		nfprobe_receiver
 DESC:		defines the remote IP address/hostname and port to which NetFlow dagagrams are to be exported.
 		The value is expected to be in the usual form 'address:port'. (default: 127.0.0.1:2100)
+
+KEY:            nfprobe_source_ip
+DESC:           defines the local IP address from which NetFlow dagagrams are to be exported. Only a numerical
+		IPv4/IPv6 address is expected. The supplied IP address is required to be already configured on
+		one of the interfaces. (default: IP address is selected by the OS)
 
 KEY:		nfprobe_version
 VALUES:		[5,9]
@@ -1072,4 +1080,15 @@ DESC:		Sets ULOG Netlink internal buffer size (specified in bytes). It is 4KB by
 		safely record bursts of high-speed traffic, it could be further increased. For high loads,
 		values as large as 2MB are recommended. When modifying this value, it is also recommended
 		to reflect the change to the 'snaplen' option. (default: 4096)
+
+KEY:		tunnel_0 [GLOBAL, NO_NFACCTD]
+DESC:		Defines tunnel inspection, disabled by default. The daemon will then account on tunnelled
+		data rather than on the envelope. The implementation approach is stateless, ie. control
+		messages are not handled. Up to 4 tunnel layers are supported (ie. <tun proto>, <options>;
+		<tun proto>, <options>; ...). Up to 8 tunnel stacks will be supported (ie. configuration
+		directives tunnel_0 .. tunnel_8), to be used in a strictly sequential order. First stack
+		matched at the first layering, wins. Below tunnel protocols supported and related options:
+
+		GTP, GPRS tunnelling protocol. Expects as option the UDP port identifying the protocol. 
+		tunnel_0: gtp, <UDP port> 
 

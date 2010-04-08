@@ -1,8 +1,8 @@
 dnl Process this file with autoconf to produce a configure script.
-dnl configuration file for pmacct
+dnl configuration file for pmacct 
 
-AC_INIT([src/pmacctd.c], [0.12.0], [paolo@pmacct.net])
-AM_INIT_AUTOMAKE([pmacctd], [0.12.0])
+AC_INIT([src/pmacctd.c], [0.12.1], [paolo@pmacct.net])
+AM_INIT_AUTOMAKE([pmacctd], [0.12.1])
 AC_PREFIX_DEFAULT([/usr/local])
 
 dnl Checks for programs.
@@ -55,6 +55,16 @@ AC_ARG_ENABLE(debug,
 	AC_MSG_RESULT(no)
 )
 
+dnl set relax level
+AC_MSG_CHECKING([whether to relax compiler optimizations])
+AC_ARG_ENABLE(relax,
+[  --enable-relax                   relax compiler optimization],
+	AC_MSG_RESULT(yes)
+        tmp_CFLAGS=`echo $CFLAGS | sed 's/O2/O0/g'`
+        CFLAGS="$tmp_CFLAGS",
+        AC_MSG_RESULT(no)
+)
+
 dnl os specific flags
 case "$host_os" in
   OSF*)
@@ -98,19 +108,19 @@ dnl some systems have __progname ; if this is the case and we play around argv
 dnl we need to enable a minor hack to make things work nicely.
 dnl
 AC_MSG_CHECKING(for __progname)
-AC_TRY_LINK([ extern char *__progname; ],
+AC_TRY_LINK([ extern char *__progname; ], 
 [ __progname = "test"; ],
 [AC_MSG_RESULT(yes); AC_DEFINE(PROGNAME, 1)], [AC_MSG_RESULT(no)])
 
 dnl
 dnl Some checks to understand whether we need to instruct the linker for
-dnl exporting collector symbols to dynamically loaded classifiers.
+dnl exporting collector symbols to dynamically loaded classifiers. 
 dnl
 dnl OS'es with ELF executables using the GNU linker (Linux and recent *BSD,
 dnl in rare cases Solaris) typically need '-Wl,-export-dynamic'; some SYSv4
 dnl systems instead need '-Wl,-Bexport'; AIX 4.x wants -Wl,-bexpall,-brtl'.
 dnl
-
+      
 AC_MSG_CHECKING(for extra flags needed to export symbols)
 if test "x$ac_cv_prog_gcc" = xyes ; then
   case $host_os in
@@ -151,9 +161,9 @@ static inline func()
 [AC_MSG_RESULT(yes)], [AC_MSG_RESULT(no); AC_DEFINE(NOINLINE, 1)])
 
 dnl
-dnl Check for architecture endianess: big | little
+dnl Check for architecture endianess: big | little 
 dnl
-dnl XXX: switch to manually define this feature
+dnl XXX: switch to manually define this feature 
 ac_cv_endianess="unknown"
 if test x"$ac_cv_endianess" = x"unknown"; then
   AC_MSG_CHECKING(endianess)
@@ -240,19 +250,19 @@ AC_ARG_ENABLE(l2,
         [  --disable-l2                     disable Layer-2 features and support],
         if test x$enableval = x"yes" ; then
           AC_MSG_RESULT(no)
-	  AC_DEFINE(HAVE_L2, 1)
+	  AC_DEFINE(HAVE_L2, 1) 
         else
           AC_MSG_RESULT(yes)
         fi
         ,
         AC_MSG_RESULT(no)
-	AC_DEFINE(HAVE_L2, 1)
+	AC_DEFINE(HAVE_L2, 1) 
 )
 
 AC_MSG_CHECKING([whether to enable IPv6 code])
 AC_ARG_ENABLE(ipv6,
         [  --enable-ipv6                    Enable IPv6 code],
-	[
+	[ 
         AC_MSG_RESULT(yes)
         AC_CHECK_FUNCS(inet_pton)
         if test x"$ac_cv_func_inet_pton" = x"no"; then
@@ -275,11 +285,11 @@ AC_ARG_ENABLE(ipv6,
 	ipv6support="no"
 )
 
-if test $ipv6support = "yes"; then
+if test $ipv6support = "yes"; then 
 AC_MSG_CHECKING([whether to enable IPv4-mapped IPv6 sockets ])
-AC_ARG_ENABLE(v4-mapped,
+AC_ARG_ENABLE(v4-mapped,		    
 	[  --enable-v4-mapped               allow IPv6 sockets to handle IPv4 connections],
-	[
+	[ 
 	if test x$enableval = x"yes" ; then
 	  AC_DEFINE(V4_MAPPED, 1)
 	  AC_MSG_RESULT(yes)
@@ -310,12 +320,12 @@ AC_ARG_WITH(pcap-includes,
 
 if test x"$PCAPINCLS" != x""; then
   AC_MSG_CHECKING(your own pcap includes)
-  if test -r $PCAPINCLS/pcap.h; then
+  if test -r $PCAPINCLS/pcap.h; then 
     AC_MSG_RESULT(ok)
     AC_DEFINE(HAVE_PCAP_H, 1)
   else
     AC_MSG_RESULT(no)
-    AC_MSG_ERROR(ERROR: missing pcap.h in $PCAPINCLS)
+    AC_MSG_ERROR(ERROR: missing pcap.h in $PCAPINCLS) 
   fi
 fi
 
@@ -333,7 +343,7 @@ if test x"$PCAPINCLUDESFOUND" = x""; then
     AC_MSG_RESULT([found in /usr/local/include])
     INCLUDES="${INCLUDES} -I/usr/local/include"
     PCAPINCLUDESFOUND=1
-    AC_DEFINE(HAVE_PCAP_H, 1)
+    AC_DEFINE(HAVE_PCAP_H, 1) 
   elif test -r /usr/local/include/pcap/pcap.h; then
     AC_MSG_RESULT([found in /usr/local/include])
     INCLUDES="${INCLUDES} -I/usr/local/include"
@@ -348,7 +358,7 @@ fi
 
 AC_ARG_WITH(pcap-libs,
   [  --with-pcap-libs=DIR             Search the specified directories for libraries],
-  [
+  [	
 	AC_LINEARIZE_PATH($withval, withval=$absdir)
 	LIBS="${LIBS} -L$withval"
 	PCAPLIB=$withval
@@ -360,6 +370,14 @@ if test x"$PCAPLIB" != x""; then
   if test -r $PCAPLIB/libpcap.a -o -r $PCAPLIB/libpcap.so; then
     AC_MSG_RESULT(ok)
     PCAP_LIB_FOUND=1
+    AC_MSG_CHECKING(for PF_RING library)
+    if test -r $PCAPLIB/libpfring.a -o -r $PCAPLIB/libpfring.so; then
+      LIBS="${LIBS} -lpcap -lpfring"
+      AC_MSG_RESULT(yes)
+      PFRING_LIB_FOUND=1
+    else
+      AC_MSG_RESULT(no)
+    fi
   else
     AC_MSG_RESULT(no)
     AC_MSG_ERROR(ERROR: unable to find pcap library in $PCAPLIB)
@@ -372,17 +390,29 @@ if test x"$PCAPLIBFOUND" = x""; then
     LIBS="${LIBS} -L/usr/local/lib"
     AC_MSG_RESULT([found in /usr/local/lib])
     PCAPLIBFOUND=1
+    AC_MSG_CHECKING(for PF_RING library)
+    if test -r /usr/local/lib/libpfring.a -o -r /usr/local/lib/libpfring.so; then
+      LIBS="${LIBS} -lpcap -lpfring"
+      AC_MSG_RESULT(yes)
+      PFRING_LIB_FOUND=1
+    else
+      AC_MSG_RESULT(no)
+    fi
   else
     AC_MSG_RESULT(no)
   fi
 fi
 
 dnl Checks for libraries.
-AC_CHECK_LIB([pcap], [pcap_dispatch], [], [AC_MSG_ERROR([
-  ERROR: missing pcap library. Refer to: http://www.tcpdump.org/
-])])
+
+dnl libpcap is checked only if PF_RING is not found
+if test x"$PFRING_LIB_FOUND" = x""; then
+  AC_CHECK_LIB([pcap], [pcap_dispatch], [], [AC_MSG_ERROR([
+    ERROR: missing pcap library. Refer to: http://www.tcpdump.org/
+  ])])
 
 AC_CHECK_LIB([pcap], [pcap_setnonblock], [ AC_DEFINE(PCAP_7, 1) ], [])
+fi
 
 dnl packet capture type check; taken from libpcap.
 AC_MSG_CHECKING(packet capture type)
@@ -437,7 +467,7 @@ AC_ARG_ENABLE(mysql,
 	LIBS="${LIBS} -L$withval"
 	MYSQLLIB=$withval
 	MYSQLLIBFOUND=1
-      ])
+      ]) 
 
     if test x"$MYSQLLIB" != x""; then
       AC_MSG_CHECKING(your own MySQL client library)
@@ -463,7 +493,7 @@ AC_ARG_ENABLE(mysql,
 	LIBS="${LIBS} -L/usr/local/lib/mysql"
 	AC_MSG_RESULT([found in /usr/local/lib/mysql])
 	MYSQLLIBFOUND=1
-      else
+      else 
         AC_MSG_RESULT([not found])
       fi
     fi
@@ -472,7 +502,7 @@ AC_ARG_ENABLE(mysql,
       AC_CHECK_LIB([mysqlclient], [mysql_real_connect], [], [AC_MSG_ERROR([
         ERROR: missing MySQL client library. Refer to: http://www.mysql.com/
       ])])
-    else
+    else 
       LIBS="${LIBS} -lmysqlclient"
       case "$host_os" in
         Sun*)
@@ -503,7 +533,7 @@ AC_ARG_ENABLE(mysql,
       fi
     fi
 
-    if test x"$MYSQLINCLUDESFOUND" = x""; then
+    if test x"$MYSQLINCLUDESFOUND" = x""; then 
       AC_MSG_CHECKING([default locations for mysql.h])
       if test -r /usr/include/mysql/mysql.h; then
 	AC_MSG_RESULT([found in /usr/include/mysql])
@@ -525,12 +555,12 @@ AC_ARG_ENABLE(mysql,
 
     if test x"$MYSQLINCLUDESFOUND" = x""; then
       AC_CHECK_HEADER([mysql/mysql.h],,
-      [AC_MSG_ERROR(ERROR: missing MySQL headers)])
+      [AC_MSG_ERROR(ERROR: missing MySQL headers)])      
     fi
 
     AC_DEFINE(WITH_MYSQL, 1)
     PLUGINS="${PLUGINS} mysql_plugin.c"
-    EXTRABIN="${EXTRABIN} pmmyplay"
+    EXTRABIN="${EXTRABIN} pmmyplay" 
     ;;
   no)
     AC_MSG_RESULT(no)
@@ -555,7 +585,7 @@ AC_ARG_ENABLE(pgsql,
 	LIBS="${LIBS} -L$withval"
 	PGSQLLIB=$withval
 	PGSQLLIBFOUND=1
-      ])
+      ]) 
 
     if test x"$PGSQLLIB" != x""; then
       AC_MSG_CHECKING(your own PostgreSQL client library)
@@ -580,7 +610,7 @@ AC_ARG_ENABLE(pgsql,
 	LIBS="${LIBS} -L/usr/local/pgsql/lib"
 	AC_MSG_RESULT([found in /usr/local/pgsql/lib])
 	PGSQLLIBFOUND=1
-      else
+      else 
         AC_MSG_RESULT([not found])
       fi
     fi
@@ -589,9 +619,9 @@ AC_ARG_ENABLE(pgsql,
       AC_CHECK_LIB([pq], [PQconnectdb], [], [AC_MSG_ERROR([
         ERROR: missing PQ library. Refer to: http://www.postgresql.org/
       ])])
-    else
+    else 
       LIBS="${LIBS} -lpq"
-    fi
+    fi 
 
     AC_ARG_WITH(pgsql-includes,
       [  --with-pgsql-includes=DIR        Search for PostgreSQL includes in the specified directory],
@@ -612,7 +642,7 @@ AC_ARG_ENABLE(pgsql,
       fi
     fi
 
-    if test x"$PGSQLINCLUDESFOUND" = x""; then
+    if test x"$PGSQLINCLUDESFOUND" = x""; then 
       AC_MSG_CHECKING([default locations for libpq-fe.h])
       if test -r /usr/include/libpq-fe.h; then
 	AC_MSG_RESULT([found in /usr/include])
@@ -633,12 +663,12 @@ AC_ARG_ENABLE(pgsql,
 
     if test x"$PGSQLINCLUDESFOUND" = x""; then
       AC_CHECK_HEADER([libpq-fe.h],,
-      [AC_MSG_ERROR(ERROR: missing PostgreSQL headers)])
+      [AC_MSG_ERROR(ERROR: missing PostgreSQL headers)])      
     fi
 
     AC_DEFINE(WITH_PGSQL, 1)
     PLUGINS="${PLUGINS} pgsql_plugin.c"
-    EXTRABIN="${EXTRABIN} pmpgplay"
+    EXTRABIN="${EXTRABIN} pmpgplay" 
     ;;
   no)
     AC_MSG_RESULT(no)
@@ -662,7 +692,7 @@ AC_ARG_ENABLE(sqlite3,
 	LIBS="${LIBS} -L$withval"
 	SQLITE3LIB=$withval
 	SQLITE3LIBFOUND=1
-      ])
+      ]) 
 
     if test x"$SQLITE3LIB" != x""; then
       AC_MSG_CHECKING(your own SQLite3 client library)
@@ -688,7 +718,7 @@ AC_ARG_ENABLE(sqlite3,
 	LIBS="${LIBS} -L/usr/local/lib"
 	AC_MSG_RESULT([found in /usr/local/lib])
 	SQLITE3LIBFOUND=1
-      else
+      else 
         AC_MSG_RESULT([not found])
       fi
     fi
@@ -697,9 +727,9 @@ AC_ARG_ENABLE(sqlite3,
       AC_CHECK_LIB([sqlite3], [sqlite3_open], [], [AC_MSG_ERROR([
         ERROR: missing SQLite3 client library. Refer to: http://sqlite.org/
       ])])
-    else
+    else 
       LIBS="${LIBS} -lsqlite3"
-    fi
+    fi 
 
     AC_ARG_WITH(sqlite3-includes,
       [  --with-sqlite3-includes=DIR      Search for SQLite3 includes in the specified directory],
@@ -720,7 +750,7 @@ AC_ARG_ENABLE(sqlite3,
       fi
     fi
 
-    if test x"$SQLITE3INCLUDESFOUND" = x""; then
+    if test x"$SQLITE3INCLUDESFOUND" = x""; then 
       AC_MSG_CHECKING([default locations for sqlite3.h])
       if test -r /usr/include/sqlite3.h; then
 	AC_MSG_RESULT([found in /usr/include])
@@ -741,7 +771,7 @@ AC_ARG_ENABLE(sqlite3,
 
     if test x"$SQLITE3INCLUDESFOUND" = x""; then
       AC_CHECK_HEADER([sqlite3.h],,
-      [AC_MSG_ERROR(ERROR: missing SQLite3 headers)])
+      [AC_MSG_ERROR(ERROR: missing SQLite3 headers)])      
     fi
 
     AC_DEFINE(WITH_SQLITE3, 1)
@@ -759,12 +789,12 @@ AC_ARG_ENABLE(so,
         [  --disable-so                     Disable shared objects],
         if test x$enableval = x"yes" ; then
           AC_MSG_RESULT(no)
-	  AC_CHECK_FUNC(dlopen, [ USING_DLOPEN="yes" ], [])
-	  if test x"$USING_DLOPEN" != x"yes"; then
+	  AC_CHECK_FUNC(dlopen, [ USING_DLOPEN="yes" ], []) 
+	  if test x"$USING_DLOPEN" != x"yes"; then 
 	    AC_CHECK_LIB(dl, dlopen,
 		[ USING_DLOPEN="yes"
 		  LIBS="${LIBS} -ldl" ],
-		[ AC_MSG_ERROR(Unable to find dlopen(). Try with --disable-so) ])
+		[ AC_MSG_ERROR(Unable to find dlopen(). Try with --disable-so) ]) 
 	  fi
         else
           AC_MSG_RESULT(yes)
@@ -787,7 +817,7 @@ fi
 
   if test x"$USING_SQL" = x"yes"; then
     PLUGINS="${PLUGINS} sql_common.c sql_handlers.c log_templates.c preprocess.c"
-    LIBS="${LIBS}"
+    LIBS="${LIBS} -lm -lz"
   fi
 
 dnl Checks for header files.
@@ -824,7 +854,7 @@ AC_ARG_ENABLE(threads,
         if test x$enableval = x"yes" ; then
           AC_MSG_RESULT(yes)
           AC_DEFINE(ENABLE_THREADS, 1)
-
+	  
 	  dnl OS Specifics
 	  [
 	    case "$host" in
@@ -866,7 +896,7 @@ dnl AC_CHECK_FUNCS(inet_ntoa socket)
 AC_CHECK_FUNCS([strlcpy vsnprintf setproctitle])
 
 dnl final checks
-dnl trivial solution to portability issue
+dnl trivial solution to portability issue 
 CFLAGS="${CFLAGS} ${INCLUDES}"
 INCLUDES=""
 
