@@ -170,6 +170,10 @@ int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
     else if (!strcmp(count_token, "src_local_pref")) value |= COUNT_SRC_LOCAL_PREF;
     else if (!strcmp(count_token, "src_med")) value |= COUNT_SRC_MED;
     else if (!strcmp(count_token, "is_symmetric")) value |= COUNT_IS_SYMMETRIC;
+    else if (!strcmp(count_token, "in_iface")) value |= COUNT_IN_IFACE;
+    else if (!strcmp(count_token, "out_iface")) value |= COUNT_OUT_IFACE;
+    else if (!strcmp(count_token, "src_mask")) value |= COUNT_SRC_NMASK;
+    else if (!strcmp(count_token, "dst_mask")) value |= COUNT_DST_NMASK;
     else Log(LOG_WARNING, "WARN ( %s ): ignoring unknown aggregation method: %s.\n", filename, count_token);
   }
 
@@ -2555,5 +2559,18 @@ int cfg_key_uacctd_nl_size(char *filename, char *name, char *value_ptr)
   value = atoi(value_ptr);
 
   for (; list; list = list->next, changes++) list->cfg.uacctd_nl_size = value;
+  return changes;
+}
+
+int cfg_key_tunnel_0(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  trim_all_spaces(value_ptr);
+
+  for (; list; list = list->next, changes++) list->cfg.tunnel0 = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'tunnel_0'. Globalized.\n", filename);
+
   return changes;
 }

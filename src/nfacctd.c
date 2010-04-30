@@ -55,7 +55,7 @@ void usage_daemon(char *prog_name)
   printf("  -L  \tBind to the specified IP address\n");
   printf("  -l  \tListen on the specified UDP port\n");
   printf("  -f  \tLoad configuration from the specified file\n");
-  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | none ] \n\tAggregation string (DEFAULT: src_host)\n");
+  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | in_iface | out_iface | src_mask | dst_mask | none ] \n\tAggregation string (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
   printf("  -n  \tPath to a file containing Network definitions\n");
   printf("  -o  \tPath to a file containing Port definitions\n");
@@ -356,6 +356,12 @@ int main(int argc,char **argv, char **envp)
 #endif
 	list->cfg.what_to_count |= COUNT_SRC_HOST;
 	list->cfg.what_to_count |= COUNT_DST_HOST;
+
+        if (list->cfg.networks_file || list->cfg.networks_mask || list->cfg.nfacctd_net) {
+          list->cfg.what_to_count |= COUNT_SRC_NMASK;
+          list->cfg.what_to_count |= COUNT_DST_NMASK;
+        }
+
 	list->cfg.what_to_count |= COUNT_SRC_PORT;
 	list->cfg.what_to_count |= COUNT_DST_PORT;
 	list->cfg.what_to_count |= COUNT_IP_TOS;
@@ -371,6 +377,8 @@ int main(int argc,char **argv, char **envp)
 	  list->cfg.what_to_count |= COUNT_ID;
 	  list->cfg.what_to_count |= COUNT_ID2;
 	}
+        list->cfg.what_to_count |= COUNT_IN_IFACE;
+        list->cfg.what_to_count |= COUNT_OUT_IFACE;
         if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                        COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
 				       COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
@@ -422,7 +430,7 @@ int main(int argc,char **argv, char **envp)
           Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation selected but 'bgp_daemon' is not enabled. Exiting...\n\n", list->name, list->type.string);
           exit(1);
         }
-	if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) {
+	if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET|COUNT_SRC_NMASK|COUNT_DST_NMASK)) {
 	  if (!list->cfg.nfacctd_net) {
 	    if (list->cfg.networks_file) list->cfg.nfacctd_net |= NF_NET_NEW;
 	    if (list->cfg.networks_mask) list->cfg.nfacctd_net |= NF_NET_STATIC;

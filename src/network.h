@@ -1,6 +1,22 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+*/
+
+/*
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if no, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
 #include "../include/extract.h"
@@ -145,9 +161,23 @@ struct my_tcphdr
     u_int16_t th_urp;           /* urgent pointer */
 };
 
+struct my_udphdr
+{
+  u_int16_t uh_sport;           /* source port */
+  u_int16_t uh_dport;           /* destination port */
+  u_int16_t uh_ulen;            /* udp length */
+  u_int16_t uh_sum;             /* udp checksum */
+};
+
 struct my_tlhdr {
    u_int16_t	src_port;	/* source and destination ports */
    u_int16_t	dst_port;
+};
+
+struct my_gtphdr {
+    u_int8_t flags;
+    u_int8_t message;
+    u_int16_t length;
 };
 
 /* typedefs */
@@ -207,6 +237,8 @@ struct packet_ptrs {
 		      1=the packet is being distributed for the 2nd+ time */
   u_int16_t ifindex_in;  /* input ifindex; only used by ULOG for the time being */
   u_int16_t ifindex_out; /* output ifindex; only used by ULOG for the time being */
+  u_int8_t tun_stack; /* tunnelling stack */
+  u_int8_t tun_layer; /* tunnelling layer count */
 };
 
 struct host_addr {
@@ -227,12 +259,16 @@ struct pkt_primitives {
 #endif
   struct host_addr src_ip;
   struct host_addr dst_ip;
+  u_int8_t src_nmask;
+  u_int8_t dst_nmask;
   as_t src_as;
   as_t dst_as;
   u_int16_t src_port;
   u_int16_t dst_port;
   u_int8_t tos;
   u_int8_t proto;
+  u_int32_t ifindex_in;
+  u_int32_t ifindex_out;
   pm_id_t id;
   pm_id_t id2;
   pm_class_t class;
@@ -260,15 +296,17 @@ struct pkt_payload {
   pm_id_t tag2;
   struct host_addr src_ip;
   struct host_addr dst_ip;
+  as_t src_as;
+  as_t dst_as;
   u_int16_t ifindex_in;
   u_int16_t ifindex_out;
+  u_int8_t src_nmask;
+  u_int8_t dst_nmask;
 };
 
 struct pkt_extras {
   u_int8_t tcp_flags;
   u_int32_t mpls_top_label;
-  u_int16_t ifindex_in;
-  u_int16_t ifindex_out;
 };
 
 /* START: BGP section */
@@ -332,3 +370,23 @@ struct hosts_table {
   struct host_addr table[MAX_MAP_ENTRIES];
 };
 
+#define TUNNEL_PROTO_STRING	16
+#define TUNNEL_REGISTRY_STACKS	9 /* MAX + 1 */
+#define TUNNEL_REGISTRY_ENTRIES 4 
+typedef int (*tunnel_func)(register struct packet_ptrs *);
+
+struct tunnel_handler {
+  tunnel_func tf;
+  u_int8_t proto;
+  u_int16_t port;
+};
+
+typedef int (*tunnel_configurator)(struct tunnel_handler *, char *);
+
+struct tunnel_entry {
+  u_char type[TUNNEL_PROTO_STRING];
+  tunnel_func tf;
+  tunnel_configurator tc;
+};
+
+struct tunnel_handler tunnel_registry[TUNNEL_REGISTRY_STACKS][TUNNEL_REGISTRY_ENTRIES];

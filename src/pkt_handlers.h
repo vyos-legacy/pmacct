@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -52,6 +52,8 @@ EXT void counters_renormalize_handler(struct channels_list_entry *, struct packe
 EXT void id_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void flows_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void class_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void in_iface_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void out_iface_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void sfprobe_payload_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void nfprobe_extras_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 
@@ -60,6 +62,8 @@ EXT void NF_dst_mac_handler(struct channels_list_entry *, struct packet_ptrs *, 
 EXT void NF_vlan_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_src_host_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_dst_host_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void NF_src_nmask_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void NF_dst_nmask_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_src_port_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_dst_port_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_src_as_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
@@ -72,6 +76,8 @@ EXT void NF_counters_secs_handler(struct channels_list_entry *, struct packet_pt
 EXT void NF_counters_new_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_flows_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_class_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void NF_in_iface_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void NF_out_iface_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_id_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_id2_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void NF_sfprobe_payload_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
@@ -87,12 +93,16 @@ EXT void bgp_src_med_frommap_handler(struct channels_list_entry *, struct packet
 EXT void bgp_is_symmetric_frommap_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void bgp_src_net_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void bgp_dst_net_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void bgp_src_nmask_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void bgp_dst_nmask_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 
 EXT void SF_src_mac_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_dst_mac_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_vlan_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_src_host_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_dst_host_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void SF_src_nmask_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void SF_dst_nmask_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_src_port_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_dst_port_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_src_as_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
@@ -107,6 +117,8 @@ EXT void SF_id2_handler(struct channels_list_entry *, struct packet_ptrs *, char
 EXT void SF_sfprobe_payload_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_nfprobe_extras_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_class_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void SF_in_iface_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void SF_out_iface_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_sampling_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_bgp_peer_src_as_fromext_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 EXT void SF_bgp_peer_src_as_fromstd_handler(struct channels_list_entry *, struct packet_ptrs *, char **);

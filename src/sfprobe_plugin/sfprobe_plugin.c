@@ -243,7 +243,9 @@ static void init_agent(SflSp *sp)
   sp->sampler = sfl_agent_getSampler(sp->agent, &dsi);
 }
 
-#define NF_AS_BGP 2
+#define NF_AS_KEEP 0
+#define NF_AS_NEW  1
+#define NF_AS_BGP  2
 /*_________________---------------------------__________________
   _________________       readPacket          __________________
   -----------------___________________________------------------
@@ -251,43 +253,58 @@ static void init_agent(SflSp *sp)
 
 static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *buf)
 {
-  SFLFlow_sample_element hdrElem, classHdrElem, gatewayHdrElem, tagHdrElem;
+  SFLFlow_sample_element hdrElem, classHdrElem, gatewayHdrElem, routerHdrElem, tagHdrElem;
   SFLExtended_as_path_segment as_path_segment;
   u_int32_t frame_len, header_len;
-  int direction, sampledPackets;
+  int direction, sampledPackets, ethHdrLen;
+  struct eth_header dummy_eh;
+  u_int16_t ethType = 0, cap_len = hdr->cap_len, pkt_len = hdr->pkt_len;
+  unsigned char *local_buf = (unsigned char *) buf;
+
+  /* If we have a dummy ethernet header, we strip it here;
+     we have rewritten Ethertype field: only src/dst MAC
+     addresses should be compared */
+  ethHdrLen = sizeof(dummy_eh);
+  memset(&dummy_eh, 0, ethHdrLen);
+  if (memcmp(&dummy_eh, local_buf, ethHdrLen-2) == 0) {
+    ethType = ((struct eth_header *)local_buf)->ether_type;
+    local_buf += ethHdrLen;
+    cap_len -= ethHdrLen;
+    pkt_len -= ethHdrLen;
+  }
 
   Log(LOG_DEBUG, "DEBUG ( %s/%s ): %02x%02x%02x%02x%02x%02x -> %02x%02x%02x%02x%02x%02x (len = %d, captured = %d)\n",
 		  	     config.name, config.type,
-			     buf[6],
-			     buf[7],
-			     buf[8],
-			     buf[9],
-			     buf[10],
-			     buf[11],
-			     buf[0],
-			     buf[1],
-			     buf[2],
-			     buf[3],
-			     buf[4],
-			     buf[5],
-			     hdr->pkt_len,
-			     hdr->cap_len);
+			     local_buf[6],
+			     local_buf[7],
+			     local_buf[8],
+			     local_buf[9],
+			     local_buf[10],
+			     local_buf[11],
+			     local_buf[0],
+			     local_buf[1],
+			     local_buf[2],
+			     local_buf[3],
+			     local_buf[4],
+			     local_buf[5],
+			     pkt_len,
+			     cap_len);
 
   // test the src mac address to know the direction.  Anything with src = interfaceMAC
   // will be counted as output, and everything else can be counted as input.  (There may
   // be a way to get this info from the pcap library,  but I don't know the incantation.
   // (If you know how to do that, please let me know).
-  direction = memcmp(sp->interfaceMAC, buf + 6, 6) ? SFL_DIRECTION_IN : SFL_DIRECTION_OUT;
+  direction = memcmp(sp->interfaceMAC, local_buf + 6, 6) ? SFL_DIRECTION_IN : SFL_DIRECTION_OUT;
 
   // maintain some counters in software - just to ease portability
-  sp->bytes[direction] += hdr->pkt_len;
-  if (buf[0] & 0x01) {
-    if(buf[0] == 0xff &&
-       buf[1] == 0xff &&
-       buf[2] == 0xff &&
-       buf[3] == 0xff &&
-       buf[4] == 0xff &&
-       buf[5] == 0xff) sp->broadcasts[direction]++;
+  sp->bytes[direction] += pkt_len;
+  if (local_buf[0] & 0x01) {
+    if(local_buf[0] == 0xff &&
+       local_buf[1] == 0xff &&
+       local_buf[2] == 0xff &&
+       local_buf[3] == 0xff &&
+       local_buf[4] == 0xff &&
+       local_buf[5] == 0xff) sp->broadcasts[direction]++;
     else sp->multicasts[direction]++;
   }
   else sp->frames[direction]++;
@@ -300,7 +317,7 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
     /* In case of flows (ie. hdr->pkt_num > 1) we have now computed how
        many packets to sample; let's cheat counters */
     if (sampledPackets > 1) {
-      hdr->pkt_len = hdr->pkt_len / hdr->pkt_num; 
+      pkt_len = pkt_len / hdr->pkt_num; 
       hdr->pkt_num = 1;
     }
 
@@ -327,12 +344,26 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
       memset(&hdrElem, 0, sizeof(hdrElem));
 
       hdrElem.tag = SFLFLOW_HEADER;
-      hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
+
+      if (!ethType) hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
+      else {
+        switch (ntohs(ethType)) {
+        case ETHERTYPE_IP:
+          hdrElem.flowType.header.header_protocol = SFLHEADER_IPv4;
+          break;
+        case ETHERTYPE_IPV6:
+          hdrElem.flowType.header.header_protocol = SFLHEADER_IPv6; 
+          break;
+	default:
+	  hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
+	  break;
+        }
+      }
     
       // the FCS trailing bytes should be counted in the frame_length
       // but they should also be recorded in the "stripped" field.
       // assume that libpcap is not giving us the FCS
-      frame_len = hdr->pkt_len;
+      frame_len = pkt_len;
       if (config.acct_type == ACCT_PM) {
         u_int32_t FCS_bytes = 4;
         hdrElem.flowType.header.frame_length = frame_len + FCS_bytes;
@@ -340,11 +371,11 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
       }
       else hdrElem.flowType.header.frame_length = frame_len;
 
-      header_len = hdr->cap_len;
+      header_len = cap_len;
       if (header_len > frame_len) header_len = frame_len;
       if (header_len > sp->snaplen) header_len = sp->snaplen;
       hdrElem.flowType.header.header_length = header_len;
-      hdrElem.flowType.header.header_bytes = (u_int8_t *)buf;
+      hdrElem.flowType.header.header_bytes = (u_int8_t *)local_buf;
       SFLADD_ELEMENT(&fs, &hdrElem);
 
       if (config.what_to_count & COUNT_CLASS) {
@@ -372,13 +403,21 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
 	memset(&as_path_segment, 0, sizeof(as_path_segment));
 	gatewayHdrElem.tag = SFLFLOW_EX_GATEWAY;
 	// gatewayHdrElem.flowType.gateway.src_as = htonl(hdr->src_ip.address.ipv4.s_addr);
-	gatewayHdrElem.flowType.gateway.src_as = hdr->src_ip.address.ipv4.s_addr;
+	gatewayHdrElem.flowType.gateway.src_as = hdr->src_as;
 	gatewayHdrElem.flowType.gateway.dst_as_path_segments = 1;
 	gatewayHdrElem.flowType.gateway.dst_as_path = &as_path_segment;
 	as_path_segment.type = SFLEXTENDED_AS_SET;
 	as_path_segment.length = 1;
-	as_path_segment.as.set = &hdr->dst_ip.address.ipv4.s_addr;
+	as_path_segment.as.set = &hdr->dst_as;
 	SFLADD_ELEMENT(&fs, &gatewayHdrElem);
+      }
+
+      if (config.what_to_count & (COUNT_SRC_NMASK|COUNT_DST_NMASK)) {
+	memset(&routerHdrElem, 0, sizeof(routerHdrElem));
+	routerHdrElem.tag = SFLFLOW_EX_ROUTER;
+	routerHdrElem.flowType.router.src_mask = hdr->src_nmask; 
+	routerHdrElem.flowType.router.dst_mask = hdr->dst_nmask;
+	SFLADD_ELEMENT(&fs, &routerHdrElem);
       }
 
       // submit the sample to be encoded and sent out - that's all there is to it(!)
@@ -426,6 +465,8 @@ static void process_config_options(SflSp *sp)
   _________________         sfprobe_plugin    __________________
   -----------------___________________________------------------
 */
+
+#define NF_NET_NEW      0x00000002
 
 void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 {
@@ -491,7 +532,7 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   memset(&dummy, 0, sizeof(dummy));
 
   if (config.networks_file) {
-    config.what_to_count |= (COUNT_SRC_AS|COUNT_DST_AS);
+    config.what_to_count |= (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SRC_NMASK|COUNT_DST_NMASK);
     load_networks(config.networks_file, &nt, &nc);
     set_net_funcs(&nt);
   }
@@ -561,10 +602,15 @@ read_data:
 
 	  for (num = 0; net_funcs[num]; num++) (*net_funcs[num])(&nt, &nc, &dummy.primitives);
 
-	  memset(&hdr->src_ip, 0, HostAddrSz);
-	  memset(&hdr->dst_ip, 0, HostAddrSz);
-	  hdr->src_ip.address.ipv4.s_addr = dummy.primitives.src_as;
-	  hdr->dst_ip.address.ipv4.s_addr = dummy.primitives.dst_as;
+          if (config.nfacctd_as == NF_AS_NEW) {
+	    hdr->src_as = dummy.primitives.src_as;
+	    hdr->dst_as = dummy.primitives.dst_as;
+          }
+
+          if (config.nfacctd_net == NF_NET_NEW) {
+            hdr->src_nmask = dummy.primitives.src_nmask;
+            hdr->dst_nmask = dummy.primitives.dst_nmask;
+          }
 	}
 	
 	readPacket(&sp, hdr, pipebuf_ptr);
