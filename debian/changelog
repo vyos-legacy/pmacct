@@ -1,3 +1,62 @@
+pmacct (0.12.2+vyatta+1) unstable; urgency=low
+
+  [ paolo ]
+  * * Input/output interfaces (SNMP index) have been implemented
+    natively; it's therefore not required anymore to pass through the
+    tag infrastructure. As a result two aggregation primitives are being
+    introduced: 'in_iface' and 'out_iface'. * Updated documentation.
+    Also added sql/README.iface to describe usage of 'in_iface' and
+    'out_iface' primitives; added sql/README.is_symmetric to describe
+    usage of 'is_symmetric' primitive.
+  * * Support for source/destination IP prefix masks is introduced via
+    two new aggregation primitives: src_mask and dst_mask. These are
+    populated as per the [nf|sf|pm|u]acctd_net directive: NetFlow/sFlow
+    protocols, BGP, Network files (networks_file) or static
+    (networks_mask) being valid data sources. * fix, nfacctd.h: source
+    and destination netmasks were twisted within the NetFlow v5
+    structure. Affected releases are: 0.12.0rc4 and 0.12.0. *
+    Documentation updated.
+  * * nfprobe: network masks are now exported via NetFlow v5/v9.
+    'pmacctd_net' and its equivalents steer how to populate
+    src_mask/dst_mask values. * cleanup, nfprobe/sfprobe: data source
+    for src_as/dst_as primitives is now expected to be always
+    explicitely defined. The only case affected is getting ASN values
+    out of a Networks File: up to now, it was sufficient to define a
+    networks_file to use it; now 'pmacctd_as: file' needs to be
+    configured aswell.
+  * * sfprobe: network masks are now exported via sFlow v5.
+    'pmacctd_net' and its equivalents steer how to populate
+    src_mask/dst_mask values.
+  * * Initial implementation of tunnel inspection feature in pmacctd and
+    uacctd daemons. Tunnel handlers might be feeded with options via
+    configuration. Once enabled, the daemon will then account on
+    tunnelled data rather than on the envelope. At this time only
+    supported tunnel protocol is GTP, the GPRS tunnelling protocol
+    (configured as: "tunnel_0: gtp, <UDP port>").
+  * * Tunnel inspection generalized: internal structures will allow up
+    to 8 tunnel stacks. Up to 4 tunnel layers per stack are already
+    supported. First matching stack at the first layer, wins. * fix,
+    nfprobe_plugin.c: l2_to_flowrec() was missing variable declaration
+    if the package was configured for compilation with --disable-l2.
+    Thanks to Brent Van Dussen for reporting the issue.
+  * * uacctd: introduced MAC layer support the for Netlink/ULOG socket
+  * * fix, bgp.c: bgp_attr_munge_as4path() return code was not defined
+    for some cases. This was causing some BGP messages to be considered
+    as malformed.
+  * * sfprobe: if the MAC layer is not available, change header protocol
+    to 11 (IPv4) or 12 (IPv6) from 1.
+  * * Building sub-system: PF_RING workaround for pcap_dispatch not
+    found
+  * * Building sub-system: PF_RING workaround addendum
+  * * ChangeLog updated * Documentation updated
+  * * Documentation updated * Building sub-system: relax compiler
+    optimizations option added
+  * * Rolling version counters
+
+  [ Stig Thormodsrud ]
+
+ -- Stig Thormodsrud <stig@vyatta.com>  Sat, 01 May 2010 11:54:42 -0700
+
 pmacct (0.12.1+vyatta+1) unstable; urgency=low
 
   [ paolo ]
