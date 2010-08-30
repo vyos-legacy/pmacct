@@ -1,3 +1,126 @@
+pmacct (0.12.3+vyatta+1) unstable; urgency=low
+
+  [ paolo ]
+  * * peer_src_ip (IP address/agent ID of the device exporting
+    NetFlow/sFlow datagrams) and peer_dst_ip (BGP next-hop) can now be
+    filled from NetFlow/ sFlow protocols data. To activate,
+    nfacctd_as_new/sfacctd_as_new have to be 'false' (default value),
+    'true' or 'file'.
+  * * BGP daemon: new bgp_daemon_ipprec feature allows to mark self-
+    originated BGP messages with the supplied IP precedence value.
+  * * BGP daemon, bgp_daemon_ipprec: SOL_IP moved to IPPROTO_IP for
+    better portability. Added detection for failure setting IP_TOS
+    socket option.
+  * * nfprobe, sfprobe: introduced support for export of the BGP next-
+    hop information. Source data selection for BGP next-hop is being
+    linked to [pmacctd_as|uacctd_as] configuration directive. Hence it
+    must be set to 'bgp' in order for this feature to work.
+  * * Enhanced 802.1ad pmacctd support. While recursing, outer VLAN is
+    always reported as value of the 'vlan' primitive. * Fix, pmacctd:
+    802.1p was kept integral part of the 'vlan' primitive. Now a 0x0FFF
+    mask is applied in order to return only the VLAN ID.
+  * * Documentation updated * pgsql_plugin.c, PG_create_dyn_table():
+    PGRES_TUPLES_OK is now considered valid return code in case a SELECT
+    statement is involved (ie. as part of a PL/PGSQL function). Thanks
+    very much to Sergio Charpinel Jr for his support.
+  * * Building sub-system and directory structure preparations for an
+    upcoming new tee plugin
+  * * fix, ip_frag.c: orphan fragment log messages re-classified as
+    debug. * fix, pkt_handlers.c: added explicit trailing '\0' symbol
+    when truncating AS-PATH and BGP community strings due to length
+    constraints.
+  * * Inauguration of tee_plugin()
+  * * tee_plugin: sFlow and NetFlow replication implementation is
+    underway; tee_receiver, tee_source_ip and tee_transparent features
+    being developed.
+  * * tee_plugin: sFlow and NetFlow replication implementation is
+    underway; transparent IPv4/IPv6 replication feature added.
+  * * tee_plugin: implementation wrapped-up. Documentation underway.
+  * * fix, sql_common.c: maximum SQL writers warning message was never
+    reached unless a recovery method is specifited. Thanks to Sergio
+    Charpinel Jr for reporting the issue. * Documentation
+  * * nfprobe, sfprobe: nfprobe_ipprec and sfprobe_ipprec features
+    introduced to mark self-originated NetFlow and sFlow datagrams with
+    the supplied IP precedence value. * nfprobe: removed unused routines
+    and sanitized logging a bit.
+  * * nfacctd: NetFlow v9, options parsing polish up.
+  * * tee_plugin, fix: internal data structure better 64-bit aligned.
+  * * print_plugin: implemented CSV (comma-separated values) output
+    format, alongside existing tabular one. Introduced a print_output
+    configuration directive to select among available output formats.
+  * * MySQL, MY_create_dyn_table(): errno 1050 (ER_TABLE_EXISTS_ERROR)
+    is being considered valid condition. * Documentation
+  * * Rolled version counters.
+  * * New 'cos' aggregation primitive has been implemented providing
+    support for 802.1p priority bits. Collection is supported via sFlow,
+    libpcap and ULOG; export is supported via sFlow. * sfprobe: partial
+    Switch Extension Header support added. * fix, addr.c: pm_ntohll()
+    and pm_htonll() routines rewritten. These are aimed to change byte
+    ordering of 64-bit variables. Successfully tested against NetFlow
+    64-bit bytes/packet counters.
+  * * nfacctd: maximum NetFlow v9 type lifted to 256. * nfprobe,
+    sfprobe: send buffer size is now aligned to plugin_pipe_size if any
+    is specified providing a way to tune it in case of sustained
+    exports.
+  * * BGP daemon: TCP MD5 signature implemented. A new
+    'bgp_daemon_md5_file' configuration directive is added for the
+    purpose of defining BGP peers and their respective MD5 keys, one per
+    line, in CSV format.
+  * * bgp_daemon_md5_file: map made reloadable at runtime. Existing MD5
+    keys are removed via setsockopt(), new ones are installed as per the
+    newly supplied map. * bgp_daemon_md5_file: added sample map,
+    'examples/bgp_md5.lst.example'.
+  * * BGP daemon: added support for RFC3107, ie. SAFI=4 label
+    information, to enable receipt of labeled IPv4/IPv6 unicast
+    prefixes. * Documentation updates
+  * * fix, BGP daemon: support for IPv6 global address + link-local
+    address next-hops as part of MP_REACH_NLRI parsing * Updated
+    documentation
+  * * nfacctd: added support for debugging of NetFlow v9 templates
+  * * fix, nfacctd: when accounting for IPv6 traffic, wrong network mask
+    fields were grabbed. Field types 29 and 30 are correctly fetched
+    now.
+  * * fix, pmacct.c: in_iface, out_iface aggregation primitives
+    erroneusly kept within a "#if defined (HAVE_L2)" code section when
+    parsing '-c' option.
+  * * fix, nfacctd: NetFlow v9 template print out for unknown field
+    types
+  * * cfg_handlers.c: bgp_daemon, bgp_daemon_msglog parsing fixed. * SQL
+    documentation fixes.
+  * * nfprobe, sfprobe: introducing concept of traffic direction. As a
+    result, [ns]fprobe_direction and [ns]fprobe_ifindex configuration
+    directives have been implemented. * [ns]fprobe_direction defines
+    traffic direction. Can be statically defined via 'in' and 'out'
+    keywords. It can also be dynamically determined via lookup to either
+    'tag' or 'tag2' values. * [ns]fprobe_ifindex statically associates
+    an interface index (ifIndex) to a given nfprobe or sfprobe plugin. *
+    sfprobe: sfprobe_ifspeed configuration directive is introduced and
+    aimed at statically associating an interface speed to a given
+    sfprobe plugin.
+  * * [ns]fprobe_ifindex now supports semi-dynamic lookups against
+    either 'tag' or 'tag2'. This is in addition to previously
+    implemented static ifIndex support. Updated docs and examples.
+  * * fix, sfprobe_plugin.c: counter sample showing wrong ifindex when
+    in semi- dynamic mode.
+  * * sfprobe: added support for multi-interface Counter Samples
+  * * fix, bgp.c: CPU hog issue was caused by missing cleanup of the
+    select() descriptors vector. * fix, nfprobe: nfprobe_ifindex value
+    was incorrectly evaluated * fix, sfprobe: upon introducing support
+    for multi-interfaces, the linked list of counter samples was found
+    to get corrupted.
+  * * fix, nfprobe: nfprobe_ifindex and nfprobe_direction were not
+    working with tag/tag2 setup and NetFlow v5 export due to tags
+    suppression. * fix, sfprobe: sampler process moved into the plugin
+    in order to correctly populate counter samples.
+  * * Documentation updated
+  * * fix, sfprobe: Counter Samples index was uninitialized
+  * * sfacctd: added support for egress VLAN and CoS (802.1p)
+    information
+
+  [ Stig Thormodsrud ]
+
+ -- Stig Thormodsrud <stig@vyatta.com>  Mon, 30 Aug 2010 14:06:25 -0700
+
 pmacct (0.12.2+vyatta+2) unstable; urgency=low
 
   * UNRELEASED
