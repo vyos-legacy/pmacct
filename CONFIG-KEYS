@@ -28,7 +28,7 @@ VALUES:		[true|false]
 DESC:		daemonizes the process (default: false).
 
 KEY:		aggregate (-c)
-VALUES:		[src_mac, dst_mac, vlan, src_host, dst_host, src_net, dst_net, src_mask,
+VALUES:		[src_mac, dst_mac, vlan, cos, src_host, dst_host, src_net, dst_net, src_mask,
 		 dst_mask, src_as, dst_as, src_port, dst_port, tos, proto, none, sum_mac,
 		 sum_host, sum_net, sum_as, sum_port, flows, tag, tag2, class, tcpflags,
 		 in_iface, out_iface, std_comm, ext_comm, as_path, peer_src_ip, peer_dst_ip,
@@ -54,12 +54,11 @@ DESC:		aggregate captured traffic data by selecting the specified set of primiti
 		tagging engines (pre_tag_map, post_tag) are in use. 'class' enables reception
 		of L7 traffic classes when Packet/Flow Classification engine (classifiers) is
 		in use. (default: src_host).
-NOTES:		* tag2, src_as_path, src_std_comm, src_ext_comm, src_local_pref and src_med
-		  primitives are not part of any default pmacct SQL table. When considering
-		  their use, they have to be manually added to the selected SQL schema and to
-		  the indexing. Read further in the documentation of the database of choice
-		  (ie. 'sql/README.mysql') and take as reference the 'sql/README.agent_id2'
-		  document.  
+NOTES:		* Some primitives (ie. tag2, src_as_path, src_std_comm, src_ext_comm, src_med
+		  and src_local_pref primitives) are not part of any default SQL table schema
+		  shipped with pmacct. Always check out documentation related to the RDBMS in
+		  use (ie. 'sql/README.mysql') which will point you to extra primitive-related
+		  documentation, if required.
 
 KEY:		aggregate_filter [NO_GLOBAL]
 DESC:		Per-plugin filtering applied against the original packet or flow. Aggregation
@@ -80,7 +79,7 @@ DESC:		Per-plugin filtering applied against the original packet or flow. Aggrega
 		turn, allows to filter tags). You will also need to force fragmentation handling
 		in the specific case in which a) none of the 'aggregate' directives is including
 		L4 primitives (ie. src_port, dst_port) but b) an 'aggregate_filter' runs a filter
-		which requires dealing with L4 primitives. For further informations, refer to the
+		which requires dealing with L4 primitives. For further information, refer to the
 		'pmacctd_force_frag_handling' directive.
 
 KEY:		pcap_filter (like tcpdump syntax) [GLOBAL, NO_NFACCTD]
@@ -104,14 +103,17 @@ DESC:		specifies the maximum number of bytes to capture for each packet. This di
 		increased.
 
 KEY:		plugins (-P)
-VALUES:		[ memory | print | mysql | pgsql | sqlite3 | nfprobe | sfprobe ]
+VALUES:		[ memory | print | mysql | pgsql | sqlite3 | nfprobe | sfprobe | tee ]
 DESC:		plugins to be enabled. SQL plugins are available only if configured and compiled.
 		'memory' enables the use of a memory table as backend; then, a client tool, 'pmacct',
 		can fetch its content; mysql, pgsql and sqlite3 enable the use of respectively MySQL,
 		PostgreSQL and SQLite 3.x tables to store data. 'print' prints aggregates to stdout
 		in a nicely formatted way. 'nfprobe' acts as a NetFlow agent and exports collected
 		data via NetFlow v1/v5/v9 datagrams to a remote collector. 'sfprobe' acts as a sFlow
-		agent and exports collected data via sFlow v5 datagrams to a remote collector.
+		agent and exports collected data via sFlow v5 datagrams to a remote collector. Both
+		'nfprobe' and 'sfprobe' apply only to 'pmacctd' and 'uacctd' daemons. 'tee' acts as
+		a replicator for NetFlow/sFlow data (also transparent); it applies to 'nfacctd' and
+		'sfacctd' daemons only.
 		Plugins can be either anonymous or named; configuration directives can be either
 		global or bounded to a specific named plugin. An anonymous plugin is declared as
 		'plugins: mysql' whereas a named plugin is declared as 'plugins: mysql[name]'. Then,
@@ -282,7 +284,7 @@ DESC:           defines the SQL table to use. Dynamic tables are supported throu
 		%Y	The year as a decimal number including the century.
 
 		Time-related variables REQUIRE 'sql_history' to be in place in order to work correctly
-		(refer also to their entry in this document for further informations). Moreover, if the
+		(refer also to their entry in this document for further information). Moreover, if the
 		'sql_table_schema' directive is not specified, tables are expected to be already in place.
 		Let's proceed with an example to split accounted data among multiple tables basing on
 		the day of the week:
@@ -597,9 +599,13 @@ DESC:		When more checks are to be evaluated, this directive tells whether aggreg
 		
 KEY:		print_markers
 VALUES:		[true|false]
-DESC:		this directive applies only to 'print' plugin. Enables the use of START/END markers each time 
-		purging aggregates to 'stdout'. Start marker includes also informations about current timeslot
-		and refresh time (default: false).
+DESC:		Enables the use of START/END markers each time data is written to 'stdout'. Start marker returns 
+		additional information about current time-bin and configured refresh time (default: false).
+
+KEY:		print_output
+VALUES:		[ formatted | csv ]
+DESC:		Defines the print plugin output format. 'formatted' enables tabular output; 'csv' is to enable
+		comma-separated values format, suitable for injection into 3rd party tools. (default: formatted)
 
 KEY:		nfacctd_port (-l) [GLOBAL, NO_PMACCTD]
 DESC:		defines the UDP port where to bind the 'nfacctd' daemon (default: 2100). 
@@ -637,7 +643,10 @@ DESC:		When 'false', it instructs [nf|sf]acctd to populate 'src_as' and 'dst_as'
 		source IP address.
 		pmacctd and uacctd can't grasp ASNs from any protocol: 'false' (for backward compatibility),
 		'true' and 'file' expect a 'networks_file' to be defined. 'bgp' just works as described above.
-		(default: false) 
+		Under nfacctd and sfacctd this feature also influences 'peer_src_ip' and 'peer_dst_ip': if
+		'false', 'true' or 'file' values are taken from NetFlow and sFlow datagrams respectively;
+		if 'bgp' values are looked up against the BGP RIB of the peer from which the NetFlow datagram
+		was received (or mapped to). (default: false) 
 
 KEY:            [ nfacctd_net | sfacctd_net | pmacctd_net | uacctd_net ] [GLOBAL]
 VALUES:         [ netflow | sflow | mask | file | bgp ]
@@ -645,10 +654,10 @@ DESC:		Determines the source of data to perform network aggregation - directly i
 		'dst_net', 'src_mask' and 'dst_mask' primitives. 'netflow' and 'sflow' use netmask values
 		carried within NetFlow and sFlow protocols; valid only in conjunction with nfacctd and sfacctd.
 		'mask' selects a defined networks_mask; 'file' selects a defined networks_file; 'bgp' uses
-		netmask values carried within BGP protocol (not yet implemented). If this directive is not
-		specified, the daemon falls back to backward compatibility mode, hence enabling 'mask', if a
-		networks_mask is defined, and 'file', if a networks_file. If both are defined, the outcome
-		will be the intersection of their definitions. (default: 'mask', 'file')
+		netmask values carried within BGP protocol. If this directive is not specified, the daemon
+		falls back to backward compatibility mode, hence enabling 'mask', if a networks_mask is
+		defined, and 'file', if a networks_file. If both are defined, the outcome will be the
+		intersection of their definitions. (default: 'mask', 'file')
 
 KEY:		[ nfacctd_mcast_groups | sfacctd_mcast_groups ] [GLOBAL, NO_PMACCTD]
 DESC:		defines one or more IPv4/IPv6 multicast groups to be joined by the daemon. If more groups are
@@ -757,7 +766,7 @@ KEY:            [ pmacctd_flow_lifetime | uacctd_flow_lifetime ] [GLOBAL, NO_NFA
 DESC:           defines how long a flow could remain inactive (ie. no packets belonging to such flow are received)
 		before considering it expired. The value is expected in seconds. (default: 60 secs) 
 
-KEY:		[ pmacctd_ext_sampling_rate | uacctd_ext_sampling_rate nfacctd_ext_sampling_rate |
+KEY:		[ pmacctd_ext_sampling_rate | uacctd_ext_sampling_rate | nfacctd_ext_sampling_rate |
 		  sfacctd_ext_sampling_rate ] [GLOBAL]
 		flags pmacctd that captured traffic is being sampled at the specified rate. Such rate can then
 		be renormalized by using 'pmacctd_renormalize' or otherwise is propagated by the NetFlow/sFlow
@@ -781,7 +790,7 @@ DESC:           full pathname to a file containing the list of IPv4/IPv6 address
 
 KEY:		[ sfacctd_renormalize | nfacctd_renormalize | pmacctd_renormalize | uacctd_renormalize ] (-R)
 VALUES:		[true|false]
-DESC:		automatically renormalizes byte/packet counters value basing on informations acquired from 
+DESC:		automatically renormalizes byte/packet counters value basing on information acquired from 
 		either the NetFlow data unit or sFlow packet. In particular, it allows to deal with scenarios
 		in which multiple interfaces have been configured at different sampling rates. The feature also
 		calculates an effective sampling rate (sFlow only) which could differ from the configured one -
@@ -884,6 +893,29 @@ DESC:		includes peer-AS rather than origin-AS as part of the NetFlow/sFlow expor
 		enable this feature are: a) one of the nfacctd_as_new/sfacctd_as_new/pmacctd_as/uacctd_as set
 		to 'bgp' and b) a fully functional BGP daemon (bgp_daemon). (default: false)
 
+KEY:            [ nfprobe_ipprec | sfprobe_ipprec ]
+DESC:           marks self-originated NetFlow (nfprobe) and sFlow (sfprobe) messages with the supplied IP
+		precedence value. (default: 0)
+
+KEY:            [ nfprobe_direction | sfprobe_direction ]
+VALUES:		[in,out,tag,tag2]
+DESC:           defines traffic direction. Can be statically defined via 'in' and 'out' keywords. It can also
+		be dynamically determined via lookup to either 'tag' or 'tag2' values. Tag value of 1 will be
+		mapped to 'in' direction, whereas tag value of 2 will be mapped to 'out'. The idea underlying
+		tag lookups is that pre_tag_map supports, among the other features, 'filter' matching against
+		a supplied tcpdump-like filter expression; doing so against L2 primitives (ie. source or
+		destination MAC addresses) allows to dynamically determine traffic direction (see example at
+		'examples/pretag.map.example') (default: none)
+
+KEY:            [ nfprobe_ifindex | sfprobe_ifindex ]
+VALUES:		[tag,tag2,<1-4294967295>]
+DESC:           associates an interface index (ifIndex) to a given nfprobe or sfprobe plugin. This is meant as
+		an add-on to [ns]probe_direction directive, ie. when multiplexing mirrored traffic from different
+		sources on the same interface (ie. split by VLAN). Can be statically defined via a 32-bit integer
+		or semi-dynamically determined via lookup to either 'tag' or 'tag2' values (read full elaboration
+		on [ns]probe_direction directive). This definition will be also always overridden whenever the
+		ifIndex can be determined dynamically (ie. via ULOG framework).
+
 KEY:		sfprobe_receiver
 DESC:           defines the remote IP address/hostname and port to which sFlow dagagrams are to be exported.
 		The value is expected to be in the usual form 'address:port'. (default: 127.0.0.1:6343)
@@ -893,6 +925,9 @@ DESC:		sets the value of agentIp field inside the sFlow datagram header.
 
 KEY:		sfprobe_agentsubid
 DESC:		sets the value of agentSubId field inside the sFlow datagram header.
+
+KEY:            sfprobe_ifspeed
+DESC:           statically associates an interface speed to a given sfprobe plugin. (default: 100000000)
 
 KEY:		bgp_daemon
 VALUES:		[true|false]
@@ -912,6 +947,9 @@ DESC:		binds the BGP daemon to a specific interface. Expects as value an IPv4 ad
 
 KEY:		bgp_daemon_port
 DESC:		binds the BGP daemon to a port different from the standard BGP port: 179/tcp. (default: 179)
+
+KEY:		bgp_daemon_ipprec
+DESC:		marks self-originated BGP messages with the supplied IP precedence value. (default: 0)
 
 KEY:		bgp_daemon_max_peers
 DESC:		sets the maximum number of neighbors the BGP daemon can peer to. Upon reaching of the limit,
@@ -1069,8 +1107,14 @@ DESC:		writes a list of the BGP neighbors in the established state to the specif
 KEY:            bgp_daemon_allow_file [GLOBAL]
 DESC:           full pathname to a file containing the list of IP addresses (one for each line) allowed
                 to establish a BGP session packets to the BGP thread. Current syntax does not implement
-		network masks but only individual IP addresses. The Allow List is intended to be small;
-		firewall rules should be preferred to long ACLs. (default: allow all)
+		network masks but only individual IP addresses. (default: allow all)
+
+KEY:            bgp_daemon_md5_file [GLOBAL]
+DESC:           full pathname to a file containing the BGP peers (IP address only, one for each line)
+		and their corresponding MD5 passwords in CSV format (ie. 10.15.0.1, arealsmartpwd).
+		BGP peers not making use of a MD5 password should not be listed. The maximum number
+		of peers supported is 8192. For a sample map look in: 'examples/bgp_md5.lst.example'
+		The feature was tested working against a 2.6.32 Linux kernel. (default: no password)
 
 KEY:		uacctd_group
 DESC:		Sets the Linux Netlink ULOG multicast group to be joined. (default: 1)
@@ -1091,4 +1135,20 @@ DESC:		Defines tunnel inspection, disabled by default. The daemon will then acco
 
 		GTP, GPRS tunnelling protocol. Expects as option the UDP port identifying the protocol. 
 		tunnel_0: gtp, <UDP port> 
+
+KEY:		tee_receiver 
+DESC:           defines remote IP address and port to which NetFlow/sFlow dagagrams are to be replicated
+		to. The value is expected to be in the usual form 'address:port'. This key is mandatory
+		for a 'tee' plugin instance and no default value is set in order to prevent loops.
+
+KEY:		tee_source_ip
+DESC:           defines the local IP address from which NetFlow/sFlow dagagrams are to be replicate from.
+		Only a numerical IPv4/IPv6 address is expected. The supplied IP address is required to be
+		already configured on one of the interfaces. Value is ignored when transparent replication
+		is enabled. (default: IP address is selected by the OS)
+
+KEY:		tee_transparent
+VALUES:         [true|false]
+DESC:		Enables transparent replication mode. It essentially spoofs the source IP address to the
+		original sender of the datagram. It requires super-user permissions. (default: false)
 

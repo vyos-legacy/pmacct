@@ -53,7 +53,7 @@ void usage_daemon(char *prog_name)
   printf("\nGeneral options:\n");
   printf("  -h  \tShow this page\n");
   printf("  -f  \tLoad configuration from the specified file\n");
-  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | in_iface | out_iface | src_mask | dst_mask | none ] \n\tAggregation string (DEFAULT: src_host)\n");
+  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | in_iface | out_iface | src_mask | dst_mask | cos | none ] \n\tAggregation string (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
   printf("  -N  \tDisable promiscuous mode\n");
   printf("  -n  \tPath to a file containing Network definitions\n");
@@ -68,7 +68,7 @@ void usage_daemon(char *prog_name)
   printf("  -W  \tReading from a savefile, don't exit but sleep when finished\n");
   printf("  -R  \tRenormalize sampled data\n");
   printf("  -L  \tSet snapshot length\n");
-  printf("\nMemory Plugin (-P memory) options:\n");
+  printf("\nMemory plugin (-P memory) options:\n");
   printf("  -p  \tSocket for client-server communication (DEFAULT: /tmp/collect.pipe)\n");
   printf("  -b  \tNumber of buckets\n");
   printf("  -m  \tNumber of memory pools\n");
@@ -76,6 +76,9 @@ void usage_daemon(char *prog_name)
   printf("\nPostgreSQL (-P pgsql)/MySQL (-P mysql)/SQLite (-P sqlite3) plugin options:\n");
   printf("  -r  \tRefresh time (in seconds)\n");
   printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 | 7 ] \n\tTable version\n");
+  printf("\nPrint plugin (-P print) plugin options:\n");
+  printf("  -r  \tRefresh time (in seconds)\n");
+  printf("  -O  \t[ formatted | csv ] \n\tOutput format\n");
   printf("\n");
   printf("  See EXAMPLES or visit http://wiki.pmacct.net/ for examples.\n");
   printf("\n");
@@ -180,6 +183,11 @@ int main(int argc,char **argv, char **envp)
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break; 
+    case 'O':
+      strlcpy(cfg_cmdline[rows], "print_output: ", SRVBUFLEN);
+      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
     case 'N':
       strlcpy(cfg_cmdline[rows], "promisc: false", SRVBUFLEN);
       rows++;
@@ -354,7 +362,12 @@ int main(int argc,char **argv, char **envp)
         Log(LOG_ERR, "ERROR: Internal packet sampling and external packet sampling are mutual exclusive.\n");
         exit(1);
       }
-      if (list->type.id == PLUGIN_ID_NFPROBE) {
+
+      if (list->type.id == PLUGIN_ID_TEE) {
+        Log(LOG_ERR, "ERROR: 'tee' plugin not supported in 'pmacctd'.\n");
+        exit(1);
+      }
+      else if (list->type.id == PLUGIN_ID_NFPROBE) {
 	/* If we already renormalizing an external sampling rate,
 	   we cancel the sampling information from the probe plugin */
 	if (config.sfacctd_renormalize && list->cfg.ext_sampling_rate) list->cfg.ext_sampling_rate = 0; 
@@ -384,22 +397,23 @@ int main(int argc,char **argv, char **envp)
 	if (list->cfg.networks_file || (list->cfg.nfacctd_bgp && list->cfg.nfacctd_as == NF_AS_BGP)) {
 	  list->cfg.what_to_count |= COUNT_SRC_AS;
 	  list->cfg.what_to_count |= COUNT_DST_AS;
+	  list->cfg.what_to_count |= COUNT_PEER_DST_IP;
 	}
 	if (list->cfg.nfprobe_version == 9 && list->cfg.classifiers_path) {
 	  list->cfg.what_to_count |= COUNT_CLASS; 
 	  config.handle_flows = TRUE;
 	}
-	if (list->cfg.nfprobe_version == 9 && list->cfg.pre_tag_map) {
+	if (list->cfg.pre_tag_map) {
 	  list->cfg.what_to_count |= COUNT_ID;
 	  list->cfg.what_to_count |= COUNT_ID2;
 	}
         list->cfg.what_to_count |= COUNT_IN_IFACE;
         list->cfg.what_to_count |= COUNT_OUT_IFACE;
 	if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
-                                       COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
-				       COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
-				       COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC)) {
-	  Log(LOG_ERR, "ERROR: 'src_as' and 'dst_as' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n");
+                                       COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_SRC_STD_COMM|
+				       COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
+				       COUNT_IS_SYMMETRIC)) {
+	  Log(LOG_ERR, "ERROR: 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n");
 	  exit(1);
 	}
 	list->cfg.what_to_count |= COUNT_COUNTERS;
@@ -422,6 +436,7 @@ int main(int argc,char **argv, char **envp)
         if (list->cfg.nfacctd_bgp && list->cfg.nfacctd_as == NF_AS_BGP) {
           list->cfg.what_to_count |= COUNT_SRC_AS;
           list->cfg.what_to_count |= COUNT_DST_AS;
+          list->cfg.what_to_count |= COUNT_PEER_DST_IP;
         }
         if (list->cfg.nfacctd_bgp && list->cfg.nfacctd_net == NF_NET_BGP) {
           list->cfg.what_to_count |= COUNT_SRC_NMASK;
@@ -432,12 +447,17 @@ int main(int argc,char **argv, char **envp)
 	  list->cfg.what_to_count |= COUNT_ID2;
 	}
         if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
-                                       COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
-                                       COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
-                                       COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC)) {
-          Log(LOG_ERR, "ERROR: 'src_as' and 'dst_as' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n");
+                                       COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_SRC_STD_COMM|
+				       COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
+				       COUNT_IS_SYMMETRIC)) {
+          Log(LOG_ERR, "ERROR: 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n");
           exit(1);
         }
+
+#if defined (HAVE_L2)
+        list->cfg.what_to_count |= COUNT_VLAN;
+        list->cfg.what_to_count |= COUNT_COS;
+#endif
 
 	list->cfg.data_type = PIPE_TYPE_PAYLOAD;
       }

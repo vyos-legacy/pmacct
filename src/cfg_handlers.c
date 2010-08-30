@@ -174,6 +174,7 @@ int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
     else if (!strcmp(count_token, "out_iface")) value |= COUNT_OUT_IFACE;
     else if (!strcmp(count_token, "src_mask")) value |= COUNT_SRC_NMASK;
     else if (!strcmp(count_token, "dst_mask")) value |= COUNT_DST_NMASK;
+    else if (!strcmp(count_token, "cos")) value |= COUNT_COS;
     else Log(LOG_WARNING, "WARN ( %s ): ignoring unknown aggregation method: %s.\n", filename, count_token);
   }
 
@@ -249,7 +250,7 @@ int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
 	trim_all_spaces(value_ptr);
 
 	list->cfg.ptf.num = 0;
-	while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_MAP_ENTRIES/4) {
+	while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_PRETAG_MAP_ENTRIES/4) {
 	  neg = pt_check_neg(&count_token);
 	  range_ptr = pt_check_range(count_token); 
 	  value = strtoul(count_token, &endptr_v, 10);
@@ -295,7 +296,7 @@ int cfg_key_pre_tag2_filter(char *filename, char *name, char *value_ptr)
         trim_all_spaces(value_ptr);
 
         list->cfg.pt2f.num = 0;
-        while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_MAP_ENTRIES/4) {
+        while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_PRETAG_MAP_ENTRIES/4) {
           neg = pt_check_neg(&count_token);
           range_ptr = pt_check_range(count_token);
           value = strtoul(count_token, &endptr_v, 10);
@@ -1484,6 +1485,34 @@ int cfg_key_print_markers(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_print_output(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  if (!strcmp(value_ptr, "formatted"))
+    value = PRINT_OUTPUT_FORMATTED;
+  else if (!strcmp(value_ptr, "csv"))
+    value = PRINT_OUTPUT_CSV;
+  else {
+    Log(LOG_WARNING, "WARN ( %s ): Invalid print output value '%s'\n", filename, value_ptr);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.print_output = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.print_output = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_post_tag(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1581,6 +1610,17 @@ int cfg_key_nfacctd_bgp_allow_file(char *filename, char *name, char *value_ptr)
 
   for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_allow_file = value_ptr;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon_allow_file'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_nfacctd_bgp_md5_file(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_md5_file = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon_md5_file'. Globalized.\n", filename);
 
   return changes;
 }
@@ -1703,7 +1743,7 @@ int cfg_key_nfacctd_bgp(char *filename, char *name, char *value_ptr)
   value = parse_truefalse(value_ptr);
   if (value < 0) return ERR;
 
-  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp = TRUE;
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp = value;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon'. Globalized.\n", filename);
 
   return changes;
@@ -1717,7 +1757,7 @@ int cfg_key_nfacctd_bgp_msglog(char *filename, char *name, char *value_ptr)
   value = parse_truefalse(value_ptr);
   if (value < 0) return ERR;
 
-  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_msglog = TRUE;
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_msglog = value;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon_msglog'. Globalized.\n", filename);
 
   return changes;
@@ -2023,6 +2063,23 @@ int cfg_key_nfacctd_bgp_port(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_nfacctd_bgp_ip_precedence(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if ((value <= 0) || (value > 7)) {
+    Log(LOG_ERR, "WARN ( %s ): 'bgp_daemon_ipprec' has to be in the range 0-7.\n", filename);
+    return ERR;
+  }
+
+  for (; list; list = list->next, changes++) list->cfg.nfacctd_bgp_ipprec = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'bgp_daemon_ipprec'. Globalized.\n", filename);
+
+  return changes;
+}
+
 int cfg_key_pmacctd_force_frag_handling(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -2031,7 +2088,7 @@ int cfg_key_pmacctd_force_frag_handling(char *filename, char *name, char *value_
   value = parse_truefalse(value_ptr);
   if (value < 0) return ERR;
 
-  for (; list; list = list->next, changes++) list->cfg.handle_fragments = TRUE;
+  for (; list; list = list->next, changes++) list->cfg.handle_fragments = value;
   if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pmacctd_force_frag_handling'. Globalized.\n", filename);
 
   return changes;
@@ -2443,6 +2500,101 @@ int cfg_key_nfprobe_peer_as(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_nfprobe_ip_precedence(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if ((value <= 0) || (value > 7)) {
+    Log(LOG_ERR, "WARN ( %s ): 'nfprobe_ipprec' and 'sfprobe_ipprec' have to be in the range 0-7.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.nfprobe_ipprec = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+	list->cfg.nfprobe_ipprec = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_nfprobe_direction(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  if (!strcmp(value_ptr, "tag"))
+    value = DIRECTION_TAG;
+  else if (!strcmp(value_ptr, "tag2"))
+    value = DIRECTION_TAG2;
+  else if (!strcmp(value_ptr, "in"))
+    value = DIRECTION_IN;
+  else if (!strcmp(value_ptr, "out"))
+    value = DIRECTION_OUT;
+  else {
+    Log(LOG_ERR, "WARN ( %s ): Invalid nfprobe_direction or sfprobe_direction value '%s'\n", filename, value_ptr);
+    return ERR;
+  }
+
+  if (!name) {
+    Log(LOG_ERR, "ERROR ( %s ): nfprobe_direction and sfprobe_direction cannot be global. Not loaded.\n", filename);
+    changes++;
+  }
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.nfprobe_direction = value;
+	changes++;
+	break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_nfprobe_ifindex(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0, value2 = 0;
+  u_int32_t value = 0;
+
+  if (!strcmp(value_ptr, "tag"))
+    value2 = IFINDEX_TAG;
+  else if (!strcmp(value_ptr, "tag2"))
+    value2 = IFINDEX_TAG2;
+  else if (value = strtol(value_ptr, NULL, 0))
+    value2 = IFINDEX_STATIC;
+  else {
+    Log(LOG_ERR, "WARN ( %s ): Invalid nfprobe_ifindex or sfprobe_ifindex value '%s'\n", filename, value_ptr);
+    return ERR;
+  }
+
+  if (!name) {
+    Log(LOG_ERR, "ERROR ( %s ): nfprobe_ifindex and sfprobe_ifindex cannot be global. Not loaded.\n", filename);
+    changes++;
+  }
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+	list->cfg.nfprobe_ifindex = value;
+	list->cfg.nfprobe_ifindex_type = value2;
+	changes++;
+	break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_sfprobe_receiver(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -2497,6 +2649,50 @@ int cfg_key_sfprobe_agentsubid(char *filename, char *name, char *value_ptr)
     for (; list; list = list->next) {
       if (!strcmp(name, list->name)) {
         list->cfg.sfprobe_agentsubid = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_sfprobe_ifspeed(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+  u_int64_t value;
+
+  value = strtoll(value_ptr, NULL, 0);
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sfprobe_ifspeed = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+	list->cfg.sfprobe_ifspeed = value;
+	changes++;
+	break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_tee_transparent(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.tee_transparent = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.tee_transparent = value;
         changes++;
         break;
       }

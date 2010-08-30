@@ -22,7 +22,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow9.c,v 1.9 2010/03/06 12:10:17 paolo Exp $ */
+/* $Id: netflow9.c,v 1.11 2010/06/07 01:21:58 paolo Exp $ */
 
 #define __NFPROBE_NETFLOW9_C
 
@@ -79,6 +79,7 @@ struct NF9_DATA_FLOWSET_HEADER {
 /* ... */
 #define NF9_SRC_AS                      16
 #define NF9_DST_AS                      17
+#define NF9_BGP_IPV4_NEXT_HOP           18
 /* ... */
 #define NF9_LAST_SWITCHED		21
 #define NF9_FIRST_SWITCHED		22
@@ -90,10 +91,12 @@ struct NF9_DATA_FLOWSET_HEADER {
 #define NF9_FLOW_SAMPLER_MODE           49
 #define NF9_FLOW_SAMPLER_INTERVAL       50
 #define NF9_SRC_MAC                     56
-#define NF9_DST_MAC                     57
-#define NF9_SRC_VLAN                    58
+#define NF9_DST_MAC                     80
+#define NF9_SRC_VLAN                    243
 /* ... */
 #define NF9_IP_PROTOCOL_VERSION		60
+/* ... */
+#define NF9_BGP_IPV6_NEXT_HOP           63
 /* ... */
 #define NF9_MPLS_LABEL_1                70
 /* CUSTOM TYPES START HERE */
@@ -149,12 +152,13 @@ struct NF9_SOFTFLOWD_DATA_COMMON {
 } __packed;
 
 struct NF9_SOFTFLOWD_DATA_V4 {
-	u_int32_t src_addr, dst_addr;
+	u_int32_t src_addr, dst_addr, bgp_next_hop;
 	struct NF9_SOFTFLOWD_DATA_COMMON c;
 } __packed;
 
 struct NF9_SOFTFLOWD_DATA_V6 {
 	u_int8_t src_addr[16], dst_addr[16];
+	u_int8_t bgp_next_hop[16];
 	struct NF9_SOFTFLOWD_DATA_COMMON c;
 } __packed;
 
@@ -218,6 +222,12 @@ flow_to_flowset_dst_host_v4_handler(char *flowset, const struct FLOW *flow, int 
 }
 
 static void
+flow_to_flowset_bgp_next_hop_v4_handler(char *flowset, const struct FLOW *flow, int idx, int size)
+{
+  memcpy(flowset, &flow->bgp_next_hop[idx].v4, size);
+}
+
+static void
 flow_to_flowset_src_nmask_handler(char *flowset, const struct FLOW *flow, int idx, int size)
 {
   memcpy(flowset, &flow->mask[idx], size);
@@ -239,6 +249,12 @@ static void
 flow_to_flowset_dst_host_v6_handler(char *flowset, const struct FLOW *flow, int idx, int size)
 {
   memcpy(flowset, &flow->addr[idx ^ 1].v6, size);
+}
+
+static void
+flow_to_flowset_bgp_next_hop_v6_handler(char *flowset, const struct FLOW *flow, int idx, int size)
+{
+  memcpy(flowset, &flow->bgp_next_hop[idx].v6, size);
 }
 
 static void
@@ -298,10 +314,7 @@ flow_to_flowset_dst_mac_handler(char *flowset, const struct FLOW *flow, int idx,
 static void
 flow_to_flowset_vlan_handler(char *flowset, const struct FLOW *flow, int idx, int size)
 {
-  u_int16_t rec16;
-
-  rec16 = htons(flow->vlan);
-  memcpy(flowset, &rec16, size);
+  memcpy(flowset, &flow->vlan, size);
 }
 
 static void
@@ -434,6 +447,13 @@ nf9_init_template(void)
 	  v4_int_template.r[rcount].length = 4;
 	  rcount++;
 	}
+        if (config.nfprobe_what_to_count & COUNT_PEER_DST_IP) {
+          v4_template.r[rcount].type = htons(NF9_BGP_IPV4_NEXT_HOP);
+          v4_template.r[rcount].length = htons(4);
+          v4_int_template.r[rcount].handler = flow_to_flowset_bgp_next_hop_v4_handler;
+          v4_int_template.r[rcount].length = 4;
+          rcount++;
+        }
         if (config.nfprobe_what_to_count & COUNT_SRC_NMASK) {
           v4_template.r[rcount].type = htons(NF9_SRC_MASK);
           v4_template.r[rcount].length = htons(1);
@@ -518,6 +538,7 @@ nf9_init_template(void)
 	  v4_int_template.r[rcount].length = 2;
 	  rcount++;
 	}
+/*
 	if (config.nfprobe_what_to_count & COUNT_VLAN) {
 	  v4_template.r[rcount].type = htons(NF9_MPLS_LABEL_1);
 	  v4_template.r[rcount].length = htons(3);
@@ -525,6 +546,7 @@ nf9_init_template(void)
 	  v4_int_template.r[rcount].length = 3;
 	  rcount++;
 	}
+*/
 	if (config.nfprobe_what_to_count & COUNT_CLASS) {
 	  v4_template.r[rcount].type = htons(NF9_CUST_CLASS);
 	  v4_template.r[rcount].length = htons(16);
@@ -619,6 +641,13 @@ nf9_init_template(void)
 	  v6_int_template.r[rcount].length = 16;
 	  rcount++;
 	}
+        if (config.nfprobe_what_to_count & COUNT_PEER_DST_IP) {
+          v6_template.r[rcount].type = htons(NF9_BGP_IPV6_NEXT_HOP);
+          v6_template.r[rcount].length = htons(16);
+          v6_int_template.r[rcount].handler = flow_to_flowset_bgp_next_hop_v6_handler;
+          v6_int_template.r[rcount].length = 16;
+          rcount++;
+        }
         if (config.nfprobe_what_to_count & COUNT_SRC_NMASK) {
           v6_template.r[rcount].type = htons(NF9_SRC_MASK);
           v6_template.r[rcount].length = htons(1);
@@ -703,6 +732,7 @@ nf9_init_template(void)
 	  v6_int_template.r[rcount].length = 2;
 	  rcount++;
 	}
+/*
         if (config.nfprobe_what_to_count & COUNT_VLAN) {
 	  v6_template.r[rcount].type = htons(NF9_MPLS_LABEL_1);
 	  v6_template.r[rcount].length = htons(3);
@@ -710,6 +740,7 @@ nf9_init_template(void)
 	  v6_int_template.r[rcount].length = 3;
 	  rcount++;
 	}
+*/
         if (config.nfprobe_what_to_count & COUNT_CLASS) {
 	  v6_template.r[rcount].type = htons(NF9_CUST_CLASS);
 	  v6_template.r[rcount].length = htons(16);

@@ -402,7 +402,7 @@ struct data_hdr_v9 {
 #define NF9_TEMPLATE_FLOWSET_ID         0
 #define NF9_OPTIONS_FLOWSET_ID          1
 #define NF9_MIN_RECORD_FLOWSET_ID       256
-#define NF9_MAX_DEFINED_FIELD		210
+#define NF9_MAX_DEFINED_FIELD		256
 
 /* Flowset record types the we care about */
 #define NF9_IN_BYTES			1
@@ -438,10 +438,9 @@ struct data_hdr_v9 {
 #define NF9_ENGINE_TYPE                 38
 #define NF9_ENGINE_ID                   39
 /* ... */
-#define NF9_SRC_MAC                     56
-#define NF9_DST_MAC                     57
-#define NF9_SRC_VLAN                    58
-#define NF9_DST_VLAN                    59
+#define NF9_IN_SRC_MAC                  56
+#define NF9_OUT_DST_MAC                 57
+/* ... */
 #define NF9_IP_PROTOCOL_VERSION         60
 #define NF9_DIRECTION                   61
 #define NF9_IPV6_NEXT_HOP		62
@@ -457,10 +456,16 @@ struct data_hdr_v9 {
 #define NF9_MPLS_LABEL_8		77
 #define NF9_MPLS_LABEL_9		78
 #define NF9_MPLS_LABEL_10		79
+#define NF9_IN_DST_MAC			80 
+#define NF9_OUT_SRC_MAC			81 
 /* ... */
 #define NF9_CUST_CLASS			200
 #define NF9_CUST_TAG			201
 #define NF9_CUST_TAG2			202
+/* ... */
+#define NF9_IN_VLAN			243
+/* ... */
+#define NF9_OUT_VLAN			254
 
 #define NF9_FTYPE_IPV4			0
 #define NF9_FTYPE_IPV6			1
@@ -486,6 +491,73 @@ struct data_hdr_v9 {
 #define NF9_OPT_SCOPE_LC		3
 #define NF9_OPT_SCOPE_CACHE		4
 #define NF9_OPT_SCOPE_TPL		5
+
+#define MAX_TPL_DESC_LIST 81
+static char *tpl_desc_list[] = {
+  "",
+  "bytes",
+  "packets",
+  "flows",
+  "L4 protocol",
+  "tos",
+  "tcp flags",
+  "L4 src port",
+  "IPv4 src addr",
+  "IPv4 src mask",
+  "input snmp",
+  "L4 dst port",
+  "IPv4 dst addr",
+  "IPv4 dst mask",
+  "output snmp",
+  "IPv4 next hop",
+  "src as",
+  "dst as",
+  "BGP IPv4 next hop",
+  "", "",
+  "last switched",
+  "first switched",
+  "", "", "", "",
+  "IPv6 src addr",
+  "IPv6 dst addr",
+  "IPv6 src mask",
+  "IPv6 dst mask",
+  "",
+  "icmp type", 
+  "",
+  "sampling interval",
+  "sampling algorithm",
+  "",
+  "", "", "", "",
+  "", "", "", "",
+  "", "", "",
+  "sampler ID",
+  "sampler mode",
+  "sampler interval",
+  "", "", "", "",
+  "",
+  "in src mac",
+  "out dst mac",
+  "", "",
+  "ip version",
+  "direction",
+  "IPv6 next hop",
+  "IPv6 BGP next hop",
+  "",
+  "", "", "", "",
+  "",
+  "mpls label 1",
+  "mpls label 2",
+  "mpls label 3",
+  "mpls label 4",
+  "mpls label 5",
+  "mpls label 6",
+  "mpls label 7",
+  "mpls label 8",
+  "mpls label 9",
+  "mpls label 10",
+  "in dst mac",
+  "out src mac"
+};
 
 /* Ordered Template field */
 struct otpl_field {
@@ -527,6 +599,7 @@ EXT void process_v5_packet(unsigned char *, u_int16_t, struct packet_ptrs *, str
 EXT void process_v7_packet(unsigned char *, u_int16_t, struct packet_ptrs *, struct plugin_requests *);
 EXT void process_v8_packet(unsigned char *, u_int16_t, struct packet_ptrs *, struct plugin_requests *);
 EXT void process_v9_packet(unsigned char *, u_int16_t, struct packet_ptrs_vector *, struct plugin_requests *);
+EXT void process_raw_packet(unsigned char *, u_int16_t, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT u_int16_t NF_evaluate_flow_type(struct template_cache_entry *, struct packet_ptrs *);
 EXT void reset_mac(struct packet_ptrs *);
 EXT void reset_mac_vlan(struct packet_ptrs *);
@@ -551,6 +624,7 @@ EXT void handle_template_v9(struct template_hdr_v9 *, struct packet_ptrs *, u_in
 EXT struct template_cache_entry *find_template_v9(u_int16_t, struct packet_ptrs *);
 EXT struct template_cache_entry *insert_template_v9(struct template_hdr_v9 *, struct packet_ptrs *);
 EXT void refresh_template_v9(struct template_hdr_v9 *, struct template_cache_entry *, struct packet_ptrs *);
+EXT void log_template_v9(struct template_cache_entry *, struct packet_ptrs *);
 EXT struct template_cache_entry *insert_opt_template_v9(struct options_template_hdr_v9 *, struct packet_ptrs *);
 EXT void refresh_opt_template_v9(struct options_template_hdr_v9 *, struct template_cache_entry *, struct packet_ptrs *);
 #undef EXT

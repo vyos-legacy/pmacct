@@ -87,6 +87,7 @@ struct configuration {
   int print_refresh_time;
   int print_cache_entries;
   int print_markers;
+  int print_output;
   int nfacctd_port;
   char *nfacctd_ip;
   char *nfacctd_allow_file;
@@ -100,6 +101,7 @@ struct configuration {
   int nfacctd_bgp_msglog;
   char *nfacctd_bgp_ip;
   int nfacctd_bgp_port;
+  int nfacctd_bgp_ipprec;
   char *nfacctd_bgp_allow_file;
   int nfacctd_bgp_max_peers;
   int nfacctd_bgp_aspath_radius;
@@ -121,6 +123,7 @@ struct configuration {
   int nfacctd_bgp_follow_default;
   struct prefix nfacctd_bgp_follow_nexthop[FOLLOW_BGP_NH_ENTRIES];
   char *nfacctd_bgp_neighbors_file;
+  char *nfacctd_bgp_md5_file;
   int promisc; /* pcap_open_live() promisc parameter */
   char *clbuf; /* pcap filter */
   char *pcap_savefile;
@@ -165,9 +168,15 @@ struct configuration {
   char *nfprobe_engine;
   int nfprobe_peer_as;
   char *nfprobe_source_ip;
+  int nfprobe_ipprec;
+  int nfprobe_direction;
+  u_int32_t nfprobe_ifindex;
+  int nfprobe_ifindex_type;
   char *sfprobe_receiver;
   char *sfprobe_agentip;
   int sfprobe_agentsubid;
+  u_int64_t sfprobe_ifspeed;
+  int tee_transparent;
   int uacctd_group;
   int uacctd_nl_size;
   char *tunnel0;

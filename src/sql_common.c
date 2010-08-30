@@ -351,7 +351,8 @@ int sql_cache_flush(struct db_cache *queue[], int index, struct insert_data *ida
     /* If we are very near to our maximum writers threshold, let's resort to any configured
        recovery mechanism - SQL_CACHE_COMMITTED => SQL_CACHE_ERROR; otherwise, will proceed
        as usual */
-    if (sql_writers.active == config.sql_max_writers-1) {
+    if ((sql_writers.active == config.sql_max_writers-1) &&
+	(config.sql_backup_host || config.sql_recovery_logfile)) {
       for (j = 0; j < index; j++) {
 	if (queue[j]->valid == SQL_CACHE_COMMITTED) queue[j]->valid = SQL_CACHE_ERROR;
       }
@@ -1010,6 +1011,20 @@ int sql_evaluate_primitives(int primitive)
       values[primitive].handler = where[primitive].handler = count_vlan_handler;
       primitive++;
     }
+  }
+
+  if (what_to_count & COUNT_COS) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
+    }
+    strncat(insert_clause, "cos", SPACELEFT(insert_clause));
+    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "cos=%u", SPACELEFT(where[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_COS;
+    values[primitive].handler = where[primitive].handler = count_cos_handler;
+    primitive++;
   }
 #endif
 

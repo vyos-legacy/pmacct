@@ -3,7 +3,7 @@
  *
  * Baselined from:
  *
- * $Id: bgp_packet.h,v 1.1 2009/03/09 14:40:25 paolo Exp $
+ * $Id: bgp_packet.h,v 1.2 2010/06/30 11:08:05 paolo Exp $
  *
  * Wireshark - Network traffic analyzer
  * By Gerald Combs <gerald@wireshark.org>
@@ -57,7 +57,7 @@
 #define SAFI_UNICAST              1
 #define SAFI_MULTICAST            2
 #define SAFI_UNICAST_MULTICAST    3
-#define SAFI_MPLS_VPN             4
+#define SAFI_MPLS_LABEL           4
 #define SAFI_MAX                  5
 
 struct bgp_header {

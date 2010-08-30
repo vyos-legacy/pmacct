@@ -55,16 +55,16 @@ void usage_daemon(char *prog_name)
   printf("  -L  \tBind to the specified IP address\n");
   printf("  -l  \tListen on the specified UDP port\n");
   printf("  -f  \tLoad configuration from the specified file\n");
-  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | in_iface | out_iface | src_mask | dst_mask | none ] \n\tAggregation string (DEFAULT: src_host)\n");
+  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | in_iface | out_iface | src_mask | dst_mask | cos | none ] \n\tAggregation string (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
   printf("  -n  \tPath to a file containing Network definitions\n");
   printf("  -o  \tPath to a file containing Port definitions\n");
-  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | nfprobe ] \n\tActivate plugin\n"); 
+  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | tee ] \n\tActivate plugin\n"); 
   printf("  -d  \tEnable debug\n");
   printf("  -S  \t[ auth | mail | daemon | kern | user | local[0-7] ] \n\tLog to the specified syslog facility\n");
   printf("  -F  \tWrite Core Process PID into the specified file\n");
   printf("  -R  \tRenormalize sampled data\n");
-  printf("\nMemory Plugin (-P memory) options:\n");
+  printf("\nMemory plugin (-P memory) options:\n");
   printf("  -p  \tSocket for client-server communication (DEFAULT: /tmp/collect.pipe)\n");
   printf("  -b  \tNumber of buckets\n");
   printf("  -m  \tNumber of memory pools\n");
@@ -72,6 +72,9 @@ void usage_daemon(char *prog_name)
   printf("\nPostgreSQL (-P pgsql)/MySQL (-P mysql)/SQLite (-P sqlite3) plugin options:\n");
   printf("  -r  \tRefresh time (in seconds)\n");
   printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 | 7 ] \n\tTable version\n");
+  printf("\nPrint plugin (-P print) plugin options:\n");
+  printf("  -r  \tRefresh time (in seconds)\n");
+  printf("  -O  \t[ formatted | csv ] \n\tOutput format\n");
   printf("\n");
   printf("  See EXAMPLES or visit http://wiki.pmacct.net/ for examples.\n");
   printf("\n");
@@ -146,6 +149,8 @@ int main(int argc,char **argv, char **envp)
   bta_map_allocated = FALSE;
   find_id_func = NF_find_id;
 
+  data_plugins = 0;
+  tee_plugins = 0;
   xflow_status_table_entries = 0;
   xflow_tot_bad_datagrams = 0;
   errflag = 0;
@@ -206,6 +211,11 @@ int main(int argc,char **argv, char **envp)
       break;
     case 'o':
       strlcpy(cfg_cmdline[rows], "ports_file: ", SRVBUFLEN);
+      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
+    case 'O':
+      strlcpy(cfg_cmdline[rows], "print_output: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
@@ -334,86 +344,21 @@ int main(int argc,char **argv, char **envp)
   /* Enforcing policies over aggregation methods */
   list = plugins_list;
   while (list) {
-    if (list->type.id != PLUGIN_ID_CORE) {  
+    if (list->type.id != PLUGIN_ID_CORE) {
       /* applies to all plugins */
       if (list->cfg.sampling_rate && config.ext_sampling_rate) {
         Log(LOG_ERR, "ERROR: Internal packet sampling and external packet sampling are mutual exclusive.\n");
         exit(1);
       }
-      if (list->type.id == PLUGIN_ID_NFPROBE) {
-        /* If we already renormalizing an external sampling rate,
-           we cancel the sampling information from the probe plugin */
-        if (config.sfacctd_renormalize && list->cfg.ext_sampling_rate) list->cfg.ext_sampling_rate = 0;
 
-	list->cfg.nfprobe_what_to_count = list->cfg.what_to_count;
-	list->cfg.what_to_count = 0;
-#if defined (HAVE_L2)
-	if (list->cfg.nfprobe_version == 9) {
-	  list->cfg.what_to_count |= COUNT_SRC_MAC;
-	  list->cfg.what_to_count |= COUNT_DST_MAC;
-	  list->cfg.what_to_count |= COUNT_VLAN;
-	}
-#endif
-	list->cfg.what_to_count |= COUNT_SRC_HOST;
-	list->cfg.what_to_count |= COUNT_DST_HOST;
-
-        if (list->cfg.networks_file || list->cfg.networks_mask || list->cfg.nfacctd_net) {
-          list->cfg.what_to_count |= COUNT_SRC_NMASK;
-          list->cfg.what_to_count |= COUNT_DST_NMASK;
-        }
-
-	list->cfg.what_to_count |= COUNT_SRC_PORT;
-	list->cfg.what_to_count |= COUNT_DST_PORT;
-	list->cfg.what_to_count |= COUNT_IP_TOS;
-	list->cfg.what_to_count |= COUNT_IP_PROTO;
-	if (list->cfg.networks_file || list->cfg.nfacctd_as == NF_AS_KEEP || 
-	    list->cfg.nfacctd_as == NF_AS_BGP) {
-	  list->cfg.what_to_count |= COUNT_SRC_AS;
-	  list->cfg.what_to_count |= COUNT_DST_AS;
-	}
-	if (list->cfg.nfprobe_version == 9 && list->cfg.classifiers_path)
-	  list->cfg.what_to_count |= COUNT_CLASS;
-	if (list->cfg.nfprobe_version == 9 && list->cfg.pre_tag_map) {
-	  list->cfg.what_to_count |= COUNT_ID;
-	  list->cfg.what_to_count |= COUNT_ID2;
-	}
-        list->cfg.what_to_count |= COUNT_IN_IFACE;
-        list->cfg.what_to_count |= COUNT_OUT_IFACE;
-        if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
-                                       COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
-				       COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
-				       COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC)) {
-          Log(LOG_ERR, "ERROR: 'src_as' and 'dst_as' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n");
-          exit(1);
-        }
-	if (list->cfg.nfprobe_version == 9)
-	  list->cfg.what_to_count |= COUNT_FLOWS;
-	list->cfg.what_to_count |= COUNT_COUNTERS;
-
-	list->cfg.data_type = PIPE_TYPE_METADATA;
-	list->cfg.data_type |= PIPE_TYPE_EXTRAS;
+      if (list->type.id == PLUGIN_ID_NFPROBE || list->type.id == PLUGIN_ID_SFPROBE) {
+	Log(LOG_ERR, "ERROR: 'nfprobe' and 'sfprobe' plugins not supported in 'nfacctd'.\n");
+	exit(1);
       }
-      else if (list->type.id == PLUGIN_ID_SFPROBE) {
-        /* If we already renormalizing an external sampling rate,
-           we cancel the sampling information from the probe plugin */
-        if (config.sfacctd_renormalize && list->cfg.ext_sampling_rate) list->cfg.ext_sampling_rate = 0;
-
-	req.bpf_filter = TRUE;
-	list->cfg.what_to_count = COUNT_PAYLOAD;
-	if (list->cfg.classifiers_path) list->cfg.what_to_count |= COUNT_CLASS;
-	if (list->cfg.pre_tag_map) {
-	  list->cfg.what_to_count |= COUNT_ID;
-	  list->cfg.what_to_count |= COUNT_ID2;
-	}
-        if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
-                                       COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
-                                       COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
-                                       COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC)) {
-          Log(LOG_ERR, "ERROR: 'src_as' and 'dst_as' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n");
-          exit(1);
-        }
-
-	list->cfg.data_type = PIPE_TYPE_PAYLOAD;
+      else if (list->type.id == PLUGIN_ID_TEE) {
+        tee_plugins++;
+	list->cfg.what_to_count = COUNT_NONE;
+	list->cfg.data_type = PIPE_TYPE_MSG;
       }
       else {
 	list->cfg.data_type = PIPE_TYPE_METADATA;
@@ -455,10 +400,16 @@ int main(int argc,char **argv, char **envp)
 
 	bgp_config_checks(&list->cfg);
 
+	data_plugins++;
 	list->cfg.what_to_count |= COUNT_COUNTERS;
       }
     }
     list = list->next;
+  }
+
+  if (tee_plugins && data_plugins) {
+    Log(LOG_ERR, "ERROR: 'tee' plugins are not compatible with data (memory/mysql/pgsql/etc.) plugins. Exiting...\n\n");
+    exit(1);
   }
 
   /* signal handling we want to inherit to plugins (when not re-defined elsewhere) */
@@ -786,6 +737,8 @@ int main(int argc,char **argv, char **envp)
 
     if (ret < 1) continue; /* we don't have enough data to decode the version */ 
 
+    pptrs.v4.f_len = ret;
+
     /* check if Hosts Allow Table is loaded; if it is, we will enforce rules */
     if (allow.num) allowed = check_allow(&allow, (struct sockaddr *)&client); 
     if (!allowed) continue;
@@ -807,31 +760,36 @@ int main(int argc,char **argv, char **envp)
       reload_map = FALSE;
     }
 
-    /* We will change byte ordering in order to avoid a bunch of ntohs() calls */
-    ((struct struct_header_v5 *)netflow_packet)->version = ntohs(((struct struct_header_v5 *)netflow_packet)->version);
-    reset_tag_status(&pptrs);
-    reset_shadow_status(&pptrs);
+    if (data_plugins) {
+      /* We will change byte ordering in order to avoid a bunch of ntohs() calls */
+      ((struct struct_header_v5 *)netflow_packet)->version = ntohs(((struct struct_header_v5 *)netflow_packet)->version);
+      reset_tag_status(&pptrs);
+      reset_shadow_status(&pptrs);
     
-    switch(((struct struct_header_v5 *)netflow_packet)->version) {
-    case 1:
-      process_v1_packet(netflow_packet, ret, &pptrs.v4, &req);
-      break;
-    case 5:
-      process_v5_packet(netflow_packet, ret, &pptrs.v4, &req); 
-      break;
-    case 7:
-      process_v7_packet(netflow_packet, ret, &pptrs.v4, &req);
-      break;
-    case 8:
-      process_v8_packet(netflow_packet, ret, &pptrs.v4, &req);
-      break;
-    case 9:
-      process_v9_packet(netflow_packet, ret, &pptrs, &req);
-      break;
-    default:
-      notify_malf_packet(LOG_INFO, "INFO: Discarding unknown packet", (struct sockaddr *) pptrs.v4.f_agent);
-      xflow_tot_bad_datagrams++;
-      break;
+      switch(((struct struct_header_v5 *)netflow_packet)->version) {
+      case 1:
+	process_v1_packet(netflow_packet, ret, &pptrs.v4, &req);
+	break;
+      case 5:
+	process_v5_packet(netflow_packet, ret, &pptrs.v4, &req); 
+	break;
+      case 7:
+	process_v7_packet(netflow_packet, ret, &pptrs.v4, &req);
+	break;
+      case 8:
+	process_v8_packet(netflow_packet, ret, &pptrs.v4, &req);
+	break;
+      case 9:
+	process_v9_packet(netflow_packet, ret, &pptrs, &req);
+	break;
+      default:
+	notify_malf_packet(LOG_INFO, "INFO: Discarding unknown packet", (struct sockaddr *) pptrs.v4.f_agent);
+	xflow_tot_bad_datagrams++;
+	break;
+      }
+    }
+    else if (tee_plugins) {
+      process_raw_packet(netflow_packet, ret, &pptrs, &req);
     }
   }
 }
@@ -1153,23 +1111,26 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
     else if (tpl->template_type == 1) { /* Options coming */
       struct xflow_status_entry *entry = (struct xflow_status_entry *) pptrs->f_status;
       struct xflow_status_entry_sampling *sentry, *saved = NULL;
-      u_int8_t sampler_id = 0;
 
       while (flowoff+tpl->len <= flowsetlen) {
-	if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len == 1)
+	/* Is this option about sampling? */
+	if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len == 1) {
+	  u_int8_t sampler_id = 0;
+
 	  memcpy(&sampler_id, pkt+tpl->tpl[NF9_FLOW_SAMPLER_ID].off, 1);
 
-	sentry = search_smp_id_status_table(entry->sampling, sampler_id);
-	if (!sentry) sentry = create_smp_entry_status_table(entry);
-	else saved = sentry->next;
+	  sentry = search_smp_id_status_table(entry->sampling, sampler_id);
+	  if (!sentry) sentry = create_smp_entry_status_table(entry);
+	  else saved = sentry->next;
 
-	if (sentry) {
-	  memset(sentry, 0, sizeof(struct xflow_status_entry_sampling));
-	  if (tpl->tpl[NF9_SAMPLING_INTERVAL].len == 4) memcpy(&sentry->sample_pool, pkt+tpl->tpl[NF9_SAMPLING_INTERVAL].off, 4);
-	  if (tpl->tpl[NF9_FLOW_SAMPLER_INTERVAL].len == 4) memcpy(&sentry->sample_pool, pkt+tpl->tpl[NF9_FLOW_SAMPLER_INTERVAL].off, 4);
-	  sentry->sampler_id = sampler_id;
-	  sentry->sample_pool = ntohl(sentry->sample_pool);
-	  if (saved) sentry->next = saved;
+	  if (sentry) {
+	    memset(sentry, 0, sizeof(struct xflow_status_entry_sampling));
+	    if (tpl->tpl[NF9_SAMPLING_INTERVAL].len == 4) memcpy(&sentry->sample_pool, pkt+tpl->tpl[NF9_SAMPLING_INTERVAL].off, 4);
+	    if (tpl->tpl[NF9_FLOW_SAMPLER_INTERVAL].len == 4) memcpy(&sentry->sample_pool, pkt+tpl->tpl[NF9_FLOW_SAMPLER_INTERVAL].off, 4);
+	    sentry->sampler_id = sampler_id;
+	    sentry->sample_pool = ntohl(sentry->sample_pool);
+	    if (saved) sentry->next = saved;
+	  }
 	}
 
         pkt += tpl->len;
@@ -1192,8 +1153,8 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 	    reset_mac(pptrs);
 	    reset_ip4(pptrs);
 
-            memcpy(pptrs->mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
-            memcpy(pptrs->mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
+            memcpy(pptrs->mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_IN_SRC_MAC].off, tpl->tpl[NF9_IN_SRC_MAC].len);
+            memcpy(pptrs->mac_ptr, pkt+tpl->tpl[NF9_IN_DST_MAC].off, tpl->tpl[NF9_IN_DST_MAC].len);
 	    ((struct my_iphdr *)pptrs->iph_ptr)->ip_vhl = 0x45;
             memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_src, pkt+tpl->tpl[NF9_IPV4_SRC_ADDR].off, tpl->tpl[NF9_IPV4_SRC_ADDR].len);
             memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_dst, pkt+tpl->tpl[NF9_IPV4_DST_ADDR].off, tpl->tpl[NF9_IPV4_DST_ADDR].len);
@@ -1226,8 +1187,8 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 	  if (req->bpf_filter) {
 	    reset_mac(&pptrsv->v6);
 	    reset_ip6(&pptrsv->v6);
-	    memcpy(pptrsv->v6.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
-	    memcpy(pptrsv->v6.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
+	    memcpy(pptrsv->v6.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_IN_SRC_MAC].off, tpl->tpl[NF9_IN_SRC_MAC].len);
+	    memcpy(pptrsv->v6.mac_ptr, pkt+tpl->tpl[NF9_IN_DST_MAC].off, tpl->tpl[NF9_IN_DST_MAC].len);
 	    ((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_ctlun.ip6_un2_vfc = 0x60;
             memcpy(&((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_src, pkt+tpl->tpl[NF9_IPV6_SRC_ADDR].off, tpl->tpl[NF9_IPV6_SRC_ADDR].len);
             memcpy(&((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_dst, pkt+tpl->tpl[NF9_IPV6_DST_ADDR].off, tpl->tpl[NF9_IPV6_DST_ADDR].len);
@@ -1261,9 +1222,9 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 	    reset_mac_vlan(&pptrsv->vlan4); 
 	    reset_ip4(&pptrsv->vlan4);
 
-	    memcpy(pptrsv->vlan4.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
-	    memcpy(pptrsv->vlan4.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
-	    memcpy(pptrsv->vlan4.vlan_ptr, pkt+tpl->tpl[NF9_SRC_VLAN].off, tpl->tpl[NF9_SRC_VLAN].len);
+	    memcpy(pptrsv->vlan4.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_IN_SRC_MAC].off, tpl->tpl[NF9_IN_SRC_MAC].len);
+	    memcpy(pptrsv->vlan4.mac_ptr, pkt+tpl->tpl[NF9_IN_DST_MAC].off, tpl->tpl[NF9_IN_DST_MAC].len);
+	    memcpy(pptrsv->vlan4.vlan_ptr, pkt+tpl->tpl[NF9_IN_VLAN].off, tpl->tpl[NF9_IN_VLAN].len);
 	    ((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_vhl = 0x45;
 	    memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_src, pkt+tpl->tpl[NF9_IPV4_SRC_ADDR].off, tpl->tpl[NF9_IPV4_SRC_ADDR].len);
 	    memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_dst, pkt+tpl->tpl[NF9_IPV4_DST_ADDR].off, tpl->tpl[NF9_IPV4_DST_ADDR].len);
@@ -1297,9 +1258,9 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 	    reset_mac_vlan(&pptrsv->vlan6);
 	    reset_ip6(&pptrsv->vlan6);
 
-	    memcpy(pptrsv->vlan6.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
-	    memcpy(pptrsv->vlan6.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
-	    memcpy(pptrsv->vlan6.vlan_ptr, pkt+tpl->tpl[NF9_SRC_VLAN].off, tpl->tpl[NF9_SRC_VLAN].len);
+	    memcpy(pptrsv->vlan6.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_IN_SRC_MAC].off, tpl->tpl[NF9_IN_SRC_MAC].len);
+	    memcpy(pptrsv->vlan6.mac_ptr, pkt+tpl->tpl[NF9_IN_DST_MAC].off, tpl->tpl[NF9_IN_DST_MAC].len);
+	    memcpy(pptrsv->vlan6.vlan_ptr, pkt+tpl->tpl[NF9_IN_VLAN].off, tpl->tpl[NF9_IN_VLAN].len);
 	    ((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_ctlun.ip6_un2_vfc = 0x60;
 	    memcpy(&((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_src, pkt+tpl->tpl[NF9_IPV6_SRC_ADDR].off, tpl->tpl[NF9_IPV6_SRC_ADDR].len);
 	    memcpy(&((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_dst, pkt+tpl->tpl[NF9_IPV6_DST_ADDR].off, tpl->tpl[NF9_IPV6_DST_ADDR].len);
@@ -1335,8 +1296,8 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 
             /* XXX: fix caplen */
             reset_mac(&pptrsv->mpls4);
-            memcpy(pptrsv->mpls4.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
-            memcpy(pptrsv->mpls4.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
+            memcpy(pptrsv->mpls4.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_IN_SRC_MAC].off, tpl->tpl[NF9_IN_SRC_MAC].len);
+            memcpy(pptrsv->mpls4.mac_ptr, pkt+tpl->tpl[NF9_IN_DST_MAC].off, tpl->tpl[NF9_IN_DST_MAC].len);
 
 	    for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++, ptr += 4) {
 	      memset(ptr, 0, 4);
@@ -1382,8 +1343,8 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 
 	    /* XXX: fix caplen */
 	    reset_mac(&pptrsv->mpls6);
-	    memcpy(pptrsv->mpls6.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
-	    memcpy(pptrsv->mpls6.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
+	    memcpy(pptrsv->mpls6.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_IN_SRC_MAC].off, tpl->tpl[NF9_IN_SRC_MAC].len);
+	    memcpy(pptrsv->mpls6.mac_ptr, pkt+tpl->tpl[NF9_IN_DST_MAC].off, tpl->tpl[NF9_IN_DST_MAC].len);
             for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++, ptr += 4) {
 	      memset(ptr, 0, 4);
 	      memcpy(ptr, pkt+tpl->tpl[idx].off, tpl->tpl[idx].len);
@@ -1428,9 +1389,9 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 
 	    /* XXX: fix caplen */
 	    reset_mac_vlan(&pptrsv->vlanmpls4);
-	    memcpy(pptrsv->vlanmpls4.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
-	    memcpy(pptrsv->vlanmpls4.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
-	    memcpy(pptrsv->vlanmpls4.vlan_ptr, pkt+tpl->tpl[NF9_SRC_VLAN].off, tpl->tpl[NF9_SRC_VLAN].len);
+	    memcpy(pptrsv->vlanmpls4.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_IN_SRC_MAC].off, tpl->tpl[NF9_IN_SRC_MAC].len);
+	    memcpy(pptrsv->vlanmpls4.mac_ptr, pkt+tpl->tpl[NF9_IN_DST_MAC].off, tpl->tpl[NF9_IN_DST_MAC].len);
+	    memcpy(pptrsv->vlanmpls4.vlan_ptr, pkt+tpl->tpl[NF9_IN_VLAN].off, tpl->tpl[NF9_IN_VLAN].len);
 
 	    for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++, ptr += 4) {
 	      memset(ptr, 0, 4);
@@ -1476,9 +1437,9 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 
             /* XXX: fix caplen */
 	    reset_mac_vlan(&pptrsv->vlanmpls6);
-	    memcpy(pptrsv->vlanmpls6.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
-	    memcpy(pptrsv->vlanmpls6.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
-	    memcpy(pptrsv->vlanmpls6.vlan_ptr, pkt+tpl->tpl[NF9_SRC_VLAN].off, tpl->tpl[NF9_SRC_VLAN].len);
+	    memcpy(pptrsv->vlanmpls6.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_IN_SRC_MAC].off, tpl->tpl[NF9_IN_SRC_MAC].len);
+	    memcpy(pptrsv->vlanmpls6.mac_ptr, pkt+tpl->tpl[NF9_IN_DST_MAC].off, tpl->tpl[NF9_IN_DST_MAC].len);
+	    memcpy(pptrsv->vlanmpls6.vlan_ptr, pkt+tpl->tpl[NF9_IN_VLAN].off, tpl->tpl[NF9_IN_VLAN].len);
 	    for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++, ptr += 4) {
 	      memset(ptr, 0, 4);
 	      memcpy(ptr, pkt+tpl->tpl[idx].off, tpl->tpl[idx].len);
@@ -1538,6 +1499,58 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
   if (off < len) goto process_flowset;
 }
 
+void process_raw_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vector *pptrsv,
+                struct plugin_requests *req)
+{
+  struct packet_ptrs *pptrs = &pptrsv->v4;
+  u_int16_t nfv;
+
+  /* basic length check against longest NetFlow header */
+  if (len < NfHdrV8Sz) {
+    notify_malf_packet(LOG_INFO, "INFO: discarding short NetFlow packet", (struct sockaddr *) pptrs->f_agent);
+    xflow_tot_bad_datagrams++;
+    return;
+  } 
+
+  nfv = ntohs(((struct struct_header_v5 *)pkt)->version);
+
+  if (nfv != 1 && nfv != 5 && nfv != 7 && nfv != 8 && nfv != 9) {
+    notify_malf_packet(LOG_INFO, "INFO: discarding unknown NetFlow packet", (struct sockaddr *) pptrs->f_agent);
+    xflow_tot_bad_datagrams++;
+    return;
+  }
+
+  pptrs->f_header = pkt;
+
+  switch (nfv) {
+  case 5:
+  case 7:
+  case 8:
+    pptrs->seqno = ntohl(((struct struct_header_v5 *)pkt)->flow_sequence);
+    break;
+  case 9:
+    pptrs->seqno = ntohl(((struct struct_header_v9 *)pkt)->flow_sequence);
+    break;
+  default:
+    pptrs->seqno = 0;
+    break;
+  }
+
+  if (config.debug) {
+    struct host_addr a;
+    u_char agent_addr[50];
+    u_int16_t agent_port;
+
+    sa_to_addr((struct sockaddr *)pptrs->f_agent, &a, &agent_port);
+    addr_to_str(agent_addr, &a);
+
+    Log(LOG_DEBUG, "DEBUG ( default/core ): Received NetFlow packet from [%s:%u] version [%u] seqno [%u]\n", agent_addr, agent_port, nfv, pptrsv->v4.seqno);
+  }
+
+  if (config.pre_tag_map) NF_find_id((struct id_table *)pptrs->idtable, pptrs, &pptrs->tag, &pptrs->tag2);
+  exec_plugins(pptrs);
+}
+
 void compute_once()
 {
   struct pkt_data dummy;
@@ -1545,6 +1558,7 @@ void compute_once()
   CounterSz = sizeof(dummy.pkt_len);
   PdataSz = sizeof(struct pkt_data);
   PpayloadSz = sizeof(struct pkt_payload);
+  PmsgSz = sizeof(struct pkt_msg);
   PextrasSz = sizeof(struct pkt_extras);
   PbgpSz = sizeof(struct pkt_bgp_primitives);
   ChBufHdrSz = sizeof(struct ch_buf_hdr);
@@ -1565,6 +1579,7 @@ void compute_once()
   PptrsSz = sizeof(struct packet_ptrs);
   CSSz = sizeof(struct class_st);
   HostAddrSz = sizeof(struct host_addr);
+  UDPHdrSz = sizeof(struct my_udphdr);
 
 #if defined ENABLE_IPV6
   IP6HdrSz = sizeof(struct ip6_hdr);
@@ -1577,7 +1592,7 @@ u_int16_t NF_evaluate_flow_type(struct template_cache_entry *tpl, struct packet_
 {
   u_int8_t ret=0;
 
-  if (tpl->tpl[NF9_SRC_VLAN].len && *(pptrs->f_data+tpl->tpl[NF9_SRC_VLAN].off) > 0) ret += NF9_FTYPE_VLAN; 
+  if (tpl->tpl[NF9_IN_VLAN].len && *(pptrs->f_data+tpl->tpl[NF9_IN_VLAN].off) > 0) ret += NF9_FTYPE_VLAN; 
   if (tpl->tpl[NF9_MPLS_LABEL_1].len /* check: value > 0 ? */) ret += NF9_FTYPE_MPLS; 
   if (*(pptrs->f_data+tpl->tpl[NF9_IP_PROTOCOL_VERSION].off) == 4 || tpl->tpl[NF9_IPV4_SRC_ADDR].len > 0);
   else if (*(pptrs->f_data+tpl->tpl[NF9_IP_PROTOCOL_VERSION].off) == 6 || tpl->tpl[NF9_IPV6_SRC_ADDR].len > 0) ret += NF9_FTYPE_IPV6;

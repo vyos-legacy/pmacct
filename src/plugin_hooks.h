@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -97,7 +97,7 @@ extern struct channels_list_entry channels_list[MAX_N_PLUGINS];
 EXT void load_plugins(struct plugin_requests *);
 EXT void exec_plugins(struct packet_ptrs *pptrs);
 EXT void load_plugin_filters(int);
-EXT struct channels_list_entry *insert_pipe_channel(struct configuration *, int); 
+EXT struct channels_list_entry *insert_pipe_channel(int, struct configuration *, int); 
 EXT void delete_pipe_channel(int);
 EXT void sort_pipe_channels();
 EXT void init_pipe_channels();
@@ -109,6 +109,7 @@ EXT void fill_pipe_buffer();
 EXT int check_shadow_status(struct packet_ptrs *, struct channels_list_entry *);
 EXT int pkt_data_clean(void *);
 EXT int pkt_payload_clean(void *);
+EXT int pkt_msg_clean(void *);
 EXT int pkt_extras_clean(void *);
 EXT int pkt_bgp_clean(void *);
 EXT void evaluate_sampling(struct sampling *, pm_counter_t *, pm_counter_t *, pm_counter_t *);
@@ -126,6 +127,7 @@ EXT void imt_plugin(int, struct configuration *, void *);
 EXT void print_plugin(int, struct configuration *, void *);
 EXT void nfprobe_plugin(int, struct configuration *, void *);
 EXT void sfprobe_plugin(int, struct configuration *, void *);
+EXT void tee_plugin(int, struct configuration *, void *);
 
 #ifdef WITH_MYSQL
 EXT void mysql_plugin(int, struct configuration *, void *);

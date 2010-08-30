@@ -62,7 +62,7 @@ void usage_client(char *prog)
   printf("  -S\tSum counters instead of returning a single counter for each request (applies to -N)\n");
   printf("  -M\t[matching data[';' ... ]] | ['file:'[filename]] \n\tMatch primitives; print formatted table (requires -c)\n");
   printf("  -a\tDisplay all table fields (even those currently unused)\n");
-  printf("  -c\t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_mask | dst_mask | \n\t src_port | dst_port | tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | \n\t sum_port | in_iface | out_iface | tag | tag2 | flows | class | std_comm | ext_comm | as_path | \n\t peer_src_ip | peer_dst_ip | peer_src_as | peer_dst_as | src_as_path | src_std_comm | src_med | \n\t src_ext_comm | src_local_pref | is_symmetric ] \n\tSelect primitives to match (required by -N and -M)\n");
+  printf("  -c\t[ src_mac | dst_mac | vlan | cos | src_host | dst_host | src_net | dst_net | src_mask | dst_mask | \n\t src_port | dst_port | tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | \n\t sum_port | in_iface | out_iface | tag | tag2 | flows | class | std_comm | ext_comm | as_path | \n\t peer_src_ip | peer_dst_ip | peer_src_as | peer_dst_as | src_as_path | src_std_comm | src_med | \n\t src_ext_comm | src_local_pref | is_symmetric ] \n\tSelect primitives to match (required by -N and -M)\n");
   printf("  -T\t[bytes|packets|flows] \n\tOutput top N statistics (applies to -M and -s)\n");
   printf("  -e\tClear statistics\n");
   printf("  -r\tReset counters (applies to -N and -M)\n");
@@ -125,6 +125,7 @@ void write_stats_header(u_int64_t what_to_count, u_int8_t have_wtc)
     printf("SRC_MAC            ");
     printf("DST_MAC            ");
     printf("VLAN   ");
+    printf("COS ");
 #endif
     printf("SRC_AS      ");
     printf("DST_AS      "); 
@@ -180,6 +181,7 @@ void write_stats_header(u_int64_t what_to_count, u_int8_t have_wtc)
     if (what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) printf("SRC_MAC            "); 
     if (what_to_count & COUNT_DST_MAC) printf("DST_MAC            "); 
     if (what_to_count & COUNT_VLAN) printf("VLAN   ");
+    if (what_to_count & COUNT_COS) printf("COS ");
 #endif
     if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("SRC_AS      ");
     if (what_to_count & COUNT_DST_AS) printf("DST_AS      "); 
@@ -386,6 +388,15 @@ int main(int argc,char **argv)
 	  count_token_int[count_index] = COUNT_VLAN;
 	  what_to_count |= COUNT_VLAN;
 	}
+        else if (!strcmp(count_token[count_index], "cos")) {
+          count_token_int[count_index] = COUNT_COS;
+          what_to_count |= COUNT_COS;
+        }
+	else if (!strcmp(count_token[count_index], "sum_mac")) {
+	  count_token_int[count_index] = COUNT_SUM_MAC;
+	  what_to_count |= COUNT_SUM_MAC;
+	}
+#endif 
         else if (!strcmp(count_token[count_index], "in_iface")) {
           count_token_int[count_index] = COUNT_IN_IFACE;
           what_to_count |= COUNT_IN_IFACE;
@@ -394,11 +405,6 @@ int main(int argc,char **argv)
           count_token_int[count_index] = COUNT_OUT_IFACE;
           what_to_count |= COUNT_OUT_IFACE;
         }
-	else if (!strcmp(count_token[count_index], "sum_mac")) {
-	  count_token_int[count_index] = COUNT_SUM_MAC;
-	  what_to_count |= COUNT_SUM_MAC;
-	}
-#endif 
         else if (!strcmp(count_token[count_index], "tos")) {
 	  count_token_int[count_index] = COUNT_IP_TOS;
 	  what_to_count |= COUNT_IP_TOS;
@@ -794,6 +800,11 @@ int main(int argc,char **argv)
         else if (!strcmp(count_token[match_string_index], "vlan")) {
 	  request.data.vlan_id = atoi(match_string_token);
         }
+        else if (!strcmp(count_token[match_string_index], "cos")) {
+          request.data.cos = atoi(match_string_token);
+        }
+#endif
+
         else if (!strcmp(count_token[match_string_index], "in_iface")) {
           char *endptr;
 
@@ -804,6 +815,7 @@ int main(int argc,char **argv)
 
           request.data.ifindex_out = strtoul(match_string_token, &endptr, 10);
         }
+
         else if (!strcmp(count_token[match_string_index], "src_mask")) {
           char *endptr;
 	  u_int32_t src_mask;
@@ -818,7 +830,7 @@ int main(int argc,char **argv)
           dst_mask = strtoul(match_string_token, &endptr, 10);
 	  request.data.dst_nmask = dst_mask;
         }
-#endif
+
         else if (!strcmp(count_token[match_string_index], "src_port") ||
 		 !strcmp(count_token[match_string_index], "sum_port")) { 
           request.data.src_port = atoi(match_string_token);
@@ -1153,6 +1165,10 @@ int main(int argc,char **argv)
 
 	if (!have_wtc || (what_to_count & COUNT_VLAN)) {
           printf("%-5d  ", acc_elem->primitives.vlan_id);
+        }
+
+        if (!have_wtc || (what_to_count & COUNT_COS)) {
+          printf("%-2d  ", acc_elem->primitives.cos);
         }
 #endif
 	if (!have_wtc || (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS))) {
