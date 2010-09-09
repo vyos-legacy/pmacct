@@ -22,7 +22,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow9.c,v 1.11 2010/06/07 01:21:58 paolo Exp $ */
+/* $Id: netflow9.c,v 1.12 2010/09/09 14:35:48 paolo Exp $ */
 
 #define __NFPROBE_NETFLOW9_C
 
@@ -83,6 +83,8 @@ struct NF9_DATA_FLOWSET_HEADER {
 /* ... */
 #define NF9_LAST_SWITCHED		21
 #define NF9_FIRST_SWITCHED		22
+#define NF9_OUT_BYTES                   23
+#define NF9_OUT_PACKETS                 24
 /* ... */
 #define NF9_IPV6_SRC_ADDR		27
 #define NF9_IPV6_DST_ADDR		28
