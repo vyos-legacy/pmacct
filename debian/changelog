@@ -1,3 +1,44 @@
+pmacct (0.12.4+vyatta+1) unstable; urgency=low
+
+  [ paolo ]
+  * * Rolled version counters
+  * * nfacctd: improved flow recognition heuristics
+  * * BGP daemon: initial effort to optimize RIB resources consumption
+  * * BGP daemon: initial effort to optimize RIB resources consumption
+    (cont.d)
+  * * BGP daemon: initial effort to optimize RIB resources consumption
+    (cont.d)
+  * * fix, nfv9_template.c: ignoring unsupported field types; improved
+    template logging.
+  * * BGP daemon: initial effort to optimize RIB resources consumption
+    (cont.d)
+  * * BGP daemon: effort to optimize RIB resources consumption; new
+    information model encompasses a shared RIB, shared attributes and
+    per-peer routing information. Introduced bgp_table_peer_buckets
+    configuration directive.
+  * * nfacctd: introduced support for Cisco ASA bytes counter, NetFlow
+    v9 field type #85.
+  * * BGP daemon thread: documentation on memory dimensioning
+  * * BGP daemon: further effort to optimize RIB resources consumption;
+    updated documentation.
+  * * BGP daemon: further effort to optimize RIB resources consumption;
+    updated documentation.
+  * * nfprobe: record direction information, if available, for later use
+    * bgp daemon: fixed memory leak. Only affected version is 0.12.4-cvs
+  * * nfprobe: added support for export direction field (NetFlow v9
+    field type #61); its value, 0=ingress 1=egress, is determined via
+    nfprobe_direction configuration directive.
+  * * Updated ChangeLog document
+  * * print plugin: support for interfaces and network masks has been
+    added. Numeric variables output converted to unsigned from signed. *
+    bgp_table.h: spelling error corrected. Did affect 0.12.4-cvs version
+    only and was preventing package to compile when --enable-ipv6 flag
+    was passed at compile time. * ChangeLog updated
+
+  [ Stig Thormodsrud ]
+
+ -- Stig Thormodsrud <stig@vyatta.com>  Fri, 01 Oct 2010 16:36:06 -0700
+
 pmacct (0.12.3+vyatta+3) unstable; urgency=low
 
   * UNRELEASED
