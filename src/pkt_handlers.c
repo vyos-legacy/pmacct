@@ -1523,6 +1523,15 @@ void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_
       memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_IN_BYTES].off, 8);
       pdata->pkt_len = pm_ntohll(t64);
     }
+    else if (tpl->tpl[NF9_FLOW_BYTES].len == 4) {
+      memcpy(&t32, pptrs->f_data+tpl->tpl[NF9_FLOW_BYTES].off, 4);
+      pdata->pkt_len = ntohl(t32);
+    }
+    else if (tpl->tpl[NF9_FLOW_BYTES].len == 8) {
+      memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_FLOW_BYTES].off, 8);
+      pdata->pkt_len = pm_ntohll(t64);
+    }
+
     if (tpl->tpl[NF9_IN_PACKETS].len == 4) {
       memcpy(&t32, pptrs->f_data+tpl->tpl[NF9_IN_PACKETS].off, 4);
       pdata->pkt_num = ntohl(t32);
@@ -1606,6 +1615,15 @@ void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_p
       memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_IN_BYTES].off, 8);
       pdata->pkt_len = pm_ntohll(t64);
     }
+    else if (tpl->tpl[NF9_FLOW_BYTES].len == 4) {
+      memcpy(&t32, pptrs->f_data+tpl->tpl[NF9_FLOW_BYTES].off, 4);
+      pdata->pkt_len = ntohl(t32);
+    }
+    else if (tpl->tpl[NF9_FLOW_BYTES].len == 8) {
+      memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_FLOW_BYTES].off, 8);
+      pdata->pkt_len = pm_ntohll(t64);
+    }
+
     if (tpl->tpl[NF9_IN_PACKETS].len == 4) {
       memcpy(&t32, pptrs->f_data+tpl->tpl[NF9_IN_PACKETS].off, 4);
       pdata->pkt_num = ntohl(t32);
@@ -1688,6 +1706,15 @@ void NF_counters_new_handler(struct channels_list_entry *chptr, struct packet_pt
       memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_IN_BYTES].off, 8);
       pdata->pkt_len = pm_ntohll(t64);
     }
+    else if (tpl->tpl[NF9_FLOW_BYTES].len == 4) {
+      memcpy(&t32, pptrs->f_data+tpl->tpl[NF9_FLOW_BYTES].off, 4);
+      pdata->pkt_len = ntohl(t32);
+    }
+    else if (tpl->tpl[NF9_FLOW_BYTES].len == 8) {
+      memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_FLOW_BYTES].off, 8);
+      pdata->pkt_len = pm_ntohll(t64);
+    }
+
     if (tpl->tpl[NF9_IN_PACKETS].len == 4) {
       memcpy(&t32, pptrs->f_data+tpl->tpl[NF9_IN_PACKETS].off, 4);
       pdata->pkt_num = ntohl(t32);
@@ -2045,7 +2072,7 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
   --pdata; /* Bringing back to original place */
 
   if (src_ret) {
-    info = (struct bgp_info *) src_ret->info;
+    info = (struct bgp_info *) pptrs->bgp_src_info;
     if (info && info->attr) {
       if (config.nfacctd_as == NF_AS_BGP) {
 	if (chptr->aggregation & COUNT_SRC_AS && info->attr->aspath) {
@@ -2114,7 +2141,7 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
   }
 
   if (dst_ret) {
-    info = (struct bgp_info *) dst_ret->info;
+    info = (struct bgp_info *) pptrs->bgp_dst_info;
     if (info && info->attr) {
       if (chptr->aggregation & COUNT_STD_COMM && info->attr->community && info->attr->community->str) {
 	if (config.nfacctd_bgp_stdcomm_pattern)
@@ -2179,30 +2206,29 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
         }
       }
       if (chptr->aggregation & COUNT_PEER_DST_IP) {
-	struct bgp_node *nh;
 	struct bgp_info *nh_info;
 
 	if (config.nfacctd_as == NF_AS_BGP) {
-	  if (pptrs->bgp_nexthop) { 
-	    nh = (struct bgp_node *) pptrs->bgp_nexthop;
-	    nh_info = nh->info;
-	  }
-	  else 
+	  if (pptrs->bgp_nexthop_info)
+	    nh_info = (struct bgp_info *) pptrs->bgp_nexthop_info;
+	  else
 	    nh_info = info;
 
-	  if (nh_info->attr->mp_nexthop.family == AF_INET) {
-	    pbgp->peer_dst_ip.family = AF_INET;
-	    memcpy(&pbgp->peer_dst_ip.address.ipv4, &nh_info->attr->mp_nexthop.address.ipv4, 4);
-	  }
+	  if (nh_info && nh_info->attr) {
+	    if (nh_info->attr->mp_nexthop.family == AF_INET) {
+	      pbgp->peer_dst_ip.family = AF_INET;
+	      memcpy(&pbgp->peer_dst_ip.address.ipv4, &nh_info->attr->mp_nexthop.address.ipv4, 4);
+	    }
 #if defined ENABLE_IPV6
-	  else if (nh_info->attr->mp_nexthop.family == AF_INET6) {
-	    pbgp->peer_dst_ip.family = AF_INET6;
-	    memcpy(&pbgp->peer_dst_ip.address.ipv6, &nh_info->attr->mp_nexthop.address.ipv6, 16);
-	  }
+	    else if (nh_info->attr->mp_nexthop.family == AF_INET6) {
+	      pbgp->peer_dst_ip.family = AF_INET6;
+	      memcpy(&pbgp->peer_dst_ip.address.ipv6, &nh_info->attr->mp_nexthop.address.ipv6, 16);
+	    }
 #endif
-	  else {
-	    pbgp->peer_dst_ip.family = AF_INET; 
-	    pbgp->peer_dst_ip.address.ipv4.s_addr = nh_info->attr->nexthop.s_addr;
+	    else {
+	      pbgp->peer_dst_ip.family = AF_INET; 
+	      pbgp->peer_dst_ip.address.ipv4.s_addr = nh_info->attr->nexthop.s_addr;
+	    }
 	  }
 	}
       }
@@ -2211,7 +2237,7 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
 
   if (chptr->aggregation & COUNT_PEER_SRC_IP && peer) {
     if (config.nfacctd_as == NF_AS_BGP) {
-      if (!pptrs->bta) memcpy(&pbgp->peer_src_ip, &peer->addr, sizeof(struct host_addr)); 
+      if (!pptrs->bta && !config.nfacctd_bgp_follow_default) memcpy(&pbgp->peer_src_ip, &peer->addr, sizeof(struct host_addr)); 
       else {
         struct sockaddr *sa = (struct sockaddr *) pptrs->f_agent;
 
@@ -2234,7 +2260,7 @@ void sfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_pt
   struct bgp_info *info;
 
   if (src_ret) {
-    info = (struct bgp_info *) src_ret->info;
+    info = (struct bgp_info *) pptrs->bgp_src_info;
     if (info && info->attr) {
       if (config.nfacctd_as == NF_AS_BGP) {
 	if (chptr->aggregation & COUNT_SRC_AS && info->attr->aspath) {
@@ -2248,7 +2274,7 @@ void sfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_pt
   }
 
   if (dst_ret) {
-    info = (struct bgp_info *) dst_ret->info;
+    info = (struct bgp_info *) pptrs->bgp_dst_info;
     if (info && info->attr) {
       if (config.nfacctd_as == NF_AS_BGP) {
         if (chptr->aggregation & COUNT_DST_AS && info->attr->aspath) {
@@ -2259,30 +2285,29 @@ void sfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_pt
 	}
 
 	if (chptr->aggregation & COUNT_PEER_DST_IP) {
-	  struct bgp_node *nh;
-	  struct bgp_info *nh_info;
+          struct bgp_info *nh_info;
 
-          if (pptrs->bgp_nexthop) {
-            nh = (struct bgp_node *) pptrs->bgp_nexthop;
-            nh_info = nh->info;
-          }
+          if (pptrs->bgp_nexthop_info)
+	    nh_info = (struct bgp_info *) pptrs->bgp_nexthop_info;
           else
-            nh_info = info;
+	    nh_info = info;
 
-          if (nh_info->attr->mp_nexthop.family == AF_INET) {
-            payload->bgp_next_hop.family = AF_INET;
-            memcpy(&payload->bgp_next_hop.address.ipv4, &nh_info->attr->mp_nexthop.address.ipv4, 4);
-          }
+	  if (nh_info && nh_info->attr) {
+            if (nh_info->attr->mp_nexthop.family == AF_INET) {
+              payload->bgp_next_hop.family = AF_INET;
+              memcpy(&payload->bgp_next_hop.address.ipv4, &nh_info->attr->mp_nexthop.address.ipv4, 4);
+            }
 #if defined ENABLE_IPV6
-          else if (nh_info->attr->mp_nexthop.family == AF_INET6) {
-            payload->bgp_next_hop.family = AF_INET6;
-            memcpy(&payload->bgp_next_hop.address.ipv6, &nh_info->attr->mp_nexthop.address.ipv6, 16);
-          }
+            else if (nh_info->attr->mp_nexthop.family == AF_INET6) {
+              payload->bgp_next_hop.family = AF_INET6;
+              memcpy(&payload->bgp_next_hop.address.ipv6, &nh_info->attr->mp_nexthop.address.ipv6, 16);
+            }
 #endif
-          else {
-            payload->bgp_next_hop.family = AF_INET;
-            payload->bgp_next_hop.address.ipv4.s_addr = nh_info->attr->nexthop.s_addr;
-          }
+            else {
+              payload->bgp_next_hop.family = AF_INET;
+              payload->bgp_next_hop.address.ipv4.s_addr = nh_info->attr->nexthop.s_addr;
+            }
+	  }
         }
       }
     }
@@ -2301,7 +2326,7 @@ void nfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_pt
   --pdata; /* Bringing back to original place */
 
   if (src_ret) {
-    info = (struct bgp_info *) src_ret->info;
+    info = (struct bgp_info *) pptrs->bgp_src_info;
     if (info && info->attr) {
       if (config.nfacctd_as == NF_AS_BGP) {
         if (chptr->aggregation & COUNT_SRC_AS && info->attr->aspath) {
@@ -2315,7 +2340,7 @@ void nfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_pt
   }
 
   if (dst_ret) {
-    info = (struct bgp_info *) dst_ret->info;
+    info = (struct bgp_info *) pptrs->bgp_dst_info;
     if (info && info->attr) {
       if (config.nfacctd_as == NF_AS_BGP) {
         if (chptr->aggregation & COUNT_DST_AS && info->attr->aspath) {
@@ -2326,30 +2351,29 @@ void nfprobe_bgp_ext_handler(struct channels_list_entry *chptr, struct packet_pt
         }
 
         if (chptr->aggregation & COUNT_PEER_DST_IP) {
-          struct bgp_node *nh;
           struct bgp_info *nh_info;
 
-          if (pptrs->bgp_nexthop) {
-            nh = (struct bgp_node *) pptrs->bgp_nexthop;
-            nh_info = nh->info;
-          }
+          if (pptrs->bgp_nexthop_info)
+	    nh_info = (struct bgp_info *) pptrs->bgp_nexthop_info;
           else
-            nh_info = info;
+	    nh_info = info;
 
-          if (nh_info->attr->mp_nexthop.family == AF_INET) {
-            pextras->bgp_next_hop.family = AF_INET;
-            memcpy(&pextras->bgp_next_hop.address.ipv4, &nh_info->attr->mp_nexthop.address.ipv4, 4);
-          }
+	  if (nh_info && nh_info->attr) {
+            if (nh_info->attr->mp_nexthop.family == AF_INET) {
+              pextras->bgp_next_hop.family = AF_INET;
+              memcpy(&pextras->bgp_next_hop.address.ipv4, &nh_info->attr->mp_nexthop.address.ipv4, 4);
+            }
 #if defined ENABLE_IPV6
-          else if (nh_info->attr->mp_nexthop.family == AF_INET6) {
-            pextras->bgp_next_hop.family = AF_INET6;
-            memcpy(&pextras->bgp_next_hop.address.ipv6, &nh_info->attr->mp_nexthop.address.ipv6, 16);
-          }
+            else if (nh_info->attr->mp_nexthop.family == AF_INET6) {
+              pextras->bgp_next_hop.family = AF_INET6;
+              memcpy(&pextras->bgp_next_hop.address.ipv6, &nh_info->attr->mp_nexthop.address.ipv6, 16);
+            }
 #endif
-          else {
-            pextras->bgp_next_hop.family = AF_INET;
-            pextras->bgp_next_hop.address.ipv4.s_addr = nh_info->attr->nexthop.s_addr;
-          }
+            else {
+              pextras->bgp_next_hop.family = AF_INET;
+              pextras->bgp_next_hop.address.ipv4.s_addr = nh_info->attr->nexthop.s_addr;
+            }
+	  }
         }
       }
     }
@@ -2361,6 +2385,7 @@ void bgp_peer_src_as_frommap_handler(struct channels_list_entry *chptr, struct p
   struct pkt_data *pdata = (struct pkt_data *) *data;
   struct pkt_bgp_primitives *pbgp = (struct pkt_bgp_primitives *) ++pdata;
   struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
+  struct bgp_peer *peer = (struct bgp_peer *) pptrs->bgp_peer;
   struct bgp_info *info;
 
   --pdata; /* Bringing back to original place */
@@ -2373,7 +2398,7 @@ void bgp_peer_src_as_frommap_handler(struct channels_list_entry *chptr, struct p
     if (src_ret) {
       char tmp_stdcomms[MAX_BGP_STD_COMMS];
 
-      info = (struct bgp_info *) src_ret->info;
+      info = (struct bgp_info *) pptrs->bgp_src_info;
 
       if (info && info->attr && info->attr->community && info->attr->community->str) {
         evaluate_comm_patterns(tmp_stdcomms, info->attr->community->str, std_comm_patterns_to_asn, MAX_BGP_STD_COMMS);
@@ -2388,7 +2413,6 @@ void bgp_src_local_pref_frommap_handler(struct channels_list_entry *chptr, struc
   struct pkt_data *pdata = (struct pkt_data *) *data;
   struct pkt_bgp_primitives *pbgp = (struct pkt_bgp_primitives *) ++pdata;
   struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
-  struct bgp_info *info;
 
   --pdata; /* Bringing back to original place */
 
@@ -2400,7 +2424,6 @@ void bgp_src_med_frommap_handler(struct channels_list_entry *chptr, struct packe
   struct pkt_data *pdata = (struct pkt_data *) *data;
   struct pkt_bgp_primitives *pbgp = (struct pkt_bgp_primitives *) ++pdata;
   struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
-  struct bgp_info *info;
 
   --pdata; /* Bringing back to original place */
 
@@ -2412,7 +2435,6 @@ void bgp_is_symmetric_frommap_handler(struct channels_list_entry *chptr, struct 
   struct pkt_data *pdata = (struct pkt_data *) *data;
   struct pkt_bgp_primitives *pbgp = (struct pkt_bgp_primitives *) ++pdata;
   struct bgp_node *src_ret = (struct bgp_node *) pptrs->bgp_src;
-  struct bgp_info *info;
 
   --pdata; /* Bringing back to original place */
 

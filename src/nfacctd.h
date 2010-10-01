@@ -428,6 +428,8 @@ struct data_hdr_v9 {
 /* ... */
 #define NF9_LAST_SWITCHED               21
 #define NF9_FIRST_SWITCHED              22
+#define NF9_OUT_BYTES			23
+#define NF9_OUT_PACKETS			24
 /* ... */
 #define NF9_IPV6_SRC_ADDR               27
 #define NF9_IPV6_DST_ADDR               28
@@ -458,6 +460,8 @@ struct data_hdr_v9 {
 #define NF9_MPLS_LABEL_10		79
 #define NF9_IN_DST_MAC			80 
 #define NF9_OUT_SRC_MAC			81 
+/* ... */
+#define NF9_FLOW_BYTES			85 
 /* ... */
 #define NF9_CUST_CLASS			200
 #define NF9_CUST_TAG			201
@@ -624,7 +628,9 @@ EXT void handle_template_v9(struct template_hdr_v9 *, struct packet_ptrs *, u_in
 EXT struct template_cache_entry *find_template_v9(u_int16_t, struct packet_ptrs *);
 EXT struct template_cache_entry *insert_template_v9(struct template_hdr_v9 *, struct packet_ptrs *);
 EXT void refresh_template_v9(struct template_hdr_v9 *, struct template_cache_entry *, struct packet_ptrs *);
-EXT void log_template_v9(struct template_cache_entry *, struct packet_ptrs *);
+EXT void log_template_v9_header(struct template_cache_entry *, struct packet_ptrs *);
+EXT void log_template_v9_field(u_int16_t, u_int16_t, u_int16_t); 
+EXT void log_template_v9_footer(u_int16_t);
 EXT struct template_cache_entry *insert_opt_template_v9(struct options_template_hdr_v9 *, struct packet_ptrs *);
 EXT void refresh_opt_template_v9(struct options_template_hdr_v9 *, struct template_cache_entry *, struct packet_ptrs *);
 #undef EXT

@@ -101,7 +101,6 @@ struct bgp_peer {
   u_int8_t cap_mp;
   char *cap_4as;
   u_int16_t msglen;
-  struct bgp_table *rib[AFI_MAX][SAFI_MAX];
   struct bgp_peer_buf buf;
 };
 
@@ -161,8 +160,8 @@ EXT int bgp_process_update(struct bgp_peer *, struct prefix *, void *, afi_t, sa
 EXT int bgp_process_withdraw(struct bgp_peer *, struct prefix *, void *, afi_t, safi_t);
 EXT int bgp_afi2family (int);
 EXT struct bgp_info *bgp_info_new();
-EXT void bgp_info_add(struct bgp_node *, struct bgp_info *);
-EXT void bgp_info_delete(struct bgp_node *, struct bgp_info *);
+EXT void bgp_info_add(struct bgp_node *, struct bgp_info *, u_int32_t);
+EXT void bgp_info_delete(struct bgp_node *, struct bgp_info *, u_int32_t);
 EXT void bgp_info_free(struct bgp_info *);
 EXT void bgp_attr_init();
 EXT struct bgp_attr *bgp_attr_intern(struct bgp_attr *);
@@ -201,6 +200,7 @@ EXT char *ext_comm_patterns[MAX_BGP_COMM_PATTERNS];
 EXT char *std_comm_patterns_to_asn[MAX_BGP_COMM_PATTERNS];
 EXT struct bgp_comm_range peer_src_as_ifrange; 
 EXT struct bgp_comm_range peer_src_as_asrange; 
+EXT struct bgp_table *rib[AFI_MAX][SAFI_MAX];
 
 #undef EXT
 #endif 
