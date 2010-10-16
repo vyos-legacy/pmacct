@@ -22,7 +22,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow9.c,v 1.15 2010/10/16 11:58:30 paolo Exp $ */
+/* $Id: netflow9.c,v 1.16 2010/10/16 19:05:11 paolo Exp $ */
 
 #define __NFPROBE_NETFLOW9_C
 
@@ -431,14 +431,18 @@ nf9_init_template(void)
 	v4_template.r[rcount].type = htons(NF9_IN_BYTES);
 	v4_template.r[rcount].length = htons(4);
 	v4_int_template.r[rcount].length = 4;
-        v4_template_out.r[rcount].type = htons(NF9_OUT_BYTES);
+	// Cisco doesn't appear to do that (yet?)
+        // v4_template_out.r[rcount].type = htons(NF9_OUT_BYTES);
+        v4_template_out.r[rcount].type = htons(NF9_IN_BYTES);
         v4_template_out.r[rcount].length = htons(4);
         v4_int_template_out.r[rcount].length = 4;
 	rcount++;
 	v4_template.r[rcount].type = htons(NF9_IN_PACKETS);
 	v4_template.r[rcount].length = htons(4);
 	v4_int_template.r[rcount].length = 4;
-        v4_template_out.r[rcount].type = htons(NF9_OUT_PACKETS);
+	// Cisco doesn't appear to do that (yet?)
+        // v4_template_out.r[rcount].type = htons(NF9_OUT_PACKETS);
+	v4_template_out.r[rcount].type = htons(NF9_IN_PACKETS);
         v4_template_out.r[rcount].length = htons(4);
         v4_int_template_out.r[rcount].length = 4;
 	rcount++;
@@ -738,14 +742,18 @@ nf9_init_template(void)
 	v6_template.r[rcount].type = htons(NF9_IN_BYTES);
 	v6_template.r[rcount].length = htons(4);
 	v6_int_template.r[rcount].length = 4;
-        v6_template_out.r[rcount].type = htons(NF9_OUT_BYTES);
+	// Cisco doesn't appear to do that (yet?)
+        // v6_template_out.r[rcount].type = htons(NF9_OUT_BYTES);
+        v6_template_out.r[rcount].type = htons(NF9_IN_BYTES);
         v6_template_out.r[rcount].length = htons(4);
         v6_int_template_out.r[rcount].length = 4;
 	rcount++;
 	v6_template.r[rcount].type = htons(NF9_IN_PACKETS);
 	v6_template.r[rcount].length = htons(4);
 	v6_int_template.r[rcount].length = 4;
-        v6_template_out.r[rcount].type = htons(NF9_OUT_PACKETS);
+	// Cisco doesn't appear to do that (yet?)
+        // v6_template_out.r[rcount].type = htons(NF9_OUT_PACKETS);
+        v6_template_out.r[rcount].type = htons(NF9_IN_PACKETS);
         v6_template_out.r[rcount].length = htons(4);
         v6_int_template_out.r[rcount].length = 4;
 	rcount++;
