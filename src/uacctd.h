@@ -19,13 +19,4 @@
 #define NETLINK_NO_ENOBUFS 5
 #endif
 
-/* functions */
-#if (!defined __UACCTD_C)
-#define EXT extern
-#else
-#define EXT
-EXT u_int16_t get_ifindex(char *);
-#endif
-#undef EXT
-
 #endif

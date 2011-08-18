@@ -83,6 +83,27 @@ void usage_daemon(char *prog_name)
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
 
+static unsigned int get_ifindex(char *device) 
+{
+  static int sock = -1;
+
+  if (sock < 0) {
+    sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock < 0) {
+      Log(LOG_ERR, "ERROR: Unable to open socket for ifindex");
+      return 0;
+    }
+  }
+
+  struct ifreq req;
+  strcpy(req.ifr_name, device);
+  if (ioctl(sock, SIOCGIFINDEX, &req)) {
+    Log(LOG_ERR, "ERROR: Interface %s not found\n", device);
+    return 0;
+  }
+
+  return req.ifr_ifindex;
+}
 
 int main(int argc,char **argv, char **envp)
 {
@@ -766,28 +787,6 @@ int main(int argc,char **argv, char **envp)
       nlh = NLMSG_NEXT(nlh, len);
     }
   }
-}
-
-u_int16_t get_ifindex(char *device) 
-{
-  static int sock = -1;
-
-  if (sock < 0) {
-    sock = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0) {
-      Log(LOG_ERR, "ERROR: Unable to open socket for ifindex");
-      return -1;
-    }
-  }
-  
-  struct ifreq req;
-  strcpy(req.ifr_name, device);
-  if (ioctl(sock, SIOCGIFINDEX, &req)) {
-    Log(LOG_ERR, "ERROR: Interface %s not found\n", device);
-    return -1;
-  }
-
-  return req.ifr_ifindex;
 }
 
 #else
