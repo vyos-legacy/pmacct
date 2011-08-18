@@ -1,3 +1,11 @@
+pmacct (0.12.4+vyatta+4) unstable; urgency=low
+
+  * uacctd: set socket option to ignore overrun
+  * uacctd: Allow greater than 2^15 interfaces
+  * uacctd: add a acache of interface names
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Thu, 18 Aug 2011 10:58:17 -0700
+
 pmacct (0.12.4+vyatta+3) unstable; urgency=low
 
   * new branch
