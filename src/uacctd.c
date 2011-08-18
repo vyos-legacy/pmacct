@@ -565,6 +565,11 @@ int main(int argc,char **argv, char **envp)
       Log(LOG_INFO, "INFO ( default/core ): Netlink receive buffer size set to %u\n", config.uacctd_nl_size);
   }
 
+  /* Turn off netlink errors from overrun. */
+  int one = 1;
+  if (setsockopt(ulog_fd, SOL_NETLINK, NETLINK_NO_ENOBUFS, &one, sizeof(one)))
+    Log(LOG_ERR, "ERROR ( default/core ): Failed to turn off netlink ENOBUFS\n");
+
   ulog_buffer = malloc(config.snaplen);
   if (ulog_buffer == NULL) {
     Log(LOG_ERR, "ERROR ( default/core ): ULOG buffer malloc() failed\n");
