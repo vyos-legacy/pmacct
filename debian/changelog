@@ -1,3 +1,9 @@
+pmacct (0.12.4+vyatta+2+napa2) unstable; urgency=low
+
+  * uacctd: set socket option to ignore overrun
+
+ -- Stephen Hemminger <shemminger@vyatta.com>  Thu, 18 Aug 2011 15:37:25 -0700
+
 pmacct (0.12.4+vyatta+2+napa1) unstable; urgency=low
 
   * new branch
