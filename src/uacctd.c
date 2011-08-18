@@ -83,7 +83,7 @@ void usage_daemon(char *prog_name)
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
 
-static unsigned int get_ifindex(char *device) 
+static unsigned int __get_ifindex(const char *device)
 {
   static int sock = -1;
 
@@ -103,6 +103,65 @@ static unsigned int get_ifindex(char *device)
   }
 
   return req.ifr_ifindex;
+}
+
+struct ifname_cache {
+  struct ifname_cache *next;
+  unsigned long tstamp;
+  unsigned int index;
+  char name[IFNAMSIZ];
+};
+#define HASHSIZ 32
+static struct ifname_cache *hash_heads[HASHSIZ];
+
+#define IFCACHE_LIFETIME 15 /* seconds */
+
+static unsigned ifname_hash(const char *name)
+{
+  unsigned hash = 0;
+
+  while (*name)
+    hash = 33 * hash + *name++;
+
+  return (hash & HASHSIZ-1);
+}
+
+/* Cache name to ifindex mapping */
+static unsigned int get_ifindex(const char *device, unsigned long now)
+{
+  struct ifname_cache *ifc, **top;
+  unsigned int ifindex;
+ 
+  top = &hash_heads[ifname_hash(device)];
+  while ( (ifc = *top) != NULL) {
+    if (strncmp(device, ifc->name, IFNAMSIZ)) {
+      top = &ifc->next;
+      continue;
+    }
+
+    /* prune old entry to deal with hotplug */
+    if ((long)(now - ifc->tstamp) > IFCACHE_LIFETIME) {
+      *top = ifc->next;
+      free(ifc);
+      break;
+    }
+
+    return ifc->index;
+  }
+
+  ifindex = __get_ifindex(device);
+  if (ifindex) {
+    ifc = malloc(sizeof(struct ifname_cache));
+    if (ifc) {
+      ifc->index = ifindex;
+      strncpy(ifc->name, device, IFNAMSIZ);
+      ifc->tstamp = now;
+      ifc->next = *top;
+      *top = ifc;
+    }
+  }
+
+  return ifindex;
 }
 
 int main(int argc,char **argv, char **envp)
@@ -741,12 +800,12 @@ int main(int argc,char **argv, char **envp)
       hdr.len = ulog_pkt->data_len;
 
       if (strlen(ulog_pkt->indev_name) > 1) {
-       cb_data.ifindex_in = get_ifindex(ulog_pkt->indev_name);
+	cb_data.ifindex_in = get_ifindex(ulog_pkt->indev_name, tv.tv_sec);
       }
       else cb_data.ifindex_in = 0;
 
       if (strlen(ulog_pkt->outdev_name) > 1) {
-       cb_data.ifindex_out = get_ifindex(ulog_pkt->outdev_name);
+	cb_data.ifindex_out = get_ifindex(ulog_pkt->outdev_name, tv.tv_sec);
       }
       else cb_data.ifindex_out = 0;
 
