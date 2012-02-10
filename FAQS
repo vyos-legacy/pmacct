@@ -1,5 +1,5 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 
 Q1: What is pmacct project homepage ?
 A: It is http://www.pmacct.net/ . There isn't any official mirror site. 
@@ -22,12 +22,12 @@ A: That is not entirely correct today, it was originally though. pmacct born as 
 
 
 Q4: What are pmacct main features?
-A: pmacct can collect and export network data. Collect in memory tables, SQL databases
-   (MySQL, PostgreSQL, SQLite 3.x). Export data speaking sFlow v5 and NetFlow v1/v5/v9.
-   pmacct is able to perform data aggregation; it can also filter, sample, renormalize,
-   tag, classify at L7. Since major release 0.12, pmacct integrates a skinny BGP daemon
-   within its NetFlow and sFlow collectors with the purpose of augment visibility into
-   the network traffic.
+A: pmacct can collect, replicate and export network data. Collect in memory tables or
+   open-source SQL databases (MySQL, PostgreSQL, SQLite 3.x). Export speaking sFlow v5
+   and NetFlow v1/v5/v9. pmacct is able to perform data aggregation; it can also filter,
+   sample, renormalize, tag, classify at L7. With release 0.12 pmacct integrates a BGP
+   BGP daemon within its NetFlow and sFlow collectors aimed at increasing visibility
+   into the network traffic.
 
 
 Q5: Does any of the pmacct daemons logs to flat files?
@@ -283,6 +283,9 @@ A: Few hints are summed below in order to improve SQL database performances. The
    * Don't rely automagically on standard indexes but enable optimal indexes based on
      clauses you (by means of reports, 3rd party tools, scripts, etc.) and pmacct use
      the most to SELECT data. Then remove every unused index.
+   * See if the dynamic table strategy offered by pmacct fits the bill: helps keeping
+     SQL tables and indexes of a manageable size by rotating SQL tables (ie. per hour,
+     day, week, etc.). See the 'sql_table_schema' configuration directive. 
    * Run all SELECT and UPDATE queries under the "EXPLAIN ANALYZE ..." method to see
      if they are actually hitting the indexes. If not, you need to build indexes that
      better fit the actual scenario.

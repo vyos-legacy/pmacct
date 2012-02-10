@@ -141,6 +141,7 @@ struct FLOW {
 
 	/* Flow identity (all are in network byte order) */
 	int af;					/* Address family of flow */
+	u_int8_t direction[2];			/* Flow direction */
 	u_int32_t ip6_flowlabel[2];		/* IPv6 Flowlabel */
 	union {
 		struct in_addr v4;
@@ -152,8 +153,12 @@ struct FLOW {
 	u_int8_t protocol;			/* Protocol */
 	u_int8_t tos[2];			/* ToS/DSCP */
 
-	/* ASN stuff */
+	/* ASN/BGP stuff */
 	as_t as[2];				/* Autonomous System numbers */
+        union {
+                struct in_addr v4;
+                struct in6_addr v6;
+        } bgp_next_hop[2];
 
 	/* L2 stuff */
 	u_int8_t mac[2][6];			/* Endpoint L2/Ethernet MAC addresses */

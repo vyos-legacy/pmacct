@@ -169,15 +169,24 @@ char *copy_argv(register char **argv)
 
 void trim_spaces(char *buf)
 {
+  char *tmp_buf;
   int i, len;
 
   len = strlen(buf);
+
+  tmp_buf = (char *)malloc(len + 1);
+  if (tmp_buf == NULL) {
+    Log(LOG_ERR, "ERROR: trim_spaces: malloc()\n");
+    return;
+  }
    
   /* trimming spaces at beginning of the string */
   for (i = 0; i <= len; i++) {
     if (!isspace(buf[i])) {
-      if (i != 0)
-        strlcpy(buf, &buf[i], len+1-i);
+      if (i != 0) { 
+        strlcpy(tmp_buf, &buf[i], len+1-i);
+        strlcpy(buf, tmp_buf, len+1-i);
+      }
       break;
     } 
   }
@@ -188,13 +197,22 @@ void trim_spaces(char *buf)
       buf[i] = '\0';
     else break;
   }
+
+  free(tmp_buf);
 }
 
 void trim_all_spaces(char *buf)
 {
+  char *tmp_buf;
   int i = 0, len, quotes = FALSE;
 
   len = strlen(buf);
+
+  tmp_buf = (char *)malloc(len + 1);
+  if (tmp_buf == NULL) {
+    Log(LOG_ERR, "ERROR: trim_all_spaces: malloc()\n");
+    return;
+  }
 
   /* trimming all spaces */
   while (i <= len) {
@@ -203,29 +221,41 @@ void trim_all_spaces(char *buf)
       else if (quotes) quotes = FALSE;
     }
     if (isspace(buf[i]) && !quotes) {
-      strlcpy(&buf[i], &buf[i+1], len);
+      strlcpy(tmp_buf, &buf[i+1], len);
+      strlcpy(&buf[i], tmp_buf, len);
       len--;
     }
     else i++;
   }
+
+  free(tmp_buf);
 }
 
 void strip_quotes(char *buf)
 {
-  char *ptr;
+  char *ptr, *tmp_buf;
   int i = 0, len;
 
-  ptr = buf;
   len = strlen(buf);
 
-  /* stripping all quote marks */
+  tmp_buf = (char *)malloc(len + 1);
+  if (tmp_buf == NULL) {
+    Log(LOG_ERR, "ERROR: strip_quotes: malloc()\n");
+    return;
+  }
+  ptr = buf;
+
+  /* stripping all quote marks using a temporary buffer to avoid string corruption by strcpy() */
   while (i <= len) {
     if (ptr[i] == '\'') {
-      strcpy(&buf[i], &ptr[i+1]);
+      strcpy(tmp_buf, &ptr[i+1]);
+      strcpy(&buf[i], tmp_buf);
       len--;
     }
     else i++;
   }
+
+  free(tmp_buf);
 }
 
 int isblankline(char *line)
@@ -965,6 +995,62 @@ void load_allow_file(char *filename, struct hosts_table *t)
     if (!t->num) t->num = -1;
 
     fclose(file);
+  }
+}
+
+void load_bgp_md5_file(char *filename, struct bgp_md5_table *t)
+{
+  FILE *file;
+  char buf[SRVBUFLEN], *ptr;
+  int index = 0;
+
+  if (filename) {
+    if ((file = fopen(filename, "r")) == NULL) {
+      Log(LOG_ERR, "ERROR ( default/core/BGP ): BGP MD5 file '%s' not found\n", filename);
+      exit(1);
+    }
+
+    memset(t->table, 0, sizeof(t->table));
+    while (!feof(file)) {
+      if (index >= BGP_MD5_MAP_ENTRIES) break; /* XXX: we shouldn't exit silently */
+      memset(buf, 0, SRVBUFLEN);
+      if (fgets(buf, SRVBUFLEN, file)) {
+        if (!sanitize_buf(buf)) {
+	  char *endptr, *token;
+	  int tk_idx = 0, ret = 0, len = 0;
+
+	  ptr = buf;
+	  memset(&t->table[index], 0, sizeof(t->table[index]));
+	  while ( (token = extract_token(&ptr, ',')) && tk_idx < 2 ) {
+	    if (tk_idx == 0) ret = str_to_addr(token, &t->table[index].addr);
+	    else if (tk_idx == 1) {
+	      strlcpy(t->table[index].key, token, TCP_MD5SIG_MAXKEYLEN); 
+	      len = strlen(t->table[index].key); 
+	    } 
+	    tk_idx++;
+	  }
+
+          if (ret > 0 && len > 0) index++;
+          else Log(LOG_WARNING, "WARN ( default/core/BGP ): 'bgp_daemon_md5_file': line '%s' ignored.\n", buf);
+        }
+      }
+    }
+    t->num = index;
+
+    /* Set to -1 to distinguish between no map and empty map conditions */
+    if (!t->num) t->num = -1;
+
+    fclose(file);
+  }
+}
+
+void unload_bgp_md5_file(struct bgp_md5_table *t)
+{
+  int index = 0;
+
+  while (index < t->num) {
+    memset(t->table[index].key, 0, TCP_MD5SIG_MAXKEYLEN);
+    index++;
   }
 }
 

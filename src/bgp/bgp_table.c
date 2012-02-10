@@ -58,6 +58,10 @@ bgp_node_create ()
 
   rn = (struct bgp_node *) malloc (sizeof (struct bgp_node));
   memset (rn, 0, sizeof (struct bgp_node));
+
+  rn->info = (void **) malloc(sizeof(struct bgp_info *) * config.bgp_table_peer_buckets);
+  memset (rn->info, 0, sizeof(struct bgp_info *) * config.bgp_table_peer_buckets);
+
   return rn;
 }
 
@@ -79,6 +83,7 @@ bgp_node_set (struct bgp_table *table, struct prefix *prefix)
 static void
 bgp_node_free (struct bgp_node *node)
 {
+  free (node->info);
   free (node);
 }
 
@@ -88,27 +93,31 @@ static void
 bgp_node_free_aggressive (struct bgp_node *node)
 {
   struct bgp_info *ri, *next;
+  u_int32_t ri_idx;
 
-  for (ri = node->info; ri; ri = next) {
-    if (config.nfacctd_bgp_msglog) {
-      char empty[] = "";
-      char prefix_str[INET6_ADDRSTRLEN];
-      char *aspath, *comm, *ecomm;
+  for (ri_idx = 0; ri_idx < config.bgp_table_peer_buckets; ri_idx++) {
+    for (ri = node->info[ri_idx]; ri; ri = next) {
+      if (config.nfacctd_bgp_msglog) {
+        char empty[] = "";
+        char prefix_str[INET6_ADDRSTRLEN];
+        char *aspath, *comm, *ecomm;
 
-      memset(prefix_str, 0, INET6_ADDRSTRLEN);
-      prefix2str(&node->p, prefix_str, INET6_ADDRSTRLEN);
+        memset(prefix_str, 0, INET6_ADDRSTRLEN);
+        prefix2str(&node->p, prefix_str, INET6_ADDRSTRLEN);
 
-      aspath = ri->attr->aspath ? ri->attr->aspath->str : empty;
-      comm = ri->attr->community ? ri->attr->community->str : empty;
-      ecomm = ri->attr->ecommunity ? ri->attr->ecommunity->str : empty;
+        aspath = ri->attr->aspath ? ri->attr->aspath->str : empty;
+        comm = ri->attr->community ? ri->attr->community->str : empty;
+        ecomm = ri->attr->ecommunity ? ri->attr->ecommunity->str : empty;
 
-      Log(LOG_INFO, "INFO ( default/core/BGP ): d Prefix: %s Path: '%s' Comms: '%s' EComms: '%s'\n", prefix_str, aspath, comm, ecomm);
+        Log(LOG_INFO, "INFO ( default/core/BGP ): d Prefix: %s Path: '%s' Comms: '%s' EComms: '%s'\n", prefix_str, aspath, comm, ecomm);
+      }
+
+      next = ri->next;
+      bgp_info_free(ri);
     }
-
-    next = ri->next;
-    bgp_info_free(ri);
   }
 
+  free (node->info);
   free (node);
 }
 
@@ -258,33 +267,37 @@ bgp_unlock_node (struct bgp_node *node)
 
 /* Find matched prefix. */
 struct bgp_node *
-bgp_node_match (const struct bgp_table *table, struct prefix *p)
+bgp_node_match (const struct bgp_table *table, struct prefix *p, struct bgp_peer *peer)
 {
   struct bgp_node *node;
   struct bgp_node *matched;
+  struct bgp_info *info;
+  u_int32_t modulo = peer->fd % config.bgp_table_peer_buckets;
 
   matched = NULL;
   node = table->top;
 
   /* Walk down tree.  If there is matched route then store it to
      matched. */
-  while (node && node->p.prefixlen <= p->prefixlen && 
-	 prefix_match (&node->p, p))
-    {
-      if (node->info)
+  while (node && node->p.prefixlen <= p->prefixlen && prefix_match(&node->p, p)) {
+    for (info = node->info[modulo]; info; info = info->next) {
+      if (info->peer == peer) {
 	matched = node;
-      node = node->link[check_bit(&p->u.prefix, node->p.prefixlen)];
+        break;
+      }
     }
 
+    node = node->link[check_bit(&p->u.prefix, node->p.prefixlen)];
+  }
+
   /* If matched route found, return it. */
-  if (matched)
-    return bgp_lock_node (matched);
+  if (matched) return bgp_lock_node (matched);
 
   return NULL;
 }
 
 struct bgp_node *
-bgp_node_match_ipv4 (const struct bgp_table *table, struct in_addr *addr)
+bgp_node_match_ipv4 (const struct bgp_table *table, struct in_addr *addr, struct bgp_peer *peer)
 {
   struct prefix_ipv4 p;
 
@@ -293,12 +306,12 @@ bgp_node_match_ipv4 (const struct bgp_table *table, struct in_addr *addr)
   p.prefixlen = IPV4_MAX_PREFIXLEN;
   p.prefix = *addr;
 
-  return bgp_node_match (table, (struct prefix *) &p);
+  return bgp_node_match (table, (struct prefix *) &p, peer);
 }
 
 #ifdef ENABLE_IPV6
 struct bgp_node *
-bgp_node_match_ipv6 (const struct bgp_table *table, struct in6_addr *addr)
+bgp_node_match_ipv6 (const struct bgp_table *table, struct in6_addr *addr, struct bgp_peer *peer)
 {
   struct prefix_ipv6 p;
 
@@ -307,29 +320,9 @@ bgp_node_match_ipv6 (const struct bgp_table *table, struct in6_addr *addr)
   p.prefixlen = IPV6_MAX_PREFIXLEN;
   p.prefix = *addr;
 
-  return bgp_node_match (table, (struct prefix *) &p);
+  return bgp_node_match (table, (struct prefix *) &p, peer);
 }
 #endif /* ENABLE_IPV6 */
-
-/* Lookup same prefix node.  Return NULL when we can't find route. */
-struct bgp_node *
-bgp_node_lookup (const struct bgp_table *table, struct prefix *p)
-{
-  struct bgp_node *node;
-
-  node = table->top;
-
-  while (node && node->p.prefixlen <= p->prefixlen && 
-	 prefix_match (&node->p, p))
-    {
-      if (node->p.prefixlen == p->prefixlen && node->info)
-	return bgp_lock_node (node);
-
-      node = node->link[check_bit(&p->u.prefix, node->p.prefixlen)];
-    }
-
-  return NULL;
-}
 
 /* Add node to routing table. */
 struct bgp_node *
@@ -394,9 +387,11 @@ bgp_node_delete (struct bgp_node *node)
 {
   struct bgp_node *child;
   struct bgp_node *parent;
+  u_int32_t ri_idx;
 
   assert (node->lock == 0);
-  assert (node->info == NULL);
+  for (ri_idx = 0; ri_idx < config.bgp_table_peer_buckets; ri_idx++)
+    assert (node->info[ri_idx] == NULL);
 
   if (node->l_left && node->l_right)
     return;

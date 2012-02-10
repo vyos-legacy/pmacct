@@ -2,8 +2,8 @@
 
 ### BEGIN INIT INFO
 # Provides: pmacct
-# Required-start: $network $syslog $remote_fs
-# Required-stop: $network $syslog $remote_fs
+# Required-start: $network $syslog
+# Required-stop: $network $syslog
 # Default-start: 2 3 4 5
 # Default-stop: 0 1 6
 # Short-Description: promiscuous mode accounting daemon
@@ -35,7 +35,7 @@ start () {
     #	--exec $DAEMON -- -f $PMACCTD_CONF $DAEMON_OPTS
     if [ -n "$INTERFACES" ]; then
     	for i in $INTERFACES; do
-		ip link set $i up
+		ifconfig $i up
 		$DAEMON -f $CONFDIR/pmacctd.$i.conf $DAEMON_OPTS
 	done
     else

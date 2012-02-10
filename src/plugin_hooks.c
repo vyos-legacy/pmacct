@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -49,7 +49,7 @@ void load_plugins(struct plugin_requests *req)
 
   while (list) {
     if ((*list->type.func)) {
-      if (list->cfg.data_type & (PIPE_TYPE_METADATA|PIPE_TYPE_PAYLOAD));
+      if (list->cfg.data_type & (PIPE_TYPE_METADATA|PIPE_TYPE_PAYLOAD|PIPE_TYPE_MSG));
       else {
 	Log(LOG_ERR, "ERROR ( %s/%s ): Data type not supported: %d\n", list->name, list->type.string, list->cfg.data_type);
 	exit(1);
@@ -63,6 +63,7 @@ void load_plugins(struct plugin_requests *req)
       }
       if (list->cfg.data_type & PIPE_TYPE_EXTRAS) min_sz += PextrasSz; 
       if (list->cfg.data_type & PIPE_TYPE_BGP) min_sz += PbgpSz; 
+      if (list->cfg.data_type & PIPE_TYPE_MSG) min_sz += PmsgSz; 
 
       /* If nothing is supplied, let's hint some working default values */
       if (list->cfg.pcap_savefile && !list->cfg.pipe_size && !list->cfg.buffer_size) {
@@ -133,7 +134,7 @@ void load_plugins(struct plugin_requests *req)
 
       list->cfg.name = list->name;
       list->cfg.type = list->type.string;
-      chptr = insert_pipe_channel(&list->cfg, list->pipe[1]);
+      chptr = insert_pipe_channel(list->type.id, &list->cfg, list->pipe[1]);
       if (!chptr) {
 	Log(LOG_ERR, "ERROR: Unable to setup a new Core Process <-> Plugin channel.\nExiting.\n"); 
 	exit_all(1);
@@ -150,6 +151,7 @@ void load_plugins(struct plugin_requests *req)
       if (list->cfg.data_type & PIPE_TYPE_PAYLOAD) chptr->clean_func = pkt_payload_clean;
       if (list->cfg.data_type & PIPE_TYPE_EXTRAS) chptr->clean_func = pkt_extras_clean;
       if (list->cfg.data_type & PIPE_TYPE_BGP) chptr->clean_func = pkt_bgp_clean;
+      if (list->cfg.data_type & PIPE_TYPE_MSG) chptr->clean_func = pkt_msg_clean;
 
       /* sets nfprobe ID */
       if (list->type.id == PLUGIN_ID_NFPROBE) {
@@ -264,7 +266,7 @@ reprocess:
   }
 }
 
-struct channels_list_entry *insert_pipe_channel(struct configuration *cfg, int pipe)
+struct channels_list_entry *insert_pipe_channel(int plugin_type, struct configuration *cfg, int pipe)
 {
   struct channels_list_entry *chptr; 
   int index = 0, x;  
@@ -278,7 +280,7 @@ struct channels_list_entry *insert_pipe_channel(struct configuration *cfg, int p
       chptr->agg_filter.num = (int *) &cfg->bpfp_a_num; 
       chptr->bufsize = cfg->buffer_size;
       chptr->id = cfg->post_tag;
-      if (cfg->sampling_rate) {
+      if (cfg->sampling_rate && plugin_type != PLUGIN_ID_SFPROBE) { /* sfprobe cares for itself */
 	chptr->s.rate = cfg->sampling_rate;
 
 	if (cfg->acct_type == ACCT_NF) chptr->s.sf = &take_simple_systematic_skip;
@@ -428,8 +430,6 @@ run_again:
     *pkt_len = ( *pkt_len / *pkt_num ) * smp->sampled_pkts;
     *pkt_num = smp->sampled_pkts;
   }
-
-  // printf("RATE: %d, COUNTER: %d, PACKETS %d, SAMPLED_PACKETS: %d, SAMPLE_POOL: %d\n", smp->rate, smp->counter, *pkt_num, smp->sampled_pkts, *sample_pool);
 }
 
 /* simple random algorithm */
@@ -551,13 +551,13 @@ void load_plugin_filters(int link_type)
       /* compiling aggregation filter if needed */
       if (list->cfg.a_filter) {
 	pcap_t *dev_desc;
-	bpf_u_int32 localnet, netmask;  /* pcap library stuff */
+	bpf_u_int32 localnet, netmask = 0;  /* pcap library stuff */
 	char errbuf[PCAP_ERRBUF_SIZE], *count_token;
 	int idx = 0;
 
 	dev_desc = pcap_open_dead(link_type, 128); /* 128 bytes should be long enough */
 
-	pcap_lookupnet(config.dev, &localnet, &netmask, errbuf);
+	if (config.dev) pcap_lookupnet(config.dev, &localnet, &netmask, errbuf);
 
 	list->cfg.bpfp_a_table[idx] = malloc(sizeof(struct bpf_program));
 	while ( (count_token = extract_token(&list->cfg.a_filter, ',')) && idx < AGG_FILTER_ENTRIES ) {
@@ -590,6 +590,13 @@ int pkt_payload_clean(void *ppayload)
   memset(ppayload, 0, PpayloadSz);
 
   return PpayloadSz;
+}
+
+int pkt_msg_clean(void *ppayload)
+{
+  memset(ppayload, 0, PmsgSz);
+
+  return PmsgSz;
 }
 
 int pkt_extras_clean(void *pextras)

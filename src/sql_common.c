@@ -140,7 +140,10 @@ void sql_init_default_values()
     /* PbgpSz is non-zero if at least one of the BGP-related
        primitives is enabled. This helps putting ASNs in the
        right field */
-    if (PbgpSz) config.sql_table_version += SQL_TABLE_VERSION_BGP;
+    if (PbgpSz) {
+      config.sql_table_version += SQL_TABLE_VERSION_BGP;
+      Log(LOG_INFO, "INFO ( %s/%s ): sql_table_type set to 'bgp' (aggregate includes one or more BGP primitives).\n", config.name, config.type);
+    }
   }
 
   qq_ptr = 0; 
@@ -351,7 +354,8 @@ int sql_cache_flush(struct db_cache *queue[], int index, struct insert_data *ida
     /* If we are very near to our maximum writers threshold, let's resort to any configured
        recovery mechanism - SQL_CACHE_COMMITTED => SQL_CACHE_ERROR; otherwise, will proceed
        as usual */
-    if (sql_writers.active == config.sql_max_writers-1) {
+    if ((sql_writers.active == config.sql_max_writers-1) &&
+	(config.sql_backup_host || config.sql_recovery_logfile)) {
       for (j = 0; j < index; j++) {
 	if (queue[j]->valid == SQL_CACHE_COMMITTED) queue[j]->valid = SQL_CACHE_ERROR;
       }
@@ -1011,6 +1015,20 @@ int sql_evaluate_primitives(int primitive)
       primitive++;
     }
   }
+
+  if (what_to_count & COUNT_COS) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
+    }
+    strncat(insert_clause, "cos", SPACELEFT(insert_clause));
+    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "cos=%u", SPACELEFT(where[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_COS;
+    values[primitive].handler = where[primitive].handler = count_cos_handler;
+    primitive++;
+  }
 #endif
 
   if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SUM_HOST|COUNT_SUM_NET)) {
@@ -1478,7 +1496,7 @@ int sql_evaluate_primitives(int primitive)
         strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
-      if (!strcmp(config.type, "mysql") || !strcmp(config.type, "sqlite3")) {
+      if ((!strcmp(config.type, "mysql") || !strcmp(config.type, "sqlite3")) && config.sql_table_version != 8) {
         strncat(insert_clause, "src_port", SPACELEFT(insert_clause));
         strncat(where[primitive].string, "src_port=%u", SPACELEFT(where[primitive].string));
       }
@@ -1511,7 +1529,7 @@ int sql_evaluate_primitives(int primitive)
         strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
-      if (!strcmp(config.type, "mysql") || !strcmp(config.type, "sqlite3")) {
+      if ((!strcmp(config.type, "mysql") || !strcmp(config.type, "sqlite3")) && config.sql_table_version != 8) {
         strncat(insert_clause, "dst_port", SPACELEFT(insert_clause));
         strncat(where[primitive].string, "dst_port=%u", SPACELEFT(where[primitive].string));
       }
@@ -2104,13 +2122,13 @@ FILE *sql_file_open(const char *path, const char *mode, const struct insert_data
 void sql_create_table(struct DBdesc *db, struct insert_data *idata)
 {
   struct tm *nowtm;
-  char buf[LONGLONGSRVBUFLEN], tmpbuf[LONGLONGSRVBUFLEN];
+  char buf[LARGEBUFLEN], tmpbuf[LARGEBUFLEN];
   int ret;
 
-  ret = read_SQLquery_from_file(config.sql_table_schema, tmpbuf, LONGLONGSRVBUFLEN);
+  ret = read_SQLquery_from_file(config.sql_table_schema, tmpbuf, LARGEBUFLEN);
   if (ret) {
     nowtm = localtime(&idata->basetime);
-    strftime(buf, LONGLONGSRVBUFLEN, tmpbuf, nowtm);
+    strftime(buf, LARGEBUFLEN, tmpbuf, nowtm);
     (*sqlfunc_cbr.create_table)(db, buf);
   }
 }

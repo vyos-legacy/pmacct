@@ -28,6 +28,7 @@
 #define PLUGIN_ID_MYSQL		5 
 #define PLUGIN_ID_PGSQL         6
 #define PLUGIN_ID_SQLITE3       7
+#define PLUGIN_ID_TEE		8
 #define PLUGIN_ID_UNKNOWN       -1
 
 /* vars */
@@ -266,6 +267,7 @@ static const struct _dictionary_line dictionary[] = {
   {"print_refresh_time", cfg_key_print_refresh_time},
   {"print_cache_entries", cfg_key_print_cache_entries},
   {"print_markers", cfg_key_print_markers},
+  {"print_output", cfg_key_print_output},
   {"nfacctd_port", cfg_key_nfacctd_port},
   {"nfacctd_ip", cfg_key_nfacctd_ip},
   {"nfacctd_allow_file", cfg_key_nfacctd_allow_file},
@@ -321,16 +323,28 @@ static const struct _dictionary_line dictionary[] = {
   {"nfprobe_version", cfg_key_nfprobe_version},
   {"nfprobe_peer_as", cfg_key_nfprobe_peer_as},
   {"nfprobe_source_ip", cfg_key_nfprobe_source_ip},
+  {"nfprobe_ipprec", cfg_key_nfprobe_ip_precedence},
+  {"nfprobe_direction", cfg_key_nfprobe_direction},
+  {"nfprobe_ifindex", cfg_key_nfprobe_ifindex},
   {"sfprobe_receiver", cfg_key_sfprobe_receiver},
   {"sfprobe_agentip", cfg_key_sfprobe_agentip},
   {"sfprobe_agentsubid", cfg_key_sfprobe_agentsubid},
   {"sfprobe_peer_as", cfg_key_nfprobe_peer_as},
+  {"sfprobe_ipprec", cfg_key_nfprobe_ip_precedence},
+  {"sfprobe_direction", cfg_key_nfprobe_direction},
+  {"sfprobe_ifindex", cfg_key_nfprobe_ifindex},
+  {"sfprobe_ifspeed", cfg_key_sfprobe_ifspeed},
+  {"tee_receiver", cfg_key_nfprobe_receiver},
+  {"tee_source_ip", cfg_key_nfprobe_source_ip},
+  {"tee_transparent", cfg_key_tee_transparent},
   {"bgp_daemon", cfg_key_nfacctd_bgp},
   {"bgp_daemon_ip", cfg_key_nfacctd_bgp_ip},
   {"bgp_daemon_port", cfg_key_nfacctd_bgp_port},
   {"bgp_daemon_max_peers", cfg_key_nfacctd_bgp_max_peers},
   {"bgp_daemon_msglog", cfg_key_nfacctd_bgp_msglog},
   {"bgp_daemon_allow_file", cfg_key_nfacctd_bgp_allow_file},
+  {"bgp_daemon_ipprec", cfg_key_nfacctd_bgp_ip_precedence},
+  {"bgp_daemon_md5_file", cfg_key_nfacctd_bgp_md5_file},
   {"bgp_aspath_radius", cfg_key_nfacctd_bgp_aspath_radius},
   {"bgp_stdcomm_pattern", cfg_key_nfacctd_bgp_stdcomm_pattern},
   {"bgp_extcomm_pattern", cfg_key_nfacctd_bgp_extcomm_pattern},
@@ -350,9 +364,12 @@ static const struct _dictionary_line dictionary[] = {
   {"bgp_follow_default", cfg_key_nfacctd_bgp_follow_default},
   {"bgp_follow_nexthop", cfg_key_nfacctd_bgp_follow_nexthop},
   {"bgp_neighbors_file", cfg_key_nfacctd_bgp_neighbors_file},
+  {"bgp_table_peer_buckets", cfg_key_nfacctd_bgp_table_peer_buckets},
   {"uacctd_group", cfg_key_uacctd_group},
   {"uacctd_nl_size", cfg_key_uacctd_nl_size},
   {"tunnel_0", cfg_key_tunnel_0},
+  {"xlate_src", cfg_key_xlate_src},
+  {"xlate_dst", cfg_key_xlate_dst},
   {"", NULL},
 };
 
@@ -371,6 +388,7 @@ static struct plugin_type_entry plugin_types_list[] = {
 #ifdef WITH_SQLITE3
   {PLUGIN_ID_SQLITE3,	"sqlite3",	sqlite3_plugin},
 #endif
+  {PLUGIN_ID_TEE,	"tee",		tee_plugin},
   {PLUGIN_ID_UNKNOWN,	"",		NULL},
 };
 #endif
