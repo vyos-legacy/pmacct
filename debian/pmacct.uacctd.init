@@ -1,7 +1,7 @@
 #!/bin/sh
 
 ### BEGIN INIT INFO
-# Provides: pmacct
+# Provides: uacct
 # Required-start: $network $syslog
 # Required-stop: $network $syslog
 # Default-start: 2 3 4 5
@@ -10,23 +10,23 @@
 ### END INIT INFO
 
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-DAEMON=/usr/sbin/pmacctd
-NAME=pmacctd
+DAEMON=/usr/sbin/uacctd
+NAME=uacctd
 DESC="promiscuous mode accounting daemon"
-CONFDIR=/etc/pmacct
+CONFDIR=/etc/uacct
 
 test -x $DAEMON || exit 0
 
-# Include pmacct defaults if available
-if [ -f /etc/default/pmacct ] ; then
-	. /etc/default/pmacct
+# Include uacct defaults if available
+if [ -f /etc/default/uacctd ] ; then
+	. /etc/default/uacctd
 fi
 
 stop () {
     #start-stop-daemon --stop --oknodo --quiet \
     #	--pidfile /var/run/$NAME.pid \
     #	--exec $DAEMON
-    killall -TERM pmacctd
+    killall -TERM uacctd
 }
 
 start () {
@@ -36,10 +36,10 @@ start () {
     if [ -n "$INTERFACES" ]; then
     	for i in $INTERFACES; do
 		ifconfig $i up
-		$DAEMON -f $CONFDIR/pmacctd.$i.conf $DAEMON_OPTS
+		$DAEMON -f $CONFDIR/uacctd.$i.conf $DAEMON_OPTS
 	done
     else
-    	$DAEMON -f $CONFDIR/pmacctd.conf $DAEMON_OPTS
+    	$DAEMON -f $CONFDIR/uacctd.conf $DAEMON_OPTS
     fi
 }
 

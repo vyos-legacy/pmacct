@@ -1,3 +1,11 @@
+pmacct (0.12.5-3) unstable; urgency=low
+
+  * Add initscripts for nfacctd, sfacctd and uacctd. (Closes: #503285, #659710)
+  * Rename the pmacct initscript and default to "pmacctd".
+  * Fix permissions on config files to not be world readable.  (Closes: #579535) 
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue, 14 Feb 2012 07:01:36 +0000
+
 pmacct (0.12.5-2) unstable; urgency=low
 
   * Build a 64bit binary and enable threads.  (Closes: #659711) 

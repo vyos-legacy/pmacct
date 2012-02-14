@@ -71,7 +71,9 @@ install: build
 	dh_prep
 	dh_installdirs
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/pmacct
-	cp debian/pmacctd.conf $(CURDIR)/debian/pmacct/etc/pmacct/pmacctd.conf
+	install -m 0600 debian/pmacctd.conf $(CURDIR)/debian/pmacct/etc/pmacct/pmacctd.conf
+	install -m 0600 debian/sfacctd.conf $(CURDIR)/debian/pmacct/etc/pmacct/sfacctd.conf
+	install -m 0600 debian/nfacctd.conf $(CURDIR)/debian/pmacct/etc/pmacct/nfacctd.conf
 
 
 # Build architecture-independent files here.
@@ -93,6 +95,9 @@ binary-arch: build install
 #	dh_installpam
 #	dh_installmime
 	dh_installinit
+	dh_installinit --name nfacctd --no-start
+	dh_installinit --name sfacctd --no-start
+	dh_installinit --name uacctd --no-start
 #	dh_installcron
 #	dh_installinfo
 	dh_installman

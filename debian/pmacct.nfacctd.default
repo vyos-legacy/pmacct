@@ -1,0 +1,17 @@
+# Defaults for nfacct initscript
+# sourced by /etc/init.d/nfacct
+# installed at /etc/default/sfacct by the maintainer scripts
+
+#
+# This is a POSIX shell fragment
+#
+
+# Location of the configuration file
+NFACCTD_CONF=/etc/pmacct/nfacctd.conf
+
+# List of interfaces to start accounting on.
+# See /usr/share/doc/pmacct/README.Debian for details.
+INTERFACES=""
+
+# Additional options that are passed to nfacctd
+DAEMON_OPTS=""

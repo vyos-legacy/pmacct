@@ -1,32 +1,32 @@
 #!/bin/sh
 
 ### BEGIN INIT INFO
-# Provides: pmacct
+# Provides: nfacct
 # Required-start: $network $syslog
 # Required-stop: $network $syslog
 # Default-start: 2 3 4 5
 # Default-stop: 0 1 6
-# Short-Description: promiscuous mode accounting daemon
+# Short-Description: netflow accounting daemon
 ### END INIT INFO
 
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
-DAEMON=/usr/sbin/pmacctd
-NAME=pmacctd
-DESC="promiscuous mode accounting daemon"
+DAEMON=/usr/sbin/nfacctd
+NAME=nfacctd
+DESC="netflow accounting daemon"
 CONFDIR=/etc/pmacct
 
 test -x $DAEMON || exit 0
 
-# Include pmacct defaults if available
-if [ -f /etc/default/pmacct ] ; then
-	. /etc/default/pmacct
+# Include nfacct defaults if available
+if [ -f /etc/default/nfacctd ] ; then
+	. /etc/default/nfacctd
 fi
 
 stop () {
     #start-stop-daemon --stop --oknodo --quiet \
     #	--pidfile /var/run/$NAME.pid \
     #	--exec $DAEMON
-    killall -TERM pmacctd
+    killall -TERM nfacctd
 }
 
 start () {
@@ -35,11 +35,11 @@ start () {
     #	--exec $DAEMON -- -f $PMACCTD_CONF $DAEMON_OPTS
     if [ -n "$INTERFACES" ]; then
     	for i in $INTERFACES; do
-		ifconfig $i up
-		$DAEMON -f $CONFDIR/pmacctd.$i.conf $DAEMON_OPTS
+		ip link set $i up
+		$DAEMON -f $CONFDIR/nfacctd.$i.conf $DAEMON_OPTS
 	done
     else
-    	$DAEMON -f $CONFDIR/pmacctd.conf $DAEMON_OPTS
+    	$DAEMON -f $CONFDIR/nfacctd.conf $DAEMON_OPTS
     fi
 }
 

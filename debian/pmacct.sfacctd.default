@@ -1,0 +1,17 @@
+# Defaults for sfacct initscript
+# sourced by /etc/init.d/sfacct
+# installed at /etc/default/sfacct by the maintainer scripts
+
+#
+# This is a POSIX shell fragment
+#
+
+# Location of the configuration file
+SFACCTD_CONF=/etc/pmacct/sfacctd.conf
+
+# List of interfaces to start accounting on.
+# See /usr/share/doc/pmacct/README.Debian for details.
+INTERFACES=""
+
+# Additional options that are passed to sfacctd
+DAEMON_OPTS=""
