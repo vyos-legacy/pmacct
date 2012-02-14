@@ -1,3 +1,9 @@
+pmacct (0.12.5-2) unstable; urgency=low
+
+  * Build a 64bit binary and enable threads.  (Closes: #659711) 
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue, 14 Feb 2012 02:10:03 +0000
+
 pmacct (0.12.5-1) unstable; urgency=low
 
   * New upstream release.

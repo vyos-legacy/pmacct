@@ -39,6 +39,8 @@ config.status: configure
 		--enable-mysql \
 		--enable-sqlite3 \
 		--enable-ipv6 \
+		--enable-64bit \
+		--enable-threads \
 		|| cat config.log
 
 build: build-stamp
