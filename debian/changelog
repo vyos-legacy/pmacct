@@ -1,3 +1,9 @@
+pmacct (0.12.5-4) unstable; urgency=low
+
+  * Revert initscripts stop command to use SIGINT instead of SIGTERM. as part of #659710. 
+
+ -- Jamie Wilkinson <jaq@debian.org>  Tue, 14 Feb 2012 07:16:03 +0000
+
 pmacct (0.12.5-3) unstable; urgency=low
 
   * Add initscripts for nfacctd, sfacctd and uacctd. (Closes: #503285, #659710)
