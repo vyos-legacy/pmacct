@@ -1,3 +1,10 @@
+pmacct (0.14.0-1) unstable; urgency=low
+
+  * New upstream release
+  * Revert stop function to use SIGINT, properly.  (Closes: #659975) 
+
+ -- Jamie Wilkinson <jaq@debian.org>  Thu, 24 May 2012 07:10:17 +0000
+
 pmacct (0.12.5-4) unstable; urgency=low
 
   * Revert initscripts stop command to use SIGINT instead of SIGTERM. as part of #659710. 

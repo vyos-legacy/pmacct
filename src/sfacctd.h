@@ -3,32 +3,6 @@
 #define SFLOW_MIN_MSG_SIZE 200 
 #define SFLOW_MAX_MSG_SIZE 65536 /* inflated ? */
 
-#if (!defined NF_AS_KEEP)
-#define NF_AS_KEEP 0 /* Keep AS numbers in NetFlow packets */
-#endif
-#if (!defined NF_AS_NEW)
-#define NF_AS_NEW 1 /* ignore ASN from sFlow and generate from network files */ 
-#endif
-#if (!defined NF_AS_BGP)
-#define NF_AS_BGP 2 /* ignore ASN from sFlow and generate from BGP peerings */
-#endif
-
-#if (!defined NF_NET_COMPAT)
-#define NF_NET_COMPAT	0x00000000 /* Backward compatibility selection */
-#endif
-#if (!defined NF_NET_KEEP)
-#define NF_NET_KEEP	0x00000001 /* Determine IP network prefixes from NetFlow data */ 
-#endif
-#if (!defined NF_NET_NEW)
-#define NF_NET_NEW	0x00000002 /* Determine IP network prefixes from network files */
-#endif
-#if (!defined NF_NET_BGP)
-#define NF_NET_BGP	0x00000004 /* Determine IP network prefixes from BGP peerings */
-#endif
-#if (!defined NF_NET_STATIC)
-#define NF_NET_STATIC	0x00000008 /* Determine IP network prefixes from static mask */
-#endif
-
 #if (!defined NF9_FTYPE_IPV4)
 #define NF9_FTYPE_IPV4                  0
 #define NF9_FTYPE_IPV6                  1
@@ -163,16 +137,15 @@ typedef struct _SFSample {
   u_int32_t my_as;
   u_int32_t src_as;
   u_int32_t src_peer_as;
+
   u_int32_t dst_as_path_len;
-  u_int32_t *dst_as_path;
-  /* note: version 4 dst as path segments just get printed, not stored here, however
-   * the dst_peer and dst_as are filled in, since those are used for netflow encoding
-   */
+  char dst_as_path[MAX_BGP_ASPATH];
+
   u_int32_t dst_peer_as;
   u_int32_t dst_as;
 
   u_int32_t communities_len;
-  u_int32_t *communities;
+  char comms[MAX_BGP_STD_COMMS];
   u_int32_t localpref;
 
   /* user id */
@@ -264,12 +237,13 @@ struct SF_icmphdr
 #define EXT
 #endif
 EXT u_int16_t SF_evaluate_flow_type(struct packet_ptrs *);
+EXT void set_vector_sample_type(struct packet_ptrs_vector *, u_int32_t);
 EXT void reset_mac(struct packet_ptrs *);
 EXT void reset_mac_vlan(struct packet_ptrs *);
 EXT void reset_ip4(struct packet_ptrs *);
 EXT void reset_ip6(struct packet_ptrs *);
 EXT void notify_malf_packet(short int, char *, struct sockaddr *);
-EXT void SF_find_id(struct id_table *t, struct packet_ptrs *, pm_id_t *, pm_id_t *);
+EXT void SF_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 
 EXT u_int32_t getData32(SFSample *);
 EXT u_int32_t getData32_nobswap(SFSample *);

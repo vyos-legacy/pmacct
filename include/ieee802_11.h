@@ -1,4 +1,4 @@
-/* @(#) $Header: /home/repo-0.12/pmacct/include/ieee802_11.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ (LBL) */
+/* @(#) $Header: /home/repo-0.14/pmacct/include/ieee802_11.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ (LBL) */
 /*
  * Copyright (c) 2001
  *	Fortress Technologies

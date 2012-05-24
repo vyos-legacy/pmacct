@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -71,6 +71,8 @@ struct token_header {
 #define ETHERTYPE_MPLS          0x8847		/* MPLS */
 #define ETHERTYPE_MPLS_MULTI    0x8848		/* MPLS */
 #define ETHERTYPE_8021AH        0x88A8		/* 802.1ah */
+#define ETHERTYPE_ISO		0xFEFE		/* OSI */
+#define ETHERTYPE_GRE_ISO	0x00FE		/* OSI over GRE */
 
 /* PPP protocol definitions */
 #define PPP_HDRLEN      4       /* octets for standard ppp header */
@@ -225,6 +227,33 @@ struct my_gtphdr {
 typedef u_int32_t as_t;
 typedef u_int16_t as16_t;
 
+#define RD_TYPE_AS      0
+#define RD_TYPE_IP      1
+#define RD_TYPE_AS4     2
+
+struct rd_as
+{
+  u_int16_t type;
+  u_int16_t as;
+  u_int32_t val;
+};
+
+struct rd_ip
+{
+  u_int16_t type;
+  struct in_addr ip;
+  u_int16_t val;
+};
+
+struct rd_as4
+{
+  u_int16_t type;
+  as_t as;
+  u_int32_t val;
+};
+
+/* Picking one of the three structures as rd_t for simplicity */
+typedef struct rd_as rd_t;
 
 /* class status */
 struct class_st {
@@ -246,8 +275,9 @@ struct packet_ptrs {
   u_char *bpas_table; /* ptr to bgp_peer_as_src table map */
   u_char *blp_table; /* ptr to bgp_src_local_pref table map */
   u_char *bmed_table; /* ptr to bgp_src_med table map */
-  u_char *biss_table; /* ptr to bgp_is_symmetric table map */
   u_char *bta_table; /* ptr to bgp_to_agent table map */
+  u_char *bitr_table; /* ptr to bgp_iface_to_rd table map */
+  u_char *sampling_table; /* ptr to sampling_map table map */
   u_char *packet_ptr; /* ptr to the whole packet */
   u_char *mac_ptr; /* ptr to mac addresses */
   u_int16_t l3_proto; /* layer-3 protocol: IPv4, IPv6 */
@@ -258,14 +288,23 @@ struct packet_ptrs {
   pm_id_t bpas; /* bgp_peer_as_src */
   pm_id_t blp; /* bgp_src_local_pref */
   pm_id_t bmed; /* bgp_src_med */
-  pm_id_t biss; /* bgp_is_symmetric */
   pm_id_t bta; /* bgp_to_agent */
+  pm_id_t bitr; /* bgp_iface_to_rd */
+  pm_id_t st; /* sampling_map */
   char *bgp_src; /* pointer to bgp_node structure for source prefix, if any */  
   char *bgp_dst; /* pointer to bgp_node structure for destination prefix, if any */ 
   char *bgp_src_info; /* pointer to bgp_info structure for source prefix, if any */  
   char *bgp_dst_info; /* pointer to bgp_info structure for destination prefix, if any */ 
   char *bgp_peer; /* record BGP peer's Router-ID */
   char *bgp_nexthop_info; /* record bgp_info of BGP next-hop in case of follow-up */
+  char *igp_src; /* pointer to IGP node structure for source prefix, if any */
+  char *igp_dst; /* pointer to IGP node structure for destination prefix, if any */
+  char *igp_src_info; /* pointer to IGP node info structure for source prefix, if any */
+  char *igp_dst_info; /* pointer to IGP node info structure for destination prefix, if any */
+  u_int8_t lm_mask_src; /* Longest match for source prefix (network mask bits) */
+  u_int8_t lm_mask_dst; /* Longest match for destination prefix (network mask bits) */
+  u_int8_t lm_method_src; /* Longest match for source prefix (method: BGP, IGP, etc.) */
+  u_int8_t lm_method_dst; /* Longest match for destination prefix (method: BGP, IGP, etc.) */
   u_int16_t pf; /* pending fragments or packets */
   u_int8_t new_flow; /* pmacctd flows: part of a new flow ? */
   u_int8_t tcp_flags; /* pmacctd flows: TCP packet flags; URG, PUSH filtered out */ 
@@ -282,8 +321,10 @@ struct packet_ptrs {
   u_int16_t ifindex_out; /* output ifindex; only used by ULOG for the time being */
   u_int8_t tun_stack; /* tunnelling stack */
   u_int8_t tun_layer; /* tunnelling layer count */
+  u_int32_t sample_type; /* sFlow sample type */
   u_int32_t seqno; /* sFlow/NetFlow sequence number */
   u_int16_t f_len; /* sFlow/NetFlow payload length */
+  u_int8_t renormalized; /* Is it renormalized yet ? */
 };
 
 struct host_addr {
@@ -302,6 +343,7 @@ struct pkt_primitives {
   u_int8_t eth_shost[ETH_ADDR_LEN];
   u_int16_t vlan_id;
   u_int8_t cos;
+  u_int16_t etype;
 #endif
   struct host_addr src_ip;
   struct host_addr dst_ip;
@@ -326,8 +368,8 @@ struct pkt_data {
   pm_counter_t pkt_num;
   pm_counter_t flo_num;
   u_int32_t tcp_flags; /* XXX */
-  u_int32_t time_start;
-  u_int32_t time_end;
+  struct timeval time_start;
+  struct timeval time_end;
   struct class_st cst;
 };
 
@@ -388,7 +430,7 @@ struct pkt_bgp_primitives {
   char src_as_path[MAX_BGP_ASPATH];
   u_int32_t src_local_pref;
   u_int32_t src_med;
-  u_int32_t is_symmetric;
+  rd_t mpls_vpn_rd;
   u_int32_t pad;
 };
 
@@ -408,7 +450,7 @@ struct cache_bgp_primitives {
   char *src_as_path;
   u_int32_t src_local_pref;
   u_int32_t src_med;
-  u_int32_t is_symmetric;
+  rd_t mpls_vpn_rd;
 };
 /* END: BGP section */
 

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -66,9 +66,15 @@ EXT int timeval_cmp(struct timeval *, struct timeval *);
 EXT void exit_all(int);
 EXT void exit_plugin(int);
 EXT void reset_tag_status(struct packet_ptrs_vector *);
+EXT void reset_net_status(struct packet_ptrs *);
+EXT void reset_net_status_v(struct packet_ptrs_vector *);
 EXT void reset_shadow_status(struct packet_ptrs_vector *);
+EXT void reset_fallback_status(struct packet_ptrs *);
+EXT void set_sampling_table(struct packet_ptrs_vector *, u_char *);
 EXT void set_shadow_status(struct packet_ptrs *);
+EXT void set_default_preferences(struct configuration *);
 EXT FILE *open_logfile(char *);
+EXT FILE *open_print_output_file(char *, time_t);
 EXT void evaluate_bgp_aspath_radius(char *, int, int);
 EXT void copy_stdcomm_to_asn(char *, as_t *, int);
 EXT void *Malloc(unsigned int);

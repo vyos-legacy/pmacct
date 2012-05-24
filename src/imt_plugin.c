@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
 */
 
 /*
@@ -55,11 +55,14 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   int cLen, num, sd, sd2;
   char *dataptr;
 
-  /* XXX: glue */
   memcpy(&config, cfgptr, sizeof(struct configuration));
   recollect_pipe_memory(ptr);
   pm_setproctitle("%s [%s]", "IMT Plugin", config.name);
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
+  if (config.logfile) {
+    fclose(config.logfile_fd);
+    config.logfile_fd = open_logfile(config.logfile);
+  }
 
   reload_map = FALSE;
   status->wakeup = TRUE;
@@ -85,7 +88,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (!(config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                 COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
 				COUNT_SRC_AS_PATH|COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_MED|
-				COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC))) 
+				COUNT_SRC_LOCAL_PREF|COUNT_MPLS_VPN_RD))) 
     PbgpSz = 0;
 
   memset(&nt, 0, sizeof(nt));

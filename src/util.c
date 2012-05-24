@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -368,23 +368,44 @@ FILE *open_logfile(char *filename)
 
   file = fopen(filename, "a"); 
   if (file) {
-    chown(filename, owner, group);
+    if (chown(filename, owner, group) == -1)
+      printf("WARN: Unable to chown() logfile '%s': %s\n", filename, strerror(errno));
+  }
+  else {
+    printf("WARN: Unable to fopen() logfile '%s': %s\n", filename, strerror(errno));
+    file = NULL;
+  }
+
+  return file;
+}
+
+FILE *open_print_output_file(char *filename, time_t now)
+{
+  char buf[LARGEBUFLEN];
+  FILE *file = NULL;
+  struct tm *tmnow;
+  uid_t owner = -1;
+  gid_t group = -1;
+
+  if (config.files_uid) owner = config.files_uid;
+  if (config.files_gid) group = config.files_gid;
+
+  tmnow = localtime(&now);
+  strftime(buf, LARGEBUFLEN, filename, tmnow);
+
+  file = fopen(buf, "w");
+  if (file) {
+    if (chown(buf, owner, group) == -1)
+      Log(LOG_WARNING, "WARN: Unable to chown() print_ouput_file '%s': %s\n", buf, strerror(errno));
+
     if (file_lock(fileno(file))) {
-      Log(LOG_ALERT, "ALERT: Unable to obtain lock for logfile '%s'.\n", filename);
+      Log(LOG_ALERT, "ALERT: Unable to obtain lock for print_ouput_file '%s'.\n", buf);
       file = NULL;
     }
   }
   else {
-    Log(LOG_ERR, "ERROR: Unable to open logfile '%s'\n", filename);
+    Log(LOG_ERR, "ERROR: Unable to open print_ouput_file '%s'\n", buf);
     file = NULL;
-  }
-
-  if (file) {
-    now = time(NULL);
-    tmnow = localtime(&now);
-    strftime(timebuf, SRVBUFLEN, "%Y-%m-%d %H:%M:%S" , tmnow);
-    fprintf(file, "\n\n=== Start logging: %s ===\n\n", timebuf); 
-    fflush(file);
   }
 
   return file;
@@ -404,7 +425,9 @@ void write_pid_file(char *filename)
     
   file = fopen(filename,"w");
   if (file) {
-    chown(filename, owner, group);
+    if (chown(filename, owner, group) == -1)
+      Log(LOG_WARNING, "WARN: Unable to chown() pidfile '%s': %s\n", filename, strerror(errno));
+
     if (file_lock(fileno(file))) {
       Log(LOG_ALERT, "ALERT: Unable to obtain lock for pidfile '%s'.\n", filename);
       return;
@@ -445,7 +468,9 @@ void write_pid_file_plugin(char *filename, char *type, char *name)
 
   file = fopen(fname,"w");
   if (file) {
-    chown(fname, owner, group);
+    if (chown(fname, owner, group) == -1)
+      Log(LOG_WARNING, "WARN: Unable to chown() '%s': %s\n", fname, strerror(errno));
+
     if (file_lock(fileno(file))) {
       Log(LOG_ALERT, "ALERT: Unable to obtain lock of '%s'.\n", fname);
       return;
@@ -724,6 +749,7 @@ int read_SQLquery_from_file(char *path, char *buf, int size)
 {
   FILE *f;
   char *ptr;
+  int ret;
 
   memset(buf, 0, size);
   f = fopen(path, "r");
@@ -732,7 +758,13 @@ int read_SQLquery_from_file(char *path, char *buf, int size)
     return(0);
   }
   
-  fread(buf, size, 1, f);
+  ret = fread(buf, size, 1, f);
+
+  if (ret != 1 && !feof(f)) {
+    Log(LOG_ERR, "ERROR: Unable to read from SQL schema '%s': %s\n", path, strerror(errno));
+    return(0);
+  }
+
   fclose(f);
   
   ptr = strrchr(buf, ';');
@@ -824,6 +856,53 @@ void reset_tag_status(struct packet_ptrs_vector *pptrsv)
 #endif
 }
 
+void reset_net_status(struct packet_ptrs *pptrs)
+{
+  pptrs->lm_mask_src = FALSE;
+  pptrs->lm_mask_dst = FALSE;
+  pptrs->lm_method_src = FALSE;
+  pptrs->lm_method_dst = FALSE;
+}
+
+void reset_net_status_v(struct packet_ptrs_vector *pptrsv)
+{
+  pptrsv->v4.lm_mask_src = FALSE;
+  pptrsv->vlan4.lm_mask_src = FALSE;
+  pptrsv->mpls4.lm_mask_src = FALSE;
+  pptrsv->vlanmpls4.lm_mask_src = FALSE;
+  pptrsv->v4.lm_mask_dst = FALSE;
+  pptrsv->vlan4.lm_mask_dst = FALSE;
+  pptrsv->mpls4.lm_mask_dst = FALSE;
+  pptrsv->vlanmpls4.lm_mask_dst = FALSE;
+  pptrsv->v4.lm_method_src = FALSE;
+  pptrsv->vlan4.lm_method_src = FALSE;
+  pptrsv->mpls4.lm_method_src = FALSE;
+  pptrsv->vlanmpls4.lm_method_src = FALSE;
+  pptrsv->v4.lm_method_dst = FALSE;
+  pptrsv->vlan4.lm_method_dst = FALSE;
+  pptrsv->mpls4.lm_method_dst = FALSE;
+  pptrsv->vlanmpls4.lm_method_dst = FALSE;
+
+#if defined ENABLE_IPV6
+  pptrsv->v6.lm_mask_src = FALSE;
+  pptrsv->vlan6.lm_mask_src = FALSE;
+  pptrsv->mpls6.lm_mask_src = FALSE;
+  pptrsv->vlanmpls6.lm_mask_src = FALSE;
+  pptrsv->v6.lm_mask_dst = FALSE;
+  pptrsv->vlan6.lm_mask_dst = FALSE;
+  pptrsv->mpls6.lm_mask_dst = FALSE;
+  pptrsv->vlanmpls6.lm_mask_dst = FALSE;
+  pptrsv->v6.lm_method_src = FALSE;
+  pptrsv->vlan6.lm_method_src = FALSE;
+  pptrsv->mpls6.lm_method_src = FALSE;
+  pptrsv->vlanmpls6.lm_method_src = FALSE;
+  pptrsv->v6.lm_method_dst = FALSE;
+  pptrsv->vlan6.lm_method_dst = FALSE;
+  pptrsv->mpls6.lm_method_dst = FALSE;
+  pptrsv->vlanmpls6.lm_method_dst = FALSE;
+#endif
+}
+
 void reset_shadow_status(struct packet_ptrs_vector *pptrsv)
 {
   pptrsv->v4.shadow = FALSE;
@@ -839,9 +918,40 @@ void reset_shadow_status(struct packet_ptrs_vector *pptrsv)
 #endif
 }
 
+void reset_fallback_status(struct packet_ptrs *pptrs)
+{
+  pptrs->renormalized = FALSE;
+}
+
+void set_default_preferences(struct configuration *cfg)
+{
+  if (!cfg->nfacctd_as) cfg->nfacctd_as = NF_AS_KEEP;
+  if (!cfg->nfacctd_bgp_peer_as_src_type) cfg->nfacctd_bgp_peer_as_src_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_std_comm_type) cfg->nfacctd_bgp_src_std_comm_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_ext_comm_type) cfg->nfacctd_bgp_src_ext_comm_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_as_path_type) cfg->nfacctd_bgp_src_as_path_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_local_pref_type) cfg->nfacctd_bgp_src_local_pref_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_med_type) cfg->nfacctd_bgp_src_med_type = BGP_SRC_PRIMITIVES_KEEP;
+}
+
 void set_shadow_status(struct packet_ptrs *pptrs)
 {
   pptrs->shadow = TRUE;
+}
+
+void set_sampling_table(struct packet_ptrs_vector *pptrsv, u_char *t)
+{
+  pptrsv->v4.sampling_table = t;
+  pptrsv->vlan4.sampling_table = t;
+  pptrsv->mpls4.sampling_table = t;
+  pptrsv->vlanmpls4.sampling_table = t;
+
+#if defined ENABLE_IPV6
+  pptrsv->v6.sampling_table = t;
+  pptrsv->vlan6.sampling_table = t;
+  pptrsv->mpls6.sampling_table = t;
+  pptrsv->vlanmpls6.sampling_table = t;
+#endif
 }
 
 struct packet_ptrs *copy_packet_ptrs(struct packet_ptrs *pptrs)

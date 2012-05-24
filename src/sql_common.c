@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -104,7 +104,7 @@ void sql_init_default_values()
   if (!(config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                 COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
 				COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
-				COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC)))
+				COUNT_SRC_LOCAL_PREF|COUNT_MPLS_VPN_RD)))
     PbgpSz = 0;
 
   if ( (config.what_to_count & COUNT_CLASS ||
@@ -470,15 +470,15 @@ void sql_cache_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp, st
   struct db_cache *Cursor, *newElem, *SafePtr = NULL, *staleElem = NULL;
   unsigned int cb_size = sizeof(struct cache_bgp_primitives);
 
-  if (data->time_start && config.sql_history) {
-    while (basetime > data->time_start) {
+  if (data->time_start.tv_sec && config.sql_history) {
+    while (basetime > data->time_start.tv_sec) {
       if (config.sql_history != COUNT_MONTHLY) basetime -= timeslot;
       else {
         timeslot = calc_monthly_timeslot(basetime, config.sql_history_howmany, SUB);
         basetime -= timeslot;
       }
     }
-    while ((basetime+timeslot) < data->time_start) {
+    while ((basetime+timeslot) < data->time_start.tv_sec) {
       if (config.sql_history != COUNT_MONTHLY) basetime += timeslot;
       else {
         basetime += timeslot;
@@ -626,8 +626,8 @@ void sql_cache_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp, st
     Cursor->endtime = 0;
   }
   else {
-    Cursor->basetime = data->time_start;
-    Cursor->endtime = data->time_end;
+    Cursor->basetime = data->time_start.tv_sec;
+    Cursor->endtime = data->time_end.tv_sec;
   }
   Cursor->start_tag = idata->now;
   Cursor->lru_tag = idata->now;
@@ -825,6 +825,7 @@ int sql_evaluate_primitives(int primitive)
   u_int64_t what_to_count = 0, fakes = 0;
   short int assume_custom_table = FALSE; 
   char *insert_clause_start_ptr = insert_clause + strlen(insert_clause);
+  char default_delim[] = ",", delim_buf[SRVBUFLEN];
 
   /* SQL tables < v6 multiplex IP addresses and AS numbers on the same field, thus are
      unable to use both them for a same direction (ie. src, dst). Tables v6 break such
@@ -862,12 +863,6 @@ int sql_evaluate_primitives(int primitive)
     if (config.what_to_count & (COUNT_DST_HOST|COUNT_DST_NET)) what_to_count |= COUNT_DST_HOST;
     else fakes |= FAKE_DST_HOST;
 
-    if (config.what_to_count & COUNT_IN_IFACE) what_to_count |= COUNT_IN_IFACE;
-    if (config.what_to_count & COUNT_OUT_IFACE) what_to_count |= COUNT_OUT_IFACE;
-
-    if (config.what_to_count & COUNT_SRC_NMASK) what_to_count |= COUNT_SRC_NMASK;
-    if (config.what_to_count & COUNT_DST_NMASK) what_to_count |= COUNT_DST_NMASK;
-
     if (config.what_to_count & COUNT_AS_PATH) what_to_count |= COUNT_AS_PATH;
     else fakes |= FAKE_AS_PATH;
 
@@ -896,7 +891,6 @@ int sql_evaluate_primitives(int primitive)
 
     if (config.what_to_count & COUNT_SRC_LOCAL_PREF) what_to_count |= COUNT_SRC_LOCAL_PREF;
     if (config.what_to_count & COUNT_SRC_MED) what_to_count |= COUNT_SRC_MED;
-    if (config.what_to_count & COUNT_IS_SYMMETRIC) what_to_count |= COUNT_IS_SYMMETRIC;
 
     if (config.sql_table_version < 6) {
       if (config.what_to_count & COUNT_SRC_AS) what_to_count |= COUNT_SRC_AS;
@@ -932,10 +926,23 @@ int sql_evaluate_primitives(int primitive)
     what_to_count |= COUNT_ID;
 
     /* aggregation primitives listed below are not part of any default SQL schema; hence
-       either statements' optimization is on or off, these have to be passed on blindly */
-    if (config.what_to_count & COUNT_ID2)
-      what_to_count |= COUNT_ID2;
+       no matter if SQL statements optimization is enabled or not, they have to be passed
+       on blindly */
+    if (config.what_to_count & COUNT_ID2) what_to_count |= COUNT_ID2;
+    if (config.what_to_count & COUNT_COS) what_to_count |= COUNT_COS;
+    if (config.what_to_count & COUNT_ETHERTYPE) what_to_count |= COUNT_ETHERTYPE;
+    if (config.what_to_count & COUNT_MPLS_VPN_RD) what_to_count |= COUNT_MPLS_VPN_RD;
+    if (config.what_to_count & COUNT_IN_IFACE) what_to_count |= COUNT_IN_IFACE;
+    if (config.what_to_count & COUNT_OUT_IFACE) what_to_count |= COUNT_OUT_IFACE;
+    if (config.what_to_count & COUNT_SRC_NMASK) what_to_count |= COUNT_SRC_NMASK;
+    if (config.what_to_count & COUNT_DST_NMASK) what_to_count |= COUNT_DST_NMASK;
   }
+
+  /* sorting out delimiter */
+  if (!config.sql_delimiter || !config.sql_use_copy)
+    snprintf(delim_buf, SRVBUFLEN, "%s ", default_delim);
+  else
+    snprintf(delim_buf, SRVBUFLEN, "%s ", config.sql_delimiter);
 
   /* 1st part: arranging pointers to an opaque structure and 
      composing the static selection (WHERE) string */
@@ -953,7 +960,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "mac_src", SPACELEFT(insert_clause));
@@ -977,7 +984,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "mac_dst", SPACELEFT(insert_clause));
@@ -1004,7 +1011,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "vlan", SPACELEFT(insert_clause));
@@ -1019,7 +1026,7 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & COUNT_COS) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "cos", SPACELEFT(insert_clause));
@@ -1027,6 +1034,20 @@ int sql_evaluate_primitives(int primitive)
     strncat(where[primitive].string, "cos=%u", SPACELEFT(where[primitive].string));
     values[primitive].type = where[primitive].type = COUNT_COS;
     values[primitive].handler = where[primitive].handler = count_cos_handler;
+    primitive++;
+  }
+
+  if (what_to_count & COUNT_ETHERTYPE) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
+      strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
+    }
+    strncat(insert_clause, "etype", SPACELEFT(insert_clause));
+    strncat(values[primitive].string, "\'%x\'", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "etype=\'%x\'", SPACELEFT(where[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_ETHERTYPE;
+    values[primitive].handler = where[primitive].handler = count_etype_handler;
     primitive++;
   }
 #endif
@@ -1043,15 +1064,25 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
-      strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "ip_src=\'%s\'", SPACELEFT(where[primitive].string));
-      values[primitive].type = where[primitive].type = COUNT_SRC_HOST;
-      values[primitive].handler = where[primitive].handler = count_src_host_handler;
-      primitive++;
+      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+        strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
+        strncat(values[primitive].string, "INET_ATON(\'%s\')", SPACELEFT(values[primitive].string));
+        strncat(where[primitive].string, "ip_src=INET_ATON(\'%s\')", SPACELEFT(where[primitive].string));
+        values[primitive].type = where[primitive].type = COUNT_SRC_HOST;
+        values[primitive].handler = where[primitive].handler = count_src_host_handler;
+        primitive++;
+      }
+      else {
+	strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "ip_src=\'%s\'", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = COUNT_SRC_HOST;
+	values[primitive].handler = where[primitive].handler = count_src_host_handler;
+	primitive++;
+      }
     }
   }
 
@@ -1067,22 +1098,32 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
-      strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "ip_dst=\'%s\'", SPACELEFT(where[primitive].string));
-      values[primitive].type = where[primitive].type = COUNT_DST_HOST;
-      values[primitive].handler = where[primitive].handler = count_dst_host_handler;
-      primitive++;
+      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+        strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
+        strncat(values[primitive].string, "INET_ATON(\'%s\')", SPACELEFT(values[primitive].string));
+        strncat(where[primitive].string, "ip_dst=INET_ATON(\'%s\')", SPACELEFT(where[primitive].string));
+        values[primitive].type = where[primitive].type = COUNT_DST_HOST;
+        values[primitive].handler = where[primitive].handler = count_dst_host_handler;
+        primitive++;
+      }
+      else {
+	strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "ip_dst=\'%s\'", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = COUNT_DST_HOST;
+	values[primitive].handler = where[primitive].handler = count_dst_host_handler;
+	primitive++;
+      }
     }
   }
 
   if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
 
@@ -1111,7 +1152,7 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & COUNT_IN_IFACE) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "iface_in", SPACELEFT(insert_clause));
@@ -1125,7 +1166,7 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & COUNT_OUT_IFACE) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "iface_out", SPACELEFT(insert_clause));
@@ -1139,7 +1180,7 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & COUNT_SRC_NMASK) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "mask_src", SPACELEFT(insert_clause));
@@ -1153,7 +1194,7 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & COUNT_DST_NMASK) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "mask_dst", SPACELEFT(insert_clause));
@@ -1167,7 +1208,7 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & COUNT_DST_AS) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
 
@@ -1205,7 +1246,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "comms", SPACELEFT(insert_clause));
@@ -1226,7 +1267,7 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM)) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "comms_src", SPACELEFT(insert_clause));
@@ -1255,7 +1296,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "as_path", SPACELEFT(insert_clause));
@@ -1270,7 +1311,7 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & COUNT_SRC_AS_PATH) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "as_path_src", SPACELEFT(insert_clause));
@@ -1296,7 +1337,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "local_pref", SPACELEFT(insert_clause));
@@ -1311,7 +1352,7 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & COUNT_SRC_LOCAL_PREF) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "local_pref_src", SPACELEFT(insert_clause));
@@ -1337,7 +1378,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "med", SPACELEFT(insert_clause));
@@ -1352,7 +1393,7 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & COUNT_SRC_MED) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "med_src", SPACELEFT(insert_clause));
@@ -1363,17 +1404,17 @@ int sql_evaluate_primitives(int primitive)
     primitive++;
   }
 
-  if (what_to_count & COUNT_IS_SYMMETRIC) {
+  if (what_to_count & COUNT_MPLS_VPN_RD) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    strncat(insert_clause, "is_symmetric", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
-    strncat(where[primitive].string, "is_symmetric=%u", SPACELEFT(where[primitive].string));
-    values[primitive].type = where[primitive].type = COUNT_IS_SYMMETRIC;
-    values[primitive].handler = where[primitive].handler = count_is_symmetric_handler;
+    strncat(insert_clause, "mpls_vpn_rd", SPACELEFT(insert_clause));
+    strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "mpls_vpn_rd=\'%s\'", SPACELEFT(where[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_MPLS_VPN_RD;
+    values[primitive].handler = where[primitive].handler = count_mpls_vpn_rd_handler;
     primitive++;
   }
 
@@ -1389,7 +1430,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
 
@@ -1414,7 +1455,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
 
@@ -1439,15 +1480,25 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
-      strncat(insert_clause, "peer_ip_src", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "peer_ip_src=\'%s\'", SPACELEFT(where[primitive].string));
-      values[primitive].type = where[primitive].type = COUNT_PEER_SRC_IP;
-      values[primitive].handler = where[primitive].handler = count_peer_src_ip_handler;
-      primitive++;
+      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+        strncat(insert_clause, "peer_ip_src", SPACELEFT(insert_clause));
+        strncat(values[primitive].string, "INET_ATON(\'%s\')", SPACELEFT(values[primitive].string));
+        strncat(where[primitive].string, "peer_ip_src=INET_ATON(\'%s\')", SPACELEFT(where[primitive].string));
+        values[primitive].type = where[primitive].type = COUNT_PEER_SRC_IP;
+        values[primitive].handler = where[primitive].handler = count_peer_src_ip_handler;
+        primitive++;
+      }
+      else {
+	strncat(insert_clause, "peer_ip_src", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "peer_ip_src=\'%s\'", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = COUNT_PEER_SRC_IP;
+	values[primitive].handler = where[primitive].handler = count_peer_src_ip_handler;
+	primitive++;
+      }
     }
   }
 
@@ -1463,15 +1514,25 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
-      strncat(insert_clause, "peer_ip_dst", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "peer_ip_dst=\'%s\'", SPACELEFT(where[primitive].string));
-      values[primitive].type = where[primitive].type = COUNT_PEER_DST_IP;
-      values[primitive].handler = where[primitive].handler = count_peer_dst_ip_handler;
-      primitive++;
+      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+        strncat(insert_clause, "peer_ip_dst", SPACELEFT(insert_clause));
+        strncat(values[primitive].string, "INET_ATON(\'%s\')", SPACELEFT(values[primitive].string));
+        strncat(where[primitive].string, "peer_ip_dst=INET_ATON(\'%s\')", SPACELEFT(where[primitive].string));
+        values[primitive].type = where[primitive].type = COUNT_PEER_DST_IP;
+        values[primitive].handler = where[primitive].handler = count_peer_dst_ip_handler;
+        primitive++;
+      }
+      else {
+	strncat(insert_clause, "peer_ip_dst", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "peer_ip_dst=\'%s\'", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = COUNT_PEER_DST_IP;
+	values[primitive].handler = where[primitive].handler = count_peer_dst_ip_handler;
+	primitive++;
+      }
     }
   }
 
@@ -1493,7 +1554,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       if ((!strcmp(config.type, "mysql") || !strcmp(config.type, "sqlite3")) && config.sql_table_version != 8) {
@@ -1526,7 +1587,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       if ((!strcmp(config.type, "mysql") || !strcmp(config.type, "sqlite3")) && config.sql_table_version != 8) {
@@ -1559,7 +1620,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
 	strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-	strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+	strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       }
       strncat(insert_clause, "tcp_flags", SPACELEFT(insert_clause));
       strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
@@ -1584,7 +1645,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "tos", SPACELEFT(insert_clause));
@@ -1611,11 +1672,11 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "ip_proto", SPACELEFT(insert_clause));
-      if (!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) {
+      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && !config.num_protos) {
         strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
         strncat(where[primitive].string, "ip_proto=\'%s\'", SPACELEFT(where[primitive].string));
         values[primitive].handler = where[primitive].handler = MY_count_ip_proto_handler;
@@ -1645,12 +1706,12 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "agent_id", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "agent_id=%u", SPACELEFT(where[primitive].string));
+      strncat(values[primitive].string, "%llu", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "agent_id=%llu", SPACELEFT(where[primitive].string));
       values[primitive].type = where[primitive].type = COUNT_ID;
       values[primitive].handler = where[primitive].handler = count_id_handler;
       primitive++;
@@ -1660,12 +1721,12 @@ int sql_evaluate_primitives(int primitive)
   if (what_to_count & COUNT_ID2) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "agent_id2", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
-    strncat(where[primitive].string, "agent_id2=%u", SPACELEFT(where[primitive].string));
+    strncat(values[primitive].string, "%llu", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "agent_id2=%llu", SPACELEFT(where[primitive].string));
     values[primitive].type = where[primitive].type = COUNT_ID2;
     values[primitive].handler = where[primitive].handler = count_id2_handler;
     primitive++;
@@ -1686,7 +1747,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "class_id", SPACELEFT(insert_clause));
@@ -1710,7 +1771,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "mac_src", SPACELEFT(insert_clause));
@@ -1733,7 +1794,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "mac_dst", SPACELEFT(insert_clause));
@@ -1757,15 +1818,25 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
-      strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "ip_src=\'%s\'", SPACELEFT(where[primitive].string));
-      values[primitive].type = where[primitive].type = FAKE_SRC_HOST;
-      values[primitive].handler = where[primitive].handler = fake_host_handler;
-      primitive++;
+      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+	strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "INET_ATON(\'%s\')", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "ip_src=INET_ATON(\'%s\')", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = FAKE_SRC_HOST;
+	values[primitive].handler = where[primitive].handler = fake_host_handler;
+	primitive++;
+      }
+      else {
+	strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "ip_src=\'%s\'", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = FAKE_SRC_HOST;
+	values[primitive].handler = where[primitive].handler = fake_host_handler;
+	primitive++;
+      }
     }
   }
 
@@ -1780,22 +1851,32 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
-      strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "ip_dst=\'%s\'", SPACELEFT(where[primitive].string));
-      values[primitive].type = where[primitive].type = FAKE_DST_HOST;
-      values[primitive].handler = where[primitive].handler = fake_host_handler;
-      primitive++;
+      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+	strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "INET_ATON(\'%s\')", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "ip_dst=INET_ATON(\'%s\')", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = FAKE_DST_HOST;
+	values[primitive].handler = where[primitive].handler = fake_host_handler;
+	primitive++;
+      }
+      else {
+	strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "ip_dst=\'%s\'", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = FAKE_DST_HOST;
+	values[primitive].handler = where[primitive].handler = fake_host_handler;
+	primitive++;
+      }
     }
   }
 
   if (fakes & FAKE_SRC_AS) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
@@ -1816,7 +1897,7 @@ int sql_evaluate_primitives(int primitive)
   if (fakes & FAKE_DST_AS) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
@@ -1845,7 +1926,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "comms", SPACELEFT(insert_clause));
@@ -1868,7 +1949,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "as_path", SPACELEFT(insert_clause));
@@ -1891,7 +1972,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "peer_as_src", SPACELEFT(insert_clause));
@@ -1914,7 +1995,7 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "peer_as_dst", SPACELEFT(insert_clause));
@@ -1937,15 +2018,25 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
-      strncat(insert_clause, "peer_ip_src", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "peer_ip_src=\'%s\'", SPACELEFT(where[primitive].string));
-      values[primitive].type = where[primitive].type = FAKE_PEER_SRC_IP;
-      values[primitive].handler = where[primitive].handler = fake_host_handler;
-      primitive++;
+      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+	strncat(insert_clause, "peer_ip_src", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "INET_ATON(\'%s\')", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "peer_ip_src=INET_ATON(\'%s\')", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = FAKE_PEER_SRC_IP;
+	values[primitive].handler = where[primitive].handler = fake_host_handler;
+	primitive++;
+      }
+      else {
+	strncat(insert_clause, "peer_ip_src", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "peer_ip_src=\'%s\'", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = FAKE_PEER_SRC_IP;
+	values[primitive].handler = where[primitive].handler = fake_host_handler;
+	primitive++;
+      }
     }
   }
 
@@ -1960,15 +2051,25 @@ int sql_evaluate_primitives(int primitive)
     if (count_it) {
       if (primitive) {
         strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+        strncat(values[primitive].string, delim_buf, sizeof(values[primitive].string));
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
-      strncat(insert_clause, "peer_ip_dst", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "peer_ip_dst=\'%s\'", SPACELEFT(where[primitive].string));
-      values[primitive].type = where[primitive].type = FAKE_PEER_DST_IP;
-      values[primitive].handler = where[primitive].handler = fake_host_handler;
-      primitive++;
+      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+	strncat(insert_clause, "peer_ip_dst", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "INET_ATON(\'%s\')", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "peer_ip_dst=INET_ATON(\'%s\')", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = FAKE_PEER_DST_IP;
+	values[primitive].handler = where[primitive].handler = fake_host_handler;
+	primitive++;
+      }
+      else {
+	strncat(insert_clause, "peer_ip_dst", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+	strncat(where[primitive].string, "peer_ip_dst=\'%s\'", SPACELEFT(where[primitive].string));
+	values[primitive].type = where[primitive].type = FAKE_PEER_DST_IP;
+	values[primitive].handler = where[primitive].handler = fake_host_handler;
+	primitive++;
+      }
     }
   }
 
@@ -1993,7 +2094,11 @@ int sql_query(struct BE_descs *bed, struct db_cache *elem, struct insert_data *i
     if (!bed->b->fail) {
       if (!bed->b->connected) {
         (*sqlfunc_cbr.connect)(bed->b, config.sql_backup_host);
-        if (config.sql_table_schema && idata->new_basetime) sql_create_table(bed->b, idata);
+        if (config.sql_table_schema) {
+	  time_t stamp = idata->new_basetime ? idata->new_basetime : idata->basetime;
+
+	  sql_create_table(bed->b, &stamp);
+	}
         (*sqlfunc_cbr.lock)(bed->b);
       }
       if (!bed->b->fail) {
@@ -2062,7 +2167,7 @@ FILE *sql_file_open(const char *path, const char *mode, const struct insert_data
       else {
         struct tm *nowtm;
 
-        nowtm = localtime(&idata->basetime);
+        nowtm = localtime(&idata->new_basetime);
         strftime(lh.sql_table, DEF_HDR_FIELD_LEN, config.sql_table, nowtm);
       }
       strlcpy(lh.sql_user, config.sql_user, DEF_HDR_FIELD_LEN);
@@ -2119,7 +2224,7 @@ FILE *sql_file_open(const char *path, const char *mode, const struct insert_data
   return NULL;
 }
 
-void sql_create_table(struct DBdesc *db, struct insert_data *idata)
+void sql_create_table(struct DBdesc *db, time_t *basetime)
 {
   struct tm *nowtm;
   char buf[LARGEBUFLEN], tmpbuf[LARGEBUFLEN];
@@ -2127,7 +2232,7 @@ void sql_create_table(struct DBdesc *db, struct insert_data *idata)
 
   ret = read_SQLquery_from_file(config.sql_table_schema, tmpbuf, LARGEBUFLEN);
   if (ret) {
-    nowtm = localtime(&idata->basetime);
+    nowtm = localtime(basetime);
     strftime(buf, LARGEBUFLEN, tmpbuf, nowtm);
     (*sqlfunc_cbr.create_table)(db, buf);
   }

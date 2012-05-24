@@ -2,16 +2,21 @@ SUPPORTED CONFIGURATION KEYS
 Both configuration directives and commandline switches are listed below. 
 A configuration consists of key/value pairs, separated by the ':' char.
 Starting a line with the '!' symbol, makes the whole line to be ignored
-by the interpreter, making it a comment.
-Please refer also to the EXAMPLES document and the 'examples/' sub-tree
-for some examples.
+by the interpreter, making it a comment. Please refer also to the EXAMPLES
+document and the 'examples/' sub-tree for some examples.
+
+Directives are sometimes grouped, like sql_table and print_output_file:
+this is to stress if multiple plugins are running as part of the same
+daemon instance, such directives must be casted to the plugin they refer
+to - in order to prevent undesired inheritance effects. In other words,
+grouped directives share the same field in the configuration structure.
 
 
 LEGEND of flags:
 
 GLOBAL		Can't be configured on individual plugins
 NO_GLOBAL	Can't be configured globally
-NO_PMACCTD	Does not apply to 'pmacctd' (it's likely it will not apply to 'sfacctd' either)
+NO_PMACCTD	Does not apply to 'pmacctd' (it's likely it will not apply to 'uacctd' either)
 NO_UACCTD	Does not apply to 'uacctd' 
 NO_NFACCTD	Does not apply to 'nfacctd' (it's likely it will not apply to 'sfacctd' either) 
 NO_SFACCTD	Does not apply to 'sfacctd' 
@@ -28,12 +33,12 @@ VALUES:		[true|false]
 DESC:		daemonizes the process (default: false).
 
 KEY:		aggregate (-c)
-VALUES:		[src_mac, dst_mac, vlan, cos, src_host, dst_host, src_net, dst_net, src_mask,
-		 dst_mask, src_as, dst_as, src_port, dst_port, tos, proto, none, sum_mac,
-		 sum_host, sum_net, sum_as, sum_port, flows, tag, tag2, class, tcpflags,
-		 in_iface, out_iface, std_comm, ext_comm, as_path, peer_src_ip, peer_dst_ip,
-		 peer_src_as, peer_dst_as, local_pref, med, src_as_path, src_std_comm,
-		 src_ext_comm, src_local_pref, src_med, is_symmetric]
+VALUES:		[src_mac, dst_mac, vlan, cos, etype, src_host, dst_host, src_net, dst_net,
+		 src_mask, dst_mask, src_as, dst_as, src_port, dst_port, tos, proto, none,
+		 sum_mac, sum_host, sum_net, sum_as, sum_port, flows, tag, tag2, class,
+		 tcpflags, in_iface, out_iface, std_comm, ext_comm, as_path, peer_src_ip,
+		 peer_dst_ip, peer_src_as, peer_dst_as, local_pref, med, src_as_path,
+		 src_std_comm, src_ext_comm, src_local_pref, src_med, mpls_vpn_rd]
 FOREWORDS:	individual IP packets are uniquely identified by their header fields values (a
 		rather large set of primitives!). Same applies to uni-directional IP flows, as
 		they have at least enough information to discriminate where packets are coming
@@ -107,19 +112,18 @@ VALUES:		[ memory | print | mysql | pgsql | sqlite3 | nfprobe | sfprobe | tee ]
 DESC:		plugins to be enabled. SQL plugins are available only if configured and compiled.
 		'memory' enables the use of a memory table as backend; then, a client tool, 'pmacct',
 		can fetch its content; mysql, pgsql and sqlite3 enable the use of respectively MySQL,
-		PostgreSQL and SQLite 3.x tables to store data. 'print' prints aggregates to stdout
-		in a nicely formatted way. 'nfprobe' acts as a NetFlow agent and exports collected
-		data via NetFlow v1/v5/v9 datagrams to a remote collector. 'sfprobe' acts as a sFlow
-		agent and exports collected data via sFlow v5 datagrams to a remote collector. Both
-		'nfprobe' and 'sfprobe' apply only to 'pmacctd' and 'uacctd' daemons. 'tee' acts as
-		a replicator for NetFlow/sFlow data (also transparent); it applies to 'nfacctd' and
-		'sfacctd' daemons only.
-		Plugins can be either anonymous or named; configuration directives can be either
-		global or bounded to a specific named plugin. An anonymous plugin is declared as
-		'plugins: mysql' whereas a named plugin is declared as 'plugins: mysql[name]'. Then,
-		directives can be bound to such named plugin as: 'directive[name]: value'.
-		Note that currently 'nfprobe' and 'sfprobe' are intended to work only as agents which
-		collect, process and export data and not as transparent reflectors. (default: memory) 
+		PostgreSQL and SQLite 3.x (or BerkeleyDB 5.x with the SQLite API compiled-in) tables
+		to store data. 'print' prints aggregates to flat-files or stdout in CSV or formatted.
+		'nfprobe' acts as a NetFlow/IPFIX agent and exports collected data via NetFlow v1/v5/
+		v9 and IPFIX datagrams to a remote collector. 'sfprobe' acts as a sFlow agent and
+		exports collected data via sFlow v5 datagrams to a remote collector. Both 'nfprobe'
+		and 'sfprobe' apply only to 'pmacctd' and 'uacctd' daemons. 'tee' acts as a replicator
+		for NetFlow/IPFIX/ sFlow data (also transparent); it applies to 'nfacctd' and 'sfacctd'
+		daemons only. Plugins can be either anonymous or named; configuration directives can
+		be either global or bound to a specific named plugin. An anonymous plugin is declared
+		as 'plugins: mysql' whereas a named plugin is declared as 'plugins: mysql[name]'.
+		Then, directives can be bound to such named plugin as: 'directive[name]: value'.
+		(default: memory) 
 
 KEY:		plugin_pipe_size
 DESC:		Core process and active plugins are encapsulated into different OS processes.
@@ -140,6 +144,14 @@ DESC:		by defining the transfer buffer size, in bytes, this directive enables bu
 		to the plugin while the circular queue moves to the next buffer element. For further
 		details, read INTERNALS, 'Communications between core process and plugin' section. A
 		value of 10240 (10KB) is usually ok. (default: 0)
+
+KEY:            plugin_pipe_backlog
+VALUES:         [0 <= value < 100]
+DESC:           Expects the value to be a percentage. It creates a backlog of buffers on the pipe
+		before actually releasing them to the plugin. The strategy helps optimizing inter
+		process communications where plugins are quicker handling data than the Core process.
+		By default backlog is disabled; as with buffering in general, this feature should be
+		enabled with caution in lab and low-traffic environments. (default: 0)
 
 KEY:		files_umask 
 DESC:		Defines the mask for newly created files (log, pid, etc.). A mask less than "002" is
@@ -260,10 +272,11 @@ DESC:		defines the SQL database to use. Remember that when using the SQLite3 plu
 		directive refers to the full path to the database file (default: 'pmacct', SQLite 3.x
 		default: '/tmp/pmacct.db'). 
 
-KEY:            sql_table
-DESC:           defines the SQL table to use. Dynamic tables are supported through the use of some
-		variables. Variables are computed when data is purged into the DB. The list of supported 
-		variables follows:
+KEY:            [ sql_table | print_output_file ]
+DESC:           In SQL plugins this defines the SQL table to use (sql_table); in print plugin it defines
+		the file to write to (print_output_file). Dynamic names are supported through the use of
+		variables, which are computed at the moment when data is purged to the backend. The list
+		of supported variables follows: 
 
 		%d	The day of the month as a decimal number (range 01 to 31).
 
@@ -283,11 +296,17 @@ DESC:           defines the SQL table to use. Dynamic tables are supported throu
 
 		%Y	The year as a decimal number including the century.
 
-		Time-related variables REQUIRE 'sql_history' to be in place in order to work correctly
-		(refer also to their entry in this document for further information). Moreover, if the
-		'sql_table_schema' directive is not specified, tables are expected to be already in place.
-		Let's proceed with an example to split accounted data among multiple tables basing on
-		the day of the week:
+		SQL plugins notes:
+		Time-related variables require 'sql_history' to be specified in order to work correctly
+		(see 'sql_history' entry in this in this document for further information) and that the
+		'sql_refresh_time' setting is aligned with the 'sql_history', ie.:
+
+			sql_history: 5m
+			sql_refresh_time: 300
+
+		Furthermore, if the 'sql_table_schema' directive is not specified, tables are expected
+		to be already in place. This is an example on how to split accounted data among multiple
+		tables basing on the day of the week:
 
 			sql_history: 1h
 			sql_history_roundoff: h
@@ -298,10 +317,16 @@ DESC:           defines the SQL table to use. Dynamic tables are supported throu
 		the 'acct_v4_1' table, and so on. The switch between the tables will happen each day at
 		midnight: this behaviour is ensured by the use of the 'sql_history_roundoff' directive. 
 
+		Ideally sql_refresh_time and sql_history values should be aligned for the dynamic tables
+		to work; sql_refresh_time with a value smaller than sql_history is also supported; whereas
+		the feature does not support values of sql_refresh_time greater than sql_history.
+
+		Print plugin notes:
+		If a non-dynamic filename is selected, content is overwritten to the existing one. 
+
+		Common notes:
 		The maximum table name length is 64 characters. The maximum number of variables it may
-		contain is 8. It's also useful to notice that selecting a 'sql_history' value which is
-		divisible by 'sql_refresh_time' helps in a more precise split of the entries among the
-		tables. 
+		contain is 8.
 
 KEY:		sql_table_schema
 DESC:		full pathname to a file containing a SQL table schema. It allows to create the SQL table
@@ -391,9 +416,10 @@ DESC:		enables historical accounting by dividing accounted data into configurabl
 		is close to time slots in a RRD file. Examples of valid values are: '5m' - five minutes,
 		'1h' - one hour, '4h' - four hours, '1d' - one day, '1w' - one week, '1M' - one month).
 
-KEY:		sql_history_roundoff
+KEY:		[ sql_history_roundoff | print_time_roundoff ]
 VALUES		[m,h,d,w,M]
-DESC:		enables alignment of minutes (m), hours (h), days of month (d), weeks (w) and months (M).
+DESC:		enables alignment of minutes (m), hours (h), days of month (d), weeks (w) and months (M)
+		in print (to print_refresh_time) and SQL plugins (to sql_history and sql_refresh_time).
 		Suppose you go with 'sql_history: 1h', 'sql_history_roundoff: m' and it's 6:34pm. Rounding
 		off minutes gives you an hourly timeslot (1h) starting at 6:00pm; so, subsequent ones will
 		start at 7:00pm, 8:00pm, etc. Now, you go with 'sql_history: 5m', 'sql_history_roundoff: m'
@@ -468,6 +494,11 @@ DESC:		instructs the plugin to build non-UPDATE SQL queries using COPY (in place
 		directive requires 'sql_dont_try_update' to be set to true. It applies to PostgreSQL plugin
 		only. (default: false)
 
+KEY:		sql_delimiter
+DESC:		If sql_use_copy is true, uses the supplied character as delimiter. This is thought in cases
+		where the default delimiter is part of any of the supplied strings to be inserted into the
+		database. (default: ',')
+
 KEY:		sql_multi_values
 DESC:		enables the use of multi-values INSERT statements. The value of the directive is intended
 		to be the size (in bytes) of the multi-values buffer. The directive applies only to MySQL
@@ -476,12 +507,14 @@ DESC:		enables the use of multi-values INSERT statements. The value of the direc
 		to check the size of this pmacct buffer against the size of the corresponding MySQL buffer
 		(max_allowed_packet). (default: none) 
 
-KEY:		sql_trigger_exec
+KEY:		[ sql_trigger_exec | print_trigger_exec ]
 DESC:		defines the executable to be launched at fixed time intervals to post-process aggregates;
-		intervals are specified by the 'sql_trigger_time' directive; if no interval is supplied,
-		'sql_refresh_time' value is used instead: this will result in a trigger being fired each 
-		purging event. A number of environment variables are set in order to allow the trigger to
-		take actions; take a look to docs/TRIGGER_VARS to check them out.
+		in SQL plugins, intervals are specified by the 'sql_trigger_time' directive; if no interval
+		is supplied 'sql_refresh_time' value is used instead: this will result in a trigger being
+		fired each purging event. A number of environment variables are set in order to allow the
+		trigger to take actions; take a look to docs/TRIGGER_VARS to check them out. In the print
+		plugin a simpler implementation is made: triggers can be fired at each 'print_refresh_time'
+		only and no environment variables are passed over to the executable.
 
 KEY:		sql_trigger_time
 VALUES:		#[m|h|d|w|M]
@@ -607,22 +640,39 @@ VALUES:		[ formatted | csv ]
 DESC:		Defines the print plugin output format. 'formatted' enables tabular output; 'csv' is to enable
 		comma-separated values format, suitable for injection into 3rd party tools. (default: formatted)
 
-KEY:		nfacctd_port (-l) [GLOBAL, NO_PMACCTD]
-DESC:		defines the UDP port where to bind the 'nfacctd' daemon (default: 2100). 
+KEY:            [ print_num_protos | sql_num_protos ]
+VALUES:         [true|false]
+DESC:		Defines whether IP protocols (ie. tcp, udp) should be looked up and presented in string format
+		or left numerical. The default is to look protocol names up. (default: false)
 
-KEY:		nfacctd_ip (-L) [GLOBAL, NO_PMACCTD]
-DESC:		defines the IPv4/IPv6 address where to bind the 'nfacctd' daemon (default: all interfaces).
+KEY:            sql_num_hosts
+VALUES:         [true|false]
+DESC:           Defines whether IP addresses should be left numerical (in network bytes ordering) or converted
+		into human-readable strings. Applies to MySQL and SQLite plugins only and assumes the INET_NTOA()
+		function is defined in the RDBMS (which for MySQL is always the case, while for SQLite it is not
+		by default). Since INET_NTOA() is used, unless redefined to some custom-made variant, this feature
+		works for IPv4 addresses only. Default setting is to convert IP addresses into strings. (default:
+		false)
 
-KEY:		nfacctd_allow_file [GLOBAL, NO_PMACCTD]
+KEY:		[ nfacctd_port | sfacctd_port ] (-l) [GLOBAL, NO_PMACCTD]
+DESC:		defines the UDP port where to bind nfacctd (nfacctd_port) and sfacctd (sfacctd_port) daemons
+		(default: nfacctd_port: 2100, sfacctd_port: 6343). 
+
+KEY:		[ nfacctd_ip | sfacctd_ip ] (-L) [GLOBAL, NO_PMACCTD]
+DESC:		defines the IPv4/IPv6 address where to bind the nfacctd (nfacctd_ip) and sfacctd (sfacctd_ip)
+		daemons (default: all interfaces).
+
+KEY:		[ nfacctd_allow_file | sfacctd_allow_file ] [GLOBAL, NO_PMACCTD]
 DESC:		full pathname to a file containing the list of IPv4/IPv6 addresses (one for each line) allowed
-		to send NetFlow packets to 'nfacctd'. Current syntax does not implement network masks but only
-		individual IP addresses. The Allow List is intended to be small; firewall rules should be
-		preferred to long ACLs. (default: allow all) 
+		to send packets to the daemon. Current syntax does not implement network masks but individual
+		IP addresses only. The Allow List is intended to be small; firewall rules should be preferred
+		to long ACLs. (default: allow all) 
 
 KEY:		nfacctd_time_secs [GLOBAL, NO_PMACCTD]
 VALUES:		[true|false]
 DESC:		makes 'nfacctd' expect times included in NetFlow header to be in seconds rather than msecs. This
-		seems to be quite a common case. (default: false; times are expected in msecs)
+		knob makes sense for NetFlow up to v8 - as in NetFlow v9 and IPFIX different fields are reserved
+		for secs and msecs timestamps, increasing collector awareness. (default: false)
 
 KEY:		nfacctd_time_new [GLOBAL, NO_PMACCTD]
 VALUES:		[true|false]
@@ -633,32 +683,33 @@ DESC:		makes 'nfacctd' to ignore timestamps included in NetFlow header and build
 		(default: false) 
 
 KEY:		[ nfacctd_as_new | sfacctd_as_new | pmacctd_as | uacctd_as ] [GLOBAL]
-VALUES:		[ false | (true|file) | bgp ]
-DESC:		When 'false', it instructs [nf|sf]acctd to populate 'src_as' and 'dst_as' from data within
-		the NetFlow and sFlow datagram respectively; when 'true' ('file' being an alias of 'true')
-		it instructs [nf|sf]acctd to generate ASNs by looking up source and destination IP addresses
-		against a 'networks_file' map. When 'bgp' is specified, ASNs are looked up against the BGP
-		RIB of the peer from which the NetFlow datagram was received. If not otherwise mapped via a
-		bgp_agent_map directive, the assumption is: BGP Source IP address equals to the sFlow/NetFlow
-		source IP address.
-		pmacctd and uacctd can't grasp ASNs from any protocol: 'false' (for backward compatibility),
-		'true' and 'file' expect a 'networks_file' to be defined. 'bgp' just works as described above.
-		Under nfacctd and sfacctd this feature also influences 'peer_src_ip' and 'peer_dst_ip': if
-		'false', 'true' or 'file' values are taken from NetFlow and sFlow datagrams respectively;
-		if 'bgp' values are looked up against the BGP RIB of the peer from which the NetFlow datagram
-		was received (or mapped to). (default: false) 
+VALUES:		[ false | (true|file) | bgp | fallback ]
+DESC:		When 'false', it instructs nfacctd and sfacctd to populate 'src_as', 'dst_as', 'peer_src_as' and
+		'peer_dst_as' primitives from NetFlow and sFlow datagram respectively; when 'true' ('file' being
+		an alias of 'true') it instructs nfacctd and sfacctd to generate 'src_as' and 'dst_as' (only! ie.
+		no peer-AS) by looking up source and destination IP addresses against a networks_file. When 'bgp'
+		is specified, ASNs are looked up against the BGP RIB of the peer from which the NetFlow datagram
+		was received (see also bgp_agent_map directive). When 'fallback' is specified, lookup is done
+		against the winning longest match lookup method (sFlow/NetFlow <= BGP), which can be different
+		for source and destination IP prefix. Intuitively if 'fallback' is specified, IS-IS/IGP daemon
+		is enabled and IGP is the winning method then no BGP information will be attached to the prefixes.
+		In pmacctd and uacctd 'false' (maintained for backward compatibility), 'true' and 'file' expect a
+		'networks_file' to be defined; 'bgp' just works as described previously for nfacctd and sfacctd;
+		'fallback' is mapped to 'bgp' since no export protocol lookup method is available. (default: false)
 
 KEY:            [ nfacctd_net | sfacctd_net | pmacctd_net | uacctd_net ]
-VALUES:         [ netflow | sflow | mask | file | bgp ]
-DESC:		Determines the source of data to perform network aggregation - directly influencing 'src_net',
-		'dst_net', 'src_mask' and 'dst_mask' primitives. 'netflow' and 'sflow' use netmask values
-		carried within NetFlow and sFlow protocols; valid only in conjunction with nfacctd and sfacctd.
-		'mask' selects a defined networks_mask; 'file' selects a defined networks_file; 'bgp' uses
-		netmask values carried within BGP protocol. If this directive is not specified, the daemon
-		falls back to backward compatibility mode, hence enabling 'mask', if a networks_mask is
-		defined, and 'file', if a networks_file. If both are defined, the outcome will be the
-		intersection of their definitions. (default: nfacctd: 'netflow'; sfacctd: 'sflow'; pmacctd
-		and uacctd: 'mask', 'file')
+VALUES:         [ netflow | sflow | mask | file | igp | bgp | fallback ]
+DESC:		Determines the method for performing IP prefix aggregation - hence directly influencing 'src_net',
+		'dst_net', 'src_mask', 'dst_mask' and 'peer_dst_ip' primitives. 'netflow' and 'sflow' get values
+		from NetFlow and sFlow protocols respectively; these keywords are only valid in nfacctd, sfacctd.
+		'mask' applies a defined networks_mask; 'file' selects a defined networks_file; 'igp' and 'bgp'
+		source values from IGP/IS-IS daemon and BGP daemon respectively. Default behaviour under pmacctd
+		and uacctd is for backward compatibility: 'mask' and 'file' are turned on if a networks_mask and
+		a networks_file are respectively specified by configuration. If they both are defined, the outcome
+		will be the intersection of their definitions. 'fallback' behaves in a longest-match-wins fashion:
+		in nfacctd and sfacctd lookup is done against sFlow/NetFlow protocol, IGP and BGP (sFlow/NetFlow < 
+		IGP <= BGP) whereas in pmacctd and uacctd lookup is done against IGP and BGP only (IGP <= BGP).
+		(default: nfacctd: 'netflow'; sfacctd: 'sflow'; pmacctd and uacctd: 'mask', 'file')
 
 KEY:		[ nfacctd_mcast_groups | sfacctd_mcast_groups ] [GLOBAL, NO_PMACCTD]
 DESC:		defines one or more IPv4/IPv6 multicast groups to be joined by the daemon. If more groups are
@@ -736,6 +787,15 @@ DESC:		enables packet sampling. It expects a number which is the mean ratio of p
 		methods). Finally, note that this 'sampling_rate' directive can be renormalized by using the 
 		'usrf' action of the 'sql_preprocess' layer. (default: no sampling)
 
+KEY:            sampling_map [GLOBAL, NO_PMACCTD, NO_UACCTD]
+DESC:           full pathname to a file containing traffic sampling mappings. It is mainly meant to be used
+		in conjunction with nfacctd and sfacctd for the purpose of fine-grained reporting of sampling
+		rates circumventing bugs and issues in router operating systems. Renormalization must be
+		enabled (nfacctd_renormalize or sfacctd_renormalize set to true) in order for the feature to
+		work. If a specific router is not defined in the map, the sampling rate advertised by the
+		router itself is applied. Take a look to the examples/ sub-tree 'sampling.map.example' for all
+		supported keys and detailed examples.
+
 KEY:		[ pmacctd_force_frag_handling | uacctd_force_frag_handling ] [GLOBAL, NO_NFACCTD]
 VALUES:		[true|false]
 DESC:		forces 'pmacctd' to join together IPv4/IPv6 fragments: 'pmacctd' does this only whether any of
@@ -776,18 +836,6 @@ KEY:		[ pmacctd_ext_sampling_rate | uacctd_ext_sampling_rate | nfacctd_ext_sampl
 		mirroring).
 		In nfacctd and sfacctd daemons this directive can be used to tackle corner cases, ie. sampling
 		rate reported by the NetFlow/sFlow agent is missing or not correct. (default: no sampling) 
-
-KEY:            sfacctd_port (-l) [GLOBAL, NO_PMACCTD]
-DESC:           defines the UDP port where to bind the 'sfacctd' daemon (default: 6343).
-
-KEY:            sfacctd_ip (-L) [GLOBAL, NO_PMACCTD]
-DESC:           defines the IPv4/IPv6 address where to bind the 'sfacctd' daemon (default: all interfaces).
-
-KEY:            sfacctd_allow_file [GLOBAL, NO_PMACCTD]
-DESC:           full pathname to a file containing the list of IPv4/IPv6 addresses (one for each line) allowed
-		to send NetFlow packets to 'sfacctd'. Current syntax does not implement network masks but only
-		individual IP addresses. The Allow List is intended to be small; firewall rules should be
-		preferred to long ACLs. (default: allow all)
 
 KEY:		[ sfacctd_renormalize | nfacctd_renormalize | pmacctd_renormalize | uacctd_renormalize ] (-R)
 VALUES:		[true|false]
@@ -871,23 +919,24 @@ DESC:		defines the remote IP address/hostname and port to which NetFlow dagagram
 KEY:            nfprobe_source_ip
 DESC:           defines the local IP address from which NetFlow dagagrams are to be exported. Only a numerical
 		IPv4/IPv6 address is expected. The supplied IP address is required to be already configured on
-		one of the interfaces. This parameter is also required for graceful encoding of NetFlow v9
-		option scoping. (default: IP address is selected by the OS)
+		one of the interfaces. This parameter is also required for graceful encoding of NetFlow v9 and
+		IPFIX option scoping. (default: IP address is selected by the OS)
 
 KEY:		nfprobe_version
-VALUES:		[5,9]
-DESC:		version of outgoing NetFlow datagrams. NetFlow v5/v9 are supported. NetFlow v5 features a fixed
-		record structure and if not specifying an 'aggregate' directive it gets populated as much as
-		possible; NetFlow v9 features a dynamic template-based structure instead and by default it is
-		populated as: 'src_host, dst_host, src_port, dst_Port, proto, tos'. (default: 5)
+VALUES:		[5,9,10]
+DESC:		version of outgoing NetFlow datagrams. NetFlow v5/v9 and IPFIX (v10) are supported. NetFlow v5
+		features a fixed record structure and if not specifying an 'aggregate' directive it gets
+		populated as much as possible; NetFlow v9 and IPFIX feature a dynamic template-based structure
+		instead and by default it is populated as: 'src_host, dst_host, src_port, dst_Port, proto, tos'.
+		(default: 5)
 
 KEY:            nfprobe_engine
-DESC:           allows to define Engine ID and Engine Type fields. It applies only to NetFlow v5 and v9. In v9,
-		the supplied value fills last two bytes of SourceID field. Expects two non-negative numbers, up
-		to 255 each and separated by the ":" symbol. It also allows a collector to distinguish between
-		distinct probe instances running on the same box; this is also important for letting NetFlow v9
-		templates to work correctly: in fact, template IDs get automatically selected only inside single
-		daemon instances. (default: 0:0)
+DESC:           allows to define Engine ID and Engine Type fields. It applies only to NetFlow v5/v9 and IPFIX.
+		In NetFlow v9/IPFIX, the supplied value fills last two bytes of SourceID field. Expects two
+		non-negative numbers, up to 255 each and separated by the ":" symbol. It also allows a collector
+		to distinguish between distinct probe instances running on the same box; this is also important
+		for letting NetFlow v9/IPFIX templates to work correctly: in fact, template IDs get automatically
+		selected only inside single daemon instances. (default: 0:0)
 
 KEY:		[ nfprobe_peer_as | sfprobe_peer_as ]
 VALUES:         [true|false]
@@ -965,7 +1014,7 @@ DESC:		sets the maximum number of neighbors the BGP daemon can peer to. Upon rea
 KEY:		bgp_daemon_msglog
 VALUES:		[true|false]
 DESC:		enables BGP messages logging: as this can get easily verbose, it is intended for debug and
-		troubleshooting purposes only.
+		troubleshooting purposes only. (default: false)
 
 KEY:		bgp_aspath_radius
 DESC:		cuts down AS-PATHs to the specified number of ASN hops. If the same ASN is repeated multiple
@@ -999,11 +1048,11 @@ DESC:		When determining the peer AS (source and destination), skip potential con
 		(default: false)
 
 KEY:		bgp_peer_src_as_type
-VALUES:		[ map | bgp ]
+VALUES:		[ netflow | sflow | map | bgp ]
 DESC:		Defines the method to use to map incoming traffic to a source peer ASN. "map" selects a
 		map, reloadable at runtime, specified by the bgp_peer_src_as_map directive (refer to it for
 		further information); "bgp" implements naive BGP RIB lookups. BGP lookups assume traffic is
-		symmtric, which is often not the case, affecting their accuracy.
+		symmtric, which is often not the case, affecting their accuracy. (default: netflow, sflow)
 
 KEY:		bgp_peer_src_as_map
 DESC:		full pathname to a file containing source peer AS mappings. The AS can be mapped to one or
@@ -1055,13 +1104,6 @@ DESC:           full pathname to a file containing source MED (Multi Exit Discri
 		entries (by default 384) can be modified via pre_tag_map_entries. Sample map in
 		'examples/med.map.example'.
 
-KEY:            bgp_is_symmetric_map
-DESC:           full pathname to a file defining for each edge device local traffic paths out of the
-		observed routing domain by using a combination of ingress ifIndex, source MAC address,
-		BGP next-hop (query against the BGP RIB to look up the source IP prefix). Number of
-		map entries (by default 384) can be modified via pre_tag_map_entries. Sample map in
-		'examples/is_symmetric.map.example'.
-
 KEY:		bgp_agent_map
 DESC:		full pathname to a file to map source IP address of NetFlow agents and AgentID of sFlow
 		agents to source IP address or Router ID of BGP peers. This is particularly aimed as a
@@ -1072,6 +1114,12 @@ DESC:		full pathname to a file to map source IP address of NetFlow agents and Ag
 		working in a primary/backup fashion (see agent_to_peer.map in the examples section):
 		this is because these daemons do not have a NetFlow/sFlow source address to match to.
 		Number of map entries (by default 384) can be modified via pre_tag_map_entries.
+
+KEY:		bgp_iface_rd_map
+DESC:		full pathname to a file to map PE routers ifIndexes (input interfaces typically) to a
+		BGP/MPLS Virtual Private Network (VPN) Route Distinguisher (RD), based upon rfc4659.
+		See iface_to_rd.map file in the examples section for further information. Number of map
+		entries (by default 384) can be modified via pre_tag_map_entries. 
 
 KEY:		bgp_follow_default
 DESC:		expects positive number value which instructs how many times a default route, if any, can
@@ -1130,6 +1178,39 @@ DESC:		From version 0.12.4, a shared BGP RIB is worked out from announcements se
 		aprox 100 BGP peers in lab. More buckets means better CPU usage but also increased memory
 		footprint - and vice-versa. (default: 13)
 
+KEY:		isis_daemon
+VALUES:		[true|false]
+DESC:		Enables the skinny IS-IS daemon thread. This feature requires the package to be supporting
+		multi-threading (--enable-threads). It implements P2P Hellos, CSNP and PSNP - and does not
+		send any LSP information out. It currently supports a single L2 P2P neighborship. Testing
+		has been done over a GRE tunnel. (default: false)
+
+KEY:		isis_daemon_ip
+DESC:		Sets the sub-TLV of the Extended IS Reachability TLV that contains an IPv4 address for the
+		local end of a link. No default value is set and a non-zero value is mandatory. It should
+		be set to the IPv4 address configured on the interface pointed by isis_daemon_iface. 
+
+KEY:		isis_daemon_net
+DESC:		Defines the Network entity title (NET) of the IS-IS daemon. In turn a NET defines the area
+		addresses for the IS-IS area and the system ID of the router. No default value is set and
+		a non-zero value is mandatory. Extensive IS-IS and ISO literature cover the topic, example
+		of the NET value format can be found as part of the "Quickstart guide to setup the IS-IS
+		daemon" in the EXAMPLES document.
+
+KEY:		isis_daemon_iface
+DESC:		Defines the network interface (ie. gre1) where to bind the IS-IS daemon. No default value
+		is set and a non-zero value is mandatory.
+
+KEY:		isis_daemon_mtu
+DESC:		Defines the available MTU for the IS-IS daemon. P2P HELLOs will be padded to such length.
+		When the daemon is configured to set a neighborship with a Cisco router running IOS, this
+		value should match the value of the "clns mtu" IOS directive. (default: 1476) 
+
+KEY		isis_daemon_msglog
+VALUES:		[true|false]
+DESC:	 	enables IS-IS messages logging: as this can get easily verbose, it is intended for debug
+		and troubleshooting purposes only. (default: false)
+
 KEY:		uacctd_group
 DESC:		Sets the Linux Netlink ULOG multicast group to be joined. (default: 1)
 
@@ -1166,9 +1247,14 @@ VALUES:         [true|false]
 DESC:		Enables transparent replication mode. It essentially spoofs the source IP address to the
 		original sender of the datagram. It requires super-user permissions. (default: false)
 
-KEY:            [ xlate_src | xlate_dst ]
+KEY:            xlate_src
 VALUES:         [true|false]
 DESC:           Copies NAT L3/L4 field values in place of the original ones (ie. src_host, src_port,
-		src_net, dst_host, dst_port, dst_net) when available; alternatively it falls back to
-		original values. At time of writing only IPFIX and Cisco ASA NetFlow v9 (NSEL) have
-		support for this. (default: false)
+		src_net) when available; alternatively it falls back to original values. At time of
+		writing only IPFIX and Cisco ASA NetFlow v9 (NSEL) have support for this (default: false)
+
+KEY:            xlate_dst
+VALUES:         [true|false]
+DESC:           Copies NAT L3/L4 field values in place of the original ones (ie. dst_host, dst_port,
+                dst_net) when available; alternatively it falls back to original values. At time of
+                writing only IPFIX and Cisco ASA NetFlow v9 (NSEL) have support for this (default: false)

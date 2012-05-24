@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -26,6 +26,8 @@
 #include "imt_plugin.h"
 #include "ip_flow.h"
 #include "classifier.h"
+#include "bgp/bgp_packet.h"
+#include "bgp/bgp.h"
 
 /* functions */
 int build_query_server(char *path_ptr)
@@ -240,14 +242,13 @@ void process_query_data(int sd, unsigned char *buf, int len, int forked)
   }
   else if (q->type & WANT_CLASS_TABLE) {
     struct stripped_class dummy;
-    int idx = 0;
+    u_int32_t idx = 0, max = 0;
 
     /* XXX: we should try using pmct_get_max_entries() */
-    q->num = config.classifier_table_num;
-    // if (!q->num && config.classifiers_path) q->num = MAX_CLASSIFIERS;
-    if (!q->num && class) q->num = MAX_CLASSIFIERS;
+    max = q->num = config.classifier_table_num;
+    if (!q->num && class) max = q->num = MAX_CLASSIFIERS;
 
-    while (idx < q->num) {
+    while (idx < max) {
       enQueue_elem(sd, &rb, &class[idx], sizeof(struct stripped_class), sizeof(struct stripped_class));
       idx++;
     }
@@ -275,6 +276,7 @@ void mask_elem(struct pkt_primitives *d1, struct pkt_bgp_primitives *d2, struct 
   if (w & COUNT_DST_MAC) memcpy(d1->eth_dhost, s1->eth_dhost, ETH_ADDR_LEN); 
   if (w & COUNT_VLAN) d1->vlan_id = s1->vlan_id; 
   if (w & COUNT_COS) d1->cos = s1->cos; 
+  if (w & COUNT_ETHERTYPE) d1->etype = s1->etype; 
 #endif
   if (w & (COUNT_SRC_HOST|COUNT_SRC_NET)) {
     if (s1->src_ip.family == AF_INET) d1->src_ip.address.ipv4.s_addr = s1->src_ip.address.ipv4.s_addr; 
@@ -315,7 +317,6 @@ void mask_elem(struct pkt_primitives *d1, struct pkt_bgp_primitives *d2, struct 
     if (w & COUNT_SRC_LOCAL_PREF) d2->src_local_pref = s2->src_local_pref;
     if (w & COUNT_MED) d2->med = s2->med;
     if (w & COUNT_SRC_MED) d2->src_med = s2->src_med;
-    if (w & COUNT_IS_SYMMETRIC) d2->is_symmetric = s2->is_symmetric;
     if (w & COUNT_PEER_SRC_AS) d2->peer_src_as = s2->peer_src_as;
     if (w & COUNT_PEER_DST_AS) d2->peer_dst_as = s2->peer_dst_as;
     if (w & COUNT_PEER_SRC_IP) {
@@ -332,6 +333,7 @@ void mask_elem(struct pkt_primitives *d1, struct pkt_bgp_primitives *d2, struct 
 #endif
       d2->peer_dst_ip.family = s2->peer_dst_ip.family;
     }
+    if (w & COUNT_MPLS_VPN_RD) memcpy(&d2->mpls_vpn_rd, &s2->mpls_vpn_rd, sizeof(rd_t)); 
   }
 }
 
@@ -359,5 +361,5 @@ void Accumulate_Counters(struct pkt_data *abuf, struct acc *elem)
   abuf->pkt_len += elem->bytes_counter;
   abuf->pkt_num += elem->packet_counter;
   abuf->flo_num += elem->flow_counter;
-  abuf->time_start++; /* XXX: this unused field works as counter of how much entries we are accumulating */
+  abuf->time_start.tv_sec++; /* XXX: this unused field works as counter of how much entries we are accumulating */
 }

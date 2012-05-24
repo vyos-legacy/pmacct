@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
 */
 
 /*
@@ -100,7 +100,7 @@ struct bgp_peer {
   struct host_addr addr;
   u_int8_t cap_mp;
   char *cap_4as;
-  u_int16_t msglen;
+  u_int32_t msglen;
   struct bgp_peer_buf buf;
 };
 
@@ -156,9 +156,14 @@ EXT int bgp_attr_parse_local_pref(struct bgp_peer *, u_int16_t, struct bgp_attr 
 EXT int bgp_attr_parse_mp_reach(struct bgp_peer *, u_int16_t, struct bgp_attr *, char *, struct bgp_nlri *);
 EXT int bgp_attr_parse_mp_unreach(struct bgp_peer *, u_int16_t, struct bgp_attr *, char *, struct bgp_nlri *);
 EXT int bgp_nlri_parse(struct bgp_peer *, void *, struct bgp_nlri *);
-EXT int bgp_process_update(struct bgp_peer *, struct prefix *, void *, afi_t, safi_t);
-EXT int bgp_process_withdraw(struct bgp_peer *, struct prefix *, void *, afi_t, safi_t);
-EXT int bgp_afi2family (int);
+EXT int bgp_process_update(struct bgp_peer *, struct prefix *, void *, afi_t, safi_t, rd_t *, char *);
+EXT int bgp_process_withdraw(struct bgp_peer *, struct prefix *, void *, afi_t, safi_t, rd_t *, char *);
+EXT int bgp_afi2family(int);
+EXT int bgp_rd2str(char *, rd_t *);
+EXT int bgp_str2rd(rd_t *, char *);
+EXT struct bgp_info_extra *bgp_info_extra_new();
+EXT void bgp_info_extra_free(struct bgp_info_extra **);
+EXT struct bgp_info_extra *bgp_info_extra_get(struct bgp_info *);
 EXT struct bgp_info *bgp_info_new();
 EXT void bgp_info_add(struct bgp_node *, struct bgp_info *, u_int32_t);
 EXT void bgp_info_delete(struct bgp_node *, struct bgp_info *, u_int32_t);

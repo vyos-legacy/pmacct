@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -39,6 +39,7 @@ EXT int PT_map_filter_handler(char *, struct id_entry *, char *, struct plugin_r
 EXT int PT_map_v8agg_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
 EXT int PT_map_agent_id_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
 EXT int PT_map_sampling_rate_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
+EXT int PT_map_sample_type_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
 EXT int PT_map_direction_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
 EXT int PT_map_src_as_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
 EXT int PT_map_dst_as_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
@@ -48,6 +49,7 @@ EXT int PT_map_src_local_pref_handler(char *, struct id_entry *, char *, struct 
 EXT int PT_map_local_pref_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
 EXT int PT_map_src_comms_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
 EXT int PT_map_comms_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
+EXT int PT_map_mpls_vpn_rd_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
 EXT int PT_map_label_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
 EXT int PT_map_jeq_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
 EXT int PT_map_return_handler(char *, struct id_entry *, char *, struct plugin_requests *, int);
@@ -82,6 +84,7 @@ EXT int pretag_src_comms_handler(struct packet_ptrs *, void *, void *);
 EXT int pretag_comms_handler(struct packet_ptrs *, void *, void *);
 EXT int pretag_sampling_rate_handler(struct packet_ptrs *, void *, void *);
 EXT int pretag_direction_handler(struct packet_ptrs *, void *, void *);
+EXT int pretag_mpls_vpn_rd_handler(struct packet_ptrs *, void *, void *);
 
 EXT int SF_pretag_input_handler(struct packet_ptrs *, void *, void *);
 EXT int SF_pretag_output_handler(struct packet_ptrs *, void *, void *);
@@ -91,6 +94,8 @@ EXT int SF_pretag_agent_id_handler(struct packet_ptrs *, void *, void *);
 EXT int SF_pretag_sampling_rate_handler(struct packet_ptrs *, void *, void *);
 EXT int SF_pretag_src_as_handler(struct packet_ptrs *, void *, void *);
 EXT int SF_pretag_dst_as_handler(struct packet_ptrs *, void *, void *);
+EXT int SF_pretag_dst_as_handler(struct packet_ptrs *, void *, void *);
+EXT int SF_pretag_sample_type_handler(struct packet_ptrs *, void *, void *);
 
 EXT int PM_pretag_src_as_handler(struct packet_ptrs *, void *, void *);
 EXT int PM_pretag_dst_as_handler(struct packet_ptrs *, void *, void *);

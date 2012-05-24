@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -53,7 +53,7 @@ void usage_daemon(char *prog_name)
   printf("\nGeneral options:\n");
   printf("  -h  \tShow this page\n");
   printf("  -f  \tLoad configuration from the specified file\n");
-  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | in_iface | out_iface | src_mask | dst_mask | cos | none ] \n\tAggregation string (DEFAULT: src_host)\n");
+  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | in_iface | out_iface | src_mask | dst_mask | cos | etype | none ] \n\tAggregation string (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
   printf("  -N  \tDisable promiscuous mode\n");
   printf("  -n  \tPath to a file containing Network definitions\n");
@@ -68,6 +68,7 @@ void usage_daemon(char *prog_name)
   printf("  -W  \tReading from a savefile, don't exit but sleep when finished\n");
   printf("  -R  \tRenormalize sampled data\n");
   printf("  -L  \tSet snapshot length\n");
+  printf("  -u  \tLeave IP protocols in numerical format\n");
   printf("\nMemory plugin (-P memory) options:\n");
   printf("  -p  \tSocket for client-server communication (DEFAULT: /tmp/collect.pipe)\n");
   printf("  -b  \tNumber of buckets\n");
@@ -188,6 +189,10 @@ int main(int argc,char **argv, char **envp)
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
+    case 'u':
+      strlcpy(cfg_cmdline[rows], "print_num_protos: true", SRVBUFLEN);
+      rows++;
+      break;
     case 'N':
       strlcpy(cfg_cmdline[rows], "promisc: false", SRVBUFLEN);
       rows++;
@@ -298,6 +303,7 @@ int main(int argc,char **argv, char **envp)
   list = plugins_list;
   while(list) {
     list->cfg.acct_type = ACCT_PM;
+    set_default_preferences(&list->cfg);
     if (!strcmp(list->name, "default") && !strcmp(list->type.string, "core")) 
       memcpy(&config, &list->cfg, sizeof(struct configuration)); 
     list = list->next;
@@ -312,7 +318,7 @@ int main(int argc,char **argv, char **envp)
   if (!config.pcap_savefile) {
     if (getuid() != 0) {
       printf("%s\n\n", PMACCTD_USAGE_HEADER);
-      printf("ERROR: You need superuser privileges to run this command.\nExiting ...\n\n");
+      printf("ERROR ( default/core ): You need superuser privileges to run this command.\nExiting ...\n\n");
       exit(1);
     }
   }
@@ -320,11 +326,11 @@ int main(int argc,char **argv, char **envp)
   if (config.daemon) {
     list = plugins_list;
     while (list) {
-      if (!strcmp(list->type.string, "print")) printf("WARN: Daemonizing. Hmm, bye bye screen.\n");
+      if (!strcmp(list->type.string, "print")) printf("WARN ( default/core ): Daemonizing. Hmm, bye bye screen.\n");
       list = list->next;
     }
     if (debug || config.debug)
-      printf("WARN: debug is enabled; forking in background. Console logging will get lost.\n"); 
+      printf("WARN ( default/core ): debug is enabled; forking in background. Console logging will get lost.\n"); 
     daemonize();
   }
 
@@ -333,7 +339,7 @@ int main(int argc,char **argv, char **envp)
     logf = parse_log_facility(config.syslog);
     if (logf == ERR) {
       config.syslog = NULL;
-      Log(LOG_WARNING, "WARN ( default/core ): specified syslog facility is not supported; logging to console.\n");
+      printf("WARN ( default/core ): specified syslog facility is not supported; logging to console.\n");
     }
     else openlog(NULL, LOG_PID, logf);
     Log(LOG_INFO, "INFO ( default/core ): Start logging ...\n");
@@ -355,16 +361,16 @@ int main(int argc,char **argv, char **envp)
     if (list->type.id != PLUGIN_ID_CORE) {
       /* applies to all plugins */
       if (config.classifiers_path && (list->cfg.sampling_rate || config.ext_sampling_rate)) {
-        Log(LOG_ERR, "ERROR: Packet sampling and classification are mutual exclusive.\n");
+        Log(LOG_ERR, "ERROR ( default/core ): Packet sampling and classification are mutual exclusive.\n");
         exit(1);
       }
       if (list->cfg.sampling_rate && config.ext_sampling_rate) {
-        Log(LOG_ERR, "ERROR: Internal packet sampling and external packet sampling are mutual exclusive.\n");
+        Log(LOG_ERR, "ERROR ( default/core ): Internal packet sampling and external packet sampling are mutual exclusive.\n");
         exit(1);
       }
 
       if (list->type.id == PLUGIN_ID_TEE) {
-        Log(LOG_ERR, "ERROR: 'tee' plugin not supported in 'pmacctd'.\n");
+        Log(LOG_ERR, "ERROR ( default/core ): 'tee' plugin not supported in 'pmacctd'.\n");
         exit(1);
       }
       else if (list->type.id == PLUGIN_ID_NFPROBE) {
@@ -376,7 +382,7 @@ int main(int argc,char **argv, char **envp)
 	list->cfg.nfprobe_what_to_count = list->cfg.what_to_count;
 	list->cfg.what_to_count = 0;
 #if defined (HAVE_L2)
-	if (list->cfg.nfprobe_version == 9) {
+	if (list->cfg.nfprobe_version == 9 || list->cfg.nfprobe_version == 10) {
 	  list->cfg.what_to_count |= COUNT_SRC_MAC;
 	  list->cfg.what_to_count |= COUNT_DST_MAC;
 	  list->cfg.what_to_count |= COUNT_VLAN;
@@ -399,7 +405,7 @@ int main(int argc,char **argv, char **envp)
 	  list->cfg.what_to_count |= COUNT_DST_AS;
 	  list->cfg.what_to_count |= COUNT_PEER_DST_IP;
 	}
-	if (list->cfg.nfprobe_version == 9 && list->cfg.classifiers_path) {
+	if ((list->cfg.nfprobe_version == 9 || list->cfg.nfprobe_version == 10) && list->cfg.classifiers_path) {
 	  list->cfg.what_to_count |= COUNT_CLASS; 
 	  config.handle_flows = TRUE;
 	}
@@ -412,8 +418,8 @@ int main(int argc,char **argv, char **envp)
 	if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                        COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_SRC_STD_COMM|
 				       COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
-				       COUNT_IS_SYMMETRIC)) {
-	  Log(LOG_ERR, "ERROR: 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n");
+				       COUNT_MPLS_VPN_RD)) {
+	  Log(LOG_ERR, "ERROR ( default/core ): 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n");
 	  exit(1);
 	}
 	list->cfg.what_to_count |= COUNT_COUNTERS;
@@ -438,7 +444,8 @@ int main(int argc,char **argv, char **envp)
           list->cfg.what_to_count |= COUNT_DST_AS;
           list->cfg.what_to_count |= COUNT_PEER_DST_IP;
         }
-        if (list->cfg.nfacctd_bgp && list->cfg.nfacctd_net == NF_NET_BGP) {
+        if ((list->cfg.nfacctd_bgp && list->cfg.nfacctd_net == NF_NET_BGP) ||
+	    (list->cfg.nfacctd_isis && list->cfg.nfacctd_net == NF_NET_IGP)) {
           list->cfg.what_to_count |= COUNT_SRC_NMASK;
           list->cfg.what_to_count |= COUNT_DST_NMASK;
         }
@@ -449,8 +456,8 @@ int main(int argc,char **argv, char **envp)
         if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                        COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_SRC_STD_COMM|
 				       COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
-				       COUNT_IS_SYMMETRIC)) {
-          Log(LOG_ERR, "ERROR: 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n");
+				       COUNT_MPLS_VPN_RD)) {
+          Log(LOG_ERR, "ERROR ( default/core ): 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n");
           exit(1);
         }
 
@@ -481,7 +488,7 @@ int main(int argc,char **argv, char **envp)
 	  Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation selected but NO 'networks_file' or 'pmacctd_as' are specified. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
 	}
-        if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET|COUNT_SRC_NMASK|COUNT_DST_NMASK)) {
+        if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET|COUNT_SRC_NMASK|COUNT_DST_NMASK|COUNT_PEER_DST_IP)) {
           if (!list->cfg.nfacctd_net) {
             if (list->cfg.networks_file) list->cfg.nfacctd_net |= NF_NET_NEW;
             if (list->cfg.networks_mask) list->cfg.nfacctd_net |= NF_NET_STATIC;
@@ -494,8 +501,9 @@ int main(int argc,char **argv, char **envp)
             if ((list->cfg.nfacctd_net == NF_NET_NEW && !list->cfg.networks_file) ||
                 (list->cfg.nfacctd_net == NF_NET_STATIC && !list->cfg.networks_mask) ||
                 (list->cfg.nfacctd_net == NF_NET_BGP && !list->cfg.nfacctd_bgp) ||
+                (list->cfg.nfacctd_net == NF_NET_IGP && !list->cfg.nfacctd_isis) ||
                 (list->cfg.nfacctd_net == NF_NET_KEEP)) {
-              Log(LOG_ERR, "ERROR ( %s/%s ): network aggregation selected but none of 'bgp_daemon', 'networks_file', 'networks_mask' is specified. Exiting ...\n\n", list->name, list->type.string);
+              Log(LOG_ERR, "ERROR ( %s/%s ): network aggregation selected but none of 'bgp_daemon', 'isis_daemon', 'networks_file', 'networks_mask' is specified. Exiting ...\n\n", list->name, list->type.string);
               exit(1);
             }
           }
@@ -605,7 +613,7 @@ int main(int argc,char **argv, char **envp)
   cb_data.device = &device;
   
   /* doing pcap stuff */
-  if (pcap_lookupnet(config.dev, &localnet, &netmask, errbuf) < 0) {
+  if (!config.dev || pcap_lookupnet(config.dev, &localnet, &netmask, errbuf) < 0) {
     localnet = 0;
     netmask = 0;
     Log(LOG_WARNING, "WARN ( default/core ): %s\n", errbuf);
@@ -636,6 +644,16 @@ int main(int argc,char **argv, char **envp)
   }
 
 #if defined ENABLE_THREADS
+  /* starting the ISIS threa */
+  if (config.nfacctd_isis) {
+    req.bpf_filter = TRUE;
+
+    nfacctd_isis_wrapper();
+
+    /* Let's give the ISIS thread some advantage to create its structures */
+    sleep(5);
+  }
+
   /* starting the BGP thread */
   if (config.nfacctd_bgp) {
     req.bpf_filter = TRUE;
@@ -677,12 +695,6 @@ int main(int argc,char **argv, char **envp)
     }
     else cb_data.bmed_table = NULL;
 
-    if (config.nfacctd_bgp_is_symmetric_map) {
-      load_id_file(MAP_BGP_IS_SYMMETRIC, config.nfacctd_bgp_is_symmetric_map, &biss_table, &req, &biss_map_allocated);
-      cb_data.biss_table = (u_char *) &biss_table;
-    }
-    else cb_data.biss_table = NULL;
-
     if (config.nfacctd_bgp_to_agent_map) {
       load_id_file(MAP_BGP_TO_XFLOW_AGENT, config.nfacctd_bgp_to_agent_map, &bta_table, &req, &bta_map_allocated);
       cb_data.bta_table = (u_char *) &bta_table;
@@ -697,6 +709,11 @@ int main(int argc,char **argv, char **envp)
        to keep a backup feed in memory */
     config.nfacctd_bgp_max_peers = 2;
 
+    if (config.nfacctd_bgp_iface_to_rd_map) {
+      Log(LOG_ERR, "ERROR ( default/core ): 'bgp_iface_to_rd_map' is not supported by this daemon. Exiting.\n");
+      exit(1);
+    }
+
     cb_data.f_agent = (char *)&client;
     nfacctd_bgp_wrapper();
 
@@ -704,6 +721,11 @@ int main(int argc,char **argv, char **envp)
     sleep(5);
   }
 #else
+  if (config.nfacctd_isis) {
+    Log(LOG_ERR, "ERROR ( default/core ): 'isis_daemon' is available only with threads (--enable-threads). Exiting.\n");
+    exit(1);
+  }
+
   if (config.nfacctd_bgp) {
     Log(LOG_ERR, "ERROR ( default/core ): 'bgp_daemon' is available only with threads (--enable-threads). Exiting.\n");
     exit(1);
@@ -757,4 +779,13 @@ int main(int argc,char **argv, char **envp)
     }
     device.active = FALSE;
   }
+}
+
+/* Dummy objects here - ugly to see but well portable */
+void NF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
+{
+}
+
+void SF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
+{
 }
