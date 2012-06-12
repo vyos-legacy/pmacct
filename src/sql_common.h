@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -200,6 +200,7 @@ EXT void count_src_mac_handler(const struct db_cache *, const struct insert_data
 EXT void count_dst_mac_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_vlan_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_cos_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_etype_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_src_host_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_src_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_dst_host_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
@@ -214,7 +215,7 @@ EXT void count_src_ext_comm_handler(const struct db_cache *, const struct insert
 EXT void count_src_as_path_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_src_local_pref_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_src_med_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
-EXT void count_is_symmetric_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_mpls_vpn_rd_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_peer_src_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_peer_dst_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_peer_src_ip_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
@@ -239,6 +240,7 @@ EXT void fake_host_handler(const struct db_cache *, const struct insert_data *, 
 EXT void fake_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void fake_comms_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void fake_as_path_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void fake_mpls_vpn_rd_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 
 EXT void count_counters_setclause_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_flows_setclause_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
@@ -279,7 +281,7 @@ EXT int sql_query(struct BE_descs *, struct db_cache *, struct insert_data *);
 EXT void sql_exit_gracefully(int);
 EXT int sql_evaluate_primitives(int);
 EXT FILE *sql_file_open(const char *, const char *, const struct insert_data *);
-EXT void sql_create_table(struct DBdesc *, struct insert_data *);
+EXT void sql_create_table(struct DBdesc *, time_t *);
 EXT void sql_invalidate_shadow_entries(struct db_cache *[], int *);
 EXT int sql_select_locking_style(char *);
 EXT int sql_compose_static_set(int); 

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -49,29 +49,31 @@ void pcap_cb(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *buf)
     pptrs.mac_ptr = 0; pptrs.vlan_ptr = 0; pptrs.mpls_ptr = 0;
     pptrs.pf = 0; pptrs.shadow = 0; pptrs.tag = 0; pptrs.tag2 = 0;
     pptrs.class = 0; pptrs.bpas = 0, pptrs.bta = 0; pptrs.blp = 0;
-    pptrs.bmed = 0; pptrs.biss = 0;
+    pptrs.bmed = 0; pptrs.bitr = 0; pptrs.bta2 = 0; pptrs.bta_af = 0;
     pptrs.tun_layer = 0; pptrs.tun_stack = 0;
     pptrs.f_agent = cb_data->f_agent;
     pptrs.idtable = cb_data->idt;
     pptrs.bpas_table = cb_data->bpas_table;
     pptrs.blp_table = cb_data->blp_table;
     pptrs.bmed_table = cb_data->bmed_table;
-    pptrs.biss_table = cb_data->biss_table;
     pptrs.bta_table = cb_data->bta_table;
     pptrs.ifindex_in = cb_data->ifindex_in;
     pptrs.ifindex_out = cb_data->ifindex_out;
+    pptrs.f_status = NULL;
 
     (*device->data->handler)(pkthdr, &pptrs);
     if (pptrs.iph_ptr) {
       if ((*pptrs.l3_handler)(&pptrs)) {
+        if (config.nfacctd_isis) {
+          isis_srcdst_lookup(&pptrs);
+        }
         if (config.nfacctd_bgp) {
-          PM_find_id((struct id_table *)pptrs.bta_table, &pptrs, &pptrs.bta, NULL);
+          BTA_find_id((struct id_table *)pptrs.bta_table, &pptrs, &pptrs.bta, &pptrs.bta2);
           bgp_srcdst_lookup(&pptrs);
         }
         if (config.nfacctd_bgp_peer_as_src_map) PM_find_id((struct id_table *)pptrs.bpas_table, &pptrs, &pptrs.bpas, NULL);
         if (config.nfacctd_bgp_src_local_pref_map) PM_find_id((struct id_table *)pptrs.blp_table, &pptrs, &pptrs.blp, NULL);
         if (config.nfacctd_bgp_src_med_map) PM_find_id((struct id_table *)pptrs.bmed_table, &pptrs, &pptrs.bmed, NULL);
-        if (config.nfacctd_bgp_is_symmetric_map) PM_find_id((struct id_table *)pptrs.biss_table, &pptrs, &pptrs.biss, NULL);
         if (config.pre_tag_map) PM_find_id((struct id_table *)pptrs.idtable, &pptrs, &pptrs.tag, &pptrs.tag2);
 
         exec_plugins(&pptrs);
@@ -80,20 +82,24 @@ void pcap_cb(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *buf)
   }
 
   if (reload_map) {
+    bta_map_caching = FALSE;
+    sampling_map_caching = FALSE;
+
     load_networks(config.networks_file, &nt, &nc);
+
     if (config.nfacctd_bgp && config.nfacctd_bgp_peer_as_src_map)
       load_id_file(MAP_BGP_PEER_AS_SRC, config.nfacctd_bgp_peer_as_src_map, (struct id_table *)cb_data->bpas_table, &req, &bpas_map_allocated);
     if (config.nfacctd_bgp && config.nfacctd_bgp_src_local_pref_map)
       load_id_file(MAP_BGP_SRC_LOCAL_PREF, config.nfacctd_bgp_src_local_pref_map, (struct id_table *)cb_data->blp_table, &req, &blp_map_allocated);
     if (config.nfacctd_bgp && config.nfacctd_bgp_src_med_map)
       load_id_file(MAP_BGP_SRC_MED, config.nfacctd_bgp_src_med_map, (struct id_table *)cb_data->bmed_table, &req, &bmed_map_allocated);
-    if (config.nfacctd_bgp && config.nfacctd_bgp_is_symmetric_map)
-      load_id_file(MAP_BGP_IS_SYMMETRIC, config.nfacctd_bgp_is_symmetric_map, (struct id_table *)cb_data->biss_table, &req, &biss_map_allocated);
     if (config.nfacctd_bgp)
       load_id_file(MAP_BGP_TO_XFLOW_AGENT, config.nfacctd_bgp_to_agent_map, (struct id_table *)cb_data->bta_table, &req, &bta_map_allocated);
     if (config.pre_tag_map)
       load_id_file(config.acct_type, config.pre_tag_map, (struct id_table *) pptrs.idtable, &req, &tag_map_allocated);
+
     reload_map = FALSE;
+    gettimeofday(&reload_map_tstamp, NULL);
   }
 }
 
@@ -184,11 +190,11 @@ int ip_handler(register struct packet_ptrs *pptrs)
 
     /* tunnel handlers here */ 
     if (config.tunnel0 && !pptrs->tun_stack) {
-      for (num = 0; pptrs->payload_ptr && !is_fragment && tunnel_registry[num][0].tf; num++) {
-        if (tunnel_registry[num][0].proto == pptrs->l4_proto) {
-	  if (!tunnel_registry[num][0].port || (pptrs->tlh_ptr && tunnel_registry[num][0].port == ntohs(((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port))) {
+      for (num = 0; pptrs->payload_ptr && !is_fragment && tunnel_registry[0][num].tf; num++) {
+        if (tunnel_registry[0][num].proto == pptrs->l4_proto) {
+	  if (!tunnel_registry[0][num].port || (pptrs->tlh_ptr && tunnel_registry[0][num].port == ntohs(((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port))) {
 	    pptrs->tun_stack = num;
-	    ret = (*tunnel_registry[num][0].tf)(pptrs);
+	    ret = (*tunnel_registry[0][num].tf)(pptrs);
 	  }
         }
       }
@@ -220,7 +226,7 @@ int ip6_handler(register struct packet_ptrs *pptrs)
 
   /* length checks */
   if (off+IP6HdrSz > caplen) return FALSE; /* IP packet truncated */
-  if (plen == 0) {
+  if (plen == 0 && ((struct ip6_hdr *)pptrs->iph_ptr)->ip6_nxt != IPPROTO_NONE) {
     Log(LOG_INFO, "INFO ( default/core ): NULL IPv6 payload length. Jumbo packets are currently not supported.\n");
     return FALSE;
   }
@@ -331,17 +337,18 @@ int ip6_handler(register struct packet_ptrs *pptrs)
 }
 #endif
 
-void PM_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
+int PM_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
 {
   int x, j, stop;
   pm_id_t id;
 
-  if (!t) return;
+  if (!t) return 0;
 
   id = 0;
   if (tag) *tag = 0;
   if (tag2) *tag2 = 0;
   for (x = 0; x < t->ipv4_num; x++) {
+    t->e[x].last_matched = FALSE;
     for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
     if (id) {
       if (stop == PRETAG_MAP_RCODE_ID) {
@@ -351,6 +358,11 @@ void PM_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_
       else if (stop == PRETAG_MAP_RCODE_ID2) {
         if (t->e[x].stack.func) id = (*t->e[x].stack.func)(id, *tag2);
         *tag2 = id;
+      }
+      else if (stop == BTA_MAP_RCODE_ID_ID2) {
+        // stack not applicable here
+        *tag = id;
+        *tag2 = t->e[x].id2;
       }
 
       if (t->e[x].jeq.ptr) {
@@ -367,6 +379,8 @@ void PM_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_
       else break;
     }
   }
+
+  return stop;
 }
 
 void compute_once()

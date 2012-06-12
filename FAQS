@@ -1,5 +1,5 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 
 Q1: What is pmacct project homepage ?
 A: It is http://www.pmacct.net/ . There isn't any official mirror site. 
@@ -8,9 +8,9 @@ A: It is http://www.pmacct.net/ . There isn't any official mirror site.
 Q2: 'pmacct', 'pmacctd', 'nfacctd', 'sfacctd', 'uacctd' -- but what do they mean ?
 A: 'pmacct' is intended to be the name of the project; 'pmacctd' is the name of the
    libpcap-based IPv4/IPv6 accounting daemon; 'nfacctd' is the name of the NetFlow
-   accounting daemon (versions supported NetFlow v1 to v9); 'sfacctd' is the name of
-   the sFlow v2/v4/v5 accounting daemon; 'uacctd' is the name of the Linux Netlink
-   ULOG-based accounting daemon.
+   (versions supported NetFlow v1 to v9) and IPFIX accounting daemon; 'sfacctd' is
+   the name of the sFlow v2/v4/v5 accounting daemon; 'uacctd' is the name of the
+   Linux Netlink ULOG-based accounting daemon.
 
 
 Q3: Does pmacct stand for Promiscuous mode IP Accounting package ?
@@ -22,23 +22,25 @@ A: That is not entirely correct today, it was originally though. pmacct born as 
 
 
 Q4: What are pmacct main features?
-A: pmacct can collect, replicate and export network data. Collect in memory tables or
-   open-source SQL databases (MySQL, PostgreSQL, SQLite 3.x). Export speaking sFlow v5
-   and NetFlow v1/v5/v9. pmacct is able to perform data aggregation; it can also filter,
-   sample, renormalize, tag, classify at L7. With release 0.12 pmacct integrates a BGP
-   BGP daemon within its NetFlow and sFlow collectors aimed at increasing visibility
-   into the network traffic.
+A: pmacct can collect, replicate and export network data. Collect in memory tables, OSS
+   RDBMS (MySQL, PostgreSQL, SQLite 3.x, BerkeleyDB 5.x via SQLite API) and files (csv,
+   formatted output). Export speaking sFlow v5, NetFlow v1/v5/v9 and IPFIX. pmacct is
+   able to perform data aggregation, offering a rich set of primitives to choose from;
+   it can also filter, sample, renormalize, tag and classify at L7. pmacct integrates a 
+   BGP daemon join routing visibility and network traffic information.
 
 
 Q5: Does any of the pmacct daemons logs to flat files?
-A: No. For a variety of reasons. Mainly, flat-files are used in two-stages approaches:
-   first log everything down, then aggregate to process - while pmacct aims to a single
-   stage approach to improve query response time and resources utilization; flat-files
-   use proprietary formats which often translates is poor query flexibility (compared
-   to the potential offered by the SQL language) and lack of recovery tools in case of
-   file corruption. And finally innovation: other projects already largely stress this
-   rather traditional approach (libpcap: tcpdump; NetFlow: nfcapd, flowd, flow-tools;
-   sFlow: sflowtools) making not attractive to just add one more to the list.
+A: Yes, but in a specific way. In other tools flat-files are typically used to log every
+   micro-flow (or whatever aggregation the NetFlow agents have been configured to export
+   with) and work in a two-stages fashion: a) write down to persistent storage then b)
+   consolidate, on either or both spatial and temporal axes, to build the desired view.
+   By inception, pmacct always aimed to a single-stage approach instead, ie. offer data
+   reduction tecniques and correlation tools to process network traffic data on the fly,
+   so to immediately offer the desired view(s) of the traffic. pmacct writes to files in
+   text-format (either csv or formatted via its 'print' plugin, see QUICKSTART doc for
+   further information) so to maximize potential integration with 3rd party applications
+   while keeping low the effort of customization.
 
 
 Q6: Is it feasible for pmacct to scale by making use of either memory tables or RDBMS
@@ -150,7 +152,7 @@ Q11: How to get the historical accounting enabled ? SQL table have a 'stamp_inse
    and 'stamp_updated' fields but they remain empty.
 A: Historical accounting is easily enabled by adding to the SQL plugin configuration a
    'sql_history' directive. Associate to it a 'sql_history_roundoff'. For examples and
-   syntax, refer to CONFIG-KEYS and EXAMPLES documents. 
+   syntax, refer to CONFIG-KEYS and QUICKSTART documents. 
 
 
 Q12: CLI is not enough to me. I would like to graph traffic data: how to do that?
