@@ -29,6 +29,7 @@ struct ifname_cache {
   char name[IFNAMSIZ];
 };
 
+/* functions */
 #if (!defined __UACCTD_C)
 #define EXT extern
 #else
@@ -39,4 +40,6 @@ EXT unsigned int hash_ifname(char *);
 
 EXT struct ifname_cache *hash_heads[IFCACHE_HASHSIZ];
 #endif
+#undef EXT
+
 #endif
