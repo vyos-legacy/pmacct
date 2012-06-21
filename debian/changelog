@@ -1,3 +1,11 @@
+pmacct (0.14.0-1.1) unstable; urgency=low
+
+  * Non-maintainer upload.
+  * Added patch to handle AF_LINK on hurd and kfreebsd
+    platforms (Closes: #675836)
+
+ -- Nicholas Bamber <nicholas@periapt.co.uk>  Thu, 21 Jun 2012 12:39:40 +0100
+
 pmacct (0.14.0-1) unstable; urgency=low
 
   * New upstream release

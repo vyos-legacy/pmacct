@@ -1,0 +1,32 @@
+Author: Nicholas Bamber <nicholas@periapt.co.uk>
+Subject: Problems with the sockaddr_dl structure
+ The first issue is that on kfreebsd platforms,
+ where AF_LINK is legitimately defined, the definition
+ of sockaddr_dl is in net/if_dl.h which the upstream source
+ does not #include. The second issue is that Hurd also
+ defines AF_LINK but does not actually implement
+ that functionality - #678358. Bug #678375 was raised
+ to clear this up when it is sorted out in Hurd.
+Bug-Debian: http://bugs.debian.org/675836
+Last-Update: 2012-06-21
+--- a/src/isis/sockunion.c
++++ b/src/isis/sockunion.c
+@@ -27,6 +27,18 @@
+ #include "prefix.h"
+ #include "sockunion.h"
+ 
++/* As per #678358, Hurd defines AF_LINK but does not
++ * provide the functionality. When that bug is fixed
++ * These three lines could be removed and #678375 closed.
++ */
++#ifdef __GNU__
++#undef AF_LINK
++#endif
++
++#ifdef AF_LINK
++#include <net/if_dl.h>
++#endif
++
+ const char *
+ inet_sutop (union sockunion *su, char *str)
+ {
