@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -169,15 +169,24 @@ char *copy_argv(register char **argv)
 
 void trim_spaces(char *buf)
 {
+  char *tmp_buf;
   int i, len;
 
   len = strlen(buf);
+
+  tmp_buf = (char *)malloc(len + 1);
+  if (tmp_buf == NULL) {
+    Log(LOG_ERR, "ERROR: trim_spaces: malloc()\n");
+    return;
+  }
    
   /* trimming spaces at beginning of the string */
   for (i = 0; i <= len; i++) {
     if (!isspace(buf[i])) {
-      if (i != 0)
-        strlcpy(buf, &buf[i], len+1-i);
+      if (i != 0) { 
+        strlcpy(tmp_buf, &buf[i], len+1-i);
+        strlcpy(buf, tmp_buf, len+1-i);
+      }
       break;
     } 
   }
@@ -188,13 +197,22 @@ void trim_spaces(char *buf)
       buf[i] = '\0';
     else break;
   }
+
+  free(tmp_buf);
 }
 
 void trim_all_spaces(char *buf)
 {
+  char *tmp_buf;
   int i = 0, len, quotes = FALSE;
 
   len = strlen(buf);
+
+  tmp_buf = (char *)malloc(len + 1);
+  if (tmp_buf == NULL) {
+    Log(LOG_ERR, "ERROR: trim_all_spaces: malloc()\n");
+    return;
+  }
 
   /* trimming all spaces */
   while (i <= len) {
@@ -203,29 +221,41 @@ void trim_all_spaces(char *buf)
       else if (quotes) quotes = FALSE;
     }
     if (isspace(buf[i]) && !quotes) {
-      strlcpy(&buf[i], &buf[i+1], len);
+      strlcpy(tmp_buf, &buf[i+1], len);
+      strlcpy(&buf[i], tmp_buf, len);
       len--;
     }
     else i++;
   }
+
+  free(tmp_buf);
 }
 
 void strip_quotes(char *buf)
 {
-  char *ptr;
+  char *ptr, *tmp_buf;
   int i = 0, len;
 
-  ptr = buf;
   len = strlen(buf);
 
-  /* stripping all quote marks */
+  tmp_buf = (char *)malloc(len + 1);
+  if (tmp_buf == NULL) {
+    Log(LOG_ERR, "ERROR: strip_quotes: malloc()\n");
+    return;
+  }
+  ptr = buf;
+
+  /* stripping all quote marks using a temporary buffer to avoid string corruption by strcpy() */
   while (i <= len) {
     if (ptr[i] == '\'') {
-      strcpy(&buf[i], &ptr[i+1]);
+      strcpy(tmp_buf, &ptr[i+1]);
+      strcpy(&buf[i], tmp_buf);
       len--;
     }
     else i++;
   }
+
+  free(tmp_buf);
 }
 
 int isblankline(char *line)
@@ -338,23 +368,71 @@ FILE *open_logfile(char *filename)
 
   file = fopen(filename, "a"); 
   if (file) {
-    chown(filename, owner, group);
-    if (file_lock(fileno(file))) {
-      Log(LOG_ALERT, "ALERT: Unable to obtain lock for logfile '%s'.\n", filename);
-      file = NULL;
-    }
+    if (chown(filename, owner, group) == -1)
+      printf("WARN: Unable to chown() logfile '%s': %s\n", filename, strerror(errno));
   }
   else {
-    Log(LOG_ERR, "ERROR: Unable to open logfile '%s'\n", filename);
+    printf("WARN: Unable to fopen() logfile '%s': %s\n", filename, strerror(errno));
     file = NULL;
   }
 
+  return file;
+}
+
+FILE *open_print_output_file(char *filename, time_t now)
+{
+  char buf[LARGEBUFLEN], *fname_ptr, *fname_ptr_tmp;
+  char latest_fname[LARGEBUFLEN], latest_pname[LARGEBUFLEN];
+  FILE *file = NULL;
+  struct tm *tmnow;
+  uid_t owner = -1;
+  gid_t group = -1;
+  u_int16_t offset;
+
+  if (config.files_uid) owner = config.files_uid;
+  if (config.files_gid) group = config.files_gid;
+
+  tmnow = localtime(&now);
+  strftime(buf, LARGEBUFLEN-10, filename, tmnow);
+
+  /* Check: filename is not making use of the reserved word 'latest' */
+  for (fname_ptr_tmp = buf, fname_ptr = NULL; fname_ptr_tmp; fname_ptr_tmp = strchr(fname_ptr_tmp, '/')) {
+    if (*fname_ptr_tmp == '/') fname_ptr_tmp++;
+    fname_ptr = fname_ptr_tmp;
+  }
+
+  strcpy(latest_fname, config.name);
+  strcat(latest_fname, "-latest");
+  if (!strcmp(fname_ptr, latest_fname)) {
+    Log(LOG_WARNING, "WARN: Invalid print_ouput_file '%s': reserved word\n", buf);
+    return NULL;
+  }
+
+  file = fopen(buf, "w");
   if (file) {
-    now = time(NULL);
-    tmnow = localtime(&now);
-    strftime(timebuf, SRVBUFLEN, "%Y-%m-%d %H:%M:%S" , tmnow);
-    fprintf(file, "\n\n=== Start logging: %s ===\n\n", timebuf); 
-    fflush(file);
+    if (chown(buf, owner, group) == -1)
+      Log(LOG_WARNING, "WARN: Unable to chown() print_ouput_file '%s': %s\n", buf, strerror(errno));
+
+    if (file_lock(fileno(file))) {
+      Log(LOG_ALERT, "ALERT: Unable to obtain lock for print_ouput_file '%s'.\n", buf);
+      file = NULL;
+    }
+
+    /* Let's point 'latest' to the newly opened file */
+    if (file) {
+      memcpy(latest_pname, buf, LARGEBUFLEN);
+      offset = strlen(buf)-strlen(fname_ptr);
+      if (strlen(latest_fname) < LARGEBUFLEN-offset) {
+        strcpy(latest_pname+offset, latest_fname);
+        unlink(latest_pname);
+        symlink(fname_ptr, latest_pname);
+      }
+      else Log(LOG_WARNING, "WARN: Unable to link latest file for print_ouput_file '%s'\n", buf);
+    }
+  }
+  else {
+    Log(LOG_ERR, "ERROR: Unable to open print_ouput_file '%s'\n", buf);
+    file = NULL;
   }
 
   return file;
@@ -374,7 +452,9 @@ void write_pid_file(char *filename)
     
   file = fopen(filename,"w");
   if (file) {
-    chown(filename, owner, group);
+    if (chown(filename, owner, group) == -1)
+      Log(LOG_WARNING, "WARN: Unable to chown() pidfile '%s': %s\n", filename, strerror(errno));
+
     if (file_lock(fileno(file))) {
       Log(LOG_ALERT, "ALERT: Unable to obtain lock for pidfile '%s'.\n", filename);
       return;
@@ -415,7 +495,9 @@ void write_pid_file_plugin(char *filename, char *type, char *name)
 
   file = fopen(fname,"w");
   if (file) {
-    chown(fname, owner, group);
+    if (chown(fname, owner, group) == -1)
+      Log(LOG_WARNING, "WARN: Unable to chown() '%s': %s\n", fname, strerror(errno));
+
     if (file_lock(fileno(file))) {
       Log(LOG_ALERT, "ALERT: Unable to obtain lock of '%s'.\n", fname);
       return;
@@ -694,6 +776,7 @@ int read_SQLquery_from_file(char *path, char *buf, int size)
 {
   FILE *f;
   char *ptr;
+  int ret;
 
   memset(buf, 0, size);
   f = fopen(path, "r");
@@ -702,7 +785,13 @@ int read_SQLquery_from_file(char *path, char *buf, int size)
     return(0);
   }
   
-  fread(buf, size, 1, f);
+  ret = fread(buf, size, 1, f);
+
+  if (ret != 1 && !feof(f)) {
+    Log(LOG_ERR, "ERROR: Unable to read from SQL schema '%s': %s\n", path, strerror(errno));
+    return(0);
+  }
+
   fclose(f);
   
   ptr = strrchr(buf, ';');
@@ -794,6 +883,53 @@ void reset_tag_status(struct packet_ptrs_vector *pptrsv)
 #endif
 }
 
+void reset_net_status(struct packet_ptrs *pptrs)
+{
+  pptrs->lm_mask_src = FALSE;
+  pptrs->lm_mask_dst = FALSE;
+  pptrs->lm_method_src = FALSE;
+  pptrs->lm_method_dst = FALSE;
+}
+
+void reset_net_status_v(struct packet_ptrs_vector *pptrsv)
+{
+  pptrsv->v4.lm_mask_src = FALSE;
+  pptrsv->vlan4.lm_mask_src = FALSE;
+  pptrsv->mpls4.lm_mask_src = FALSE;
+  pptrsv->vlanmpls4.lm_mask_src = FALSE;
+  pptrsv->v4.lm_mask_dst = FALSE;
+  pptrsv->vlan4.lm_mask_dst = FALSE;
+  pptrsv->mpls4.lm_mask_dst = FALSE;
+  pptrsv->vlanmpls4.lm_mask_dst = FALSE;
+  pptrsv->v4.lm_method_src = FALSE;
+  pptrsv->vlan4.lm_method_src = FALSE;
+  pptrsv->mpls4.lm_method_src = FALSE;
+  pptrsv->vlanmpls4.lm_method_src = FALSE;
+  pptrsv->v4.lm_method_dst = FALSE;
+  pptrsv->vlan4.lm_method_dst = FALSE;
+  pptrsv->mpls4.lm_method_dst = FALSE;
+  pptrsv->vlanmpls4.lm_method_dst = FALSE;
+
+#if defined ENABLE_IPV6
+  pptrsv->v6.lm_mask_src = FALSE;
+  pptrsv->vlan6.lm_mask_src = FALSE;
+  pptrsv->mpls6.lm_mask_src = FALSE;
+  pptrsv->vlanmpls6.lm_mask_src = FALSE;
+  pptrsv->v6.lm_mask_dst = FALSE;
+  pptrsv->vlan6.lm_mask_dst = FALSE;
+  pptrsv->mpls6.lm_mask_dst = FALSE;
+  pptrsv->vlanmpls6.lm_mask_dst = FALSE;
+  pptrsv->v6.lm_method_src = FALSE;
+  pptrsv->vlan6.lm_method_src = FALSE;
+  pptrsv->mpls6.lm_method_src = FALSE;
+  pptrsv->vlanmpls6.lm_method_src = FALSE;
+  pptrsv->v6.lm_method_dst = FALSE;
+  pptrsv->vlan6.lm_method_dst = FALSE;
+  pptrsv->mpls6.lm_method_dst = FALSE;
+  pptrsv->vlanmpls6.lm_method_dst = FALSE;
+#endif
+}
+
 void reset_shadow_status(struct packet_ptrs_vector *pptrsv)
 {
   pptrsv->v4.shadow = FALSE;
@@ -809,9 +945,40 @@ void reset_shadow_status(struct packet_ptrs_vector *pptrsv)
 #endif
 }
 
+void reset_fallback_status(struct packet_ptrs *pptrs)
+{
+  pptrs->renormalized = FALSE;
+}
+
+void set_default_preferences(struct configuration *cfg)
+{
+  if (!cfg->nfacctd_as) cfg->nfacctd_as = NF_AS_KEEP;
+  if (!cfg->nfacctd_bgp_peer_as_src_type) cfg->nfacctd_bgp_peer_as_src_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_std_comm_type) cfg->nfacctd_bgp_src_std_comm_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_ext_comm_type) cfg->nfacctd_bgp_src_ext_comm_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_as_path_type) cfg->nfacctd_bgp_src_as_path_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_local_pref_type) cfg->nfacctd_bgp_src_local_pref_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_med_type) cfg->nfacctd_bgp_src_med_type = BGP_SRC_PRIMITIVES_KEEP;
+}
+
 void set_shadow_status(struct packet_ptrs *pptrs)
 {
   pptrs->shadow = TRUE;
+}
+
+void set_sampling_table(struct packet_ptrs_vector *pptrsv, u_char *t)
+{
+  pptrsv->v4.sampling_table = t;
+  pptrsv->vlan4.sampling_table = t;
+  pptrsv->mpls4.sampling_table = t;
+  pptrsv->vlanmpls4.sampling_table = t;
+
+#if defined ENABLE_IPV6
+  pptrsv->v6.sampling_table = t;
+  pptrsv->vlan6.sampling_table = t;
+  pptrsv->mpls6.sampling_table = t;
+  pptrsv->vlanmpls6.sampling_table = t;
+#endif
 }
 
 struct packet_ptrs *copy_packet_ptrs(struct packet_ptrs *pptrs)
@@ -1044,4 +1211,44 @@ int check_allow(struct hosts_table *allow, struct sockaddr *sa)
   }
 
   return FALSE;
+}
+
+int BTA_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
+{
+  struct xflow_status_entry *xsentry = (struct xflow_status_entry *) pptrs->f_status;
+  struct xflow_status_map_cache *xsmc = NULL;
+  int ret = 0;
+
+  pptrs->bta_af = 0;
+
+  if (bta_map_caching && xsentry) {
+    if (pptrs->l3_proto == ETHERTYPE_IP) xsmc = &xsentry->bta_v4; 
+#if defined ENABLE_IPV6
+    else if (pptrs->l3_proto == ETHERTYPE_IPV6) xsmc = &xsentry->bta_v6;
+#endif
+  }
+
+  if (bta_map_caching && xsmc && timeval_cmp(&xsmc->stamp, &reload_map_tstamp) > 0) {
+    *tag = xsmc->id;
+    *tag2 = xsmc->id2;
+    ret = xsmc->ret;
+  }
+  else {
+    if (find_id_func) {
+      ret = find_id_func(t, pptrs, tag, tag2);
+      if (xsmc) {
+	xsmc->id = *tag;
+	xsmc->id2 = *tag2;
+	xsmc->ret = ret;
+	gettimeofday(&xsmc->stamp, NULL);
+      }
+    }
+  }
+
+  if (ret == PRETAG_MAP_RCODE_ID) pptrs->bta_af = ETHERTYPE_IP;
+#if defined ENABLE_IPV6
+  else if (ret == BTA_MAP_RCODE_ID_ID2) pptrs->bta_af = ETHERTYPE_IPV6;
+#endif
+
+  return ret;
 }

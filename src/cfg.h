@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -40,6 +40,7 @@ struct configuration {
   int acct_type; 
   int data_type; 
   int pipe_size;
+  int pipe_backlog;
   int buffer_size;
   int files_umask;
   int files_uid;
@@ -51,6 +52,8 @@ struct configuration {
   int flow_hashsz;
   int conntrack_bufsz;
   int flow_lifetime;
+  int num_protos;
+  int num_hosts;
   char *imt_plugin_path;
   char *imt_plugin_passwd;
   char *sql_db;
@@ -84,16 +87,18 @@ struct configuration {
   int sql_aggressive_classification;
   char *sql_locking_style;
   int sql_use_copy;
+  char *sql_delimiter;
   int print_refresh_time;
   int print_cache_entries;
   int print_markers;
   int print_output;
+  char *print_output_file;
   int nfacctd_port;
   char *nfacctd_ip;
   char *nfacctd_allow_file;
   int nfacctd_time;
-  int nfacctd_as;
-  int nfacctd_net;
+  u_int32_t nfacctd_as;
+  u_int32_t nfacctd_net;
   int sfacctd_renormalize;
   int nfacctd_disable_checks;
   int nfacctd_sql_log;
@@ -118,13 +123,19 @@ struct configuration {
   char *nfacctd_bgp_peer_as_src_map;
   char *nfacctd_bgp_src_local_pref_map;
   char *nfacctd_bgp_src_med_map;
-  char *nfacctd_bgp_is_symmetric_map;
   char *nfacctd_bgp_to_agent_map;
+  char *nfacctd_bgp_iface_to_rd_map;
   int nfacctd_bgp_follow_default;
   struct prefix nfacctd_bgp_follow_nexthop[FOLLOW_BGP_NH_ENTRIES];
   char *nfacctd_bgp_neighbors_file;
   char *nfacctd_bgp_md5_file;
   int bgp_table_peer_buckets;
+  int nfacctd_isis;
+  char *nfacctd_isis_ip;
+  char *nfacctd_isis_net;
+  char *nfacctd_isis_iface;
+  int nfacctd_isis_mtu;
+  int nfacctd_isis_msglog;
   int promisc; /* pcap_open_live() promisc parameter */
   char *clbuf; /* pcap filter */
   char *pcap_savefile;
@@ -154,6 +165,7 @@ struct configuration {
   pm_id_t post_tag;
   int ext_sampling_rate;
   int sampling_rate;
+  char *sampling_map;
   char *syslog;
   int debug;
   int snaplen;
@@ -169,6 +181,7 @@ struct configuration {
   char *nfprobe_engine;
   int nfprobe_peer_as;
   char *nfprobe_source_ip;
+  struct host_addr nfprobe_source_ha;
   int nfprobe_ipprec;
   int nfprobe_direction;
   u_int32_t nfprobe_ifindex;
@@ -181,6 +194,8 @@ struct configuration {
   int uacctd_group;
   int uacctd_nl_size;
   char *tunnel0;
+  int xlate_src;
+  int xlate_dst;
 };
 
 struct plugin_type_entry {

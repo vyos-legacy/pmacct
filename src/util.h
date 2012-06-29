@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -66,9 +66,15 @@ EXT int timeval_cmp(struct timeval *, struct timeval *);
 EXT void exit_all(int);
 EXT void exit_plugin(int);
 EXT void reset_tag_status(struct packet_ptrs_vector *);
+EXT void reset_net_status(struct packet_ptrs *);
+EXT void reset_net_status_v(struct packet_ptrs_vector *);
 EXT void reset_shadow_status(struct packet_ptrs_vector *);
+EXT void reset_fallback_status(struct packet_ptrs *);
+EXT void set_sampling_table(struct packet_ptrs_vector *, u_char *);
 EXT void set_shadow_status(struct packet_ptrs *);
+EXT void set_default_preferences(struct configuration *);
 EXT FILE *open_logfile(char *);
+EXT FILE *open_print_output_file(char *, time_t);
 EXT void evaluate_bgp_aspath_radius(char *, int, int);
 EXT void copy_stdcomm_to_asn(char *, as_t *, int);
 EXT void *Malloc(unsigned int);
@@ -76,6 +82,7 @@ EXT void load_allow_file(char *, struct hosts_table *);
 EXT int check_allow(struct hosts_table *, struct sockaddr *);
 EXT void load_bgp_md5_file(char *, struct bgp_md5_table *);
 EXT void unload_bgp_md5_file(struct bgp_md5_table *);
+EXT int BTA_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 
 EXT unsigned int str_to_addr(const char *, struct host_addr *);
 

@@ -9,6 +9,10 @@
 .*.swp
 TAGS
 ID
+INSTALL
+install-sh
+missing
+mkinstalldirs
 /aclocal.m4
 /autom4te.cache
 /build-stamp
@@ -26,8 +30,13 @@ ID
 /debian/pmacct.debhelper.log
 /debian/pmacct.substvars
 /Makefile
+/Makefile.in
+src/tee_plugin/Makefile
+depcomp
+/src/Makefile.in
 /src/Makefile
 /src/bgp/Makefile
+/src/isis/Makefile
 /src/nfprobe_plugin/Makefile
 /src/sfprobe_plugin/Makefile
 /src/nfacctd

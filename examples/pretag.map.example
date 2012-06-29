@@ -13,8 +13,8 @@
 ! mandatory keys for each rule: id or id2 and ip.
 !
 ! sfacctd: valid keys: id, id2, ip, in, out, agent_id, nexthop, bgp_nexthop,
-! src_as, dst_as, sampling_rate and filter; mandatory keys for each rule: id or
-! id2 and ip.
+! src_as, dst_as, sampling_rate, sample_type and filter; mandatory keys for
+! each rule: id or id2 and ip.
 !
 ! pmacctd: valid keys: id, id2, src_as, dst_as and filter. Only either id or id2
 ! are mandatory for each rule. 
@@ -24,7 +24,7 @@
 !
 ! BGP-related keys are independent of the collection method in use, hence apply
 ! to all daemons (BGP daemon must be enabled): src_as, dst_as, src_comms, comms,
-! peer_src_as, peer_dst_as, src_local_pref, local_pref.
+! peer_src_as, peer_dst_as, src_local_pref, local_pref, mpls_vpn_rd.
 !
 ! list of currently supported keys follows:
 !
@@ -67,10 +67,12 @@
 !			apply.
 ! 'sampling_rate'       In sFlow v2/v4/v5 this is compared against the sampling
 !			rate field; it also works against NetFlow v5. NetFlow v9
-!			is unsupported instead.
-! 'direction'		In NetFlow v9 it is compared against the direction (61)
-!			field, which only valid values are 0 (ingress) and 1
-!			(egress) flow.
+!			and IPFIX are unsupported instead.
+! 'sample_type'         In sFlow v2/v4/v5 this is compared against the sample
+!			type field. Expected in <Enterprise>:<Format> notation.
+! 'direction'		In NetFlow v9 and IPFIX this is compared against the
+!			direction (61) field, which only valid values are 0
+!			(ingress) and 1 (egress) flow.
 ! 'src_as'		source Autonomous System Number. Whether BGP daemon is
 !			not enabled in pmacctd it works only against a Networks
 !			map (see 'networks_file' directive); in nfacctd and
@@ -102,6 +104,9 @@
 !			spaces allowed); the check is successful if any of the
 !			communities is matched. This is compared against the BGP
 !			RIB of the exporting device. See examples below.
+! 'mpls_vpn_rd'		Destination IP prefix BGP/MPLS VPN Route Distinguisher
+!			(RD) value. Encoding types #0, #1 and #2 are supported
+!			as per rfc4364. See example below.
 ! 'label'		Mark the rule with label's value. Labels don't need to
 !			be unique: when jumping, the first matching label wins.
 !			Label value 'next' is reserved for internal use and
@@ -227,6 +232,13 @@ id=100 ip=192.168.1.1 comms=65000:1234 label=65000:1234 jeq=65000:2345
 id=100 ip=192.168.1.1 comms=65000:2345 label=65000:2345 jeq=65000:3456
 ! ... further id=100 
 id=200 ip=192.168.1.1 comms=65000:3456 label=65000:3456
+!
+! ===
+!
+! === BGP/MPLS VPN Route Distinguisher (RD) example
+! - check is successful if matches encoding type #0 with value 65512:1
+!
+id=100 ip=192.168.1.1 mpls_vpn_rd=0:65512:1
 !
 ! ===
 !

@@ -1,5 +1,14 @@
-/* Copyright (c) 2002-2006 InMon Corp. Licensed under the terms of the InMon sFlow licence: */
-/* http://www.inmon.com/technology/sflowlicense.txt */
+/*
+    pmacct (Promiscuous mode IP Accounting package)
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+*/
+
+/* 
+   Originally based on sflowtool which is:
+
+   Copyright (c) 2002-2006 InMon Corp. Licensed under the terms of the InMon sFlow licence:
+   http://www.inmon.com/technology/sflowlicense.txt
+*/
 
 #include <stdio.h>
 #include <unistd.h>
@@ -255,9 +264,6 @@ static void init_agent(SflSp *sp)
   sp->sampler = sfl_agent_getSampler(sp->agent, &dsi);
 }
 
-#define NF_AS_KEEP 0
-#define NF_AS_NEW  1
-#define NF_AS_BGP  2
 /*_________________---------------------------__________________
   _________________       readPacket          __________________
   -----------------___________________________------------------
@@ -284,23 +290,6 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
     cap_len -= ethHdrLen;
     pkt_len -= ethHdrLen;
   }
-
-  Log(LOG_DEBUG, "DEBUG ( %s/%s ): %02x%02x%02x%02x%02x%02x -> %02x%02x%02x%02x%02x%02x (len = %d, captured = %d)\n",
-		  	     config.name, config.type,
-			     local_buf[6],
-			     local_buf[7],
-			     local_buf[8],
-			     local_buf[9],
-			     local_buf[10],
-			     local_buf[11],
-			     local_buf[0],
-			     local_buf[1],
-			     local_buf[2],
-			     local_buf[3],
-			     local_buf[4],
-			     local_buf[5],
-			     pkt_len,
-			     cap_len);
 
   /* Let's fill sample direction in - and default to ingress */
   direction = 0;
@@ -375,6 +364,23 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
   else sp->counters[idx].frames[direction]++;
 
   if (config.ext_sampling_rate || sfl_sampler_takeSample(sp->sampler)) {
+    Log(LOG_DEBUG, "DEBUG ( %s/%s ): %02x%02x%02x%02x%02x%02x -> %02x%02x%02x%02x%02x%02x (len = %d, captured = %d)\n",
+                             config.name, config.type,
+                             local_buf[6],
+                             local_buf[7],
+                             local_buf[8],
+                             local_buf[9],
+                             local_buf[10],
+                             local_buf[11],
+                             local_buf[0],
+                             local_buf[1],
+                             local_buf[2],
+                             local_buf[3],
+                             local_buf[4],
+                             local_buf[5],
+                             pkt_len,
+                             cap_len);
+
     // Yes. Build a flow sample and send it off...
     SFL_FLOW_SAMPLE_TYPE fs;
     memset(&fs, 0, sizeof(fs));
@@ -583,6 +589,10 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   recollect_pipe_memory(ptr);
   pm_setproctitle("%s [%s]", "sFlow Probe Plugin", config.name);
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
+  if (config.logfile) {
+    fclose(config.logfile_fd);
+    config.logfile_fd = open_logfile(config.logfile);
+  }
 
   reload_map = FALSE;
 

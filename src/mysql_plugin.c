@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -36,7 +36,6 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct ports_table pt;
   struct pollfd pfd;
   struct insert_data idata;
-  struct timezone tz;
   time_t refresh_deadline;
   int timeout;
   int ret, num;
@@ -50,12 +49,15 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   int pollagain = TRUE;
   u_int32_t seq = 1, rg_err_count = 0; 
 
-  /* XXX: glue */
   memcpy(&config, cfgptr, sizeof(struct configuration));
   recollect_pipe_memory(ptr);
   pm_setproctitle("%s [%s]", "MySQL Plugin", config.name);
   memset(&idata, 0, sizeof(idata));
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
+  if (config.logfile) {
+    fclose(config.logfile_fd);
+    config.logfile_fd = open_logfile(config.logfile);
+  }
 
   sql_set_signals();
   sql_init_default_values();
@@ -104,6 +106,19 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
     idata.now = time(NULL);
 
+    if (config.sql_history) {
+      while (idata.now > (idata.basetime + idata.timeslot)) {
+        time_t saved_basetime = idata.basetime;
+
+        idata.basetime += idata.timeslot;
+        if (config.sql_history == COUNT_MONTHLY)
+          idata.timeslot = calc_monthly_timeslot(idata.basetime, config.sql_history_howmany, ADD);
+        glob_basetime = idata.basetime;
+        idata.new_basetime = saved_basetime;
+        glob_new_basetime = saved_basetime;
+      }
+    }
+
     switch (ret) {
     case 0: /* timeout */
       if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata, FALSE);
@@ -129,7 +144,7 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         exit(0);
       default: /* Parent */
 	if (pqq_ptr) sql_cache_flush_pending(pending_queries_queue, pqq_ptr, &idata);
-	gettimeofday(&idata.flushtime, &tz);
+	gettimeofday(&idata.flushtime, NULL);
 	while (idata.now > refresh_deadline)
 	  refresh_deadline += config.sql_refresh_time; 
 	while (idata.now > idata.triggertime && idata.t_timeslot > 0) {
@@ -211,7 +226,7 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           exit(0);
         default: /* Parent */
 	  if (pqq_ptr) sql_cache_flush_pending(pending_queries_queue, pqq_ptr, &idata);
-	  gettimeofday(&idata.flushtime, &tz);
+	  gettimeofday(&idata.flushtime, NULL);
 	  while (idata.now > refresh_deadline)
 	    refresh_deadline += config.sql_refresh_time; 
           while (idata.now > idata.triggertime && idata.t_timeslot > 0) {
@@ -244,18 +259,6 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
-      if (config.sql_history) {
-        while (idata.now > (idata.basetime + idata.timeslot)) {
-	  time_t saved_basetime = idata.basetime;
-
-	  idata.basetime += idata.timeslot;
-	  if (config.sql_history == COUNT_MONTHLY)
-	    idata.timeslot = calc_monthly_timeslot(idata.basetime, config.sql_history_howmany, ADD);
-	  glob_basetime = idata.basetime;
-	  idata.new_basetime = saved_basetime;
-	  glob_new_basetime = saved_basetime;
-	}
-      }
 
       while (((struct ch_buf_hdr *)pipebuf)->num) {
 	for (num = 0; net_funcs[num]; num++)
@@ -434,11 +437,12 @@ void MY_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
   /* We check for variable substitution in SQL table */ 
   if (idata->dyn_table) {
     char tmpbuf[LONGLONGSRVBUFLEN];
+    time_t stamp = idata->new_basetime ? idata->new_basetime : idata->basetime;
 
-    strftime_same(insert_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
-    strftime_same(update_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
-    strftime_same(lock_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
-    if (config.sql_table_schema && idata->new_basetime) sql_create_table(bed.p, idata);
+    strftime_same(insert_clause, LONGSRVBUFLEN, tmpbuf, &stamp);
+    strftime_same(update_clause, LONGSRVBUFLEN, tmpbuf, &stamp);
+    strftime_same(lock_clause, LONGSRVBUFLEN, tmpbuf, &stamp);
+    if (config.sql_table_schema) sql_create_table(bed.p, &stamp);
   }
 
   if (idata->locks == PM_LOCK_EXCLUSIVE) (*sqlfunc_cbr.lock)(bed.p); 
@@ -668,6 +672,7 @@ void MY_init_default_values(struct insert_data *idata)
   if (!config.sql_passwd) config.sql_passwd = mysql_pwd;
   if (!config.sql_table) {
     if (config.sql_table_version == (SQL_TABLE_VERSION_BGP+1)) config.sql_table = mysql_table_bgp;
+    else if (config.sql_table_version == 8) config.sql_table = mysql_table_v8;
     else if (config.sql_table_version == 7) config.sql_table = mysql_table_v7;
     else if (config.sql_table_version == 6) config.sql_table = mysql_table_v6;
     else if (config.sql_table_version == 5) config.sql_table = mysql_table_v5;

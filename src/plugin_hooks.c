@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -136,7 +136,7 @@ void load_plugins(struct plugin_requests *req)
       list->cfg.type = list->type.string;
       chptr = insert_pipe_channel(list->type.id, &list->cfg, list->pipe[1]);
       if (!chptr) {
-	Log(LOG_ERR, "ERROR: Unable to setup a new Core Process <-> Plugin channel.\nExiting.\n"); 
+	Log(LOG_ERR, "ERROR ( %s/%s ): Unable to setup a new Core Process <-> Plugin channel.\nExiting.\n", list->name, list->type.string);
 	exit_all(1);
       }
       else chptr->plugin = list;
@@ -209,6 +209,7 @@ reprocess:
       bptr = channels_list[index].rg.ptr+ChBufHdrSz+channels_list[index].bufptr; 
       size = (*channels_list[index].clean_func)(bptr);
       savedptr = channels_list[index].bufptr;
+      reset_fallback_status(pptrs);
       
       while (channels_list[index].phandler[num]) {
         (*channels_list[index].phandler[num])(&channels_list[index], pptrs, &bptr);
@@ -248,8 +249,14 @@ reprocess:
 	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->num = channels_list[index].hdr.num;
 
 	if (channels_list[index].status->wakeup) {
-	  channels_list[index].status->wakeup = channels_list[index].request;
-	  write(channels_list[index].pipe, &channels_list[index].rg.ptr, CharPtrSz); 
+	  channels_list[index].status->backlog++;
+	  
+	  if (channels_list[index].status->backlog > ((channels_list[index].plugin->cfg.pipe_size/channels_list[index].plugin->cfg.buffer_size)*channels_list[index].plugin->cfg.pipe_backlog)/100) {
+	    channels_list[index].status->wakeup = channels_list[index].request;
+            if (write(channels_list[index].pipe, &channels_list[index].rg.ptr, CharPtrSz) != CharPtrSz)
+	      Log(LOG_WARNING, "WARN: Failed during write: %s\n", strerror(errno));
+	    channels_list[index].status->backlog = 0;
+	  }
 	}
 	channels_list[index].rg.ptr += channels_list[index].bufsize;
 
@@ -430,8 +437,6 @@ run_again:
     *pkt_len = ( *pkt_len / *pkt_num ) * smp->sampled_pkts;
     *pkt_num = smp->sampled_pkts;
   }
-
-  // printf("RATE: %d, COUNTER: %d, PACKETS %d, SAMPLED_PACKETS: %d, SAMPLE_POOL: %d\n", smp->rate, smp->counter, *pkt_num, smp->sampled_pkts, *sample_pool);
 }
 
 /* simple random algorithm */
@@ -509,9 +514,9 @@ void recollect_pipe_memory(struct channels_list_entry *mychptr)
 
 void init_random_seed()
 {
-  struct timeval tv; struct timezone tz;
+  struct timeval tv;
 
-  gettimeofday(&tv, &tz);
+  gettimeofday(&tv, NULL);
   srandom((unsigned int)tv.tv_usec);
 }
 
@@ -528,7 +533,8 @@ void fill_pipe_buffer()
 
     if (channels_list[index].status->wakeup) {
       channels_list[index].status->wakeup = channels_list[index].request;
-      write(channels_list[index].pipe, &channels_list[index].rg.ptr, CharPtrSz);
+      if (write(channels_list[index].pipe, &channels_list[index].rg.ptr, CharPtrSz) != CharPtrSz)
+	Log(LOG_WARNING, "WARN: Failed during write: %s\n", strerror(errno));
     }
   }
 }
@@ -553,13 +559,13 @@ void load_plugin_filters(int link_type)
       /* compiling aggregation filter if needed */
       if (list->cfg.a_filter) {
 	pcap_t *dev_desc;
-	bpf_u_int32 localnet, netmask;  /* pcap library stuff */
+	bpf_u_int32 localnet, netmask = 0;  /* pcap library stuff */
 	char errbuf[PCAP_ERRBUF_SIZE], *count_token;
 	int idx = 0;
 
 	dev_desc = pcap_open_dead(link_type, 128); /* 128 bytes should be long enough */
 
-	pcap_lookupnet(config.dev, &localnet, &netmask, errbuf);
+	if (config.dev) pcap_lookupnet(config.dev, &localnet, &netmask, errbuf);
 
 	list->cfg.bpfp_a_table[idx] = malloc(sizeof(struct bpf_program));
 	while ( (count_token = extract_token(&list->cfg.a_filter, ',')) && idx < AGG_FILTER_ENTRIES ) {

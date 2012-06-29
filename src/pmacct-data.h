@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -176,6 +176,9 @@ static const struct _protocols_struct _protocols[] = {
 
 #if defined __PMACCTD_C || defined __UACCTD_C
 static struct _devices_struct _devices[] = {
+#if defined DLT_LOOP
+  {null_handler, DLT_LOOP},
+#endif
   {null_handler, DLT_NULL},
   {eth_handler, DLT_EN10MB},
   {ppp_handler, DLT_PPP},
@@ -218,6 +221,7 @@ static const struct _dictionary_line dictionary[] = {
   {"uacctd_net", cfg_key_nfacctd_net},
   {"plugins", NULL},
   {"plugin_pipe_size", cfg_key_plugin_pipe_size},
+  {"plugin_pipe_backlog", cfg_key_plugin_pipe_backlog},
   {"plugin_buffer_size", cfg_key_plugin_buffer_size},
   {"interface", cfg_key_interface},
   {"interface_wait", cfg_key_interface_wait},
@@ -253,6 +257,7 @@ static const struct _dictionary_line dictionary[] = {
   {"sql_history_since_epoch", cfg_key_sql_history_since_epoch},
   {"sql_recovery_backup_host", cfg_key_sql_recovery_backup_host},
   {"sql_recovery_logfile", cfg_key_sql_recovery_logfile},
+  {"sql_delimiter", cfg_key_sql_delimiter},
   {"sql_max_writers", cfg_key_sql_max_writers},
   {"sql_trigger_exec", cfg_key_sql_trigger_exec},
   {"sql_trigger_time", cfg_key_sql_trigger_time},
@@ -264,10 +269,16 @@ static const struct _dictionary_line dictionary[] = {
   {"sql_aggressive_classification", cfg_key_sql_aggressive_classification},
   {"sql_locking_style", cfg_key_sql_locking_style},
   {"sql_use_copy", cfg_key_sql_use_copy},
+  {"sql_num_protos", cfg_key_num_protos},
+  {"sql_num_hosts", cfg_key_num_hosts},
   {"print_refresh_time", cfg_key_print_refresh_time},
   {"print_cache_entries", cfg_key_print_cache_entries},
   {"print_markers", cfg_key_print_markers},
   {"print_output", cfg_key_print_output},
+  {"print_num_protos", cfg_key_num_protos},
+  {"print_time_roundoff", cfg_key_sql_history_roundoff},
+  {"print_output_file", cfg_key_sql_table},
+  {"print_trigger_exec", cfg_key_sql_trigger_exec},
   {"nfacctd_port", cfg_key_nfacctd_port},
   {"nfacctd_ip", cfg_key_nfacctd_ip},
   {"nfacctd_allow_file", cfg_key_nfacctd_allow_file},
@@ -300,6 +311,7 @@ static const struct _dictionary_line dictionary[] = {
   {"pre_tag2_filter", cfg_key_pre_tag2_filter},
   {"post_tag", cfg_key_post_tag},
   {"sampling_rate", cfg_key_sampling_rate},
+  {"sampling_map", cfg_key_sampling_map},	
   {"sfacctd_port", cfg_key_nfacctd_port},
   {"sfacctd_ip", cfg_key_nfacctd_ip},
   {"sfacctd_allow_file", cfg_key_nfacctd_allow_file},
@@ -353,7 +365,6 @@ static const struct _dictionary_line dictionary[] = {
   {"bgp_peer_src_as_map", cfg_key_nfacctd_bgp_peer_src_as_map},
   {"bgp_src_local_pref_map", cfg_key_nfacctd_bgp_src_local_pref_map},
   {"bgp_src_med_map", cfg_key_nfacctd_bgp_src_med_map},
-  {"bgp_is_symmetric_map", cfg_key_nfacctd_bgp_is_symmetric_map},
   {"bgp_peer_src_as_type", cfg_key_nfacctd_bgp_peer_src_as_type},
   {"bgp_src_std_comm_type", cfg_key_nfacctd_bgp_src_std_comm_type},
   {"bgp_src_ext_comm_type", cfg_key_nfacctd_bgp_src_ext_comm_type},
@@ -361,13 +372,22 @@ static const struct _dictionary_line dictionary[] = {
   {"bgp_src_local_pref_type", cfg_key_nfacctd_bgp_src_local_pref_type},
   {"bgp_src_med_type", cfg_key_nfacctd_bgp_src_med_type},
   {"bgp_agent_map", cfg_key_nfacctd_bgp_to_agent_map},
+  {"bgp_iface_rd_map", cfg_key_nfacctd_bgp_iface_to_rd_map},
   {"bgp_follow_default", cfg_key_nfacctd_bgp_follow_default},
   {"bgp_follow_nexthop", cfg_key_nfacctd_bgp_follow_nexthop},
   {"bgp_neighbors_file", cfg_key_nfacctd_bgp_neighbors_file},
   {"bgp_table_peer_buckets", cfg_key_nfacctd_bgp_table_peer_buckets},
+  {"isis_daemon", cfg_key_nfacctd_isis},
+  {"isis_daemon_ip", cfg_key_nfacctd_isis_ip},
+  {"isis_daemon_net", cfg_key_nfacctd_isis_net},
+  {"isis_daemon_iface", cfg_key_nfacctd_isis_iface},
+  {"isis_daemon_mtu", cfg_key_nfacctd_isis_mtu},
+  {"isis_daemon_msglog", cfg_key_nfacctd_isis_msglog},
   {"uacctd_group", cfg_key_uacctd_group},
   {"uacctd_nl_size", cfg_key_uacctd_nl_size},
   {"tunnel_0", cfg_key_tunnel_0},
+  {"xlate_src", cfg_key_xlate_src},
+  {"xlate_dst", cfg_key_xlate_dst},
   {"", NULL},
 };
 

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -20,13 +20,36 @@
 */
 
 /* Pre-Tag map stuff */
-#define N_MAP_HANDLERS 10 
+#define N_MAP_HANDLERS 16
 #define MAX_LABEL_LEN 32
 #define MAX_PRETAG_MAP_ENTRIES 384 
 
-#define PRETAG_MAP_RCODE_ID  100
-#define PRETAG_MAP_RCODE_ID2 101
-#define BPAS_MAP_RCODE_BGP   102
+#define PRETAG_IN_IFACE		0x00000001
+#define PRETAG_OUT_IFACE	0x00000002
+#define PRETAG_NEXTHOP		0x00000004
+#define PRETAG_BGP_NEXTHOP	0x00000008
+#define PRETAG_ENGINE_TYPE	0x00000010
+#define PRETAG_ENGINE_ID	0x00000020
+#define PRETAG_FILTER		0x00000040
+#define PRETAG_NFV8_AGG		0x00000080
+#define PRETAG_SF_AGENTID	0x00000100
+#define PRETAG_SAMPLING_RATE	0x00000200
+#define PRETAG_DIRECTION	0x00000400
+#define PRETAG_SRC_AS		0x00000800
+#define PRETAG_DST_AS		0x00001000
+#define PRETAG_PEER_SRC_AS	0x00002000
+#define PRETAG_PEER_DST_AS	0x00004000
+#define PRETAG_SRC_LOCAL_PREF	0x00008000
+#define PRETAG_LOCAL_PREF	0x00010000
+#define PRETAG_SRC_STD_COMM	0x00020000
+#define PRETAG_STD_COMM		0x00040000
+#define PRETAG_MPLS_VPN_RD	0x00080000
+#define PRETAG_SAMPLE_TYPE      0x00100000
+
+#define PRETAG_MAP_RCODE_ID	100
+#define PRETAG_MAP_RCODE_ID2	101
+#define BTA_MAP_RCODE_ID_ID2	102
+#define BPAS_MAP_RCODE_BGP	103
 
 typedef int (*pretag_handler) (struct packet_ptrs *, void *, void *);
 typedef pm_id_t (*pretag_stack_handler) (pm_id_t, pm_id_t);
@@ -50,6 +73,11 @@ typedef struct {
   u_int8_t neg;
   struct host_addr a;
 } pt_hostaddr_t;
+
+typedef struct {
+  u_int8_t neg;
+  rd_t rd;
+} pt_rd_t;
 
 typedef struct {
   char *label;
@@ -79,8 +107,9 @@ struct id_entry {
   pt_uint32_t output; /* output interface index */
   pt_uint8_t engine_type;
   pt_uint8_t engine_id;
-  pt_uint32_t agent_id; /* applies to sFlow's agentSubId */
-  pt_uint32_t sampling_rate; /* applies to sFlow's sampling rate */
+  pt_uint32_t agent_id; /* applies to sFlow agentSubId */
+  pt_uint32_t sampling_rate; /* applies to sFlow sampling rate */
+  pt_uint32_t sample_type; /* applies to sFlow sample type */
   pt_uint8_t direction;
   pt_uint32_t src_as;
   pt_uint32_t dst_as; 
@@ -90,13 +119,16 @@ struct id_entry {
   pt_uint32_t local_pref;
   char *src_comms[16]; /* XXX: MAX_BGP_COMM_PATTERNS = 16 */
   char *comms[16]; /* XXX: MAX_BGP_COMM_PATTERNS = 16 */
+  pt_rd_t mpls_vpn_rd;
   struct bpf_program filter;
   pt_uint8_t v8agg;
   pretag_handler func[N_MAP_HANDLERS];
+  u_int32_t func_type[N_MAP_HANDLERS];
   char label[MAX_LABEL_LEN];
   pt_jeq_t jeq;
   u_int8_t ret;
   pt_stack_t stack;
+  u_int32_t last_matched;
 };
 
 struct id_table {
@@ -137,6 +169,11 @@ EXT int blp_map_allocated;
 EXT int bmed_map_allocated;
 EXT int biss_map_allocated;
 EXT int bta_map_allocated;
-EXT void (*find_id_func)(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
+EXT int bitr_map_allocated;
+EXT int sampling_map_allocated;
 
+EXT int bta_map_caching; 
+EXT int sampling_map_caching; 
+
+EXT int (*find_id_func)(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 #undef EXT
