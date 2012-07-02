@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -277,7 +277,7 @@ EXT int gtp_tunnel_func(register struct packet_ptrs *);
 EXT int gtp_tunnel_configurator(struct tunnel_handler *, char *);
 EXT void tunnel_registry_init();
 EXT void pcap_cb(u_char *, const struct pcap_pkthdr *, const u_char *);
-EXT void PM_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
+EXT int PM_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 EXT void compute_once();
 #undef EXT
 
@@ -288,6 +288,7 @@ EXT void compute_once();
 #endif
 EXT struct host_addr mcast_groups[MAX_MCAST_GROUPS];
 EXT int reload_map, reload_map_bgp_thread, data_plugins, tee_plugins;
+EXT struct timeval reload_map_tstamp;
 EXT struct child_ctl sql_writers;
 #undef EXT
 

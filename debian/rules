@@ -24,16 +24,18 @@ ifeq (,$(findstring nostrip,$(DEB_BUILD_OPTIONS)))
 	INSTALL_PROGRAM += -s
 endif
 
+configure: 
+	autoreconf -i --force
+	touch Makefile.in configure aclocal.m4
+
 config.status: configure
 	dh_testdir
-	touch Makefile.in configure aclocal.m4
 	CFLAGS="$(CFLAGS)" ./configure \
 		--host=$(DEB_HOST_GNU_TYPE) \
 		--build=$(DEB_BUILD_GNU_TYPE) \
 		--prefix=/usr \
 		--mandir=\$${prefix}/share/man \
 		--infodir=\$${prefix}/share/info \
-		--enable-mmap \
 		--enable-threads \
 		--enable-ulog \
 		--enable-ipv6 \
@@ -52,6 +54,14 @@ clean:
 	dh_testroot
 	rm -f build-stamp
 	[ ! -f Makefile ] || $(MAKE) distclean
+	rm -f configure
+	rm -f Makefile
+	rm -f Makefile.in
+	rm -f INSTALL
+	rm -f install-sh
+	rm -f missing
+	rm -f mkinstalldirs
+
 ifneq "$(wildcard /usr/share/misc/config.sub)" ""
 	cp -f /usr/share/misc/config.sub config.sub
 endif

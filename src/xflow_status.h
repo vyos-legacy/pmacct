@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -37,8 +37,24 @@ struct xflow_status_entry_sampling
   u_int32_t interface;		/* sFlow/NetFlow v9: interface generating the sample */
   u_int32_t sample_pool;	/* sampling rate */
   u_int32_t seqno;		/* sFlow: flow samples sequence number */
-  u_int8_t sampler_id;		/* NetFlow v9: flow sampler ID field */ 
+  u_int16_t sampler_id;		/* NetFlow v9: flow sampler ID field */ 
   struct xflow_status_entry_sampling *next;
+};
+
+struct xflow_status_entry_class
+{
+  pm_class_t class_id;				/* NetFlow v9: classfier ID field */
+  pm_class_t class_int_id;			/* NetFlow v9: internal classfier ID field */
+  char class_name[MAX_PROTOCOL_LEN];		/* NetFlow v9: classfier name field */
+  struct xflow_status_entry_class *next;
+};
+
+struct xflow_status_map_cache
+{
+  pm_id_t id;
+  pm_id_t id2;
+  int ret;
+  struct timeval stamp;
 };
 
 struct xflow_status_entry
@@ -50,8 +66,14 @@ struct xflow_status_entry
                                    NetFlow v9: Source ID
                                    sFlow v5: agentSubID */
   u_int16_t inc;		/* increment, NetFlow v5: required by flow sequence number */
+  u_int32_t peer_v4_idx;        /* last known BGP peer index for ipv4 address family */
+  u_int32_t peer_v6_idx;        /* last known BGP peer index for ipv6 address family */
+  struct xflow_status_map_cache bta_v4;			/* last known bgp_agent_map IPv4 result */
+  struct xflow_status_map_cache bta_v6;			/* last known bgp_agent_map IPv6 result */
+  struct xflow_status_map_cache st;			/* last known sampling_map result */
   struct xflow_status_entry_counters counters;
   struct xflow_status_entry_sampling *sampling;
+  struct xflow_status_entry_class *class;
   struct xflow_status_entry *next;
 };
 
@@ -67,13 +89,16 @@ EXT void update_good_status_table(struct xflow_status_entry *, u_int32_t);
 EXT void update_bad_status_table(struct xflow_status_entry *);
 EXT void print_status_table(time_t, int);
 EXT struct xflow_status_entry_sampling *search_smp_if_status_table(struct xflow_status_entry_sampling *, u_int32_t);
-EXT struct xflow_status_entry_sampling *search_smp_id_status_table(struct xflow_status_entry_sampling *, u_int8_t);
+EXT struct xflow_status_entry_sampling *search_smp_id_status_table(struct xflow_status_entry_sampling *, u_int16_t, u_int8_t);
 EXT struct xflow_status_entry_sampling *create_smp_entry_status_table(struct xflow_status_entry *);
+EXT struct xflow_status_entry_class *search_class_id_status_table(struct xflow_status_entry_class *, pm_class_t);
+EXT struct xflow_status_entry_class *create_class_entry_status_table(struct xflow_status_entry *);
+EXT pm_class_t NF_evaluate_classifier(struct xflow_status_entry_class *, pm_class_t *);
 
 EXT struct xflow_status_entry *xflow_status_table[XFLOW_STATUS_TABLE_SZ];
 EXT u_int32_t xflow_status_table_entries;
 EXT u_int8_t xflow_status_table_error;
 EXT u_int32_t xflow_tot_bad_datagrams;
-EXT u_int8_t smp_entry_status_table_memerr;
+EXT u_int8_t smp_entry_status_table_memerr, class_entry_status_table_memerr;
 EXT void set_vector_f_status(struct packet_ptrs_vector *);
 #undef EXT
