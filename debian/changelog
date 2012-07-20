@@ -1,3 +1,511 @@
+pmacct (0.14.0+vyatta+2) unstable; urgency=low
+
+  [ paolo ]
+  * * Refreshed building system * Rolled version counters
+  * * nfacctd, sfacctd: aggregate_filter can now filter against TCP
+    flags
+  * * pmacct client: numeric variables output converted to unsigned from
+    signed * nfacctd_net, sfacctd_net: default value changed from null
+    (and related error message) to 'netflow' for nfacctd_net and 'sflow'
+    for sfacctd_net.
+  * * MySQL, SQLite3 plugins: sql table version 8 issued to provide
+    common naming convention when mapping primitives to database fields
+    among the supported RDBMS base. Thanks to Chris Wilson for his
+    support.
+  * * sfacctd: interface format merged back into interface value fields
+    so to ease keeping track of discards (and discard reasons) and
+    multicast fanout * nfacctd: fixed typo preventing the package to
+    compile when enabling IPv6; only version affected by the issue is
+    0.12.5-cvs.
+  * * nfprobe: introducing egress IPv4/IPv6 NetFlow v9 templates * fixed
+    naming convention for some mispelled examples documentation. Thanks
+    to Xavier Vitard for having spotted the issue.
+  * * nfprobe: introduced egress IPv4/IPv6 NetFlow v9 flowsets
+  * * nfprobe: egress flowset, examples documentation and enabled
+    compatibility with Cisco (no use of OUT_BYTES, OUT_OUT_PACKETS) *
+    nfacctd: added support for egress datalink NetFlow v9 fields basing
+    on direction field
+  * * [ns]facctd_net: directive can now be specified per-plugin;
+    documentation updated.
+  * * fix, util.c: string copies in trim_spaces(), trim_all_spaces() and
+    strip_quotes() have been rewritten more safely. Patch is courtesy of
+    Dmitry Koplovich.
+  * * nfacctd: introduced support for application classification via
+    NetFlow v9 field type #95 (application ID) and application name
+    table option. This mechanism aligns with Cisco NBAR-NetFlow v9
+    integration feature.
+  * * nfprobe: introduced support for application classification via
+    NetFlow v9 field type #95 (application ID) and application name
+    table option. This mechanism aligns with Cisco NBAR-NetFlow v9
+    integration feature.
+  * * nfprobe: encoding of NetFlow v9 option scope has been improved;
+    nfprobe source IPv4/IPv6 address, if specified via nfprobe_source_ip
+    directive, is now being written * fix, sql_common.c: log implicit
+    set of sql_table_type to 'bgp' if any BGP primitive is part of the
+    aggregation method * Updated relevant documentation
+  * * fix, nfacctd, sfacctd: aggregate_filter was not catching L2
+    primitives (VLAN, MAC addresses) when performing egress
+    measurements.
+  * * nfacctd: introduced support for NAT L3/L4 field values via
+    xlate_src and xlate_dst configuration directives. Implementation
+    follows IPFIX standard for IPv4 and IPv6 (field types 225, 226, 227,
+    228, 281 and 282) and is added by a compatibility glue to support
+    Cisco ASA NetFlow v9 NSEL field types 40001, 40002, 40003, 40004. *
+    nfacctd: added support for IPFIX/Cisco ASA NetFlow v9 NSEL msecs
+    absolute timestamps: field types 152, 153 and 323.
+  * * nfacctd: introduced support for 'new' TCP/UDP source/destination
+    ports (field types 180, 181, 182, 183), as per IPFIX standard,
+    basing on the L4 protocol value (if any, otherwise assume L4 is not
+    TCP/UDP). * nfacctd: introduced support for egress bytes and packet
+    counters (field types 23, 24) basing on the direction value (if any,
+    otherwise assume ingress as per RFC3954).
+  * * BGP daemon: introduced support for IPv6 transport of BGP messaging
+    * bgp_agent_map has been improved to allow mapping of NetFlow/sFlow
+    agents making use of IPv6 transport to either a) IPv4 transport
+    address of BGP sessions or b) 32-bit BGP Router IDs * documentation
+    and examples updated
+  * * fix, sql_common.c: increased buffer size available for
+    sql_table_schema from 1KB to 8KB.
+  * * fix, nfacctd: added check to verify validity of internal status
+    object for a given NetFlow agent. Only affected version is 0.12.5-
+    cvs. * fix, nfacctd, sfacctd: daemons were crashing on OpenBSD
+    platform upon setting an aggregate_filter configuration directive.
+    Patch is courtesy of Manuel Pata.
+  * * fix, nfacctd: added check to verify validity of internal status
+    object for a given NetFlow agent. Only affected version is 0.12.5-
+    cvs (cont.d)
+  * * fix, xflow_status.c: status entries were not properly linked to
+    the hash conflict chain resulting in a minor memory leak. * BGP
+    daemon: BGP peer information is now linked into the status table for
+    caching purposes. This optimization results in major CPU saving on
+    bigger deployments.
+  * * Documentation updated
+  * * Rolled version counters
+  * * Refresh build system
+  * * Refresh build system
+  * * sfacctd: BGP-related primitives (AS Path, local preference,
+    communities,
+  * * sfacctd: f_agent now points sFlow Agent ID instead of source IP
+    address;
+  * * nfacctd: initial IPFIX collector implementation
+  * * fix, documentation: missing 'in', input interface, lookup key
+    added.
+  * * nfacctd: IPFIX templates including PENs are now supported
+  * * nfprobe plugin: initial IPFIX export implementation. It is called
+    via a
+  * * nfprobe plugin: misc fixes to initial IPFIX export implementation
+  * * nfacctd: introduced IPFIX replication capability
+  * * fix, MySQL/PostgreSQL/SQLite3 plugins: insert of data into the
+    database
+  * * PostgreSQL plugin: 'sql_delimiter' config directive being
+    introduced: if
+  * * Linux ULOG accounting daemon (uacctd) documentation has been added
+  * * fix, SQL plugins: under certain conditions, when using dynamic
+    tables,
+  * * fix, BGP daemon: multiple BGP capabilities per capability
+    announcement
+  * * nfacctd: introduced support for NetFlow v9/IPFIX source and
+    destination
+  * * pmacct client: introduced support for Comma-Separated Values (CSV)
+    output
+  * * Rolled version counters
+  * * fix, pmacct client: error code when connection is refused on UNIX
+    socket
+  * * fix, building system: CFLAGS were not always honoured. Patch is
+    courtesy
+  * * fix, BGP daemon: sanitized reassembly of truncated BGP payload
+  * * fix, SQL plugins: sql_create_table() timestamp has been aligned
+    with SQL
+  * * fix, nfacctd: NetFlow v9/IPFIX sampling option parsing now doesn't
+    rely
+  * * nfacctd: workaround for sampled NetFlow v9 & C7600 is being
+    introduced:
+  * * print_num_protos and sql_num_protos configuration directives have
+    been
+  * * fix, nfacctd: support for multiple NetFlow v9/IPFIX sampling
+    options in
+  * * sampling_map feature is introduced, allowing definition of static
+    traffic
+  * * fix, ll.c: empty return value was causing compiler with certain
+    flags to
+  * * sql_num_hosts feature is being introduced: defines, in MySQL and
+    SQLite
+  * * fix, reset_renormalize_status(): function moved inside main
+    parsing loops
+  * fix, nfacctd: infinite loop when reloading sampling_map via SIGUSR2
+    solved.
+  * * nfacctd: introduced support for 16 bits SAMPLER_IDs in NetFlow
+    v9/IPFIX;
+  * * nfacctd, sfacctd: nfacctd_as_new and sfacctd_as_new got a new
+    'fallback'
+  * * nfacctd: (FLOW)_SAMPLING_INTERVAL fields as part of the NetFlow
+    v9/IPFIX
+  * * nfacctd, sfacctd: nfacctd_net and sfacctd_net got a new 'fallback'
+    option
+  * * Documentation updated
+  * * fix: reset_fallback_status() moved inside exec_plugins()
+  * * Rolled version counters
+  * * pmacctd, uacctd: case of zero IPv6 payload in conjunction with no
+    IPv6
+  * * uacctd: NETLINK_NO_ENOBUFS is set to prevent the daemon being
+    flagged of
+  * * uacctd: a cache of ifindexes is introduced. Hash structure with
+    conflict
+  * * nfprobe: individual flows start and end timestamps are now filled
+    to the
+  * * pmacctd: introduced support for DLT_LOOP link-type (ie. OpenBSD
+    tunneled
+  * * fix, IMT plugin: an issue with fragmenting the class table over
+    multiple
+  * * print plugin: introduced print_output_file feature to write
+    statistics to
+  * * fix, print plugin: CSV header was missing interfaces and network
+    masks
+  * * fix, nfprobe: input and output VLAN ID field types have been
+    aligned to
+  * * Logging: introduced timestamping when writing directly to files
+  * * Logging: separate FD per process. Also SIGHUP now causes reopening
+    of
+  * * print plugin: made output of AS-PATH and BGP communities
+    consistent with
+  * * print plugin: introduced print_trigger_exec feature to execute
+    custom
+  * * BGP daemon: initial implementation storage of BGP/MPLS VPNs
+    information
+  * * BGP daemon: initial implementation storage of BGP/MPLS VPNs
+    information
+  * * nfacctd, sfacctd: introducing bgp_iface_to_rd_map feature to map
+    ifIndex
+  * * BGP daemon, BGP/MPLS VPNs: changed internal data model, added MP
+    next-hop
+  * * peer_src_ip primitive: disconnected from [ns]facctd_as_new
+    mechanism in
+  * * BGP daemon, BGP/MPLS VPNs: lookup algorithm written, taking into
+    account
+  * * print plugin: documentation, examples updated to mention new
+    capability
+  * * Introduced plugin_pipe_backlog configuration directive: it induces
+    a
+  * * Support for is_symmetric aggregation primitive ceased.
+  * * Implementation of 'mpls_vpn_rd' aggregation primitive. It supports
+    types
+  * * 'mpls_vpn_rd' aggregation primitive. Added support for Pre-
+    Tagging; docs
+  * * Updated documentation
+  * * Rolled version counters
+  * * Rolled version counters
+  * * Rolled version counters (2)
+  * * fix, misc compile time warnings and missing return values are now
+    being
+  * * fix, misc compile time warnings and missing return values are now
+    being
+  * * Initial commit IS-IS daemon
+  * * Refresh building system
+  * * fix, IS-IS daemon: compilation issue on Solaris
+  * * fix, sfacctd: improved length checks when extracting strings (ie.
+    AS-PATH
+  * * nfacctd: L2 primitives (ie. MAC addresses, VLANs, etc.) are not
+    expected
+  * * fix, nfprobe: NetFlow output socket is re-opened after a failed
+    send().
+  * * Introduced the new aggregation primitive 'etype' to support
+    accounting
+  * * sfacctd: introduced support for samples generated on ACL matches
+    in
+  * * pre_tag_map: introduced 'sample_type' key. In sFlow v2/v4/v5 this
+    is
+  * * pre_tag_map: introduced 'sample_type' key. In sFlow v2/v4/v5 this
+    is
+  * * fix, sfacctd: support for samples generated on ACL matches in
+    Brocade
+  * * fix, util.c: added feof() test to fread() in
+    read_SQLquery_from_file();
+
+  [ Deepti Kulkarni ]
+  * new branch
+  * 0.12.4+vyatta+4+oxnard1
+
+  [ paolo ]
+  * * IS-IS daemon: work in progress ..
+  * * IS-IS daemon: temp compilation fix for systems not supporting
+    AF_PACKET
+  * * IS-IS daemon: fixed ISO packets MTU size, padded P2P hellos and
+    sendto()
+  * * IS-IS daemon: work in progress ..
+  * * IS-IS daemon: work in progress ..
+  * * IS-IS daemon: work in progress ..
+  * * IS-IS daemon: work in progress ..
+  * * IS-IS daemon: work in progress ..
+  * * fix, pmacctd: tunnel registry now correctly supports multiple
+    tunnel
+  * * fix, SQL plugins: 'etype' primitive is now quoted in SQL queries
+    and docs
+  * * fix, signals.c: ignoring SIGINT and SIGTERM in my_sigint_handler()
+    to
+  * * fix, pmacctd, uacctd: pmacctd_as fallback value now sets just
+    NF_AS_BGP
+  * * IS-IS daemon: documentation
+  * * Documentation updated
+  * * Documentation updated
+  * * Rolled version counters
+  * * nfacctd: etype primitive can now be populated from
+    IP_PROTOCOL_VERSION,
+  * * bgp_agent_map: resolution of a NetFlow agent to BGP speakers with
+    IPv6
+  * * nfacctd: introduced support for IPFIX variable-length IEs
+    (RFC5101),
+  * * nfacctd, fix: EBIT handling scoped to IPIFX only.
+  * * nfprobe, misc fixes: ENABLE_IPV6 conditionals around IPv6 template
+    and
+  * * nfacctd, sfacctd: introduced positive/negative caching for
+    bgp_agent_map
+  * * Several code cleanups. Patches are courtesy by Osama Abu Elsorour
+    and
+  * * fix, uacctd: cache routine is now being called in order to resolve
+    input
+  * * EXAMPLES document renamed QUICKSTART for disambiguation on
+    filesystems
+  * * fix, pretag_handlers.c: BGP next-hop handlers hooked to the
+    longest-match
+  * * print plugin: introduced a pointer to the latest filename in the
+    set, ie.
+
+  [ John Southworth ]
+  * Fix merge problem in uacctd.h
+  * Cleanup build and repo
+  * Fix merge problem with makefile
+
+ -- John Southworth <john.southworth@vyatta.com>  Fri, 20 Jul 2012 12:41:04 -0700
+
+pmacct (0.14.0+vyatta+1) UNRELEASED; urgency=low
+
+  [ paolo ]
+  * * Refreshed building system * Rolled version counters
+  * * nfacctd, sfacctd: aggregate_filter can now filter against TCP
+    flags
+  * * pmacct client: numeric variables output converted to unsigned from
+    signed * nfacctd_net, sfacctd_net: default value changed from null
+    (and related error message) to 'netflow' for nfacctd_net and 'sflow'
+    for sfacctd_net.
+  * * MySQL, SQLite3 plugins: sql table version 8 issued to provide
+    common naming convention when mapping primitives to database fields
+    among the supported RDBMS base. Thanks to Chris Wilson for his
+    support.
+  * * sfacctd: interface format merged back into interface value fields
+    so to ease keeping track of discards (and discard reasons) and
+    multicast fanout * nfacctd: fixed typo preventing the package to
+    compile when enabling IPv6; only version affected by the issue is
+    0.12.5-cvs.
+  * * nfprobe: introducing egress IPv4/IPv6 NetFlow v9 templates * fixed
+    naming convention for some mispelled examples documentation. Thanks
+    to Xavier Vitard for having spotted the issue.
+  * * nfprobe: introduced egress IPv4/IPv6 NetFlow v9 flowsets
+  * * nfprobe: egress flowset, examples documentation and enabled
+    compatibility with Cisco (no use of OUT_BYTES, OUT_OUT_PACKETS) *
+    nfacctd: added support for egress datalink NetFlow v9 fields basing
+    on direction field
+  * * [ns]facctd_net: directive can now be specified per-plugin;
+    documentation updated.
+  * * fix, util.c: string copies in trim_spaces(), trim_all_spaces() and
+    strip_quotes() have been rewritten more safely. Patch is courtesy of
+    Dmitry Koplovich.
+  * * nfacctd: introduced support for application classification via
+    NetFlow v9 field type #95 (application ID) and application name
+    table option. This mechanism aligns with Cisco NBAR-NetFlow v9
+    integration feature.
+  * * nfprobe: introduced support for application classification via
+    NetFlow v9 field type #95 (application ID) and application name
+    table option. This mechanism aligns with Cisco NBAR-NetFlow v9
+    integration feature.
+  * * nfprobe: encoding of NetFlow v9 option scope has been improved;
+    nfprobe source IPv4/IPv6 address, if specified via nfprobe_source_ip
+    directive, is now being written * fix, sql_common.c: log implicit
+    set of sql_table_type to 'bgp' if any BGP primitive is part of the
+    aggregation method * Updated relevant documentation
+  * * fix, nfacctd, sfacctd: aggregate_filter was not catching L2
+    primitives (VLAN, MAC addresses) when performing egress
+    measurements.
+  * * nfacctd: introduced support for NAT L3/L4 field values via
+    xlate_src and xlate_dst configuration directives. Implementation
+    follows IPFIX standard for IPv4 and IPv6 (field types 225, 226, 227,
+    228, 281 and 282) and is added by a compatibility glue to support
+    Cisco ASA NetFlow v9 NSEL field types 40001, 40002, 40003, 40004. *
+    nfacctd: added support for IPFIX/Cisco ASA NetFlow v9 NSEL msecs
+    absolute timestamps: field types 152, 153 and 323.
+  * * nfacctd: introduced support for 'new' TCP/UDP source/destination
+    ports (field types 180, 181, 182, 183), as per IPFIX standard,
+    basing on the L4 protocol value (if any, otherwise assume L4 is not
+    TCP/UDP). * nfacctd: introduced support for egress bytes and packet
+    counters (field types 23, 24) basing on the direction value (if any,
+    otherwise assume ingress as per RFC3954).
+  * * BGP daemon: introduced support for IPv6 transport of BGP messaging
+    * bgp_agent_map has been improved to allow mapping of NetFlow/sFlow
+    agents making use of IPv6 transport to either a) IPv4 transport
+    address of BGP sessions or b) 32-bit BGP Router IDs * documentation
+    and examples updated
+  * * fix, sql_common.c: increased buffer size available for
+    sql_table_schema from 1KB to 8KB.
+  * * fix, nfacctd: added check to verify validity of internal status
+    object for a given NetFlow agent. Only affected version is 0.12.5-
+    cvs. * fix, nfacctd, sfacctd: daemons were crashing on OpenBSD
+    platform upon setting an aggregate_filter configuration directive.
+    Patch is courtesy of Manuel Pata.
+  * * fix, nfacctd: added check to verify validity of internal status
+    object for a given NetFlow agent. Only affected version is 0.12.5-
+    cvs (cont.d)
+  * * fix, xflow_status.c: status entries were not properly linked to
+    the hash conflict chain resulting in a minor memory leak. * BGP
+    daemon: BGP peer information is now linked into the status table for
+    caching purposes. This optimization results in major CPU saving on
+    bigger deployments.
+  * * Documentation updated
+  * * Rolled version counters
+  * * Refresh build system
+  * * Refresh build system
+  * * sfacctd: BGP-related primitives (AS Path, local preference,
+    communities,
+  * * sfacctd: f_agent now points sFlow Agent ID instead of source IP
+    address;
+  * * nfacctd: initial IPFIX collector implementation
+  * * fix, documentation: missing 'in', input interface, lookup key
+    added.
+  * * nfacctd: IPFIX templates including PENs are now supported
+  * * nfprobe plugin: initial IPFIX export implementation. It is called
+    via a
+  * * nfprobe plugin: misc fixes to initial IPFIX export implementation
+  * * nfacctd: introduced IPFIX replication capability
+  * * fix, MySQL/PostgreSQL/SQLite3 plugins: insert of data into the
+    database
+  * * PostgreSQL plugin: 'sql_delimiter' config directive being
+    introduced: if
+  * * Linux ULOG accounting daemon (uacctd) documentation has been added
+  * * fix, SQL plugins: under certain conditions, when using dynamic
+    tables,
+  * * fix, BGP daemon: multiple BGP capabilities per capability
+    announcement
+  * * nfacctd: introduced support for NetFlow v9/IPFIX source and
+    destination
+  * * pmacct client: introduced support for Comma-Separated Values (CSV)
+    output
+  * * Rolled version counters
+  * * fix, pmacct client: error code when connection is refused on UNIX
+    socket
+  * * fix, building system: CFLAGS were not always honoured. Patch is
+    courtesy
+  * * fix, BGP daemon: sanitized reassembly of truncated BGP payload
+  * * fix, SQL plugins: sql_create_table() timestamp has been aligned
+    with SQL
+  * * fix, nfacctd: NetFlow v9/IPFIX sampling option parsing now doesn't
+    rely
+  * * nfacctd: workaround for sampled NetFlow v9 & C7600 is being
+    introduced:
+  * * print_num_protos and sql_num_protos configuration directives have
+    been
+  * * fix, nfacctd: support for multiple NetFlow v9/IPFIX sampling
+    options in
+  * * sampling_map feature is introduced, allowing definition of static
+    traffic
+  * * fix, ll.c: empty return value was causing compiler with certain
+    flags to
+  * * sql_num_hosts feature is being introduced: defines, in MySQL and
+    SQLite
+  * * fix, reset_renormalize_status(): function moved inside main
+    parsing loops
+  * fix, nfacctd: infinite loop when reloading sampling_map via SIGUSR2
+    solved.
+  * * nfacctd: introduced support for 16 bits SAMPLER_IDs in NetFlow
+    v9/IPFIX;
+  * * nfacctd, sfacctd: nfacctd_as_new and sfacctd_as_new got a new
+    'fallback'
+  * * nfacctd: (FLOW)_SAMPLING_INTERVAL fields as part of the NetFlow
+    v9/IPFIX
+  * * nfacctd, sfacctd: nfacctd_net and sfacctd_net got a new 'fallback'
+    option
+  * * Documentation updated
+  * * fix: reset_fallback_status() moved inside exec_plugins()
+  * * Rolled version counters
+  * * pmacctd, uacctd: case of zero IPv6 payload in conjunction with no
+    IPv6
+  * * uacctd: NETLINK_NO_ENOBUFS is set to prevent the daemon being
+    flagged of
+  * * uacctd: a cache of ifindexes is introduced. Hash structure with
+    conflict
+  * * nfprobe: individual flows start and end timestamps are now filled
+    to the
+  * * pmacctd: introduced support for DLT_LOOP link-type (ie. OpenBSD
+    tunneled
+  * * fix, IMT plugin: an issue with fragmenting the class table over
+    multiple
+  * * print plugin: introduced print_output_file feature to write
+    statistics to
+  * * fix, print plugin: CSV header was missing interfaces and network
+    masks
+  * * fix, nfprobe: input and output VLAN ID field types have been
+    aligned to
+  * * Logging: introduced timestamping when writing directly to files
+  * * Logging: separate FD per process. Also SIGHUP now causes reopening
+    of
+  * * print plugin: made output of AS-PATH and BGP communities
+    consistent with
+  * * print plugin: introduced print_trigger_exec feature to execute
+    custom
+  * * BGP daemon: initial implementation storage of BGP/MPLS VPNs
+    information
+  * * BGP daemon: initial implementation storage of BGP/MPLS VPNs
+    information
+  * * nfacctd, sfacctd: introducing bgp_iface_to_rd_map feature to map
+    ifIndex
+  * * BGP daemon, BGP/MPLS VPNs: changed internal data model, added MP
+    next-hop
+  * * peer_src_ip primitive: disconnected from [ns]facctd_as_new
+    mechanism in
+  * * BGP daemon, BGP/MPLS VPNs: lookup algorithm written, taking into
+    account
+  * * print plugin: documentation, examples updated to mention new
+    capability
+  * * Introduced plugin_pipe_backlog configuration directive: it induces
+    a
+  * * Support for is_symmetric aggregation primitive ceased.
+  * * Implementation of 'mpls_vpn_rd' aggregation primitive. It supports
+    types
+  * * 'mpls_vpn_rd' aggregation primitive. Added support for Pre-
+    Tagging; docs
+  * * Updated documentation
+  * * Rolled version counters
+  * * Rolled version counters
+  * * Rolled version counters (2)
+  * * fix, misc compile time warnings and missing return values are now
+    being
+  * * fix, misc compile time warnings and missing return values are now
+    being
+  * * Initial commit IS-IS daemon
+  * * Refresh building system
+  * * fix, IS-IS daemon: compilation issue on Solaris
+  * * fix, sfacctd: improved length checks when extracting strings (ie.
+    AS-PATH
+  * * nfacctd: L2 primitives (ie. MAC addresses, VLANs, etc.) are not
+    expected
+  * * fix, nfprobe: NetFlow output socket is re-opened after a failed
+    send().
+  * * Introduced the new aggregation primitive 'etype' to support
+    accounting
+  * * sfacctd: introduced support for samples generated on ACL matches
+    in
+  * * pre_tag_map: introduced 'sample_type' key. In sFlow v2/v4/v5 this
+    is
+  * * pre_tag_map: introduced 'sample_type' key. In sFlow v2/v4/v5 this
+    is
+  * * fix, sfacctd: support for samples generated on ACL matches in
+    Brocade
+  * * fix, util.c: added feof() test to fread() in
+    read_SQLquery_from_file();
+
+  [ Deepti Kulkarni ]
+  * new branch
+  * 0.12.4+vyatta+4+oxnard1
+
+ -- Deepti Kulkarni <deepti@vyatta.com>  Fri, 20 Jul 2012 12:40:33 -0700
+
 pmacct (0.12.4+vyatta+4+oxnard1) unstable; urgency=low
 
   * new branch
