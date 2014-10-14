@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -419,20 +419,33 @@ void sll_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs
   register u_short etype;
   u_char *p;
   u_int caplen = h->caplen;
+  u_int16_t e8021Q, nl;
 
   if (caplen < SLL_HDR_LEN) {
     pptrs->iph_ptr = NULL;
     return;
   }
 
+  pptrs->mac_ptr = NULL;
+  pptrs->vlan_ptr = NULL;
+  pptrs->mpls_ptr = NULL;
+
   p = pptrs->packet_ptr;
+
   sllp = (const struct sll_header *) pptrs->packet_ptr;
   etype = ntohs(sllp->sll_protocol);
+  nl = SLL_HDR_LEN;
 
+  if (EXTRACT_16BITS(&sllp->sll_halen) == ETH_ADDR_LEN) {
+    memcpy(sll_mac[1], sllp->sll_addr, ETH_ADDR_LEN);
+    pptrs->mac_ptr = (char *) sll_mac;
+  }
+
+  recurse:
   if (etype == ETHERTYPE_IP) {
     pptrs->l3_proto = ETHERTYPE_IP;
     pptrs->l3_handler = ip_handler; 
-    pptrs->iph_ptr = (u_char *)(pptrs->packet_ptr + SLL_HDR_LEN);
+    pptrs->iph_ptr = (u_char *)(pptrs->packet_ptr + nl);
     return;
   }
   
@@ -446,6 +459,20 @@ void sll_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs
       pptrs->iph_ptr = p;
       return;
     }
+  }
+
+  /* originally contributed by Rich Gade for eth_handler() */
+  if (etype == ETHERTYPE_8021Q) {
+    if (caplen < IEEE8021Q_TAGLEN) {
+      pptrs->iph_ptr = NULL;
+      return;
+    }
+    memcpy(&e8021Q, pptrs->packet_ptr+nl+2, 2);
+    pptrs->vlan_ptr = pptrs->packet_ptr + nl;
+    etype = ntohs(e8021Q);
+    nl += IEEE8021Q_TAGLEN;
+    caplen -= IEEE8021Q_TAGLEN;
+    goto recurse;
   }
 
   pptrs->l3_proto = 0;

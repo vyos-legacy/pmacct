@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -39,6 +39,9 @@ void evaluate_configuration(char *filename, int rows)
     else valid_line = TRUE; 
 
     if (valid_line) {
+      /* debugging the line if required */
+      if (debug) Log(LOG_DEBUG, "DEBUG ( %s ): %s\n", filename, cfg[index]);
+
       /* splitting key, value and name */
       delim = strchr(cfg[index], ':');
       *delim = '\0';
@@ -104,10 +107,7 @@ int parse_configuration_file(char *filename)
 	  break;
         }
 	memset(localbuf, 0, sizeof(localbuf));
-        if (fgets(localbuf, sizeof(localbuf), file) == NULL) {
-	  if (debug) debug_configuration_file(filename, rows); 
-	  break;	
-        }
+        if (fgets(localbuf, sizeof(localbuf), file) == NULL) break;	
         else {
 	  localbuf[sizeof(localbuf)-1] = '\0';
           cfg[rows] = malloc(strlen(localbuf)+2);
@@ -166,7 +166,7 @@ int parse_configuration_file(char *filename)
 
 void sanitize_cfg(int rows, char *filename)
 {
-  int rindex = 0, len;
+  int rindex = 0, len, got_first;
   char localbuf[10240];
 
   while (rindex < rows) {
@@ -186,7 +186,7 @@ void sanitize_cfg(int rows, char *filename)
     */
     len = strlen(cfg[rindex]);
     if (len) {
-      int symbol = FALSE, cindex = 0;
+      int symbol = FALSE, cindex = 0, got_first = 0;
 
       if (!strchr(cfg[rindex], ':')) {
 	Log(LOG_ERR, "ERROR ( %s ): Syntax error: missing ':' at line %d. Exiting.\n", filename, rindex+1); 
@@ -194,21 +194,24 @@ void sanitize_cfg(int rows, char *filename)
       }
       while(cindex <= len) {
         if (cfg[rindex][cindex] == '[') symbol++;
-        else if (cfg[rindex][cindex] == ']') symbol--;
+        else if (cfg[rindex][cindex] == ']') {
+	  symbol--;
+	  got_first++;
+	}
 	
 	if ((cfg[rindex][cindex] == ':') || (cfg[rindex][cindex] == '\0')) {
-	  if (symbol) {
+	  if (symbol && !got_first) {
             Log(LOG_ERR, "ERROR ( %s ): Syntax error: not weighted brackets at line %d. Exiting.\n", filename, rindex+1);
 	    exit(1);
 	  }
 	}
 
-	if (symbol < 0) {
+	if (symbol < 0 && !got_first) {
 	  Log(LOG_ERR, "ERROR ( %s ): Syntax error: not weighted brackets at line %d. Exiting.\n", filename, rindex+1);
 	  exit(1);
 	}
 
-	if (symbol > 1) {
+	if (symbol > 1 && !got_first) {
 	  Log(LOG_ERR, "ERROR ( %s ): Syntax error: nested symbols not allowed at line %d. Exiting.\n", filename, rindex+1);
 	  exit(1);
 	}
@@ -218,7 +221,7 @@ void sanitize_cfg(int rows, char *filename)
     }
 
     /* checking the whole line: erasing unwanted spaces from key;
-       trimming start/end spaces from value; symbols will be leaved
+       trimming start/end spaces from value; symbols will be left
        untouched */
     len = strlen(cfg[rindex]);
     if (len) {
@@ -226,11 +229,13 @@ void sanitize_cfg(int rows, char *filename)
       char *valueptr;
 
       while(cindex <= len) {
-        if (cfg[rindex][cindex] == '[') symbol++;
-        else if (cfg[rindex][cindex] == ']') symbol--;
-	else if (cfg[rindex][cindex] == ':') {
-	  value++;
-	  valueptr = &localbuf[lbindex+1];
+	if (!value) {
+          if (cfg[rindex][cindex] == '[') symbol++;
+          else if (cfg[rindex][cindex] == ']') symbol--;
+	  else if (cfg[rindex][cindex] == ':') {
+	    value++;
+	    valueptr = &localbuf[lbindex+1];
+	  }
 	}
         if ((!symbol) && (!value)) {
 	  if (!isspace(cfg[rindex][cindex])) {
@@ -386,16 +391,6 @@ void set_default_values()
     list->cfg.refresh_maps = TRUE;
 
     list = list->next;
-  }
-}
-
-void debug_configuration_file(char *filename, int rows)
-{
-  int index = 0;
-
-  while (index < rows) {
-    Log(LOG_DEBUG, "DEBUG ( %s ): %s", filename, cfg[index]);
-    index++;
   }
 }
 

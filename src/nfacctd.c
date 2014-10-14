@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -160,36 +160,36 @@ int main(int argc,char **argv, char **envp)
     cfg_cmdline[rows] = malloc(SRVBUFLEN);
     switch (cp) {
     case 'L':
-      strcpy(cfg_cmdline[rows], "nfacctd_ip: ");
+      strlcpy(cfg_cmdline[rows], "nfacctd_ip: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'l':
-      strcpy(cfg_cmdline[rows], "nfacctd_port: ");
+      strlcpy(cfg_cmdline[rows], "nfacctd_port: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'P':
-      strcpy(cfg_cmdline[rows], "plugins: ");
+      strlcpy(cfg_cmdline[rows], "plugins: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'D':
-      strcpy(cfg_cmdline[rows], "daemonize: true");
+      strlcpy(cfg_cmdline[rows], "daemonize: true", SRVBUFLEN);
       rows++;
       break;
     case 'd':
       debug = TRUE;
-      strcpy(cfg_cmdline[rows], "debug: true");
+      strlcpy(cfg_cmdline[rows], "debug: true", SRVBUFLEN);
       rows++;
       break;
     case 'n':
-      strcpy(cfg_cmdline[rows], "networks_file: ");
+      strlcpy(cfg_cmdline[rows], "networks_file: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'o':
-      strcpy(cfg_cmdline[rows], "ports_file: ");
+      strlcpy(cfg_cmdline[rows], "ports_file: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
@@ -197,57 +197,57 @@ int main(int argc,char **argv, char **envp)
       strlcpy(config_file, optarg, sizeof(config_file));
       break;
     case 'F':
-      strcpy(cfg_cmdline[rows], "pidfile: ");
+      strlcpy(cfg_cmdline[rows], "pidfile: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'c':
-      strcpy(cfg_cmdline[rows], "aggregate: ");
+      strlcpy(cfg_cmdline[rows], "aggregate: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'b':
-      strcpy(cfg_cmdline[rows], "imt_buckets: ");
+      strlcpy(cfg_cmdline[rows], "imt_buckets: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'm':
-      strcpy(cfg_cmdline[rows], "imt_mem_pools_number: ");
+      strlcpy(cfg_cmdline[rows], "imt_mem_pools_number: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       have_num_memory_pools = TRUE;
       rows++;
       break;
     case 'p':
-      strcpy(cfg_cmdline[rows], "imt_path: ");
+      strlcpy(cfg_cmdline[rows], "imt_path: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'r':
-      strcpy(cfg_cmdline[rows], "sql_refresh_time: ");
+      strlcpy(cfg_cmdline[rows], "sql_refresh_time: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       cfg_cmdline[rows] = malloc(SRVBUFLEN);
-      strcpy(cfg_cmdline[rows], "print_refresh_time: ");
+      strlcpy(cfg_cmdline[rows], "print_refresh_time: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'v':
-      strcpy(cfg_cmdline[rows], "sql_table_version: ");
+      strlcpy(cfg_cmdline[rows], "sql_table_version: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 's':
-      strcpy(cfg_cmdline[rows], "imt_mem_pools_size: ");
+      strlcpy(cfg_cmdline[rows], "imt_mem_pools_size: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'S':
-      strcpy(cfg_cmdline[rows], "syslog: ");
+      strlcpy(cfg_cmdline[rows], "syslog: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'R':
-      strcpy(cfg_cmdline[rows], "sfacctd_renormalize: true");
+      strlcpy(cfg_cmdline[rows], "sfacctd_renormalize: true", SRVBUFLEN);
       rows++;
       break;
     case 'h':
@@ -303,7 +303,15 @@ int main(int argc,char **argv, char **envp)
     Log(LOG_INFO, "INFO ( default/core ): Start logging ...\n");
   }
 
-  if (config.logfile) config.logfile_fd = open_logfile(config.logfile);
+  if (config.logfile)
+  {
+    config.logfile_fd = open_logfile(config.logfile);
+    list = plugins_list;
+    while (list) {
+      list->cfg.logfile_fd = config.logfile_fd ;
+      list = list->next;
+    }
+  }
 
   /* Enforcing policies over aggregation methods */
   list = plugins_list;
@@ -576,7 +584,8 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.vlan6.packet_ptr)->ether_type, htons(ETHERTYPE_8021Q));
   pptrs.vlan6.mac_ptr = (u_char *)((struct eth_header *)pptrs.vlan6.packet_ptr)->ether_dhost;
   pptrs.vlan6.vlan_ptr = pptrs.vlan6.packet_ptr + ETHER_HDRLEN;
-  Assign16(*(pptrs.vlan6.vlan_ptr+2), htons(ETHERTYPE_IPV6));
+  Assign8(*(pptrs.vlan6.vlan_ptr+2), 0x86);
+  Assign8(*(pptrs.vlan6.vlan_ptr+3), 0xDD);
   pptrs.vlan6.iph_ptr = pptrs.vlan6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
   pptrs.vlan6.tlh_ptr = pptrs.vlan6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN + sizeof(struct ip6_hdr);
   Assign16(((struct ip6_hdr *)pptrs.vlan6.iph_ptr)->ip6_plen, htons(100));
@@ -607,7 +616,8 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.vlanmpls6.packet_ptr)->ether_type, htons(ETHERTYPE_8021Q));
   pptrs.vlanmpls6.mac_ptr = (u_char *)((struct eth_header *)pptrs.vlanmpls6.packet_ptr)->ether_dhost;
   pptrs.vlanmpls6.vlan_ptr = pptrs.vlanmpls6.packet_ptr + ETHER_HDRLEN;
-  Assign16(*(pptrs.vlanmpls6.vlan_ptr+2), htons(ETHERTYPE_MPLS));
+  Assign8(*(pptrs.vlanmpls6.vlan_ptr+2), 0x88);
+  Assign8(*(pptrs.vlanmpls6.vlan_ptr+3), 0x47);
   pptrs.vlanmpls6.mpls_ptr = pptrs.vlanmpls6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
   // pptrs.vlanmpls6.pkthdr->caplen = 104; /* eth_header + vlan + upto 10 MPLS labels + ip6_hdr + my_tlhdr */
   pptrs.vlanmpls6.pkthdr->caplen = 121;
@@ -875,16 +885,28 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
   data_hdr = (struct data_hdr_v9 *)pkt;
   fid = ntohs(data_hdr->flow_id);
   if (fid == 0) { /* template */ 
-    template_hdr = (struct template_hdr_v9 *)pkt;
-    flowsetlen = ntohs(template_hdr->flow_len);
-    if (off+flowsetlen > len) { 
-      notify_malf_packet(LOG_INFO, "INFO: unable to read next Template Flowset; incomplete NetFlow v9 packet",
-		      (struct sockaddr *) pptrsv->v4.f_agent);
-      xflow_tot_bad_datagrams++;
-      return;
-    }
+    unsigned char *tpl_ptr = pkt;
 
-    handle_template_v9(template_hdr, pptrs);
+    flowoff = 0;
+    tpl_ptr += NfDataHdrV9Sz;
+    flowoff += NfDataHdrV9Sz;
+    flowsetlen = ntohs(data_hdr->flow_len);
+
+    while (flowoff < flowsetlen) {
+      template_hdr = (struct template_hdr_v9 *) tpl_ptr;
+      if (off+flowsetlen > len) { 
+        notify_malf_packet(LOG_INFO, "INFO: unable to read next Template Flowset; incomplete NetFlow v9 packet",
+		        (struct sockaddr *) pptrsv->v4.f_agent);
+        xflow_tot_bad_datagrams++;
+        return;
+      }
+
+      handle_template_v9(template_hdr, pptrs);
+
+      tpl_ptr += sizeof(struct template_hdr_v9)+ntohs(template_hdr->num)*sizeof(struct template_field_v9); 
+      flowoff += sizeof(struct template_hdr_v9)+ntohs(template_hdr->num)*sizeof(struct template_field_v9); 
+    }    
+
     pkt += flowsetlen; 
     off += flowsetlen; 
   }
@@ -903,7 +925,15 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 
     tpl = find_template_v9(data_hdr->flow_id, pptrs);
     if (!tpl) {
-      Log(LOG_DEBUG, "DEBUG ( default/core ): Discarded NetFlow V9 packet (R: unknown template '%u')\n", fid); 
+      struct host_addr a;
+      u_char agent_addr[50];
+      u_int16_t agent_port;
+
+      sa_to_addr((struct sockaddr *)pptrs->f_agent, &a, &agent_port);
+      addr_to_str(agent_addr, &a);
+
+      Log(LOG_DEBUG, "DEBUG ( default/core ): Discarded NetFlow V9 packet (R: unknown template %u [%s:%u])\n", fid,
+		agent_addr, ntohl(((struct struct_header_v9 *)pptrs->f_header)->source_id)); 
       pkt += flowsetlen-NfDataHdrV9Sz;
       off += flowsetlen;
     }
@@ -1306,8 +1336,8 @@ u_int16_t NF_evaluate_flow_type(struct template_cache_entry *tpl, struct packet_
 
   if (tpl->tpl[NF9_SRC_VLAN].len && *(pptrs->f_data+tpl->tpl[NF9_SRC_VLAN].off) > 0) ret += NF9_FTYPE_VLAN; 
   if (tpl->tpl[NF9_MPLS_LABEL_1].len /* check: value > 0 ? */) ret += NF9_FTYPE_MPLS; 
-  if (!tpl->tpl[NF9_IP_PROTOCOL_VERSION].len || *(pptrs->f_data+tpl->tpl[NF9_IP_PROTOCOL_VERSION].off) == 4);
-  else if (*(pptrs->f_data+tpl->tpl[NF9_IP_PROTOCOL_VERSION].off) == 6) ret += NF9_FTYPE_IPV6; 
+  if (*(pptrs->f_data+tpl->tpl[NF9_IP_PROTOCOL_VERSION].off) == 4 || tpl->tpl[NF9_IPV4_SRC_ADDR].len > 0);
+  else if (*(pptrs->f_data+tpl->tpl[NF9_IP_PROTOCOL_VERSION].off) == 6 || tpl->tpl[NF9_IPV6_SRC_ADDR].len > 0) ret += NF9_FTYPE_IPV6;
 
   return ret;
 }

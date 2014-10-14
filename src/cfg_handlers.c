@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -212,8 +212,8 @@ int cfg_key_aggregate_filter(char *filename, char *name, char *value_ptr)
 int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
-  char *count_token;
-  int value, changes = 0;
+  char *count_token, *range_ptr;
+  int value, range = 0, changes = 0;
   u_int8_t neg;
 
   if (!name) {
@@ -228,17 +228,35 @@ int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
 	list->cfg.ptf.num = 0;
 	while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_MAP_ENTRIES/4) {
 	  neg = pt_check_neg(&count_token);
+	  range_ptr = pt_check_range(count_token); 
 	  value = atoi(count_token);
+	  if (range_ptr) range = atoi(range_ptr);
+	  else range = value;
+
 	  if ((value < 0) || (value > 65535)) {
 	    Log(LOG_ERR, "WARN ( %s ): 'pre_tag_filter' values has to be in the range 0-65535. '%d' not loaded.\n", filename, value);
 	    changes++;
+	    break;
 	  }
-	  else {
-            list->cfg.ptf.table[list->cfg.ptf.num].neg = neg;
-            list->cfg.ptf.table[list->cfg.ptf.num].n = value;
-	    list->cfg.ptf.num++;
-            changes++;
+
+	  if (range_ptr) { 
+	    if ((range < 1) || (range > 65535)) {
+	      Log(LOG_ERR, "WARN ( %s ): Range values has to be in the range 1-65535. '%d' not loaded.\n", filename, range);
+	      changes++;
+	      break;
+	    }
+	    if (range <= value) {
+	      Log(LOG_ERR, "WARN ( %s ): Range value is expected in the format low-high. '%d-%d' not loaded.\n", filename, value, range);
+	      changes++;
+	      break;
+	    }
 	  }
+
+          list->cfg.ptf.table[list->cfg.ptf.num].neg = neg;
+          list->cfg.ptf.table[list->cfg.ptf.num].n = value;
+          list->cfg.ptf.table[list->cfg.ptf.num].r = range;
+	  list->cfg.ptf.num++;
+          changes++;
 	}
         break;
       }

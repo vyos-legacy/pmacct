@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -72,6 +72,7 @@ void process_query_data(int sd, unsigned char *buf, int len, int forked)
   int following_chain=0;
   unsigned int idx;
   struct pkt_data dummy;
+  int reset_counter;
 
   memset(&dummy, 0, sizeof(struct pkt_data));
   memset(&rb, 0, sizeof(struct reply_buffer));
@@ -95,6 +96,8 @@ void process_query_data(int sd, unsigned char *buf, int len, int forked)
   }
 
   elem = (unsigned char *) a;
+
+  reset_counter = q->type & WANT_RESET;
 
   if (q->type & WANT_STATS) {
     q->what_to_count = config.what_to_count; 
@@ -148,7 +151,7 @@ void process_query_data(int sd, unsigned char *buf, int len, int forked)
         if (acc_elem) { 
 	  if (acc_elem->packet_counter && !acc_elem->reset_flag) {
 	    enQueue_elem(sd, &rb, acc_elem, sizeof(struct pkt_data));
-	    if (q->type & WANT_RESET) {
+	    if (reset_counter) {
 	      if (forked) set_reset_flag(acc_elem);
 	      else reset_counters(acc_elem);
 	    }
@@ -175,7 +178,7 @@ void process_query_data(int sd, unsigned char *buf, int len, int forked)
             if (!memcmp(&tbuf, &request.data, sizeof(struct pkt_primitives))) {
 	      if (q->type & WANT_COUNTER) Accumulate_Counters(&abuf, acc_elem); 
 	      else enQueue_elem(sd, &rb, acc_elem, sizeof(struct pkt_data)); /* q->type == WANT_MATCH */
-	      if (q->type & WANT_RESET) set_reset_flag(acc_elem);
+	      if (reset_counter) set_reset_flag(acc_elem);
 	    }
           }
           if (acc_elem->next) {
@@ -199,7 +202,7 @@ void process_query_data(int sd, unsigned char *buf, int len, int forked)
 
     /* XXX: we should try using pmct_get_max_entries() */
     q->num = config.classifier_table_num;
-    if (!q->num) q->num = MAX_CLASSIFIERS;
+    if (!q->num && config.classifiers_path) q->num = MAX_CLASSIFIERS;
 
     while (idx < q->num) {
       enQueue_elem(sd, &rb, &class[idx], sizeof(struct stripped_class));

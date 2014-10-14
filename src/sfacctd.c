@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -169,36 +169,36 @@ int main(int argc,char **argv, char **envp)
     cfg_cmdline[rows] = malloc(SRVBUFLEN);
     switch (cp) {
     case 'L':
-      strcpy(cfg_cmdline[rows], "sfacctd_ip: ");
+      strlcpy(cfg_cmdline[rows], "sfacctd_ip: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'l':
-      strcpy(cfg_cmdline[rows], "sfacctd_port: ");
+      strlcpy(cfg_cmdline[rows], "sfacctd_port: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'P':
-      strcpy(cfg_cmdline[rows], "plugins: ");
+      strlcpy(cfg_cmdline[rows], "plugins: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'D':
-      strcpy(cfg_cmdline[rows], "daemonize: true");
+      strlcpy(cfg_cmdline[rows], "daemonize: true", SRVBUFLEN);
       rows++;
       break;
     case 'd':
       debug = TRUE;
-      strcpy(cfg_cmdline[rows], "debug: true");
+      strlcpy(cfg_cmdline[rows], "debug: true", SRVBUFLEN);
       rows++;
       break;
     case 'n':
-      strcpy(cfg_cmdline[rows], "networks_file: ");
+      strlcpy(cfg_cmdline[rows], "networks_file: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'o':
-      strcpy(cfg_cmdline[rows], "ports_file: ");
+      strlcpy(cfg_cmdline[rows], "ports_file: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
@@ -206,57 +206,57 @@ int main(int argc,char **argv, char **envp)
       strlcpy(config_file, optarg, sizeof(config_file));
       break;
     case 'F':
-      strcpy(cfg_cmdline[rows], "pidfile: ");
+      strlcpy(cfg_cmdline[rows], "pidfile: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'c':
-      strcpy(cfg_cmdline[rows], "aggregate: ");
+      strlcpy(cfg_cmdline[rows], "aggregate: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'b':
-      strcpy(cfg_cmdline[rows], "imt_buckets: ");
+      strlcpy(cfg_cmdline[rows], "imt_buckets: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'm':
-      strcpy(cfg_cmdline[rows], "imt_mem_pools_number: ");
+      strlcpy(cfg_cmdline[rows], "imt_mem_pools_number: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       have_num_memory_pools = TRUE;
       rows++;
       break;
     case 'p':
-      strcpy(cfg_cmdline[rows], "imt_path: ");
+      strlcpy(cfg_cmdline[rows], "imt_path: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'r':
-      strcpy(cfg_cmdline[rows], "sql_refresh_time: ");
+      strlcpy(cfg_cmdline[rows], "sql_refresh_time: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       cfg_cmdline[rows] = malloc(SRVBUFLEN);
-      strcpy(cfg_cmdline[rows], "print_refresh_time: ");
+      strlcpy(cfg_cmdline[rows], "print_refresh_time: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'v':
-      strcpy(cfg_cmdline[rows], "sql_table_version: ");
+      strlcpy(cfg_cmdline[rows], "sql_table_version: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 's':
-      strcpy(cfg_cmdline[rows], "imt_mem_pools_size: ");
+      strlcpy(cfg_cmdline[rows], "imt_mem_pools_size: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'S':
-      strcpy(cfg_cmdline[rows], "syslog: ");
+      strlcpy(cfg_cmdline[rows], "syslog: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'R':
-      strcpy(cfg_cmdline[rows], "sfacctd_renormalize: true");
+      strlcpy(cfg_cmdline[rows], "sfacctd_renormalize: true", SRVBUFLEN);
       rows++;
       break;
     case 'h':
@@ -312,7 +312,16 @@ int main(int argc,char **argv, char **envp)
     Log(LOG_INFO, "INFO ( default/core ): Start logging ...\n");
   }
 
-  if (config.logfile) config.logfile_fd = open_logfile(config.logfile);
+  if (config.logfile)
+  {
+    config.logfile_fd = open_logfile(config.logfile);
+    list = plugins_list;
+    while (list) {
+      list->cfg.logfile_fd = config.logfile_fd ;
+      list = list->next;
+    }
+  }
+
 
   /* Enforcing policies over aggregation methods */
   list = plugins_list;
@@ -583,7 +592,8 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.vlan6.packet_ptr)->ether_type, htons(ETHERTYPE_8021Q));
   pptrs.vlan6.mac_ptr = (u_char *)((struct eth_header *)pptrs.vlan6.packet_ptr)->ether_dhost;
   pptrs.vlan6.vlan_ptr = pptrs.vlan6.packet_ptr + ETHER_HDRLEN;
-  Assign16(*(pptrs.vlan6.vlan_ptr+2), htons(ETHERTYPE_IPV6));
+  Assign8(*(pptrs.vlan6.vlan_ptr+2), 0x86);
+  Assign8(*(pptrs.vlan6.vlan_ptr+3), 0xDD);
   pptrs.vlan6.iph_ptr = pptrs.vlan6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
   pptrs.vlan6.tlh_ptr = pptrs.vlan6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN + sizeof(struct ip6_hdr);
   Assign16(((struct ip6_hdr *)pptrs.vlan6.iph_ptr)->ip6_plen, htons(100));
@@ -616,7 +626,8 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.vlanmpls6.packet_ptr)->ether_type, htons(ETHERTYPE_8021Q));
   pptrs.vlanmpls6.mac_ptr = (u_char *)((struct eth_header *)pptrs.vlanmpls6.packet_ptr)->ether_dhost;
   pptrs.vlanmpls6.vlan_ptr = pptrs.vlanmpls6.packet_ptr + ETHER_HDRLEN;
-  Assign16(*(pptrs.vlanmpls6.vlan_ptr+2), htons(ETHERTYPE_MPLS));
+  Assign8(*(pptrs.vlanmpls6.vlan_ptr+2), 0x88);
+  Assign8(*(pptrs.vlanmpls6.vlan_ptr+3), 0x47);
   pptrs.vlanmpls6.mpls_ptr = pptrs.vlanmpls6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
   // pptrs.vlanmpls6.pkthdr->caplen = 104; /* eth_header + vlan + upto 10 MPLS labels + ip6_hdr + my_tlhdr */
   pptrs.vlanmpls6.pkthdr->caplen = 121;
@@ -1807,7 +1818,11 @@ void readv5FlowSample(SFSample *sample, int expanded, struct packet_ptrs_vector 
       case SFLFLOW_EX_PROCESS:      readExtendedProcess(sample); break;
       case SFLFLOW_EX_CLASS:	    readExtendedClass(sample); break;
       case SFLFLOW_EX_TAG:	    readExtendedTag(sample); break;
-      default: skipBytes(sample, length); break; 
+      default:
+	// lengthCheck() here for extra security before skipBytes()
+	if (lengthCheck(sample, start, length) == ERR) return;
+	skipBytes(sample, length);
+	break;
       }
       if (lengthCheck(sample, start, length) == ERR) return;
     }
@@ -2224,7 +2239,12 @@ char *sfv245_check_status(SFSample *spp, struct sockaddr *sa)
   int hash; 
 
   memcpy(&salocal, sa, sizeof(struct sockaddr));
+
+  /* Let's copy the IPv4 sFlow agent address; family is defined just in case the
+     remote peer IP address was reported as IPv4-mapped IPv6 address */
+  salocal.sa_family = AF_INET; 
   ( (struct sockaddr_in *)&salocal )->sin_addr = spp->agent_addr.address.ip_v4;
+
   hash = hash_status_table(aux1, &salocal, XFLOW_STATUS_TABLE_SZ);
 
   if (hash >= 0) {

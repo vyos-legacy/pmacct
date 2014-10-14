@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -639,4 +639,6 @@ void SQLI_init_default_values(struct insert_data *idata)
     }
     memset(multi_values_buffer, 0, config.sql_multi_values);
   }
+
+  if (config.sql_locking_style) idata->locks = sql_select_locking_style(config.sql_locking_style);
 }

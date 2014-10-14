@@ -1,5 +1,102 @@
-pmacct (Promiscuous mode IP Accounting package) v0.11.4
-pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+pmacct (Promiscuous mode IP Accounting package) v0.11.6
+pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+
+0.11.6 -- 07-04-2008
+  + Introduced support for tag ranges into the 'pre_tag_filter' 
+    configuration directive (ie. '10-20' matches traffic tagged
+    in the range 10..20). This works both in addition to and in
+    combination with negations.
+  + Tcpdump-style filters, ie. 'aggregate_filter', now support
+    indexing within a packet, ie. 'ether[12:2]', to allow a more
+    flexible separation of the traffic.
+  + Introduced support for descriptions in networks definition
+    files pointed by the 'networks_file' configuration directive.
+    Thanks to Karl O. Pinc for contributing the patch.
+  ! fix, pmacctd: libpcap DLT_LINUX_SLL type is not defined in
+    older versions of the library. It was preventing successful
+    compilation of pmacct on OpenBSD. This has been fixed by
+    defining internally to pmacct all DLT types in use. Thanks
+    to Karl O. Pinc for his support.
+  ! fix, IPv6 networks_file, load_networks6(): wrong masks were
+    applied to IPv6 networks due to dirty temporary buffers for
+    storing IPv6 addresses and masks. Short '::' IPv6 format is
+    currently not supported. Thanks to Robert Blechinger for
+    flagging the issue.
+  ! fix, pretag.c: Pre-Tagging infrastructure was SEGV'ing after
+    having been instructed to reload via a SIGHUP signal. Patch
+    is courtesy of Denis Cavrois and the Acipia development team.
+  ! fix, sfacctd, nfacctd: Assign16() was not handling correctly
+    2-bytes EtherType values (ie. 0x86dd, 0x8847) in 802.1Q tags.
+    As a result 'aggregate_filter' was not able to correctly match
+    IPv6-related filters. Thanks to Axel Apitz for reporting the
+    issue.
+  ! fix, xflow_status.c: a cosmetic bug was displaying sequence
+    numbers without applying previous increment. This definitely
+    will help troubleshooting and debugging.
+  ! fix, sfacctd, sfv245_check_status(): AF of the sFlow agent
+    is now explicitely defined: when IPv6 is enabled the remote
+    peer address can be reported as IPv4-mapped IPv6 address. This
+    was causing warning messages to report the wrong sFlow agent
+    IP address. Thanks to Axel Apitz for reporting the issue.
+  ! fix, IMT plugin was crashing upon receipt of a classification
+    table request (WANT_CLASS_TABLE) when stream classification
+    was actually disabled.
+  ! fix, pmacct.c: classifier index was not brought back to zero
+    by the pmacct client. This was preventing the client to show
+    correct stream classification when it was feeded with multiple
+    queries. The fix is courtesy of Fabio Cairo.
+  ! fix, MySQL plugin: upon enabling of the 'nfacctd_sql_log'
+    directive, 'stamp_updated' field was incorrectly reported
+    as '0000-00-00 00:00:00' due to wrong field formatting. Thanks
+    to Brett D'Arcy for reporting and patching the issue.
+  ! Initial effort to clean the code up by strcpy() calls. Thanks
+    to Karl O. Pinc for taking such initiative.
+
+0.11.5 -- 21-07-2008
+  + SQL UPDATE queries code has been rewritten for increased
+    flexibility. The SET statement is now a vector and part of
+    it has been shifted into the sql_compose_static_set() routine
+    in the common SQL layer.
+  + A new sql_locking_style directive is now supported in the
+    MySQL plugin. To exploit it, an underlying InnoDB table is
+    mandatory. Thanks to Matt Gillespie for his tests.
+  + Support for Endace DAG cards is now available; this has been
+    tested against libDAG 3.0.0. Many thanks to Robert Blechinger
+    for his extensive support.
+  + pmacctd, the Linux Cooked device (DLT_LINUX_SLL) handler has
+    been enhanced by supporting 'src_mac' and 'vlan' aggregation
+    primitives.
+  ! fix, xflow_status.c: NetFlow/sFlow collector's IP address is
+    being rewritten as 0.0.0.0 when NULL. Was causing SEGVs on
+    Solaris/sparc.
+  ! fix, server.c: WANT_RESET is copied in order to avoid losing
+    it when handling long queries and need to fragment the reply.
+    Thanks very much to Ruben Laban for his support.
+  ! fix, MySQL plugin: the table name is now escaped in order to
+    not conflict with reserved words, if one of those is selected.
+    Thanks to Marcel Hecko for reporting the bug.
+  ! An extra security check is being introduced in sfacctd as an
+    unsupported extension sent over by a Foundry Bigiron 4000 kit
+    was causing SEGV issues. Many Thanks to Michael Hoffrath for
+    the strong support provided.
+  ! fix, 'nfprobe' plugin: AS numbers were not correctly exported
+    to the collector when pmacctd was in use. Patch is courtesy of
+    Emerson Pinter.
+  ! fix, 'nfprobe' plugin: MACs were not properly encapsulated
+    resulting in wrong addresses being exported through NetFlow
+    v9. The patch is courtesy of Alexander Bergolth.
+  ! fix, buffers holding MAC address strings throughout the code
+    had not enough space to store the trailing zero. The patch is
+    courtesy of Alexander Bergolth.
+  ! fix, logfile FD was not correctly passed onto active plugins.
+    The patch is courtesy of Denis Cavrois.
+  ! Missing field type 60 in NetFlow v9 IPv6 flows, was leading
+    nfacctd to incorrect flow type selection (IPv4). An additional
+    check on the source IP address has now been included to infer
+    IPv6 flows. RFC3954 mandates such field type to be present for
+    IPv6 flows. The issue has been verified against a Cisco 7600
+    w/ RSP720. Many thanks to Robert Blechinger for his extensive
+    support.
 
 0.11.4 -- 25-04-2007
   + support for TCP flags has been introduced. Flags are ORed on a

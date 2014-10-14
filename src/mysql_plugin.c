@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -422,9 +422,8 @@ void MY_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
     strftime_same(lock_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
     if (config.sql_table_schema && idata->new_basetime) sql_create_table(bed.p, idata);
   }
-  // strncat(update_clause, set_clause, SPACELEFT(update_clause));
 
-  (*sqlfunc_cbr.lock)(bed.p); 
+  if (idata->locks == PM_LOCK_EXCLUSIVE) (*sqlfunc_cbr.lock)(bed.p); 
 
   for (idata->current_queue_elem = 0; idata->current_queue_elem < index; idata->current_queue_elem++) {
     if (queue[idata->current_queue_elem]->valid) sql_query(&bed, queue[idata->current_queue_elem], idata);
@@ -438,7 +437,7 @@ void MY_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
   }
 
   /* rewinding stuff */
-  (*sqlfunc_cbr.unlock)(&bed);
+  if (idata->locks == PM_LOCK_EXCLUSIVE) (*sqlfunc_cbr.unlock)(&bed);
   if ((lf.fail) || (b.fail)) Log(LOG_ALERT, "ALERT ( %s/%s ): recovery for MySQL daemon failed.\n", config.name, config.type);
   
   if (config.debug) {
@@ -497,7 +496,7 @@ int MY_compose_static_queries()
 
   /* "INSERT INTO ... VALUES ... " and "... WHERE ..." stuff */
   strncpy(where[primitives].string, " WHERE ", sizeof(where[primitives].string));
-  snprintf(insert_clause, sizeof(insert_clause), "INSERT INTO %s (", config.sql_table);
+  snprintf(insert_clause, sizeof(insert_clause), "INSERT INTO `%s` (", config.sql_table);
   strncpy(values[primitives].string, " VALUES (", sizeof(values[primitives].string));
   primitives = MY_evaluate_history(primitives);
   primitives = sql_evaluate_primitives(primitives);
@@ -506,12 +505,11 @@ int MY_compose_static_queries()
   strncat(insert_clause, ")", SPACELEFT(insert_clause));
 
   /* "LOCK ..." stuff */
-  if (config.sql_locking_style) Log(LOG_WARNING, "WARN ( %s/%s ): sql_locking_style is not supported. Ignored.\n", config.name, config.type);
-  snprintf(lock_clause, sizeof(lock_clause), "LOCK TABLES %s WRITE", config.sql_table);
+  snprintf(lock_clause, sizeof(lock_clause), "LOCK TABLES `%s` WRITE", config.sql_table);
   strncpy(unlock_clause, "UNLOCK TABLES", sizeof(unlock_clause));
 
   /* "UPDATE ... SET ..." stuff */
-  snprintf(update_clause, sizeof(update_clause), "UPDATE %s ", config.sql_table);
+  snprintf(update_clause, sizeof(update_clause), "UPDATE `%s` ", config.sql_table);
 
   set_primitives = sql_compose_static_set(have_flows);
 
@@ -535,14 +533,14 @@ int MY_compose_static_queries()
     else {
       if (!config.sql_history_since_epoch) {
 	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
-	strncat(set[set_primitives].string, "stamp_updated=%u", SPACELEFT(set[set_primitives].string));
+	strncat(set[set_primitives].string, "stamp_updated=FROM_UNIXTIME(%u)", SPACELEFT(set[set_primitives].string));
 	set[set_primitives].type = TIMESTAMP;
 	set[set_primitives].handler = count_timestamp_setclause_handler;
 	set_primitives++;
       }
       else {
 	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
-	strncat(set[set_primitives].string, "stamp_updated=UNIX_TIMESTAMP(%u)", SPACELEFT(set[set_primitives].string));
+	strncat(set[set_primitives].string, "stamp_updated=%u", SPACELEFT(set[set_primitives].string));
 	set[set_primitives].type = TIMESTAMP;
 	set[set_primitives].handler = count_timestamp_setclause_handler;
 	set_primitives++;
@@ -667,4 +665,6 @@ void MY_init_default_values(struct insert_data *idata)
     }
     memset(multi_values_buffer, 0, config.sql_multi_values);
   }
+
+  if (config.sql_locking_style) idata->locks = sql_select_locking_style(config.sql_locking_style);
 }

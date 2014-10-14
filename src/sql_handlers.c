@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -44,7 +44,7 @@ static const char fake_as[] = "0";
 #if defined (HAVE_L2)
 void count_src_mac_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
-  char sbuf[17];
+  char sbuf[18];
   u_int8_t ubuf[ETH_ADDR_LEN];
 
   memcpy(&ubuf, &cache_elem->primitives.eth_shost, ETH_ADDR_LEN);
@@ -58,7 +58,7 @@ void count_src_mac_handler(const struct db_cache *cache_elem, const struct inser
 
 void count_dst_mac_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
-  char sbuf[17];
+  char sbuf[18];
   u_int8_t ubuf[ETH_ADDR_LEN];
 
   memcpy(ubuf, &cache_elem->primitives.eth_dhost, ETH_ADDR_LEN);

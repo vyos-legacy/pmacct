@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -243,6 +243,8 @@ void reload_maps();
 #else
 #define EXT
 #endif
+EXT char sll_mac[2][ETH_ADDR_LEN];
+
 EXT void null_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 EXT void eth_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 EXT void fddi_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);

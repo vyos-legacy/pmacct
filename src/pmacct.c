@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -93,16 +93,14 @@ int sanitize_buf(char *buf)
 
 void trim_all_spaces(char *buf)
 {
-  char *ptr;
   int i = 0, len;
 
-  ptr = buf;
   len = strlen(buf);
 
   /* trimming all spaces */
   while (i <= len) {
-    if (isspace(ptr[i])) {
-      strcpy(&buf[i], &ptr[i+1]);
+    if (isspace(buf[i])) {
+      strlcpy(&buf[i], &buf[i+1], len);
       len--;
     }
     else i++;
@@ -235,7 +233,7 @@ int main(int argc,char **argv)
   struct stripped_class *class_table = NULL;
   char clibuf[clibufsz], *bufptr;
   unsigned char *largebuf, *elem, *ct;
-  char ethernet_address[17], ip_address[INET6_ADDRSTRLEN];
+  char ethernet_address[18], ip_address[INET6_ADDRSTRLEN];
   char path[128], file[128], password[9];
   int sd, buflen, unpacked, printed;
   int counter=0, ct_idx=0, ct_num=0;
@@ -727,10 +725,13 @@ int main(int argc,char **argv)
 	    ct_num = ((struct query_header *)ct)->num;
 	    elem = ct+sizeof(struct query_header);
 	    class_table = (struct stripped_class *) elem;
+	    ct_idx = 0;
 	    while (ct_idx < ct_num) {
 	      class_table[ct_idx].protocol[MAX_PROTOCOL_LEN-1] = '\0';
-	      if (!strcmp(class_table[ct_idx].protocol, sclass))
+	      if (!strcmp(class_table[ct_idx].protocol, sclass)) {
 	        value = class_table[ct_idx].id;
+		break;
+	      }
 	      ct_idx++;
 	    }
 

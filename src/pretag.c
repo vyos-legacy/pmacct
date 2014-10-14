@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -47,6 +47,8 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
   char *start, *key = NULL, *value = NULL;
   int len;
 
+  Log(LOG_INFO, "INFO ( default/core ): Trying to reload pre tag map\n") ;
+
   memset(&st, 0, sizeof(st));
 
   if (!config.pre_tag_map_entries) config.pre_tag_map_entries = MAX_PRETAG_MAP_ENTRIES;
@@ -57,15 +59,22 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
       goto handle_error;
     }
 
-    memset(t, 0, sizeof(struct id_table));
-    memset(&tmp, 0, sizeof(struct id_table));
-
     sz = sizeof(struct id_entry)*config.pre_tag_map_entries;
+
     if (!pre_tag_map_allocated) {
-      tmp.e = (struct id_entry *) malloc(sz);
+      memset(t, 0, sizeof(struct id_table));
       t->e = (struct id_entry *) malloc(sz);
       pre_tag_map_allocated = TRUE;
     }
+    else {
+      ptr = t->e ;
+      memset(t, 0, sizeof(struct id_table));
+      t->e = ptr ;
+    }
+
+    memset(&tmp, 0, sizeof(struct id_table));
+    tmp.e = (struct id_entry *) malloc(sz);
+
 
     memset(tmp.e, 0, sz);
     memset(t->e, 0, sz);
@@ -247,9 +256,13 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 #endif
   }
 
+  free(tmp.e) ;
+  Log(LOG_INFO, "INFO ( default/core ): Pre tag map successfully reloaded.\n") ;
+
   return;
 
   handle_error:
+  free(tmp.e) ;
   if (t->timestamp) {
     Log(LOG_WARNING, "WARN: Rolling back the old Pre-Tagging Map.\n");
 
@@ -267,4 +280,16 @@ u_int8_t pt_check_neg(char **value)
     return TRUE;
   }
   else return FALSE;
+}
+
+char *pt_check_range(char *str)
+{
+  char *ptr;
+
+  if (ptr = strchr(str, '-')) {
+    *ptr = '\0';
+    ptr++;
+    return ptr;
+  }
+  else return NULL;
 }

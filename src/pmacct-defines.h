@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -45,12 +45,12 @@
 #define LARGEBUFLEN (8192+MOREBUFSZ)
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.11.4"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.11.4"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.11.4"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.11.4"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.11.4"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.11.4"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.11.6-cvs"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.11.6-cvs"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.11.6-cvs"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.11.6-cvs"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.11.6-cvs"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.11.6-cvs"
 
 #ifndef TRUE
 #define TRUE 1

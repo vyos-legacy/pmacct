@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
 */
 
 /*
@@ -472,7 +472,7 @@ int evaluate_tags(struct pretag_filter *filter, u_int16_t tag)
   if (filter->num == 0) return FALSE; /* no entries in the filter array: tag filtering disabled */
   
   for (index = 0; index < filter->num; index++) {
-    if (filter->table[index].n == tag) return (FALSE | filter->table[index].neg);
+    if (filter->table[index].n <= tag && filter->table[index].r >= tag) return (FALSE | filter->table[index].neg);
     else if (filter->table[index].neg) return FALSE;
   }
   
