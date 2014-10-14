@@ -1,0 +1,237 @@
+pmacct (Promiscuous mode IP Accounting package)
+pmacct is Copyright (C) 2004 by Paolo Lucente
+
+pmacct EXAMPLES file.
+
+(poorman's) TABLE OF CONTENTS:
+I.	Plugins included with pmacct distribution
+II.	Configuring pmacct for compilation
+III.	Brief SQL setup examples
+IV.	Common terms used in this document
+V.	Running pmacct daemon (pmacctd)
+VI.	Running nfacct daemon (nfacctd)
+VII.	Running pmacct client (pmacct)
+VIII.	Running logfile players (pmmyplay and pmpgplay) 
+
+
+I. Plugins included with pmacct distribution
+As any pluggable architecture, anyone could write his own plugins for pmacct daemon; what
+follows if the list of plugins included in the official pmacct distribution. 
+
+"memory": enables the use of memory plugin; statistics are stored in a tunable memory table
+	  and are fetched via commandline pmacct client tool. The way it works is similar
+	  to Cisco's IOS "ip show accounting" command.
+"mysql":  enables the use of MySQL plugin; it allows to use a MySQL database as storage for
+	  statistics. 
+"pgsql":  enables the use of PostgreSQL plugin; it allows to use a PostgreSQL database as
+	  storage for statistics.
+"print":  enables the use of print plugin; statistics are pulled to stdout in a way similar
+	  to tcpdump and flow-tools' 'flow-print' tool.
+
+
+II. Configuring pmacct for compilation
+The simplest chance is to let the configure script to test default headers and libraries
+locations for you without enabling any optional plugin (PostgreSQL or MySQL); plugins that
+will be compiled in are "memory" and "print":
+shell> ./configure
+
+As usual, to get help and the list of available switches:
+shell> ./configure --help
+
+A pair of examples on how to configure the package to enable the support of a (1) MySQL or
+a (2) PostgreSQL database; they, of course, could be enabled (3) both:
+(1) shell> ./configure --enable-mysql
+(2) shell> ./configure --enable-pgsql
+(3) shell> ./configure --enable-mysql --enable-pgsql
+
+
+III. Brief SQL setup examples
+Scripts for setting up DB (MySQL or PostgreSQL) are in 'sql/' subdirectory of pmacct tarball.
+Examples to create database, grant default permissions will follow.  
+
+IIIa. SQL table versioning
+pmacct version 0.7.1 introduced SQL table versioning; it enables changes to pmacct's default
+SQL table without breaking backward compatibility. Who does actually need table versioning ?
+Everyone using pmacct's SQL tables as they are created by scripts shipped into the tarball.
+So, who actually implements any customized version of the tables (and 'sql_optimize_clauses'
+configuration key) doesn't need versioning. Further pointers about SQL table's customization
+are available in INTERNALS, docs section. 
+If you definitely need versioning, don't forget to specify what SQL table version you are
+currently using:
+
+commandline: 	'-v [1|2]'
+configuration:  'sql_table_version: [1|2]'	
+
+Now, v1 or v2 tables ? Few rules of thumb follow:
+
+- Do you need agent ID for distributed accounting ? Then you have to use v2.  
+- Do you need VLAN traffic accounting ? Then you have to use v2.
+- If all of the above point sound useless for you, then use v1.
+ 
+IIIb. MySQL examples 
+shell> cd sql/
+
+- To create v1 tables:
+shell> mysql -u root -p < pmacct-create-db_v1.mysql
+shell> mysql -u root -p < pmacct-grant-db.mysql
+
+Data will be available in 'acct' table of 'pmacct' DB.
+
+- To create v2 tables:
+shell> mysql -u root -p < pmacct-create-db_v2.mysql
+shell> mysql -u root -p < pmacct-grant-db.mysql
+
+Data will be available in 'acct_v2' table of 'pmacct' DB.
+
+IIIc. PostgreSQL examples
+Which user has to execute the following two scripts and how to autenticate with the PostgreSQL
+server depends upon your current configuration. Keep in mind that both scripts need postgres
+superuser permissions to execute some commands successfully:
+shell> cp -p *.pgsql /tmp
+shell> su - postgres
+
+To create v1 tables:
+shell> psql -d template1 -f /tmp/pmacct-create-db.pgsql
+shell> psql -d pmacct -f /tmp/pmacct-create-table_v1.pgsql
+
+To create v2 tables:
+shell> psql -d template1 -f /tmp/pmacct-create-db.pgsql
+shell> psql -d pmacct -f /tmp/pmacct-create-table_v2.pgsql
+
+Two tables will be created in the 'pmacct' DB. 'acct' (or acct_v2 if using v2) table is the default
+table where data will be written when in 'frontend' mode (see 'sql_data' option in CONFIG-KEYS text
+file; default value is 'frontend'); 'acct_back' (or acct_back_v2 if using v2 tables) is the default
+table where data will be written when in 'backend' mode.
+A brief explanation of what frontend/backend means here: 'frontend data are final, human readable
+strings; backend data are integers, IP addresses represented in network byte order, etc.'.
+
+
+IV. Common terms used in this document
+TERM: Exact match. 
+EXP: We refer at 'exact matches' when requesting data from client side ('pmacct') to the daemon side
+(eg. 'pmacctd', 'nfacctd'). We have an exact match if both following two conditions are true:
+- Aggregation method used on the daemon side (via 'aggregate' configuration key or '-c' commandline
+  switch) is the same as the aggregation method used on the client side (via '-c' commandline switch) 
+- Data we are searching for, on client side, are found. 
+
+
+V. RUNNING PMACCTD DAEMON (pmacctd)
+You can run pmacctd either with commandline options or using a configuration file. Please remember
+that sample configuration files are in "examples" directory of the tarball distribution. Note that 
+many new features are available only if enabling them via a configuration file. Getting rid either
+of a configuration file or commandline options is mutual exclusive. To be aware of all existing
+config keys, please read CONFIG-KEYS textfile. 
+
+Show all available pmacctd commandline switches:
+shell> pmacctd -h
+
+Run pmacctd reading configuration from a specified config file (see "examples" directory for a brief
+list of some common use keys inside sample config files and refer to CONFIG-KEYS textfile to learn
+about available keys):
+shell> pmacctd -f pmacctd.conf
+
+Daemonize the process; listen on eth0; aggregate data with "src_host" and "dst_host" primitives; write
+data in a mysql database, activating "mysql" plugin; filter traffic matching source ip network 10.0.0.0/16;
+filtering option is same use as tcpdump. Please refer tcpdump's man page for examples. 
+shell> pmacctd -D -c src_host,dst_host -i eth0 -P mysql src net 10.0.0.0/16
+
+Print intercepted flows (data aggregated with "src_host" and "dst_host" primitives) on the screen (in a way
+similar to tcpdump or cflowd's flow-print tool); refresh data every 30 seconds and listen over "eth0". 
+shell> pmacctd -P print -r 30 -i eth0 -c src_host,dst_host
+
+Daemonize the process; aggregate traffic statistics to show who connects where and using what service; store
+data in a PostgreSQL database, activating "pgsql" plugin. Because no interface has been supplied, the default
+one will be choosen for you:
+shell> pmacctd -D -c src_host,dst_host,dst_port -P pgsql 
+
+Enable debug mode; listen on interface ee1; collect stats aggregating for destinations in a memory structure
+with 8 memory pools of 64Kb each (curious about memory pools ? Take a look to "Memory table plugin" section
+in INTERNALS textfile):
+shell> pmacctd -d -P memory -c dst_host -i ee1 -m 8 -s 65535
+
+Daemonize the process; this time memory structure is configured to grow undefinitely in memory, allowing the
+structure itself to allocate more and more memory without a pre-defined limit (-m 0); memory pools size will
+be 32Kb:
+shell> pmacctd -D -m 0 -s 32768 
+
+Daemonize the process; set the number of buckets of the in-memory table at a value of 65537; having a flat table
+(translates: high number of buckets) is the right way for keeping it healty when reaches large sizes (see further
+details about structure of in-memory table in INTERNALS textfile, section "Memory table plugin"; this time the
+traffic will get aggregated for source and destination mac addresses:
+shell> pmacctd -D -b 65537 -c src_mac,dst_mac  
+
+Run multiple instances of pmacctd (eg. to listen for traffic over multiple interfaces); each instance will have
+its own in-memory table and will require an own pipe file to get queried by pmacct client. 
+shell> pmacctd -D -i eth0 -m 8 -s 65535 -p /tmp/pipe.eth0 
+shell> pmacctd -D -i ppp0 -m 0 -s 32768 -p /tmp/pipe.ppp0 
+
+Run pmacctd logging what happens to syslog and using "local2" facility:
+shell> pmacctd -c src_host,dst_host -S local2
+
+NOTE: superuser privileges are needed to execute pmacctd correctly. 
+
+
+VI. Running nfacct daemon (nfacctd)
+All examples about pmacctd are also valid for nfacctd with the exception of options that apply exclusively to promiscuous
+mode. If you've skipped examples in section 'IV', please read them. To be aware of all existing config keys, please read
+CONFIG-KEYS textfile. Examples follow:
+
+Run nfacctd reading configuration from a specified config file.
+shell> nfacctd -f nfacctd.conf
+
+Daemonize the process; aggregate data with "src_host" and "dst_host" primitives; write data in a mysql database, activating
+"mysql" plugin. Listen for Netflow packets on port 5678.
+shell> nfacctd -D -c src_host,dst_host -P mysql -l 5678 
+
+
+VII. Running pmacct client (pmacct)
+The pmacct client is used to gather data either from pmacctd or nfacctd when using in-memory table. Requests and
+answers are exchanged bewteen via a pipe file so security is strictly connected with file permissions. Of course,
+when using SQL plugins you will not need pmacct client but your specific DB client tool (eg. psql, mysql) to gather
+data. 
+
+Show all available pmacct client commandline switches:
+shell> pmacct -h
+
+Fetch all data in the in-memory table:
+shell> pmacct -s 
+
+Fetch data in the in-memory table; search for a matching flow between 'src_host' 192.168.0.10 and 'dst_host' 192.168.0.3;
+show all fields ('-a'), filling with zeroes those that are actually unused: 
+shell> pmacct -c src_host,dst_host -M 192.168.0.10,192.168.0.3
+
+Same as before; we also request to reset counters for the exact matching entry in the memory table:
+shell> pmacct -c src_host,dst_host -M 192.168.0.10,192.168.0.3 -r
+
+Fetch data for IP 10.0.1.200 as destination host; we ask for an output suitable for MRTG data injection ('-m'); the match is
+an exact match: 
+shell> pmacct -c dst_host -m 10.0.1.200
+
+Show bandwidth wasted from www service; communicate with pmacctd or nfacctd via /tmp/pipe.eth0 pipe file: 
+shell> pmacct -c dst_port -m 80 -p /tmp/pipe.eth0 
+
+Show ftp-data (port 20) traffic for host 10.0.1.10 connecting to host 194.119.200.100 (ahhh, our loved area). NOTE: take 
+care to the match between the primitive name (supplied with '-c') and its value (supplied either with '-M' or '-m') because
+it is essential to have meaningful results:
+shell> pmacct -c src_host,dst_host,dst_port -m 10.0.1.10,194.119.200.100,20 
+
+
+VIII. Running logfile players (pmmyplay and pmpgplay)
+Examples will be shown using "pmmyplay" tool; they are same way applicable to "pmpgplay" tool. Two methods are supported
+as failover action when writing to a DB: use logfiles or a backup DB. Aside from different scenarios and environments, a
+brief advice is the following: using a logfile is a simple way to overcome transient failure situations that requires
+human intervention while using a backup DB could ease the data merging task automation.
+
+Display online help and available options:
+shell> pmmyplay -h
+
+Play the whole specified file, inserting elements in the DB and enabling debug:
+shell> pmmyplay -d -f /tmp/pmacct-recovery.dat
+
+Play a single (-s) element (the fifth) from the specified file (useful if, for example, a previously player execution has 
+failed to write some element; all element failed to get written, if any, will be displayed over your screen):
+shell> pmmyplay -o 5 -s -f /tmp/pmacct-recovery.dat
+
+Play all elements, starting from element number six:
+shell> pmmyplay -o 6 -f /tmp/pmacct-recovery.dat -p ohwhatanicepwrd
+

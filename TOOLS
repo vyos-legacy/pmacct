@@ -1,0 +1,11 @@
+pmacct (Promiscuous mode IP Accounting package)
+pmacct is Copyright (C) 2004 by Paolo Lucente
+
+pmacctd		pmacct daemon; gathers statistics.
+pmacct  	pmacct client; retrieves data from in-memory table is used. 
+pmmyplay	pmacct MySQL logfile player; plays MySQL plugin's recovery
+		logfiles. 
+pmpgplay	pmacct PGSQL logfile player; plays PGSQL plugin's recovery
+		logfiles. 
+nfacctd		Netflow accounting daemon; listens for Netflow packets and
+		gathers statistics.

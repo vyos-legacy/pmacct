@@ -1,0 +1,563 @@
+pmacct (Promiscuous mode IP Accounting package) v0.7.4
+pmacct is Copyright (C) 2004 by Paolo Lucente
+
+0.7.4 -- 30-Sep-2004
+  + Enhanced packet tagging support; it's now broken in Pre-Tagging and
+    Post-Tagging; Pre-Tagging allows 'nfacctd' to assign an ID to a flow
+    evaluating an arbitrary combination of supported NetFlow packet
+    fields (actually: IP address, Input Interface, Output Interface); the
+    Pre-Tagging map is global; Pre-Tag is applied as soon as each flow
+    is processed; Post-Tagging allows both 'nfacctd' and 'pmacctd' to
+    assign an ID to packets using a supplied value; Post-Tagging could be
+    either global or local to a single plugin (and more plugins may tag
+    differently); Post-Tag is applied as a last action before the packet
+    is sent to the plugin. 'nfacctd_id_map' and 'pmacctd_id' configuration
+    keys are now obsolete; 'pre_tag_map' and 'post_tag' are introduced to
+    replace them. 
+  + Added support for Pre-Tag filtering; it allows to filter packets basing
+    on their Pre-Tag value. The filter is evaluated after Pre-Tagging but
+    before Post-Tagging; it adds to BPF filtering support ('aggregate_filter'
+    configuration key); 'pre_tag_filter' configuration key is introduced.
+  + Added support for Packet Sampling; the current implementation bases on
+    a simple systematic algorithm; the new 'sampling_rate' configuration
+    key expects a positive integer value >= 1 which is the ratio of the
+    packets to be sampled (translates in: pick only 1 out of N packets).
+    The key is either global or local (meaning that each plugin could apply
+    different sampling rates).
+  ! Fixed a bug which was causing crashes in both 'pmacctd' and 'nfacctd'
+    when '-r' parameter was specified commandline. Thanks to Ali Nikham 
+    for his support. 
+
+0.7.3 -- 31-Aug-2004
+  + Added support for both Netflow 'input interface' and 'output interface'
+    fields. These two fields are contained in each flow record inside a
+    NetFlow packet. It works through ID mapping (read below).
+  + The ID map file syntax has been enhanced to allow greater flexibility
+    in ID assignation to packets; example: 'id=1 ip=192.168.1.1 in=3
+    out=5'; the above line will cause the 'ID' 1 to be assigned to
+    flows exported by a NetFlow agent (for example a router) which IP
+    address is '192.168.1.1' and transiting from interface '3' to interface
+    '5'. 
+  + In-memory table operations have been enhanced when using shared memory;
+    a new reset flag has been added to avoid race conditions.
+  ! Configuration lines are no more limited to some fixed maximum length
+    but are allocated dynamically; this to overcome the need for long
+    configuration lines to declare arbitrary filters and plugin's list.
+    Thanks to Jerry Ji for his support.
+  ! Configuration handlers, which are responsible to parse and validate
+    values for each configuration key, have been rewritten on the way
+    for a better portability. 
+  ! Signal handler routines have been changed to better accomodate SysV
+    semantics. 
+  ! Fixed shared memory mmap() operations on IRIX and SunOS; a further
+    test checks for either 'MAP_ANON' or 'MAP_ANONYMOUS' definitions; in
+    case of negative outcome, mmap() will use '/dev/zero'. 
+  ! Packet handlers have been revised and optimized.
+  ! Some optimizations have been added when using shared memory; write()
+    function has been usually called to signal the arrival of each new packet,
+    through the core process/plugin control channel; now it does so if and
+    only if the plugin, on the other side, is actually blocking over a poll();
+    because of sequence numbers guarantee, data is directly written into
+    shared memory segment.
+
+0.7.2p1 -- 08-Aug-2004
+  ! Multiple fixes in plugin's configuration post checks; negative outcome
+    of some checks was leading to clear misbehaviours. Versions affected
+    are >= 0.7.0 . A big thanks goes to Alexandra Walford for her support.
+
+0.7.2 -- 02-Aug-2004
+  + VLAN accounting has been added. The new 'vlan' keyword is supported as
+    argument of both '-c' commandline switch and 'aggregate' configuration
+    key.
+  + Distributed accounting support has been added. It could be enabled into
+    'pmacctd' via 'pmacctd_id' configuration key and into 'nfacctd' via the
+    'nfacctd_id_file' configuration key. While 'pmacctd_id' key expects as
+    value a small integer, 'nfacctd_id_file' expects a path to a file which
+    contains the mapping: 'IP address of the router (exporting Newflow) ->
+    small integer'. This scheme ease tasks such as keeping track of who has
+    generated what data and either cluster or keep disjoint data coming from
+    different sources when using a SQL database as backend. 
+  + Introduced SQL table version 2. The SQL schema is the same as existing
+    tables with the following additions: support for distributed accounting;
+    support for VLAN accounting.
+  + Added MAC addresses query capabilties to pmacct client. 
+  + Added '-r' commandline switch to pmacct client. It can only be used in
+    conjunction with '-m' or '-M' switches. It allows to reset packet and
+    bytes counters of the retrieved record.
+  ! Exit codes have been fixed in both 'pmacctd' and 'nfacctd'. Thanks to
+    Jerry Ji for his signallation. 
+  ! Fixed a problem when retrieving data from memory table: sometimes null
+    data (without any error message) was returned to the client; the problem
+    has been successfully reproduced only on FreeBSD 5.1: after an accept()
+    call, the socket being returned inherits same flags of the listening
+    socket, this case non-blocking flag. Thanks to Nicolas Deffayet for his
+    support. 
+  ! Revised PostgreSQL creation script. 
+
+0.7.1 -- 14-Jul-2004
+  + Added shared memory implementation; core process, now, could push data
+    into a shared memory segment and then signal arrival of new data to the
+    plugin. Shared memory support could be enabled via '--enable-mmap' switch
+    at configuration time.
+  + Strongly enhanced gathering capabilities of pmacct client; pmacct client
+    is used to fetch data from memory plugin; it is, now, able to ask exact
+    or partial matches via '-M' switch and return a readable listing output.
+    MRTG export capabilities, full table fetch and table status query are
+    still supported. 
+  + Introduced SQL table versioning. It could be enabled via 'sql_table_version'
+    configuration switch. It will enable to build new SQL tables (for example
+    adding new aggregation methods) while allowing who is not interested in new
+    setups to work with old tables. 
+  + Added checks for packet capture type; informations acquired are later used
+    for better handling pcap interface. 
+  ! Fixed some issues concerning pmacctd VLAN and PPPOE code.
+  ! Fixed a mmap() issue on Tru64 systems.
+  ! Fixed some minor poll() misbehaviours in MySQL, PgSQL and print plugins;
+    they were not correctly handled. 
+  
+
+0.7.0p1 -- 13-Jul-2004
+  ! Fixes in cache code; affects MySQL, PgSQL and print plugins.
+
+0.7.0 -- 01-Jul-2004
+  + PMACCT OPENS TO NETFLOW: a new network daemon, nfacctd, is introduced:
+    nfacctd listens for Netflow V1/V5 packets; is able to apply BPF filters
+    and to aggregate packets; it's then able to either save data in a memory
+    table, MySQL or PostgreSQL database or simply output packets on the screen.
+    It can read timestamps from Netflow packets in msecs, seconds or ignore
+    them generating new timestamps; a simple allow table mechanism allows
+    to silently discard Netflow packets not generated by a list of trusted
+    hosts.  
+  + Strongly enhanced IP fragmentation handling in pmacctd.
+  + Added new checks into the building systems; new hints when it searches 
+    for libraries and headers; initial tests for C compilers capabilities
+    have been added. 
+  + Works to let pmacct run on IRIX platforms continue; some issues with
+    MipsPRO compiler have been solved; added proper compilation flags/hints.
+    SIGCHLD is now properly handled and child processes are correctly retired.
+    (a thank for his support goes to Joerg Behrens) 
+  + First, timidous, introduction of mmap() calls in memory plugin; they need
+    to be enabled with '--enable-mmap' flag at configure time. 
+  ! Fixed a potential deadlock issue in PostgreSQL plugin; changed locking
+    mechanism. (a big thank to Wim Kerkhoff)
+  ! Fixed an issue concerning networks aggregation on Tru64 systems.
+
+0.6.4p1 -- 01-Jun-2004
+  ! Fixed an issue with cache aliasing in MySQL and PostgreSQL plugins.
+    Other plugins are not affected; this potential issue affects only
+    version 0.6.4, not previous ones. Anyone using these plugins with 
+    0.6.4 is strongly encouraged to upgrade to 0.6.4p1. 
+
+0.6.4 -- 27-May-2004
+  + Added chance to launch executables from both SQL plugins at arbitrary 
+    time intervals to ease data post-processing tasks. Two new keys are
+    available: 'sql_trigger_exec' and 'sql_trigger_time'. If any interval
+    is supplied the specified executable is triggered every time data is
+    purged from the cache. 
+  + Added a new 'print' plugin. Enabling it, data is pulled at regular
+    intervals to stdout in a way similar to cflowd's 'flow-print'.
+    tool. New config keys are 'print_refresh_time', 'print_cache_entries'
+    and 'print_markers'. This last key enables the print of start/end
+    markers each time the cache is purged.  
+  + Added 'sql_dont_try_update' switch to avoid UPDATE queries to the DB
+    and skip directly to INSERT ones. Performance gains has been noticed
+    when UPDATEs are not necessary (eg. when using timeslots to break up
+    counters and sql_history = sql_refresh_time).
+    Thanks to Jamie Wilkinson. 
+  + Optimized use of transactions in PostgreSQL plugin; in the new scheme
+    is built a single big transaction for each cache purge process. This
+    leads to good performance gains; recovery mechanisms have been modified 
+    to overcome whole transaction trashing. Many thanks to James Gregory
+    and Jamie Wilkinson.
+  ! Enhanced debug messages output when specific error conditions are returned
+    by the DB. 
+  ! Fixed a potential counters overflow issue in both MySQL and PgSQL
+    plugins cache.
+  ! Fixed preprocessor definitions issue: LOCK_UN, LOCK_EX are undeclared
+    on IRIX and Solaris. Thanks to Wilhelm Greiner for the fix.
+
+0.6.3 -- 27-Apr-2004
+  + Added support for full libpcap-style filtering capabilities inside
+    pmacctd. This allows to bind arbitrary filters to each plugin (in
+    addition to already existing chance to apply them to the listening
+    interface via 'pcap_filter' configuraiton key). The config key to
+    specify these new filters is 'aggregate_filter'.  
+  + Strongly improved networks definition file handling; now the file is
+    parsed and organized as a hierarchical tree in memory. This allows to
+    recognize and support networks-in-networks. 
+  + Initial optimizations has been done over the code produced in last
+    few months. 
+  + Preprocessor definitions has been added to some part of the code, to
+    allow pmacctd compile over IRIX. It has been reported to work over a
+    IRIX64 6.5.23 box. Thanks to Wilhelm Greiner for his efforts.
+  + Added flock() protected access to recovery logfiles.
+  ! Fixed an ugly SEGV issue detected in both 0.6.2's logfile player tools.
+
+0.6.2 -- 14-Apr-2004
+  + Added support for networks aggregation. Two new primitives has
+    been added 'src_net' and 'dst_net' to be used in conjunction with
+    a network's definitions file (path is supplied via 'networks_file'
+    configuration key). An example of this file is in the examples/
+    directory. 
+    When this aggregation is enabled, IP addresses are compared against
+    the networks table; then the matching network will get written to
+    the backend; if any match occurs a '0.0.0.0' is written.
+    A really big thank goes to Martin Anderberg for his strong support
+    during last weeks. 
+  + pipe() has been thrown away; socketpair() has been introduced to
+    set up a communication channel between pmacctd core process and
+    plugins.
+  + Added 'plugin_pipe_size' configuration key to adjust queue depth 
+    (size) beween core process and plugins. A default value is set by
+    operating system; it could not suffice when handling heavy traffic
+    loads. Added also a specific error string when pipe gets filled.
+  + Added 'plugin_buffer_size' configuration key to enable chances to
+    bufferize data to be sent to plugins. When under great loads this
+    helps in preventing high CPU usage and excessive pressure over
+    kernel.
+  + SQL plugins aliasing behaviour has been changed; when no free space
+    for new data is found and old data has to be pulled out, it's now
+    actually written to the DB but it's inserted in a new 'collision
+    queue'. This new queue is purged together with the 'queries queue'.
+    See INTERNALS for further details. 
+  + SQL plugins cache behaviour has been changed by a direct-mapped
+    one to a 3-ways associative to get better scores when searching
+    free space for new data. See INTERNALS for further details.
+  + Added 'sql_cache_entries' configuration key to adjust bucket's
+    number of SQL plugin cache. As every hashed structure, a prime
+    number of buckets is advisable to get better dispersion of data
+    through the table.
+  ! Fixed a malloc() SEGV issue in in-memory table plugin first
+    noticed with gcc 3.3.3 (Debian 20040320) and glibc 2.3.2.
+  ! Fixed a SEGV issue carried with last release. Improved handling
+    of communication channels between core process and plugins. 
+  ! Uniformed plugin's handling of signals; now sending a SIGINT to
+    all pmacctd processes causes it to flush caches and exit nicely.
+  ! Updated documentation; still no man page.
+
+0.6.1 -- 24-Mar-2004
+  + A new concept has been introduced: plugin names. A name could
+    be assigned to each running plugin allowing to run more
+    instances of the same plugin type; each one is configurable
+    with global or 'named' keys. Take a look to examples for
+    further info. 
+  + Added support for PPPOE links. The code has been fully contributed
+    by Vasiliy Ponomarev. A big thank goes to him.
+  + Added a 'sql_startup_delay' configuration key to allow more
+    plugin instances that need to write to the DB, to flush their
+    data at same intervals but in different times to avoid locking
+    stalls or DB overkills.
+  + Improved handling of syslog connections. SIGHUP signal, used to
+    reopen a connection with syslog (eg. for log rotation purposes),
+    now is supported in all plugins. 
+  + A simple LRU (Last Recently Used) cache has been added to the
+    in-memory table plugin. The cache gives great benefits (exploiting
+    some kind of locality in communication flows) when the table gets
+    large (and chain in buckets become long and expensive to traverse).
+  + Down-up of listening interface are now handled properly. Such an
+    event traps a reopening of connection with libpcap. [EXPERIMENTAL]
+  + Some work has been done (mostly via directives to preprocessor)
+    in order to get pmacct compiled under Solaris. [HIGLY EXPERIMENTAL,
+    translates: don't assume it works but, please, try it out and some
+    kind of feedback would be appreciated] 
+  ! Plugins have been better structured; plugin hooking has been
+    simplified and re-documented; configuration parser has been
+    strongly improved.
+  ! Fixed a bug in 'configure' script; when supplying custom paths to
+    MySQL libraries an erroneous library filename was searched for.
+    (thanks to Wim Kerkhoff) 
+  
+
+0.6.0p3 -- 09-Feb-2004
+  ! Fixed an issue concerning promiscuous mode; it was
+    erroneously defaulting to 'false' under certain
+    conditions. (Thanks to Royston Boot for signalling the
+    problem)
+
+0.6.0p2 -- 05-Feb-2004
+  ! Fixed pmacct daemon in-memory table plugin unstability,
+    noticed under sustained loads. (A thank for signalling
+    the problem goes to Martin Pot) 
+  ! Minor code rewritings for better optimizazion done in
+    both in-memory table plugin and pmacct client.
+
+0.6.0p1 -- 28-Jan-2004
+  ! Fixed a bug in in-memory table plugin that was causing
+    incorrect memorization of statistics. (Many thanks for
+    promptly signalling it go to Martin Pot)
+  ! Fixed a bug in pmacct client, used to gather stats from
+    in-memory table. Under high loads and certain conditions
+    the client was returning SEGV due to a realloc() issue.
+    (Thanks to Martin Pot)
+
+0.6.0  -- 27-Jan-2004
+  + PMACCT OPENS TO POSTGRESQL: fully featured PostgreSQL
+    plugin has been added; it's transaction based and
+    already supports "recovery mode" both via logfile and
+    backup DB actions. pmpgplay is the new tool that allows
+    to play logfiles written in recovery mode by the plugin
+    into a PostgreSQL DB. See CONFIG-KEYS and EXAMPLES for
+    further informations. (Again, many thanks to Wim Kerkoff) 
+  + Added new "recovery mode" action to MySQL plugin: write
+    data to a backup DB if primary DB fails. DB table/user/
+    password need to be the same as in the primary DB. The
+    action could be enabled via "sql_backup_host" config
+    key. 
+  + Added a "sql_data" configuration optinion; a "frontend"
+    value means to write human readable (strings) data; a
+    "backend" value means to write integers in network byte
+    order. Currently, this option is supported only into the
+    new PostgreSQL plugin. See CONFIG-KEYS and README.pgsql
+    for further informations.
+  + Added support for simple password authentication in 
+    client/server query mechanism for in-memory table
+    statistics. It's available via "imt_passwd" config key. 
+  + Added a "-t" commandline switch to pmmyplay; it runs
+    the tool in a test only mode; useful to check header
+    infos or logfile integrity.
+  ! Fixed an ugly bug that made impossible MAC accounting 
+    over certain links. Was affected only version 0.5.4. 
+  ! Many code and structure cleanups.
+
+0.5.4  -- 18-Dec-2003
+  + Added a commandline and configuration switch to use 
+    or not promiscuous mode for traffic capturing; useful 
+    to avoid waste of resources if running over a router. 
+  + Introduced a "recovery mode" concept for MySQL plugin:
+    if DB fails an action is taken; currently is possible
+    to write data to a logfile. More failover solutions to
+    come in next releases. Thanks also to Wim Kerkhoff. 
+  + Added a new "pmmyplay" tool. Allows to play logfiles
+    previously written by a MySQL plugin in recovery mode.
+    Check EXAMPLES for hints; see INTERNALS for further
+    details about recovery mode and pmmyplay. 
+  + Added syslog logging and debugging. Thanks for long
+    brainstormings to Wim Kerkhoff.
+  + Added chance to write PID of pmacctd core process to
+    a specified file; it could help in automating tasks
+    that need to send signals to pmacctd (eg. to rotate
+    logfiles and reopen syslog connection). Take a look
+    to SIGNALS file for further informations.
+  + support for 802.11 Wireless links. [EXPERIMENTAL]  
+  + support for linux cooked device links (DLT_LINUX_SLL).
+    pcap library >= 0.6.x is needed. A big thank goes to
+    KP Kirchdoerfer.
+  ! Simplified client/server query mechanism; avoided all
+    string comparison stuff. 
+  ! Large parts of in-memory table plugin code has been
+    revised to achieve better efficiency and optimization of
+    available resources.
+
+0.5.3  -- 20-Nov-2003
+  ! pmacctd core has been optimized and a new loop-callback
+    scheme driven by pcap library has been introduced; I/O
+    multiplexing is avoided.
+  ! In MySQL plugin, refresh of entries in the DB has been
+    switched from a signal-driven approach to a lazy timeslot
+    based one. If using historical recording, taking care
+    to the choosen values, this greatly alleviates cache 
+    aliasing.
+  ! In MySQL plugin, modulo function (for insertion of data in
+    the direct mapped cache) has been changed: crc32 algorithm
+    has been adopted. Experimental tests shown the reduction of
+    cache aliasing to about 0.45%. 
+  ! The whole MySQL plugin has been inspected for performance
+    bottlenecks resulted by the addition of new features in
+    last releases.
+  ! Fixed a bug in link layer handlers. 
+
+0.5.2  -- 03-Nov-2003
+  + "sql_history" configuration key syntax has been changed to
+    support history recording at fixed times with mins, hrs and
+    days granularity. A little of date arithmetics has been
+    introduced (merely multiplicative factors, eg. to ease 95th
+    percentile operations).
+  + Added "sql_history_roundoff" configuration key to round off
+    time of first timeslot. This little care gives cleaner time
+    results and inductively affects all subsequent slots.
+  + Achieved more precise calculations via timestamps added to
+    the cache structure to avoid data counted during the current
+    timeslot and not already fed in the DB to be accounted in next
+    slot. 
+  ! Monthly historical aggregation is no more available.
+  ! Fixed portability issues posed by vsnprintf() in MySQL
+    plugin. Now the plugin compiles smoothly under Tru64 Unix.
+
+0.5.1  -- 01-Oct-2003
+  + due to the proliferation of command-line options, the
+    support for a configuration file has been added. All
+    commandline switches until version 0.5.0 will be supported
+    in the future.
+    New configurable options (eg. log to a remote SQL server)
+    will be only supported via configuration file. See 
+    CONFIG-KEYS file for available configuration keys.
+  + added support for historical recording of counters in the
+    MySQL database. Available granularities of aggregation are
+    hourly, daily or monthly (eg. counters are separated hour
+    by hour, daily of monthly for each record). Timestamps of
+    last INSERT and UPDATE have been added over each record.
+    (thanks to Wim Kerkhoff for his strong collaboration)
+  + support for IP header options.
+  + support for PPP links. [EXPERIMENTAL]  
+  ! Fixed a MySQL plugin direct-mapped cache issue: the cache
+    now traps INSERT queries when an UPDATE fails due to any
+    asyncronous table manipulation event (eg. external scripts,
+    table truncation, etc.).
+  ! MySQL plugin has been strongly revised and optimized; added
+    options to save data to a remote sql server and to customize
+    username, password and table; added MySQL locking stuff. 
+    (another big thank to Wim Kerkhoff).
+  ! various code cleanups.
+
+0.5.0  -- 22-Jul-2003
+  + static aggregation directives (src_host, dst_host, ..)
+    are now superseded by primitives that can be stacked
+    together to form complex aggregation methods. 
+    The commandline syntax of the client program has been
+    consequently changed to support these new features. 
+  + two new primitives have been added: source MAC address
+    and destination MAC address. 
+  + support for 802.1Q (VLANs) tagged packets (thanks to
+    Rich Gade). 
+  + support for FDDI links. [EXPERIMENTAL]
+  ! the core pmacctd loop (that gathers packets off the
+    wire and feeds data to plugins) has been revised and
+    strongly optimized. 
+  ! the main loop of MySQL plugin has been optimized with
+    the introduction of adaptive selection queries during 
+    the update process.
+  ! fixed a memory allocation issue (that caused a SIGSEGV,
+    under certain circustances) in pmacct client: now the
+    upper bound of dss is checked for large data retrieval.
+
+0.4.2  -- 20-Jun-2003
+  + limited support for transport protocols (currently
+    only tcp and udp): aggregation of statistics for
+    source or destination port. 
+  + optimized query mechanism for in-memory table; solved
+    few generalization issues that will enable (in future
+    versions) to support complex queries. 
+  + added "-t" pmacctd commandline switch to specify a
+    custom database table. 
+  ! fixed realloc() issue in pmacct client (thanks to
+    Arjen Nienhuis).
+  ! fixed an issue regarding mysql headers in the configure
+    script. 
+
+0.4.1  -- 08-May-2003
+  ! missing break in a case statement that led pmacctd
+    to misbehaviours; a cleaner approach to global vars
+    (thanks to Peter Payne). 
+  ! fixed an issue with getopt() and external vars. Now
+    pmacct has reported to compile without problems on
+    FreeBSD 4.x (thanks to Kirill Ponomarew).
+  ! missing conditional statement to check the runtime
+    execution of compiled plugins in exec_plugins()
+
+0.4.0  -- 02-May-2003
+  + switched to a plugin architecture: plugins need to
+    be activated at configure time to be compiled and
+    then used via "-P" command-line switch in pmacctd.
+    See PLUGINS for more details.
+  + added first plugin: Mysql driver. It uses a Mysql
+    database as backend to store statistics other than
+    in-memory table. See sql/ directory for scripts for
+    creation of db needed to store data.
+  + added the choice to collect statistics for traffic
+    flows in addition to src|dst|sum aggregation via
+    the "-c flows" command-line switch in pmacctd.
+  + major code cleanups.
+  + mostly rewritten configure script; switched back to
+    autoconf 2.1.
+
+0.3.4  -- 24-Mar-2003
+  + accounting of IP traffic for source, destination
+    and aggregation of both. Introduced -c switch to
+    pmacctd (thanks to Martynas Bieliauskas).
+  + added daemonization of pmacctd process via -D
+    command line switch
+  + added buffering via pcap_open_live() timeout handling
+    on those architectures where it is supported.
+  + It compiles and works fine over FreeBSD 5.x;
+    solved some pcap library issues.  
+  + added customization of pipe for client/server
+    communication via -p command line switch both in
+    pmacct and pmacctd
+ 
+0.3.3  -- 19-Mar-2003
+  + introduced synchronous I/O multiplexing
+  + support for -m 0 pmacctd switch, in-memory table
+    can grow undefinitely. 
+  + revised memory pool descriptors table structure
+  ! introduced realloc() in pmacct to support really
+    large in-memory table transfers; solved additional
+    alignment problems. 
+  ! solved compatibility issues with libpcap 0.4 
+  ! solved nasty problem with -i pmacctd switch
+  ! solved various memory code bugs and open issues
+
+0.3.2  -- 13-Mar-2003
+  + support for pcap library filters 
+  ! minor bugfixes
+
+0.3.1  -- 12-Mar-2003
+  + documentation stuff: updated TODO and added INTERNALS
+  + revised query mechanism to server process, added a
+    standard header to find command and optional values
+    carried in query buffer.
+  + added -s commandline switch to customize the size of
+    each memory pool; see INTERNLS for more informations
+  ! stability tests and fixes 
+  ! configure script enhancements
+
+0.3.0  -- 11-Mar-2003
+  ! not public release
+  + increased efficiency through allocation of memory pools 
+    instead of sparse malloc() calls when inserting new
+    elements in in-memory table.
+  + added -m commandline switch to pmacctd to set the number
+    of available memory pools; the size of each memory pool is
+    the number of buckets, chosen with -b commandline option,
+    see INTERNALS for more informations.
+  + switched client program to getopt() to acquire commandline
+    inputs.
+  + new -m commandline  option in client program to acquire
+    statistics of a specified IP address in a format useful for
+    acquisition by MRTG program; see examples directory for a
+    sample mrtg configuration.
+  ! major bugfixes
+  ! minor code cleanups
+
+0.2.4  -- 07-Mar-2003
+  + portability: Tru64 5.x 
+  ! configure script fixes
+  ! minor bugfixes
+
+0.2.3  -- 05-Mar-2003
+  + first public release
+  ! portability fixes
+  ! minor bugfixes
+
+
+0.2.2  -- 04-Mar-2003
+  + minor code cleanups
+  + added autoconf, automake stuff
+
+
+0.2.1  -- 03-Mar-2003
+  + fork()ing when handling queries  
+  + signal handling
+  + command-line options using getopt() 
+  + usage instructions
+  ! major bugfixes
+
+
+0.2.0  -- 01-Mar-2003
+  + dynamic allocation of in-memory table
+  + query (client/server) mechanism 
+  + added a Makefile
+  ! major bugfixes
+
+
+0.1.0  -- late Feb, 2003
+  + Initial release 

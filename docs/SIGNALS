@@ -1,0 +1,28 @@
+SIGNALS:
+Here follows a list of supported signals and their meaning; remember
+that pmacct core says goodbye when its last child dies or is terminated.
+
+
+pmacctd core process:
+SIGCHLD:	used to handle gracefully his loved child processes;
+SIGHUP:         causes the reopening of connection with syslog daemon;
+SIGINT:		ignored;
+SIGPIPE:	ignored;
+
+MySQL plugin process:
+SIGPIPE:	inherited by parent process (pmacctd core);
+SIGCHLD:	inherited by parent process (pmacctd core);
+SIGHUP:		inherited by parent process (pmacctd core); 
+SIGINT:		causes the process to exit gracefully;	
+
+PGSQL plugin process:
+SIGPIPE:        inherited by parent process (pmacctd core);
+SIGCHLD:        inherited by parent process (pmacctd core);
+SIGHUP:         inherited by parent process (pmacctd core); 
+SIGINT:         causes the process to exit gracefully;
+
+In-memory table process:
+SIGPIPE:        inherited by parent process (pmacctd core);
+SIGCHLD:        inherited by parent process (pmacctd core);
+SIGHUP:         inherited by parent process (pmacctd core); 
+SIGINT:         causes the process to exit gracefully;

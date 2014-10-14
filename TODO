@@ -1,0 +1,37 @@
+pmacct (Promiscuous mode IP Accounting package)
+pmacct is Copyright (C) 2004 by Paolo Lucente
+
+
+This software is currently under strong development, i'll 
+try to reach a good and stable stage as soon as possible;
+The project has been started for practical reasons, i'll work
+on it mostly in my spare time. Any comment, suggestion, test,
+ideas and any other kind of help, contribution or support is
+warmly welcome. Listed below are only few ideas to be reached
+as soon as possible.
+Currently, this software has to be considered in an early
+development stage, so take care when using it in a production
+environment.
+I'm currently not able to provide any kind of mailing list or
+mission critical support mainly for lack of time and resource
+constraints. If you have ideas, resources or proposals, contact
+me (email is in AUTHORS textfile); i'll answer you as soon as
+possible.
+ 
+ + explore new traffic sources other than promiscuous mode. 
+ + strong improvements to the plugins architecture; more advanced
+   concepts are needed. It would permit some advanced feature such
+   as hotswap of old plugins without restarting pmacctd and should
+   facilitate development of custom plugins. 
+ + throw away pipes in 'core' <-> 'plugins' communications. As of 
+   0.6.2 socketpair() has been introduced to alleviate pipe trobules.
+   However this is not the best solution. Better ways need to be
+   explored.
+ + man page.
+ + strong improvements to automake/autoconf part, i wrote a really
+   rough Makefile.am/configure.in pairs, trying to make things work,
+   that's all. 
+
+Cheers,
+Paolo
+

@@ -1,0 +1,92 @@
+NAME:
+  pmacct (Promiscuous mode IP Accounting package) v0.7.4
+  pmacct is Copyright (C) 2004 by Paolo Lucente
+
+
+DESCRIPTION:
+  pmacct is a set of network tools to gather IP traffic informations (bytes
+  counter and number of packets); aggregation of statistics is done using
+  simple primitives (MAC addresses, VLAN IDs, source host, destination host,
+  ports and IP protocols) that can be used alone or combined together to form
+  complex aggregation methods; support for historical counters breakdown,
+  packet tagging to allow either load-balanced or distributed counters and
+  packet sampling. Data is either stored in a memory table, pushed to stdout
+  or in a SQL database (MySQL or PostgreSQL). Gathering packets off the wire
+  is done either using pcap library (and promiscuous mode of the listening
+  interface) or reading Netflow packets coming from the network.
+
+  IP accounting is the key for a range of operations like billing, pricing
+  models application, live or historical traffic analysis; it is also a valuable
+  way to go for handling network thresholds or bandwidth management. Taking SNMP
+  data from physical or virtual interfaces of network equipments sometimes
+  is not too useful because of coarse granularity of counters.
+  Finer granularities are reached if counters match useful logical entities
+  (such as Autonomous Systems, departmental networks, specific traffic flows,
+  etc.).
+
+  Many network equipments already support redirection of network traffic to a
+  replication port; here, non-blocking architectures help in not negatively
+  affect global performances and usual routing or forwarding operations when
+  mirroring data. Alternatively, some equipments support export protocols (like
+  Cisco's Netflow) to describe traffic flows.
+  Both approaches, traffic mirroring and export protocols, leave new chances
+  to do IP accounting online (but not inline), off critical paths. New opportunities
+  arise for advanced data manipulation or post-processing activities.
+
+  Please refer to the TODO file to read about some immediate future projects  
+  about development of this tool.
+
+
+REQUIREMENTS:
+  libpcap >= 0.6.x  -- http://www.tcpdump.org/
+
+
+PLATFORMS:
+  It has been tested and worked fine for:
+
+  Red Hat Linux 7.x/8.x/9.x (*)
+  Fedora Core 1/2
+  Slackware Linux 8.x/9.x
+  SuSE Linux 9.x
+  OpenBSD 3.2/3.3 i386
+  FreeBSD 4.x/5.x i386
+  Tru64 5.x
+
+  (*) In RH 7.x pcap.h header in /usr/include/pcap/ calls a bpf.h
+  header supposed to be in /usr/include/net/bpf.h; doing some checks,
+  i found the header in /usr/include/pcap/net/bpf.h; this bug makes 
+  to fail pcap header consistency checks in configure script. Please
+  verify and eventually take care to make a symlink from /usr/include/pcap/net/bpf.h
+  to /usr/include/net/bpf.h 
+
+  Did you successfully completed compilation and installation of the
+  software on some other operating system or architecture not listed
+  here ? Please, let me know. 
+
+
+NETFLOW:
+  Supported versions: V1/V5
+
+  Netflow packets have been read successfully from:
+  Cisco 2500, Cisco 7500; IOS 12.1
+  Juniper M10; JunOS 6.2
+
+  Did you successfully read Netflow packets from other network equipments
+  not listed here ? Please, let me know.
+
+
+INSTALLATION:
+  see INSTALL and EXAMPLES files
+
+
+LICENSE:
+  GNU GENERAL PUBLIC LICENSE
+  see COPYING for details.
+
+
+CONTACTS:
+  see AUTHORS file.  
+
+
+Cheers,
+Paolo

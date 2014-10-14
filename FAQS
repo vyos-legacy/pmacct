@@ -1,0 +1,76 @@
+pmacct (Promiscuous mode IP Accounting package)
+pmacct is Copyright (C) 2004 by Paolo Lucente
+
+A brief preamble: this FAQ document is pretty young and fresh. This is because you
+should not expect to find all needed answers here. It will gradually gets filled.
+Now, given the extensive overview and description already present on pmacct homepage,
+i'll avoid to duplicate them here.
+
+Q: Hey boy, ok, funny preamble. What is pmacct project homepage ?
+A: It's http://www.ba.cnr.it/~paolo/pmacct/ . Currently, there is any official mirror
+   site. 
+
+Q: 'pmacct', 'pmacctd', 'nfacctd' -- but what do they mean ?
+A: 'pmacct' is intended to be the name of the project; 'pmacctd' is the name of the
+promiscuous mode accounting daemon; 'nfacctd' is the name of the Netflow accounting
+daemon which entered into the project starting with version 0.7.0. 
+
+Q: What is the best way to kill a running instance of pmacctd avoiding data loss ? 
+A: You have to send a SIGINT to all running pmacctd processes, for example via a
+   'killall -INT pmacctd'. pmacctd core process will ignore it; IMT plugin will simply
+   take the exit lane. SQL plugins will flush their cached data to DB and then will
+   exit. As soon as the core process will see itself alone, it will shutdown nicely.
+
+Q: I wish to account all traffic of my network but i'm not interested in having the
+   DB polluted with data about external hosts. Do i'm really forced to waste system
+   resource ? Do i need to run two pmacctd instances each accounting either sources
+   or destinations and each with its ad hoc libpcap filter ? 
+A: No, you will be able to run a single instance of pmacctd with multiple plugins,
+   each one with its ad hoc libpcap filter; you will need to 'name' each plugin and
+   then assign a filter to it. A sample configuration fragment follows:
+
+   ...
+   aggregate[inbound]: dst_host
+   aggregate[outbound]: src_host
+   aggregate_filter[inbound]: dst net 192.168.0.0/16
+   aggregate_filter[outbound]: src net 192.168.0.0/16
+   plugins: mysql[inbound], mysql[outbound]
+   sql_table[inbound]: acct_in 
+   sql_table[outbound]: acct_out 
+   ... 
+
+   It will account all traffic directed to your hosts in 'acct_in' table and all traffic
+   they generate in 'acct_out' table. Then you will need only to play around with basic
+   SQL queries to extract meaningful totals. 
+
+Q: I wish to use Netflow accounting; but my router generates times in seconds rather than
+   in msecs. What to do ?
+A: There is a solution. You have to use nfacctd with a configuration file; then you have to
+   insert the 'nfacctd_time_secs: true' line in it. Moreover, if the clock of your network
+   equipment is skewed, 'nfacctd' is able to generate its own times. To let it work this
+   way you have to insert the 'nfacctd_time_new: true' in it. 
+
+Q: SQL table versions, what they are; why and when do i need them ?  
+A: You need to get involved with SQL tables when you use a SQL plugin (*astonishment and
+   surprise*); pmacct gets shipped with so called 'default' tables; they are built by SQL
+   scripts in 'sql/' section of the distritubtion tarball. Default tables enable you to
+   start quickly with pmacct. Default tables have multiple versions because new features 
+   have been introduced over the time and often backward compatibility when upgrading
+   pmacct is a need. 
+   
+   Briefly, v1 or v2 tables ? Few rules of thumb follow:
+
+   - Do you need agent ID for distributed accounting ? Then you have to use v2.
+   - Do you need VLAN traffic accounting ? Then you have to use v2.
+   - If all of the above point sound useless for you, then use v1.
+
+   People sometimes need to customize default SQL schema for various reasons; pmacct supports
+   such customizations via 'sql_optimize_clauses' configuration key. It instructs the running
+   SQL plugin on how to build queries.
+   So, definitely, only if you are running default tables, you will need versioning; in such
+   case don't forget to specify what SQL table version you are currently using:
+
+   commandline:    '-v [1|2]'
+   configuration:  'sql_table_version: [1|2]'
+
+/* EOF */

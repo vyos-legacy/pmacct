@@ -1,0 +1,21 @@
+! 
+! nfacctd ID file -- maps Netflow export agents' IP to a small (1-65535) numerical ID 
+!
+! File syntax is key-based. Position of keys inside a row (rule) is not relevant.
+! An atomic expression (example: 'id=1') does not allow spaces. First full match
+! wins: take care to the order you write rules. Each rule needs 'id' and 'ip' keys.
+!
+! list of currently supported keys follow:
+!
+! 'id'	ID value to be returned if a full match occurs.	
+! 'ip'	IP address of the box (router, probe, etc.) exporting NetFlow packets.
+! 'in'  Input interface as it's written into NetFlow packet.
+! 'out' Output interface as it's written into NetFlow packet. 
+!
+
+id=1	ip=192.168.2.1	in=4
+id=10	ip=192.168.1.1 	in=5	out=3
+id=11	ip=192.168.1.1 	in=3	out=5
+id=12	ip=192.168.1.1	in=3 
+id=13	ip=192.168.1.1
+

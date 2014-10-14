@@ -1,0 +1,241 @@
+SUPPORTED CONFIGURATION KEYS
+Due to the proliferation of command-line options, the support for a
+configuration file has been added. Configuration keys together with
+their correspective commandline switches and flags (in square brackets)
+are listed below.
+The configuration file consists of a key/value pairs, separated by
+a ":" character. A "!" at the beginning of the line, means a comment
+line. Please refer also to pmacctd.conf.example for some examples and
+to the output of 'pmacct -h' for a list of supported commandline switches.
+
+LEGEND:
+
+GLOBAL		The selected option does not apply to single plugins
+NO_GLOBAL	The selected option has to be applied to single plugins
+NO_PMACCTD	The selected option does not apply to 'pmacctd' 
+
+
+KEY LIST:
+
+KEY: 		debug (-d)
+VALUES:		[true|false]
+DESC:		Enables or disables debug (default: false).
+
+KEY:		daemonize (-D) [GLOBAL]
+VALUES:		[true|false]
+DESC:		Daemonizes the process (default: false).
+
+KEY:		aggregate (-c)
+VALUES:		[src_mac,dst_mac,vlan,src_host,dst_host,src_net,dst_net,sum,src_port,dst_port,proto]
+DESC:		primitives for data aggregation (default: src_host). 
+
+KEY:		aggregate_filter [NO_GLOBAL]
+DESC:		this filter is applied before data is passed to accountant plugin (memory, *SQL,
+		etc). Allows to run a single instance of pmacctd even when plugins have to account
+		different data. It is based over libpcap, so accepts has same capabilities and same
+		syntax of libpcap filters.
+
+KEY:		pcap_filter (like tcpdump syntax) [GLOBAL]
+DESC:		this filter gets passed to pcap library.
+
+KEY:		plugins (-P)
+VALUES:		[memory|print|mysql|pgsql]
+DESC:		plugin to be enabled, if compiled and configured. "memory" enables the use of memory
+		plugin; statistics are stored in a memory table and are fetched via pmacct client tool.
+		"mysql" and "pgsql" enable the use of MySQL and PostgreSQL plugins. "print" enables the
+		use of print plugin; statistics are pulled to stdout in a way similar to tcpdump and
+		cflowd's "flow-print" tool. 
+
+KEY:		plugin_pipe_size
+DESC:		size of the recv/send FIF0 queue between core pmacctd process and a plugin. The default
+		size is set by the OS. Change (mostly augment) this size is needed when facing with really
+		heavy traffic loads. Value is intended in bytes.
+
+KEY:		plugin_buffer_size 
+DESC:		size of transfer buffer between core pmacctd process and plugins. This value has to be less 
+		than FIFO queue size. Default value is to disable bufferization. Value is intended in bytes.
+
+KEY:		interface (-i) [GLOBAL]
+DESC:		interface used for listening (default: use pcap_lookupdev() to get a valid device).
+
+KEY:		promisc (-N) [GLOBAL]
+VALUES:		[true|false]
+DESC:		Enables or disables the use of promiscuous mode of interface used to capture
+		traffic. Promiscuous mode is useful only when the machine is not a router (default: true).
+
+KEY:		imt_path (-p)
+DESC:		path for client/server fifo (used by in-memory table plugin only).
+
+KEY:		imt_passwd
+DESC:		passphrase to be supplied by pmacct client to access statistics of the in-memory table.
+
+KEY:		imt_buckets (-b)
+DESC:		number of buckets in the in-memory table.
+
+KEY:		imt_mem_pools_number (-m)
+DESC:		numbers of memory pools (see INTERNALS file for further details).
+
+KEY:		imt_mem_pools_size (-s)
+DESC:		size of each memory pool (see INTERNALS file for further details).
+
+KEY:		syslog (-S)
+VALUES:		[auth|mail|daemon|kern|user|local[0-7]]
+DESC:		enables syslog logging to the specified facility (default: console logging).
+
+KEY:		pidfile (-F) [GLOBAL]
+DESC:		writes 'core' process PID to the specified file.
+
+KEY:		networks_file (-n)
+DESC:		path to a file containing a list of networks (one for each line, alloweded
+		syntax are: 1.2.3.4/255.255.255.0 and 1.2.3.4/24). Networks will get written
+		to DB or memory table; unknown or not specified networks will be referred as
+		0.0.0.0. To be used in conjunction with 'src_net' or 'dst_net' primitives. 
+
+KEY:		sql_db
+DESC:		name of the SQL database to be used (default: pmacct).
+
+KEY:            sql_table
+DESC:           name of the SQL table to be used (default: acct).
+
+KEY:		sql_table_version (-v)
+VALUES		[1|2]
+DESC:		version of the accounting SQL table (default: 1). 
+
+KEY:		sql_data
+VALUES:		[frontend|backend]
+DESC:		this switch makes sense only if using PostgreSQL plugin. If "frontend" is specified,
+		data (IP addresses, timestamps, etc.) will be written to the DB as strings; if "backend"
+		is specified data will be written as long integers (default: frontend).
+
+KEY:	 	sql_host
+DESC:		ip/hostname where is listening SQL server (default: localhost).
+
+KEY:		sql_user
+DESC:		username to be used when connecting to SQL server (default: pmacct).
+
+KEY:		sql_passwd
+DESC:		password to be used when connecting to SQL server (default: arealsmartpwd).
+
+KEY:		[sql_refresh_time|print_refresh_time] (-r)
+DESC:		sets the time interval at which data has to be purged from in-memory cache into the SQL
+		database (sql) or on the screen (print). Value is in seconds.
+
+KEY:		sql_startup_delay
+DESC:		time (in seconds) the first data flush to the DB has to be delayed. This setting allows 
+		for two or more instances to refresh data at same time intervals but in different moments to
+		avoid locking stalls or DB overkills.
+
+KEY:		sql_optimize_clauses
+VALUES:		[true|false]
+DESC:		enables the optimization of the SQL clauses. (default: false; read carefully
+		INTERNALS "SQL issues" before enabling it).
+
+KEY:		sql_history
+VALUES:		#[m|h|d]
+DESC:		enables the historical recording of counters inserted in the specified database.
+		The selected value intuitively sets the granularity of the history (for example
+		"5m", "1h", "4h", "1d", "7d"; if "1h" is choosen then counters inserted in the
+		last hour are updated; each hour is created a new record). 
+
+KEY:		sql_history_roundoff
+VALUES		[m,h,d]
+DESC:		enables the rounding of minutes, hours of days. How it works ? Suppose you launch
+		a run with "sql_history: 1h" and "sql_history_roundoff: m" and they are 18:34.
+		Rounding off minutes gives you an hourly timeslot (1h) that starts at 18:00; so,
+		subsequent ones will start at 19:00, 20:00, etc. Suppose, now, you launch a run
+		with "sql_history: 5m" and sql_history_roundoff: m" and they are 18:37. Rounding
+		off minutes gives you a 5m slot starting at first non-empty timeslot that would
+		be filled with data you are accounting; so a 5m slot that starts at 18:35. Next
+		slot will start at 18:40 and subsequent every 5 minutes (18:45 ... 19:00, etc.). 
+
+KEY:		sql_recovery_logfile
+DESC:		enables recovery mode; recovery mode takes an action if DB fails, checking for the
+		successful result of each query. By default it is disabled. This key enables writing
+		data from memory cache straight to a specified logfile. The file produced could be
+		later played with either "pmmyplay" or "pmpgplay" tools. See INTERNALS for details
+		about recovery mode. 
+
+KEY:            sql_recovery_backup_host
+DESC:           enables recovery mode; recovery mode takes an action if DB fails, checking for the
+                successful result of each query. By default it is disabled. This key enables writing
+                data to a backup DB. See INTERNALS for details about recovery mode.
+
+KEY:		[sql_cache_entries|print_cache_entries]
+DESC:		number of cache buckets (or entries). A default value is set, if any value is supplied.
+		This value is suitable for most scenarios, however when facing with large environments,
+		the advice is to carefully tune this parameter to improve performances. Remember to use
+		a prime number of buckets.
+
+KEY:		sql_dont_try_update
+VALUES:         [true|false]
+DESC:		avoid to try UPDATE counters and skip directly to INSERT phase (read about data insertion
+		in INTERNALS file, section "SQL issues and *SQL plugins"). Useful in gaining performances
+		when UPDATE queries are not necessary (example: sql_history = sql_refresh_time). WARNING: 
+		if used not caring about timing constraints, it will lead to duplicate entries and
+		potentially to data loss.
+		  
+KEY:		sql_trigger_exec
+DESC:		executable to be launched at fixed intervals for data post-processing purposes; intervals
+		are specified by if 'sql_trigger_time'; if any interval is supplied 'sql_refresh_time'
+		value is used as interval, this will result in a trigger being executed each time data
+		is purged into the DB. 
+
+KEY:		sql_trigger_time
+VALUES:		#[m|h|d]
+DESC:		specifies time intervals at which the executable specified by 'sql_trigger_exec' has to be
+		launched; if any executable is specified this key is simply ignored. Values are  expressed
+		like 'sql_history' key (for example valid values are "5m", "1h", "4h", "1d", "7d"; if "1h"
+		is choosen then executable will be triggered each hour).
+
+KEY:		print_markers
+VALUES:		[true|false]
+DESC:		Valid only when using "print" plugin. Enables the use of START/END markers when purging data 
+		to the stdout. Start marker includes also informations about current timeslot and refresh time
+		(default: false).
+
+KEY:		nfacctd_port [GLOBAL]
+DESC:		makes the 'nfacctd' daemon to listen on the specified port. (default: 2100) 
+
+KEY:		nfacctd_ip [GLOBAL]
+DESC:		makes the 'nfacctd' daemon to bind on the specified ip address. (default: all interfaces)
+
+KEY:		nfacctd_allow_file [GLOBAL]
+DESC:		path to a file containing the list of ip addresses (one for each line) allowed to send Netflow
+		data to 'nfacctd'. Current syntax doesn't implement network masks. The 'allow list' is intended
+		to be small. If you need some complicated network-wide filter, you may prefer to choose a firewall
+		rule instead. 
+
+KEY:		nfacctd_time_secs [GLOBAL]
+VALUES:		[true|false]
+DESC:		makes 'nfacctd' expect times included in Netflow header to be in seconds instead of msecs. This
+		seems to be a quite common case. (default: false; times are expected in msecs)
+
+KEY:		nfacctd_time_new [GLOBAL]
+VALUES:		[true|false]
+DESC:		makes 'nfacctd' to ignore times included in Netflow header and makes it build new times. Although
+		this could be useful to avoid date skews, remember that newly generated times will be strictly connected
+		with the arrival of Netflow packets. (default: false)
+
+KEY:		pre_tag_map [GLOBAL, NO_PMACCTD]
+DESC:		path to a file containing the IDs mapping. This map allows to translate some Netflow packet fields
+		(currently: exporting agent IP address, Input interface, Output interface) into an ID (a small number in
+		the range 1-65535). For further informations about map syntax, see 'id_map.example' into 'examples'
+		directory. Pre Tagging is done shortly after the packet is collected by the daemon from the network. 
+
+KEY:            pre_tag_filter [NO_GLOBAL, NO_PMACCTD]
+VALUES:         [1-65535]
+DESC:		it expects an ID as its value. It allows to filter packets basing on their Pre Tag ID: if it matches
+		the supplied value then it's allowed to be delivered to the plugin, otherwise it's discarded.
+
+KEY:            post_tag 
+VALUES:         [1-65535]
+DESC:           it expects an ID as its value. Once the packet has passed all filters and is on the final way to be
+		delivered to the plugin, 'post_tag' allows to assign the specified value as ID of the packet. This is
+		the unique way to tag a packet when using 'pmacctd' and speaking more generally it may be useful to
+		tag packets when not using Pre Tagging but 'aggregate_filter'.
+
+KEY:		sampling_rate
+VALUES:		[>= 1]
+DESC:		enables packet sampling. It expects a number which is the ratio of packets to be sampled (1 out of N).
+		The currently implemented sampling algorithm is a simple systematic one. 
+

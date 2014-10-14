@@ -1,0 +1,26 @@
+To create the database and grant default permission to pmacctd you have to execute
+the two scripts below, in the same order (assuming mysql command is in the path):
+
+- To create v1 tables:
+mysql -u root -p < pmacct-create-db_v1.mysql
+mysql -u root -p < pmacct-grant-db.mysql
+
+Data will be available in 'acct' table of 'pmacct' DB.
+
+- To create v2 tables:
+mysql -u root -p < pmacct-create-db_v2.mysql
+mysql -u root -p < pmacct-grant-db.mysql
+
+Data will be available in 'acct_v2' table of 'pmacct' DB.
+
+- To understand difference between v1 and v2 tables:
+  - Do you need agent ID for distributed accounting ? Then you have to use v2. 
+  - Do you need VLAN traffic accounting ? Then you have to use v2.
+  - If all of the above point sound useless, then use v1.
+
+NOTE: don't forget to specify what SQL table version you
+are currently using when running 'pmacctd' or 'nfacctd':
+
+commandline:    '-v [1|2]'
+configuration:  'sql_table_version: [1|2]'
+

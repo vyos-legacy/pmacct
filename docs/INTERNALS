@@ -1,0 +1,259 @@
+pmacct (Promiscuous mode IP Accounting package)
+pmacct is Copyright (C) 2004 by Paolo Lucente
+
+(poorman's) TABLE OF CONTENTS: 
+I.	Introduction
+II.	Primitives
+III.	The whole picture
+IV.	Processes Vs. threads
+V.	Communications between core process and plugins
+VI.	Memory table plugin
+VII.	SQL issues and *SQL plugins
+VIII.	Recovery modes
+
+
+I. Introduction
+Giving a quick look to the old 'INTERNALS' textfile, this new one starts with a big step
+forward: a rough table of contents, though it is still not fancy nor formatted. And i'm
+conscious the package is still missing the man page. So, the goal of this file would be a
+careful description of directions taken through the process of code writing, trying to
+expose the work done to constructive critics and allowing ideas to exit from the crypticism
+of code. 
+
+
+II. Primitives
+Primitives are a way to express which aggregation method has to be applied over incoming
+data. While looking forward over time we see a more generalized way to bind aggregation
+methods to pieces of data, currently primitives give a sufficient flexibility.
+The concept of primitive itself carries the idea of simple entities that can be stacked
+together to form complex expressions using boolean operators.
+Going practical, primitives are atomic expressions like "src_port", "dst_host", "proto";
+currently the unique boolean operator supported to glue expressions is "and". Traffic could 
+be aggregated translating a "who connects where, using which service" speech language phrase
+into one recognized by pmacct: "src_host,dst_host,dst_port,proto". Comma, because of the
+unique logical connective "and", is simply intended as a separator.
+
+
+III. The whole picture
+	  ----[ nfacctd loop ]---------------------------
+         |						  |
+	 |	    [ check ]      [   handle    ]        |
+	 | ... =====[ Allow ]======[ pre_tag_map ]=== ... |
+	 |	    [ table ]				  |
+	 |						  |
+	  ------------------------------------------------
+		 \		
+		  |
+		  |
+	    -----[ core process ]--------------------------------------------------------------------------------
+	   |	  | 												 |
+	   |	  | [     apply      ]	    [  evaluate  ]       [     handle     ]    [ write buffer ] 	 |
+	   |	  | [ pre_tag_filter ]      [ primitives ]    |==[ channel buffer ]====[  to plugin   ]==== ...  |
+mirrored   |	 /          &&		          && 	      |							 |
+traffic	   |    /   [       apply      ]    [   apply  ]      |  [     handle     ]    [ write buffer ]		 |
+====================[ aggregate_filter ]====[ post_tag ]======|==[ channel buffer ]====[  to plugin   ]==== ...  |
+NetFlow	   |    \	    &&				      |  						 |
+	   |	 |  [    evaluate     ]			      |  [     handle     ]    [ write buffer ]		 |
+	   |	 |  [ packet sampling ]			      |==[ channel buffer ]====[  to plugin   ]==== ...  |
+	   |	 | 												 |
+	   |      \												 | 
+	    -----------------------------------------------------------------------------------------------------
+		   |
+		   |
+		  /
+          ----[ pmacctd loop ]----------------------------------------------
+         |								    |
+	 |         [   handle   ]     [  handle  ]    [  handle   ]	    |
+	 | ... ====[ link layer ]=====[ IP layer ]====[ fragments ]==== ... |
+	 |								    |
+	  ------------------------------------------------------------------
+
+
+IV. Processes Vs. threads 
+pmacctd, pmacct daemon, relies strongly over a multi-process organization rather than over
+threads. For threads we mean what is commonly referred as threads of execution that share
+their entire address space inside a single process.
+Processes are used to encapsulate each plugin's instance and, of course, the core process.
+Core process either collects packets via pcap library API (pmacctd) or listens for specific
+packets coming from the network (nfacctd listens for NetFlow packets); packets are then
+processed and sent to plugins. Plugins pick aggregated data (struct pkt_data) and handle
+packets in some meaningful way.
+A picture follows:
+					   |===> [ pmacctd/plugin ]
+libpcap			           pipe/shm|
+===========> [ pmacctd/core ]==============|===> [ pmacctd/plugin ]
+socket
+
+I don't like, except for specific cases (eg. big memory structures that would lead the
+pages' copy-on-write to perform horrendly), the idea of threads on UNIXes and Linux. They
+are suitable and are born in environments with expensive process spawning and weak IPC
+facilities. Moreover the task of managing critical regions in a shared address space is
+sometimes a fertile source of bugs simply because they easily know too much about each
+others' internal states. They frequently translate in adding tricky issues described in
+each good Operating Systems' textbook: a fully new range of timing dependent bugs that
+are excruciatingly difficult to even reproduce. These considerations leave untouched
+portability troubles and differences of behaviour across platforms.
+
+
+V. Communications between core process and plugins
+A single running pmacctd core process is able to feed data to more plugins, even of the
+same type; plugins are distinguished by their name. Names, for this purpose, need to be
+unique. Currently, data is pushed to each plugin either through a pipe or via a shared
+memory segment.
+Each plugin has its own communication channel with core process. Pipes and shared memory
+segments are further encapsulated in channels: a channel is made of: aggregation method,
+pipe, private buffer, pointer to shared memory segment and optionally a filter. A loop
+cycles through all channels in a round-robin fashion, feeding data to each plugin.
+A pipe is effectively a peer-to-peer FIFO queue; operating system sets its defaut size;
+'plugin_pipe_size' configuration key aims to tune manually this size; an eye has to be kept
+to maximum sizes imposed by the system; Linux, for example, imposes maximum values defined
+in /proc/sys/net/cor/[w|r]mem_max. To adjust queues' size is vital when facing large volumes
+of traffic, because the amount of data to get pushed into the pipe is directly proportional
+to the number of packets seen by the machine.
+A shared memory segment is a memory area where core process writes its data (packets or
+buffers, if buffering is enabled); it then signals the plugin that new data is ready to be
+processed at a given memory address; the plugin catches the signalling message and copies
+the buffer into its private memory space; then it goes on with the packet processing stage.
+Shared memory could be enabled at configure time, before source compilation, supplying the
+configure script the '--enable-mmap' switch. When using shared memory, the 'plugin_pipe_size'
+sets the size of the shared memory segment; a fraction of this space, additionally, is
+allocated for the signallation mechanism, which is pipe-based:
+
+	signal queue size = ('plugin_pipe_size' / 'plugin_buffer_size' ) * sizeof(char *)   
+
+if 'plugin_buffer_size' is not specified, it's assumed to be 'sizeof(pkt_data)', which is the
+size of a single packet traversing the shared memory segment; 'sizeof(char *)' is the size
+of a pointer to a char, which is architecture-dependant.
+
+Data (struct pkt_data) might be bufferized before entering the channel. This aims to reduce
+pressure over the kernel: the pipe built by a socket() call is an IPC structure handled by
+the operating system and the pressure over the kernel increases with the number writes and
+reads (which are both system calls). Buffers size are adjustable trough the 'plugin_buffer_size'
+configuration key. This size intuitively has to be less than the pipe size. Choosing a small
+ratio between two sizes could lead to pipe filling.
+A rough but indicative count is the following:
+
+average_traffic = packets per seconds in your network segment
+sizeof(pkt_data) = ~20 bytes
+
+pipe size > average_traffic * sizeof(pkt_data)
+
+                     pipe
+[ pmacctd/core ] =================================> [ pmacctd/plugin ]
+                 |                                |
+                 |   enqueued buffers     free    |
+                 |==|==|==|==|==|==|==|===========|
+
+
+VI. Memory table plugin
+Memory table is used to store data assembled by core process in a memory structure which
+is organized as an hash table. The table is divided in a number of buckets where data is
+stored (struct acc). Data is direct-mapped to a bucket by the mean of a crc32 modulo
+function. Collisions in each bucket are solved constructing collision chains.
+An auxiliar structure, a LSU cache (Last Recently Used), is provided to speed up searches
+and updates to the main table. It saves last updated or searched element in the table.
+When a new search or update is required, the LSU cache is compared first; if there is any
+match the collision chain gets traversed.
+It's advisable to use a prime number of buckets ('imt_buckets' configuration key), because
+it helps in achieving data dispersion through the modulo function. Chains are organized as
+linked lists of elements and so they should be kept short because of linear search over
+them; having a flat table (so, high number of buckets) helps in keeping chains short.
+Memory is allocated in large chunks, called memory pools, to avoid as much as possible bad
+effects (such as trashing) derived from dispersion through memory pages. Drawbacks of the
+dense use of malloc() calls are described on every Operating Systems' textbook. Memory
+allocations are tracked via a linked list of chunk's descriptors (struct memory_pool_desc)
+for later jobs, such as freeing unused memory chunks or operations over the list, etc. Then,
+if the user selects to work over a fixed table, descriptors are all allocated at the beginning
+of the execution; otherwise, if the user selects a dynamic memory table (which is allowed to
+grow undefinitely in memory (via commandline option '-m 0' or 'imt_mem_pools_number' config
+key) new nodes are allocated and added to the list during the execution.
+'pmacctd' does not rely over realloc() function, but only over malloc(). Table grows and
+shrinks with the help of the above described tracking structures. This is because of a few
+assumptions about the use of realloc():
+(a) try to reallocate on the original memory block and (b) if (a) failed, allocate another
+memory block and copy the contents of the original block to this new location. In this scheme
+(a) can be done in constant time; in (b) only the allocation of new memory block and the
+deallocation of original block are done in constant time, but the copy of previous memory
+area, for large in-memory tables, could perform horrendly.
+ 
+
+VII. SQL issues and *SQL plugins
+Currently two SQL plugins are available for data insertion in a MySQL or a PostgreSQL DB.
+Storing data into a persistent backend leaves chances for advanced operations and so these
+plugins are intended to give a wider range of features (eg. fallback mechanisms and backup
+storage methods if DB fails, etc.) not available in the memory plugin.
+Let's firstly give a whole picture of how these SQL plugins work. As data received from core
+process via communication channel gets unpacked, it is inserted in a 3-way associative cache;
+data to bucket mapping is computed via a crc32 modulo function. 
+If bucket already contains valid data, then its neighbor buckets are checked; if both contain
+valid data, last bucket to get explored have its data replaced: old datum is placed in a
+collision queue, new one into the cache. Data, then, is pulled to the DB at regular intervals
+and to speed up such operation a queries queue is built as buckets get busy.
+When current temporal interval expires, a new process is charged of queues' processing; SQL
+queries are built and sent to the DB. Because at the moment of SQL query creation is not known if
+they would create duplicates, an UPDATE query is launched at first and only if any row is affected,
+then an INSERT query is trapped. 'sql_dont_try_update' makes the default behaviour to skip directly
+to INSERT query. You must be sure there is any risk of duplicate data to avoid data loss.
+Data in the cache is not erased but simply marked as invalid; this way while correctess of data
+is still preserved, we avoid the waste of CPU cycles. 
+The number of cache buckets is tunable via the 'sql_cache_entries' configuration key; a prime 
+number is strongly advisable to ensure a better data dispersion through the cache. 
+Three notes about the above described process: (a) few time ago the concept of lazy data refresh
+deadlines has been introduced. Timeframes boundaries are checked without the auxilium of signals
+but when new data comes in. If such data arrival rate is low, data is not kept stale into the
+cache but a poll() timeout makes the wheel spin. (b) SQL plugins main loop is kept sufficiently
+fast because of any direct interaction with the DB. It only gets data, computes modulo and handles
+both cache and queues. (c) cache has been thought to exploit a kind of temporal locality in internet
+data flow. A picture follows:
+				    |====> [ cache ] ===|
+pipe				    |			|====> [ collision queue ] ===|   DB
+======> [ pmacctd/SQL plugin ] =====|====> [ cache ] ===|			      |======>
+			|	    |			|====> [ queries queue ] =====|
+			|	    |====> [ cache ] ===|
+			|
+			|=======> [ fallback mechanisms ]
+
+Now, let's keep an eye on how data are structured on the DB side. Data are simply organized in flat
+tuples, without external references. After being not full convinced about better normalized solutions
+aimed to satifsy an abstract concept of flexibility, we've (and here come into play the load of mails
+exchanged with Wim Kerkhoff) found that simple means fast. And to let the wheel spin quickly is a key
+achievement, because pmacctd needs not only to insert new data but also update existing records,
+putting under heavy pressure DB when placed in busy network environments. 
+Now a pair of concluding practical notes: (a) default SQL table and its primary key are suitable
+for most normal usages, however unused fields will be filled by zeroes. I took this choice a long
+time ago to allow people to compile sources and quickly get involved into the game, without caring
+too much about SQL details (assumption: who is involved in network management, shoult not have
+necessarily to be also involved into SQL stuff). So everyone with a busy network segment under his
+feets have to tune the wheel himself to avoid performance constraints; 'sql_optimize_clauses'
+configuration key evaluates what primitives have been selected and avoids long 'WHERE' clauses in
+'INSERT' and 'UPDATE' queries. This involves the creation of an auxiliar index or the update of
+the primary key to work smoothly. A custom table might be created, trading flexibility with disk
+space wasting. (b) when using timestamps to break down data into different timeframes, validity
+of data is connected not only to data itself but also to the time; as staten before, data gets
+pulled into DB at regular intervals, tunable via 'sql_refresh_time' key. Connecting these two
+elements (refresh time and timeframe's length) with a multiplicative factor helps in avoiding
+transient cache aliasing phenomena and in fully exploiting cache benefits. All data getting stale
+in the middle of a data refresh interval, leads to frequent first-hit failures of cache modulo
+function and to a quick growth in collision queue size. 
+
+
+VIII. Recovery modes
+The concept of recovery modes is available only in SQL plugins and is aimed to avoid data loss,
+taking a corrective action if the DB suffers an outage or simply become unresponsive. Two modes
+are supported: data is either pulled into a structured logfile for later processing by a player
+program or is written to a backup DB. While this second way is straightforward, few words about
+the logfile: things has been kept simple, so much care and responsibility for keeping data
+meaningful is on your shoulders. A logfile is made of an header (struct logfile_header)
+containing DB configuration parameters, followed by records dumped by the plugin. When
+appending data to a logfile, if the file already exists, its header is not checked against
+actual parameters; the unique safety check is taken searching for a magic number into the header
+to assume it's safe to append data. If multiple SQL plugins are running, each one should have
+its own logfile.
+The health of SQL server is checked everytime data is purged into it. If DB becomes unresponsive
+a recovery flag is raised. This flag remains valid, without further checks, for the entire purging
+event. A set of player tools are available, pmmyplay and pmpgplay; they currently don't contain any
+advanced auto-process feature. Both players extract needed informations (where to connect, which username
+to use, etc.) from the logfile's header. While playing entire logfile or even a part of it, a further
+method to detect DB's failures exists. A final statistics screen summarizes what has been successfully
+written into the DB; this aims to help reprocess the logfile at a later stage if something gets wrong. 
+
