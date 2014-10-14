@@ -1,5 +1,185 @@
-pmacct (Promiscuous mode IP Accounting package) v0.12.1
+pmacct (Promiscuous mode IP Accounting package) v0.12.5
 pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+
+0.12.5 -- 28-12-2010
+  + nfacctd: introduced support for NAT L3/L4 field values via xlate_src
+    and xlate_dst configuration directives. Implementation follows IPFIX
+    standard for IPv4 and IPv6 (field types 225, 226, 227, 228, 281 and
+    282).
+  + nfacctd: Cisco ASA NetFlow v9 NSEL field types 40001, 40002, 40003,
+    40004 and IPFIX/Cisco ASA NetFlow v9 NSEL msecs absolute timestamps
+    field types 152, 153 and 323 have been added.
+  + nfacctd: introduced support for 'new' TCP/UDP source/destination ports
+    (field types 180, 181, 182, 183), as per IPFIX standard, basing on the
+    L4 protocol value (if any is specified as part of the export; otherwise
+    assume L4 is not TCP/UDP). 
+  + nfacctd, nfprobe: introduced support for application classification
+    via NetFlow v9 field type #95 (application ID) and application name
+    table option. This feature aligns with Cisco NBAR-NetFlow v9
+    integration feature.
+  + nfacctd: introduced support for egress bytes and packet counters (field
+    types 23, 24) basing on the direction value (if any is specified as
+    part of the export; otherwise assume ingress as per RFC3954).
+  + nfprobe: egress IPv4/IPv6 NetFlow v9 templates have been introduced;
+    compatibility with Cisco (no use of OUT_BYTES, OUT_OUT_PACKETS) taken
+    into account.
+  + nfacctd: added support for egress datalink NetFlow v9 fields basing
+    on direction field.
+  + nfacctd, sfacctd: aggregate_filter can now filter against TCP flags;
+    also, [ns]facctd_net directive can now be specified per-plugin.
+  + BGP daemon: introduced support for IPv6 transport of BGP messaging.
+  + BGP daemon: BGP peer information is now linked into the status table
+    for caching purposes. This optimization results in good CPU savings
+    in bigger deployments.
+  ! fix, nfacctd, sfacctd: daemons were crashing on OpenBSD platform upon
+    setting an aggregate_filter configuration directive. Patch is courtesy
+    of Manuel Pata.
+  ! fix, xflow_status.c: status entries were not properly linked to the
+    hash conflict chain resulting in a memory leak. However the maximum
+    number of table entries set by default was preventing the structure
+    to grow undefinitely.
+  ! fix, sql_common.c: increased buffer size available for sql_table_schema
+    from 1KB to 8KB. Thanks to Michiel Muhlenbaumer his support. 
+  ! fix, bgp_agent_map has been improved to allow mapping of NetFlow/sFlow
+    agents making use of IPv6 transport to either a) IPv4 transport address
+    of BGP sessions or b) 32-bit BGP Router IDs. Mapping to IPv6 addresses
+    is however not (yet) possible.
+  ! fix, nfprobe: encoding of NetFlow v9 option scope has been improved;
+    nfprobe source IPv4/IPv6 address, if specified via nfprobe_source_ip
+    directive, is now being written.
+  ! fix, util.c: string copies in trim_spaces(), trim_all_spaces() and
+    strip_quotes() have been rewritten more safely. Patch is courtesy of
+    Dmitry Koplovich.
+  ! fix, sfacctd: interface format is now merged back into interface value
+    fields so to ease keeping track of discards (and discard reasons) and
+    multicast fanout.
+  ! fix, MySQL, SQLite3 plugins: sql table version 8 issued to provide
+    common naming convention when mapping primitives to database fields
+    among the supported RDBMS base. Thanks to Chris Wilson for his support.
+  ! fix, pmacct client: numeric variables output converted to unsigned
+    from signed.
+  ! fix, nfacctd_net, sfacctd_net: default value changed from null (and
+    related error message) to 'netflow' for nfacctd_net and 'sflow' for
+    sfacctd_net.
+  ! fix, nfacctd, sfacctd: aggregate_filter was not catching L2 primitives
+    (VLAN, MAC addresses) when performing egress measurements.  
+
+0.12.4 -- 01-10-2010
+  + BGP daemon: a new memory model is introduced by which IP prefixes
+    are being shared among the BGP peers RIBs - leading to consistent
+    memory savings whenever multiple BGP peers export full tables due
+    to the almost total overlap of information. Longest match nature
+    of IP lookups required to raise BGP peer awareness of the lookup
+    algorithm. Updated INTERNALS document to support estimation of the
+    memory footprint of the daemon.
+  + BGP daemon: a new bgp_table_peer_buckets configuration directive
+    is introduced: per-peer routing information is attached to IP
+    prefixes and now hashed onto buckets with conflict chains. This
+    parameter sets the number of buckets of such hash structure; the
+    value is directly related to the number of expected BGP peers,
+    should never exceed such amount and is best set to 1/10 of the
+    expected number of peers.
+  + nfprobe: support has been added to export direction field (NetFlow
+    v9 field type #61); its value, 0=ingress 1=egress, is determined
+    via nfprobe_direction configuration directive.
+  + nfacctd: introduced support for Cisco ASA bytes counter, NetFlow v9
+    field type #85. Thanks to Ralf Reinartz for his support. 
+  + nfacctd: improved flow recognition heuristics for cases in which
+    IPv4/IPv6/input/output data are combined within the same NetFlow
+    v9 template. Thanks to Carsten Schoene for his support.
+  ! fix, BGP daemon: bgp_nexthop_followup was not working correctly if
+    pointed to a non-existing next-hop.
+  ! fix, nfv9_template.c: ignoring unsupported NetFlow v9 field types;
+    improved template logging. Thanks to Ralf Reinartz for his support.
+  ! fix, print plugin: support for interfaces and network masks has
+    been added. Numeric variables output converted to unsigned from
+    signed. 
+
+0.12.3 -- 28-07-2010
+  + 'cos' aggregation primitive has been implemented providing support
+    for 802.1p priority. Collection is supported via sFlow, libpcap and
+    ULOG; export is supported via sFlow. 
+  + BGP daemon: TCP MD5 signature implemented. New 'bgp_daemon_md5_file'
+    configuration directive is being added for the purpose of defining
+    peers and their respective MD5 keys, one per line, in CSV format. 
+    The map is reloadable at runtime: existing MD5 keys are removed via
+    setsockopt(), new ones are installed as per the newly supplied map.
+    Sample map added in 'examples/bgp_md5.lst.example'.
+  + BGP daemon: added support for RFC3107 (SAFI=4 label information) to
+    enable receipt of labeled IPv4/IPv6 unicast prefixes. 
+  + nfprobe, sfprobe: introduced the concept of traffic direction. As a
+    result, [ns]fprobe_direction and [ns]fprobe_ifindex configuration
+    directives have been implemented. 
+  + [ns]fprobe_direction defines traffic direction. It can be statically
+    defined via 'in' or 'out' keywords; values can also be dynamically
+    determined through a pre_tag_map (1=input, 2=output) by means of 
+    'tag' and 'tag2' keywords.
+  + [ns]fprobe_ifindex either statically associate an interface index
+    (ifIndex) to a given [ns]fprobe plugin or semi-dynamically via
+    lookups against a pre_tag_map by means of 'tag' and 'tag2' keywords.
+  + sfprobe: sfprobe_ifspeed configuration directive is introduced and
+    aimed at statically associating an interface speed to an sfprobe
+    plugin. 
+  + sfprobe: Switch Extension Header support added. Enabler for this
+    development was support for 'cos' and in/out direction. Whereas
+    VLAN information was already supported as an aggregation primitive.
+  + sfprobe: added support for Counter Samples for multiple interfaces. 
+    Sampling function has been brought to the plugin so that Counter
+    Samples can be populated with real bytes/packets traffic levels.
+  ! nfprobe, sfprobe: send buffer size is now aligned to plugin_pipe_size,
+    if specified, providing a way to tune buffers in case of sustained
+    exports.
+  ! fix, addr.c: pm_ntohll() and pm_htonll() routines rewritten. These
+    are aimed at changing byte ordering of 64-bit variables.
+  ! fix, BGP daemon: support for IPv6 global address/link-local address
+    next-hops as part of MP_REACH_NLRI parsing.
+  ! fix, cfg_handlers.c: bgp_daemon and bgp_daemon_msglog parsing was
+    not correct, ie. enabled if specified as 'false'. Thanks to Brent
+    Van Dussen for reporting the issue.
+  ! fix, bgp.c: found a CPU hog issue caused by missing cleanup of the
+    select() descriptors vector. 
+  ! fix, pmacct.c: in_iface/out_iface did erroneously fall inside a
+    section protected by the "--disable-l2" switch. Thanks to Brent
+    Van Dussen for reporting the issue.
+
+0.12.2 -- 27-05-2010
+  + A new 'tee' plugin is introduced bringing both NetFlow and sFlow
+    replication capabilities to pmacct. It supports transparent mode
+    (tee_transparent), coarse-grained filtering capabilities via the
+    Pre-Tagging infrastructure. Quickstart guide is included as part
+    of the EXAMPLES file (chapter XII).
+  + nfprobe, sfprobe: introduced support for export of the BGP next-hop 
+    information. Source data selection for BGP next-hop is being linked
+    to [pmacctd_as|uacctd_as] configuration directive. Hence it must be
+    set to 'bgp' in order for this feature to work.
+  + nfprobe, sfprobe, BGP daemon: new set of features (nfprobe_ipprec,
+    sfprobe_ipprec, bgp_daemon_ipprec) allows to mark self-originated
+    sFlow, NetFlow and BGP datagrams with the supplied IP precedence
+    value.
+  + peer_src_ip (IP address of the NetFlow emitter, agent ID of the
+    sFlow emitter) and peer_dst_ip (BGP next-hop) can now be filled
+    from NetFlow/sFlow protocols data other than BGP. To activate the
+    feature nfacctd_as_new/sfacctd_as_new have to be 'false' (default
+    value), 'true' or 'file'.
+  + print plugin: introduced support for Comma-Separated Values (CSV)
+    output in addition to formatted-text. A new print_output feature
+    allows to switch between the two.  
+  + pmacctd: improved 802.1ad support. While recursing, outer VLAN is
+    always reported as value of the 'vlan' primitive.
+  ! fix, pmacctd: 802.1p was kept integral part of the 'vlan' value.
+    Now a 0x0FFF mask is applied in order to return only the VLAN ID.
+  ! fix, pkt_handlers.c: added trailing '\0' symbol when truncating
+    AS-PATH and BGP community strings due to length constraints.
+  ! fix, sql_common.c: maximum SQL writers warning message was never
+    reached unless a recovery method is specifited. Thanks to Sergio
+    Charpinel Jr for reporting the issue.
+  ! fix, MySQL and PostgreSQL plugins: PGRES_TUPLES_OK (PostgreSQL)
+    and errno 1050 (MySQL) are now considered valid return codes when
+    dynamic tables are involved (ie. sql_table_schema). Thanks to
+    Sergio Charpinel Jr for his support.
+  ! fix, BGP daemon: pkt_bgp_primitives struct has been explicitely
+    64-bit aligned. Mis-alignment was causing crashes when buffering
+    was enabled (plugin_buffer_size). Verified on Solaris/sparc.
 
 0.12.1 -- 07-04-2010
   + Input/output interfaces (SNMP indexes) have now been implemented

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -88,21 +88,49 @@ struct template_cache_entry *insert_template_v9(struct template_hdr_v9 *hdr, str
   ptr->template_type = 0;
   ptr->num = num;
 
+  log_template_v9_header(ptr, pptrs);
+
   count = num;
   tpl = (u_char *) hdr;
   tpl += NfTplHdrV9Sz;
   field = (struct template_field_v9 *)tpl;
   while (count) {
     type = ntohs(field->type);
-    ptr->tpl[type].off = ptr->len; 
-    ptr->tpl[type].len = ntohs(field->len);
-    ptr->len += ptr->tpl[type].len;
+    log_template_v9_field(type, ptr->len, ntohs(field->len));
+
+    /* Cisco ASA hack */
+    switch (type) {
+    case NF9_ASA_XLATE_IPV4_SRC_ADDR:
+      type = NF9_XLATE_IPV4_SRC_ADDR;
+      break;
+    case NF9_ASA_XLATE_IPV4_DST_ADDR:
+      type = NF9_XLATE_IPV4_DST_ADDR;
+      break;
+    case NF9_ASA_XLATE_L4_SRC_PORT:
+      type = NF9_XLATE_L4_SRC_PORT;
+      break;
+    case NF9_ASA_XLATE_L4_DST_PORT:
+      type = NF9_XLATE_L4_DST_PORT;
+      break;
+    default:
+      break;
+    }
+
+    if (type < NF9_MAX_DEFINED_FIELD) {
+      ptr->tpl[type].off = ptr->len; 
+      ptr->tpl[type].len = ntohs(field->len);
+      ptr->len += ptr->tpl[type].len;
+    }
+    else ptr->len += ntohs(field->len);
+
     count--;
     field++;
   }
 
   if (prevptr) prevptr->next = ptr;
   else tpl_cache.c[modulo] = ptr;
+
+  log_template_v9_footer(ptr->len);
 
   return ptr;
 }
@@ -123,18 +151,85 @@ void refresh_template_v9(struct template_hdr_v9 *hdr, struct template_cache_entr
   tpl->num = num;
   tpl->next = next;
 
+  log_template_v9_header(tpl, pptrs);
+
   count = num;
   ptr = (u_char *) hdr;
   ptr += NfTplHdrV9Sz;
   field = (struct template_field_v9 *)ptr;
   while (count) {
     type = ntohs(field->type);
-    tpl->tpl[type].off = tpl->len;
-    tpl->tpl[type].len = ntohs(field->len);
-    tpl->len += tpl->tpl[type].len;
+    log_template_v9_field(type, tpl->len, ntohs(field->len));
+
+    /* Cisco ASA hack */
+    switch (type) {
+    case NF9_ASA_XLATE_IPV4_SRC_ADDR:
+      type = NF9_XLATE_IPV4_SRC_ADDR;
+      break;
+    case NF9_ASA_XLATE_IPV4_DST_ADDR:
+      type = NF9_XLATE_IPV4_DST_ADDR;
+      break;
+    case NF9_ASA_XLATE_L4_SRC_PORT:
+      type = NF9_XLATE_L4_SRC_PORT;
+      break;
+    case NF9_ASA_XLATE_L4_DST_PORT:
+      type = NF9_XLATE_L4_DST_PORT;
+      break;
+    default:
+      break;
+    }
+
+    if (type < NF9_MAX_DEFINED_FIELD) {
+      tpl->tpl[type].off = tpl->len;
+      tpl->tpl[type].len = ntohs(field->len);
+      tpl->len += tpl->tpl[type].len;
+    }
+    else tpl->len += ntohs(field->len);
+
     count--;
     field++;
   }
+
+  log_template_v9_footer(tpl->len);
+}
+
+void log_template_v9_header(struct template_cache_entry *tpl, struct packet_ptrs *pptrs)
+{
+  struct host_addr a;
+  u_char agent_addr[50];
+  u_int16_t agent_port, count, size;
+
+  sa_to_addr((struct sockaddr *)pptrs->f_agent, &a, &agent_port);
+  addr_to_str(agent_addr, &a);
+
+  Log(LOG_DEBUG, "DEBUG ( default/core ): NfV9 agent         : %s:%u\n", agent_addr, ntohl(((struct struct_header_v9 *)pptrs->f_header)->source_id));
+  Log(LOG_DEBUG, "DEBUG ( default/core ): NfV9 template type : %s\n", ( tpl->template_type == 0 ) ? "flow" : "options");
+  Log(LOG_DEBUG, "DEBUG ( default/core ): NfV9 template ID   : %u\n", ntohs(tpl->template_id));
+  Log(LOG_DEBUG, "DEBUG ( default/core ): ----------------------------------------\n");
+  Log(LOG_DEBUG, "DEBUG ( default/core ): |     field type     | offset |  size  |\n");
+}
+
+void log_template_v9_field(u_int16_t type, u_int16_t off, u_int16_t len)
+{
+  if (type <= MAX_TPL_DESC_LIST && strlen(tpl_desc_list[type])) 
+    Log(LOG_DEBUG, "DEBUG ( default/core ): | %-18s | %6u | %6u |\n", tpl_desc_list[type], off, len);
+  else
+    Log(LOG_DEBUG, "DEBUG ( default/core ): | %-18u | %6u | %6u |\n", type, off, len);
+}
+
+void log_opt_template_v9_field(u_int16_t type, u_int16_t off, u_int16_t len)
+{
+  if (type <= MAX_OPT_TPL_DESC_LIST && strlen(opt_tpl_desc_list[type]))
+    Log(LOG_DEBUG, "DEBUG ( default/core ): | %-18s | %6u | %6u |\n", opt_tpl_desc_list[type], off, len);
+  else
+    Log(LOG_DEBUG, "DEBUG ( default/core ): | %-18u | %6u | %6u |\n", type, off, len);
+}
+
+void log_template_v9_footer(u_int16_t size)
+{
+  Log(LOG_DEBUG, "DEBUG ( default/core ): ----------------------------------------\n");
+  Log(LOG_DEBUG, "DEBUG ( default/core ): NfV9 record size : %u\n", size);
+  Log(LOG_DEBUG, "DEBUG ( default/core ): \n");
 }
 
 struct template_cache_entry *insert_opt_template_v9(struct options_template_hdr_v9 *hdr, struct packet_ptrs *pptrs)
@@ -166,21 +261,30 @@ struct template_cache_entry *insert_opt_template_v9(struct options_template_hdr_
   ptr->template_type = 1;
   ptr->num = (olen+slen)/sizeof(struct template_field_v9);
 
+  log_template_v9_header(ptr, pptrs);
+
   count = ptr->num;
   tpl = (u_char *) hdr;
   tpl += NfOptTplHdrV9Sz;
   field = (struct template_field_v9 *)tpl;
   while (count) {
     type = ntohs(field->type);
-    ptr->tpl[type].off = ptr->len;
-    ptr->tpl[type].len = ntohs(field->len);
-    ptr->len += ptr->tpl[type].len;
+    log_opt_template_v9_field(type, ptr->len, ntohs(field->len));
+    if (type < NF9_MAX_DEFINED_FIELD) { 
+      ptr->tpl[type].off = ptr->len;
+      ptr->tpl[type].len = ntohs(field->len);
+      ptr->len += ptr->tpl[type].len;
+    }
+    else ptr->len += ntohs(field->len);
+
     count--;
     field++;
   }
 
   if (prevptr) prevptr->next = ptr;
   else tpl_cache.c[modulo] = ptr;
+
+  log_template_v9_footer(ptr->len);
 
   return ptr;
 }
@@ -202,16 +306,25 @@ void refresh_opt_template_v9(struct options_template_hdr_v9 *hdr, struct templat
   tpl->num = (olen+slen)/sizeof(struct template_field_v9);
   tpl->next = next;
 
+  log_template_v9_header(tpl, pptrs);  
+
   count = tpl->num;
   ptr = (u_char *) hdr;
   ptr += NfOptTplHdrV9Sz;
   field = (struct template_field_v9 *)ptr;
   while (count) {
     type = ntohs(field->type);
-    tpl->tpl[type].off = tpl->len;
-    tpl->tpl[type].len = ntohs(field->len);
-    tpl->len += tpl->tpl[type].len;
+    log_opt_template_v9_field(type, tpl->len, ntohs(field->len));
+    if (type < NF9_MAX_DEFINED_FIELD) {
+      tpl->tpl[type].off = tpl->len;
+      tpl->tpl[type].len = ntohs(field->len);
+      tpl->len += tpl->tpl[type].len;
+    }
+    else tpl->len += ntohs(field->len);
+
     count--;
     field++;
   }
+
+  log_template_v9_footer(tpl->len);
 }

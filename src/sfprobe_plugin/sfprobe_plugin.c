@@ -23,10 +23,22 @@
 #include "net_aggr.h"
 #include "ports_aggr.h"
 
+#define SFL_DIRECTION_IN 0
+#define SFL_DIRECTION_OUT 1
+#define SFL_MAX_INTERFACES 4096
+
+typedef struct _SflSp_counters {
+  u_int32_t ifIndex;
+  u_int32_t frames[2];
+  u_int64_t bytes[2];
+  u_int32_t multicasts[2];
+  u_int32_t broadcasts[2];
+} SflSp_counters;
+
 typedef struct _SflSp {
   int verbose;
   char *device;
-  u_int32_t ifIndex;
+  int ifIndex_Type;
   int ifType;
   u_int64_t ifSpeed;
   int ifDirection;
@@ -40,22 +52,14 @@ typedef struct _SflSp {
   int batch;
   pcap_t *pcap;
 
-  // counters for each direction
-#define SFL_DIRECTION_IN 0
-#define SFL_DIRECTION_OUT 1
-  u_int32_t frames[2];
-  u_int64_t bytes[2];
-  u_int32_t multicasts[2];
-  u_int32_t broadcasts[2];
+  SflSp_counters counters[SFL_MAX_INTERFACES]; 
 
   struct in_addr agentIP;
   u_int32_t agentSubId;
 
   struct in_addr interfaceIP;
   struct in6_addr interfaceIP6;
-  char interfaceMAC[6];
   char pad[2];
-  int gotInterfaceMAC;
 
   SFLAgent *agent;
   SFLSampler *sampler;
@@ -104,7 +108,8 @@ u_long getMyIPAddress()
 static void setDefaults(SflSp *sp)
 {
   sp->device = NULL;
-  sp->ifIndex = 1;
+  sp->counters[0].ifIndex = 1;
+  sp->ifIndex_Type = IFINDEX_STATIC;
   sp->ifType = 6; // ethernet_csmacd 
   sp->ifSpeed = 100000000L;  // assume 100 MBit
   sp->ifDirection = 1; // assume full duplex 
@@ -142,34 +147,41 @@ static void agentCB_error(void *magic, SFLAgent *agent, char *msg)
 
 void agentCB_getCounters(void *magic, SFLPoller *poller, SFL_COUNTERS_SAMPLE_TYPE *cs)
 {
+  SFLCounters_sample_element genElem[SFL_MAX_INTERFACES];
   SflSp *sp = (SflSp *)magic;
+  int idx = 0;
+
+  memset(&genElem, 0, sizeof(genElem));
 
   // build a counters sample
-  SFLCounters_sample_element genElem;
-  memset(&genElem, 0, sizeof(genElem));
-  genElem.tag = SFLCOUNTERS_GENERIC;
-  // don't need to set the length here (set by the encoder)
-  genElem.counterBlock.generic.ifIndex = sp->ifIndex;
-  genElem.counterBlock.generic.ifType = sp->ifType;
-  genElem.counterBlock.generic.ifSpeed = sp->ifSpeed;
-  genElem.counterBlock.generic.ifDirection = sp->ifDirection;
-  genElem.counterBlock.generic.ifStatus = 0x03; // adminStatus = up, operStatus = up
-  genElem.counterBlock.generic.ifPromiscuousMode = sp->promiscuous;
-  // these counters would normally be a snapshot the hardware interface counters - the
-  // same ones that the SNMP agent uses to answer SNMP requests to the ifTable.  To ease
-  // the portability of this program, however, I am just using some counters that were
-  // added up in software:
-  genElem.counterBlock.generic.ifInOctets = sp->bytes[SFL_DIRECTION_IN];
-  genElem.counterBlock.generic.ifInUcastPkts = sp->frames[SFL_DIRECTION_IN];
-  genElem.counterBlock.generic.ifInMulticastPkts = sp->multicasts[SFL_DIRECTION_IN];
-  genElem.counterBlock.generic.ifInBroadcastPkts = sp->broadcasts[SFL_DIRECTION_IN];
-  genElem.counterBlock.generic.ifOutOctets = sp->bytes[SFL_DIRECTION_OUT];
-  genElem.counterBlock.generic.ifOutUcastPkts = sp->frames[SFL_DIRECTION_OUT];
-  genElem.counterBlock.generic.ifOutMulticastPkts = sp->multicasts[SFL_DIRECTION_OUT];
-  genElem.counterBlock.generic.ifOutBroadcastPkts = sp->broadcasts[SFL_DIRECTION_OUT];
+  for (idx = 0; idx < SFL_MAX_INTERFACES && sp->counters[idx].ifIndex; idx++) {
+    if (sp->counters[idx].frames[SFL_DIRECTION_IN] ||
+        sp->counters[idx].frames[SFL_DIRECTION_OUT]) {
+      genElem[idx].tag = SFLCOUNTERS_GENERIC;
+      // don't need to set the length here (set by the encoder)
+      genElem[idx].counterBlock.generic.ifIndex = sp->counters[idx].ifIndex;
+      genElem[idx].counterBlock.generic.ifType = sp->ifType;
+      genElem[idx].counterBlock.generic.ifSpeed = sp->ifSpeed;
+      genElem[idx].counterBlock.generic.ifDirection = sp->ifDirection;
+      genElem[idx].counterBlock.generic.ifStatus = 0x03; // adminStatus = up, operStatus = up
+      genElem[idx].counterBlock.generic.ifPromiscuousMode = sp->promiscuous;
+      // these counters would normally be a snapshot the hardware interface counters - the
+      // same ones that the SNMP agent uses to answer SNMP requests to the ifTable.  To ease
+      // the portability of this program, however, I am just using some counters that were
+      // added up in software:
+      genElem[idx].counterBlock.generic.ifInOctets = sp->counters[idx].bytes[SFL_DIRECTION_IN];
+      genElem[idx].counterBlock.generic.ifInUcastPkts = sp->counters[idx].frames[SFL_DIRECTION_IN];
+      genElem[idx].counterBlock.generic.ifInMulticastPkts = sp->counters[idx].multicasts[SFL_DIRECTION_IN];
+      genElem[idx].counterBlock.generic.ifInBroadcastPkts = sp->counters[idx].broadcasts[SFL_DIRECTION_IN];
+      genElem[idx].counterBlock.generic.ifOutOctets = sp->counters[idx].bytes[SFL_DIRECTION_OUT];
+      genElem[idx].counterBlock.generic.ifOutUcastPkts = sp->counters[idx].frames[SFL_DIRECTION_OUT];
+      genElem[idx].counterBlock.generic.ifOutMulticastPkts = sp->counters[idx].multicasts[SFL_DIRECTION_OUT];
+      genElem[idx].counterBlock.generic.ifOutBroadcastPkts = sp->counters[idx].broadcasts[SFL_DIRECTION_OUT];
 
-  // add this counter block to the counter sample that we are building
-  SFLADD_ELEMENT(cs, &genElem);
+      // add this counter block to the counter sample that we are building
+      SFLADD_ELEMENT(cs, &genElem[idx]);
+    }
+  }
 
   // pass these counters down to be encoded and included with the next sFlow datagram
   sfl_poller_writeCountersSample(poller, cs);
@@ -253,10 +265,10 @@ static void init_agent(SflSp *sp)
 
 static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *buf)
 {
-  SFLFlow_sample_element hdrElem, classHdrElem, gatewayHdrElem, routerHdrElem, tagHdrElem;
+  SFLFlow_sample_element hdrElem, classHdrElem, gatewayHdrElem, routerHdrElem, tagHdrElem, switchHdrElem;
   SFLExtended_as_path_segment as_path_segment;
   u_int32_t frame_len, header_len;
-  int direction, sampledPackets, ethHdrLen;
+  int direction, sampledPackets, ethHdrLen, idx = 0;
   struct eth_header dummy_eh;
   u_int16_t ethType = 0, cap_len = hdr->cap_len, pkt_len = hdr->pkt_len;
   unsigned char *local_buf = (unsigned char *) buf;
@@ -290,115 +302,164 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
 			     pkt_len,
 			     cap_len);
 
-  // test the src mac address to know the direction.  Anything with src = interfaceMAC
-  // will be counted as output, and everything else can be counted as input.  (There may
-  // be a way to get this info from the pcap library,  but I don't know the incantation.
-  // (If you know how to do that, please let me know).
-  direction = memcmp(sp->interfaceMAC, local_buf + 6, 6) ? SFL_DIRECTION_IN : SFL_DIRECTION_OUT;
+  /* Let's fill sample direction in - and default to ingress */
+  direction = 0;
+
+  if (config.nfprobe_direction) {
+    switch (config.nfprobe_direction) {
+    case DIRECTION_IN:
+      direction = SFL_DIRECTION_IN;
+      break;
+    case DIRECTION_OUT:
+      direction = SFL_DIRECTION_OUT;
+      break;
+    case DIRECTION_TAG:
+      if (hdr->tag == 1) direction = SFL_DIRECTION_IN;
+      else if (hdr->tag == 2) direction = SFL_DIRECTION_OUT;
+      break;
+    case DIRECTION_TAG2:
+      if (hdr->tag2 == 1) direction = SFL_DIRECTION_IN;
+      else if (hdr->tag2 == 2) direction = SFL_DIRECTION_OUT;
+      break;
+    }
+  }
+
+  // Let's determine the ifIndex
+  if (!hdr->ifindex_in && !hdr->ifindex_out) {
+    if (sp->ifIndex_Type) {
+      switch (sp->ifIndex_Type) {
+      case IFINDEX_TAG:
+        for (idx = 0; idx < SFL_MAX_INTERFACES; idx++) {
+          if (sp->counters[idx].ifIndex == hdr->tag || idx == (SFL_MAX_INTERFACES-1)) break;
+	  else if (sp->counters[idx].ifIndex == 0) {
+	    sp->counters[idx].ifIndex = hdr->tag;
+	    break;
+	  }
+	}
+        break;
+      case IFINDEX_TAG2:
+        for (idx = 0; idx < SFL_MAX_INTERFACES; idx++) {
+	  if (sp->counters[idx].ifIndex == hdr->tag2 || idx == (SFL_MAX_INTERFACES-1)) break;
+	  else if (sp->counters[idx].ifIndex == 0) {
+	    sp->counters[idx].ifIndex = hdr->tag2;
+	    break;
+	  }
+        }
+        break;
+      }
+    }
+  }
+  else {
+    u_int32_t ifIndex = (direction == SFL_DIRECTION_IN) ? hdr->ifindex_in : hdr->ifindex_out;
+
+    for (idx = 0; idx < SFL_MAX_INTERFACES; idx++) {
+      if (sp->counters[idx].ifIndex == ifIndex || idx == (SFL_MAX_INTERFACES-1)) break;
+      else if (sp->counters[idx].ifIndex == 0) {
+        sp->counters[idx].ifIndex = ifIndex;
+        break;
+      }
+    }
+  }
 
   // maintain some counters in software - just to ease portability
-  sp->bytes[direction] += pkt_len;
+  sp->counters[idx].bytes[direction] += pkt_len;
   if (local_buf[0] & 0x01) {
     if(local_buf[0] == 0xff &&
        local_buf[1] == 0xff &&
        local_buf[2] == 0xff &&
        local_buf[3] == 0xff &&
        local_buf[4] == 0xff &&
-       local_buf[5] == 0xff) sp->broadcasts[direction]++;
-    else sp->multicasts[direction]++;
+       local_buf[5] == 0xff) sp->counters[idx].broadcasts[direction]++;
+    else sp->counters[idx].multicasts[direction]++;
   }
-  else sp->frames[direction]++;
+  else sp->counters[idx].frames[direction]++;
 
-  // OLD: test to see if we want to sample this packet
-  {
-    sampledPackets = hdr->pkt_num;
-    sp->sampler->samplePool += hdr->sample_pool;
+  if (config.ext_sampling_rate || sfl_sampler_takeSample(sp->sampler)) {
+    // Yes. Build a flow sample and send it off...
+    SFL_FLOW_SAMPLE_TYPE fs;
+    memset(&fs, 0, sizeof(fs));
 
-    /* In case of flows (ie. hdr->pkt_num > 1) we have now computed how
-       many packets to sample; let's cheat counters */
-    if (sampledPackets > 1) {
-      pkt_len = pkt_len / hdr->pkt_num; 
-      hdr->pkt_num = 1;
+    if (!hdr->ifindex_in && !hdr->ifindex_out) {
+	if (sp->ifIndex_Type) {
+	  switch (sp->ifIndex_Type) {
+	  case IFINDEX_STATIC:
+          fs.input = (direction == SFL_DIRECTION_IN) ? sp->counters[0].ifIndex : 0x3FFFFFFF;
+          fs.output = (direction == SFL_DIRECTION_OUT) ? sp->counters[0].ifIndex : 0x3FFFFFFF;
+	    break;
+	  case IFINDEX_TAG:
+	    fs.input = (direction == SFL_DIRECTION_IN) ? hdr->tag : 0x3FFFFFFF;
+	    fs.output = (direction == SFL_DIRECTION_OUT) ? hdr->tag : 0x3FFFFFFF;
+	    break;
+	  case IFINDEX_TAG2:
+	    fs.input = (direction == SFL_DIRECTION_IN) ? hdr->tag2 : 0x3FFFFFFF;
+	    fs.output = (direction == SFL_DIRECTION_OUT) ? hdr->tag2 : 0x3FFFFFFF;
+	    break;
+	  }
+	}
     }
+    else {
+      fs.input = (hdr->ifindex_in) ? hdr->ifindex_in : 0x3FFFFFFF;
+      fs.output = (hdr->ifindex_out) ? hdr->ifindex_out : 0x3FFFFFFF;
+    }
+    
+    memset(&hdrElem, 0, sizeof(hdrElem));
 
-    while (sampledPackets > 0) { 
-      // Yes. Build a flow sample and send it off...
-      SFL_FLOW_SAMPLE_TYPE fs;
-      memset(&fs, 0, sizeof(fs));
+    hdrElem.tag = SFLFLOW_HEADER;
 
-      // Since we are an end host, we are not switching or routing
-      // this packet.  On a switch or router this is just like a
-      // packet going to or from the management agent.  That means
-      // the local interface index should be filled in as the special
-      // value 0x3FFFFFFF, which is defined in the sFlow spec as
-      // an "internal" interface.
-      if (!hdr->ifindex_in && !hdr->ifindex_out) {
-        fs.input = (direction == SFL_DIRECTION_IN) ? sp->ifIndex : 0x3FFFFFFF;
-        fs.output = (direction == SFL_DIRECTION_IN) ? 0x3FFFFFFF : sp->ifIndex;
-      }
-      else {
-        fs.input = (hdr->ifindex_in) ? hdr->ifindex_in : 0x3FFFFFFF;
-        fs.output = (hdr->ifindex_out) ? hdr->ifindex_out : 0x3FFFFFFF;
-      }
-      
-      memset(&hdrElem, 0, sizeof(hdrElem));
-
-      hdrElem.tag = SFLFLOW_HEADER;
-
-      if (!ethType) hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
-      else {
-        switch (ntohs(ethType)) {
-        case ETHERTYPE_IP:
-          hdrElem.flowType.header.header_protocol = SFLHEADER_IPv4;
-          break;
-        case ETHERTYPE_IPV6:
-          hdrElem.flowType.header.header_protocol = SFLHEADER_IPv6; 
-          break;
+    if (!ethType) hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
+    else {
+      switch (ntohs(ethType)) {
+      case ETHERTYPE_IP:
+        hdrElem.flowType.header.header_protocol = SFLHEADER_IPv4;
+        break;
+      case ETHERTYPE_IPV6:
+        hdrElem.flowType.header.header_protocol = SFLHEADER_IPv6; 
+        break;
 	default:
 	  hdrElem.flowType.header.header_protocol = SFLHEADER_ETHERNET_ISO8023;
 	  break;
-        }
       }
-    
-      // the FCS trailing bytes should be counted in the frame_length
-      // but they should also be recorded in the "stripped" field.
-      // assume that libpcap is not giving us the FCS
-      frame_len = pkt_len;
-      if (config.acct_type == ACCT_PM) {
-        u_int32_t FCS_bytes = 4;
-        hdrElem.flowType.header.frame_length = frame_len + FCS_bytes;
-        hdrElem.flowType.header.stripped = FCS_bytes;
-      }
-      else hdrElem.flowType.header.frame_length = frame_len;
+    }
+  
+    // the FCS trailing bytes should be counted in the frame_length
+    // but they should also be recorded in the "stripped" field.
+    // assume that libpcap is not giving us the FCS
+    frame_len = pkt_len;
+    if (config.acct_type == ACCT_PM) {
+      u_int32_t FCS_bytes = 4;
+      hdrElem.flowType.header.frame_length = frame_len + FCS_bytes;
+      hdrElem.flowType.header.stripped = FCS_bytes;
+    }
+    else hdrElem.flowType.header.frame_length = frame_len;
 
-      header_len = cap_len;
-      if (header_len > frame_len) header_len = frame_len;
-      if (header_len > sp->snaplen) header_len = sp->snaplen;
-      hdrElem.flowType.header.header_length = header_len;
-      hdrElem.flowType.header.header_bytes = (u_int8_t *)local_buf;
-      SFLADD_ELEMENT(&fs, &hdrElem);
+    header_len = cap_len;
+    if (header_len > frame_len) header_len = frame_len;
+    if (header_len > sp->snaplen) header_len = sp->snaplen;
+    hdrElem.flowType.header.header_length = header_len;
+    hdrElem.flowType.header.header_bytes = (u_int8_t *)local_buf;
+    SFLADD_ELEMENT(&fs, &hdrElem);
 
-      if (config.what_to_count & COUNT_CLASS) {
+    if (config.what_to_count & COUNT_CLASS) {
 	memset(&classHdrElem, 0, sizeof(classHdrElem));
 	classHdrElem.tag = SFLFLOW_EX_CLASS;
 	classHdrElem.flowType.class.class = hdr->class;
 	SFLADD_ELEMENT(&fs, &classHdrElem);
-      }
+    }
 
-      if (config.what_to_count & (COUNT_ID|COUNT_ID2)) {
-        memset(&tagHdrElem, 0, sizeof(tagHdrElem));
-        tagHdrElem.tag = SFLFLOW_EX_TAG;
-        tagHdrElem.flowType.tag.tag = hdr->tag;
-        tagHdrElem.flowType.tag.tag2 = hdr->tag2;
-        SFLADD_ELEMENT(&fs, &tagHdrElem);
-      }
+    if (config.what_to_count & (COUNT_ID|COUNT_ID2)) {
+      memset(&tagHdrElem, 0, sizeof(tagHdrElem));
+      tagHdrElem.tag = SFLFLOW_EX_TAG;
+      tagHdrElem.flowType.tag.tag = hdr->tag;
+      tagHdrElem.flowType.tag.tag2 = hdr->tag2;
+      SFLADD_ELEMENT(&fs, &tagHdrElem);
+    }
 
-      /*
-         Extended gateway is meant to have a broad range of
-         informations; we will fill in only infos pertaining
+    /*
+       Extended gateway is meant to have a broad range of
+       informations; we will fill in only infos pertaining
 	 to src and dst ASNs
-      */
-      if (config.networks_file || config.nfacctd_as == NF_AS_BGP) {
+    */
+    if (config.networks_file || config.nfacctd_as == NF_AS_BGP) {
 	memset(&gatewayHdrElem, 0, sizeof(gatewayHdrElem));
 	memset(&as_path_segment, 0, sizeof(as_path_segment));
 	gatewayHdrElem.tag = SFLFLOW_EX_GATEWAY;
@@ -409,22 +470,50 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
 	as_path_segment.type = SFLEXTENDED_AS_SET;
 	as_path_segment.length = 1;
 	as_path_segment.as.set = &hdr->dst_as;
+	if (config.what_to_count & COUNT_PEER_DST_IP) {
+        switch (hdr->bgp_next_hop.family) {
+        case AF_INET:
+          gatewayHdrElem.flowType.gateway.nexthop.type = SFLADDRESSTYPE_IP_V4;
+          memcpy(&gatewayHdrElem.flowType.gateway.nexthop.address.ip_v4, &hdr->bgp_next_hop.address.ipv4, 4);
+          break;
+#if defined ENABLE_IPV6
+        case AF_INET6:
+          gatewayHdrElem.flowType.gateway.nexthop.type = SFLADDRESSTYPE_IP_V6;
+          memcpy(&gatewayHdrElem.flowType.gateway.nexthop.address.ip_v6, &hdr->bgp_next_hop.address.ipv6, 16);
+          break;
+#endif
+        default:
+          memset(&gatewayHdrElem.flowType.gateway.nexthop, 0, sizeof(routerHdrElem.flowType.router.nexthop));
+          break;
+        }
+	}
 	SFLADD_ELEMENT(&fs, &gatewayHdrElem);
-      }
+    }
 
-      if (config.what_to_count & (COUNT_SRC_NMASK|COUNT_DST_NMASK)) {
+    if (config.what_to_count & (COUNT_SRC_NMASK|COUNT_DST_NMASK)) {
 	memset(&routerHdrElem, 0, sizeof(routerHdrElem));
 	routerHdrElem.tag = SFLFLOW_EX_ROUTER;
 	routerHdrElem.flowType.router.src_mask = hdr->src_nmask; 
 	routerHdrElem.flowType.router.dst_mask = hdr->dst_nmask;
 	SFLADD_ELEMENT(&fs, &routerHdrElem);
-      }
-
-      // submit the sample to be encoded and sent out - that's all there is to it(!)
-      sfl_sampler_writeFlowSample(sp->sampler, &fs);
-
-      sampledPackets--;
     }
+
+    if (config.what_to_count & (COUNT_VLAN|COUNT_COS)) {
+      memset(&switchHdrElem, 0, sizeof(switchHdrElem));
+      switchHdrElem.tag = SFLFLOW_EX_SWITCH;
+	if (direction == SFL_DIRECTION_IN) {
+        switchHdrElem.flowType.sw.src_vlan = hdr->vlan;
+        switchHdrElem.flowType.sw.src_priority = hdr->priority;
+	}
+	else if (direction == SFL_DIRECTION_OUT) {
+        switchHdrElem.flowType.sw.dst_vlan = hdr->vlan;
+        switchHdrElem.flowType.sw.dst_priority = hdr->priority;
+	}
+      SFLADD_ELEMENT(&fs, &switchHdrElem);
+    }
+
+    // submit the sample to be encoded and sent out - that's all there is to it(!)
+    sfl_sampler_writeFlowSample(sp->sampler, &fs);
   }
 }
 
@@ -451,9 +540,9 @@ static void parse_receiver(char *string, struct in_addr *addr, u_int32_t *port)
 
 static void process_config_options(SflSp *sp)
 {
-  // sp->ifIndex = atoi(optarg);
-  // sp->ifSpeed = strtoll(optarg, NULL, 0);
-  
+  if (config.nfprobe_ifindex_type) sp->ifIndex_Type = config.nfprobe_ifindex_type;
+  if (config.nfprobe_ifindex) sp->counters[0].ifIndex = config.nfprobe_ifindex;
+  if (config.sfprobe_ifspeed) sp->ifSpeed = config.sfprobe_ifspeed;
   if (config.sfprobe_agentip) sp->agentIP.s_addr = Name_to_IP(config.sfprobe_agentip);
   if (config.sfprobe_agentsubid) sp->agentSubId = config.sfprobe_agentsubid;
   if (config.sfprobe_receiver) parse_receiver(config.sfprobe_receiver, &sp->collectorIP, &sp->collectorPort);
@@ -512,9 +601,6 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   setDefaults(&sp);
   process_config_options(&sp);
-
-  // remember if we got a mac address, so we can use it to infer direction
-  // sp.gotInterfaceMAC = ((getDevFlags & GETDEV_FOUND_MAC) != 0);
 
   // create the agent and sampler objects
   init_agent(&sp);

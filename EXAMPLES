@@ -13,6 +13,7 @@ VIII.	Quickstart guide to packet/stream classifiers
 IX.	Quickstart guide to setup a NetFlow agent/probe 
 X.	Quickstart guide to setup a sFlow agent/probe 
 XI.	Quickstart guide to setup the BGP daemon
+XII.	Quickstart guide to setup a NetFlow/sFlow replicator
 
 
 I. Plugins included with pmacct distribution
@@ -446,8 +447,6 @@ nfprobe_version: 9
 ! nfprobe_timeouts: tcp=120:maxlife=3600
 !
 ! networks_file: /path/to/networks.lst
-! classifiers: /path/to/classifiers/
-! snaplen: 700
 !...
 
    This is a basic working configuration. Additional features include: 1) generate ASNs
@@ -477,11 +476,54 @@ router bgp Y
  neighbor 127.0.0.1 update-source X.X.X.X
 !
 
-   2) embed flow classification informations in NetFlow v9 datagrams by uncommenting
-   'classifiers' and 'snaplen' lines, reading for further information the section of
-   this document about stream classification and finally adding the 'class' key to the
-   'aggregate' directive; 3) add L2 (MAC addresses, VLANs) information to NetFlow v9
-   flowsets.
+   2) encode flow classification information in NetFlow v9 like Cisco does with its
+   NBAR/NetFlow v9 tie-up. This can be done by introducing the 'class' primitive to
+   the afore mentioned 'aggregate' and add the extra configuration directives:
+
+aggregate: class, src_host, dst_host, src_port, dst_port, proto, tos
+classifiers: /path/to/classifiers/
+snaplen: 700
+
+   Further information on this topic can be found in the section of this document about
+   stream classification; 3) add direction (ingress, egress) awareness to measured IP
+   traffic flows. Direction can be inferred either statically (in, out) or dinamically
+   (tag, tag2) via nfprobe_direction directive. Let's look at a dynamic example using
+   tag2; first, add the following lines to the daemon configuration:
+
+nfprobe_direction: tag2
+pre_tag_map: /path/to/pretag.map
+
+   then edit the tag map as follows. A return value of '1' means ingress while '2' is
+   translated to egress. It is possible to employ L2 and/or L3 addresses to recognize
+   flow directions. The 'id2' primitive (tag2) will be used to carry the return value:
+
+id=1 filter='dst host XXX.XXX.XXX.XXX'
+id=2 filter='src host XXX.XXX.XXX.XXX'
+
+id=1 filter='ether src XX:XX:XX:XX:XX:XX'
+id=2 filter='ether dst XX:XX:XX:XX:XX:XX'
+
+   Indeed in such a case, the 'id' primitive (tag) can be leveraged to other uses (ie.
+   filter sub-set of the traffic for flow export); 4) add interface (input, output)
+   awareness to measured IP traffic flowsi - in addition to direction awareness, as
+   just discussed. Interface can be inferred either statically (<1-4294967295>) or
+   dynamically (tag, tag2) via nfprobe_ifindex directive. Let's look at a dynamic
+   example using tag; first add the following lines to the daemon configuration:
+
+nfprobe_direction: tag
+pre_tag_map: /path/to/pretag.map 
+
+   then edit the tag map as follows. It is possible to employ L2 and/or L3 addresses
+   to recognize flow directions. The 'id' primitive (tag) will be used to carry the
+   return value:
+
+id=100 filter='dst host XXX.XXX.XXX.XXX'
+id=100 filter='src host XXX.XXX.XXX.XXX'
+id=200 filter='dst host YYY.YYY.YYY.YYY'
+id=200 filter='src host YYY.YYY.YYY.YYY'
+
+id=200 filter='ether src YY:YY:YY:YY:YY:YY'
+id=200 filter='ether dst YY:YY:YY:YY:YY:YY'
 
 c) build NetFlow collector configuration, using nfacctd:
 !
@@ -775,3 +817,46 @@ please get in touch. TCP MD5 signature for BGP messages is not yet supported but
 on the radar. For a review of all the configurable knobs and features see the
 CONFIG-KEYS document. 
 
+
+XII. Quickstart guide to setup a NetFlow/sFlow replicator
+pmacct 0.12 (>= 0.12.2) includes a new 'tee' plugin which is meant to replicate
+NetFlow/sFlow data to N remote collectors. The plugin can also act transparently
+by preserving the original IP address of the datagrams.
+Setting up a replicator is very easy. All is needed is where to listen to for
+incoming packets, where to replicate them to and optionally a filtering layer,
+if required. Filtering bases on the standard pre_tag_map infrastructure; only
+coarse-grained filtering against original source IP address is possible. 
+
+nfacctd_port: 2100
+nfacctd_ip: X.X.X.X
+
+plugins: tee[a], tee[b]
+tee_receiver[a]: Y.Y.Y.Y:2100
+tee_receiver[b]: Z.Z.Z.Z:2100
+! tee_transparent: true
+
+! pre_tag_map: /path/to/pretag.map
+! pre_tag_filter[b]: 0
+
+plugin_buffer_size: 10240
+plugin_pipe_size: 1024000
+
+The pre_tag_filter in the above configuration snapshot applies only to the 'tee'
+plugin instance 'b' and filters out any NetFlow/sFlow packets marked with a non-
+zero 'id'. Plugin instance 'a' would normally receive all packets instead. An
+example of the pre_tag_map content follows:
+
+id=1 ip=A.A.A.A
+id=1 ip=B.B.B.B
+id=1 ip=C.C.C.C
+
+To enable the transparent mode, the tee_transparent should be commented out. It
+preserves the original IP address of the NetFlow/sFlow sender while replicating
+by essentially spoofing it. This feature is not global and can be freely enabled
+only on a subset of the active replicators. It requires super-user permissions
+in order to run.
+
+Concluding note: 'tee' plugin is not compatible with different plugins - within
+the same daemon instance. So if in the need of using pmacct for both collecting
+and replicating data, two separate instances must be used (intuitively with the
+replicator instance feeding the collector one).

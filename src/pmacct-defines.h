@@ -20,18 +20,20 @@
 */
 
 /* defines */
-#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:R"
-#define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:R"
-#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:wWL:R"
-#define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:v:o:Rg:L:"
+#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:R"
+#define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:R"
+#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:O:wWL:R"
+#define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:v:o:O:Rg:L:"
 #define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:"
-#define N_PRIMITIVES 46
+#define N_PRIMITIVES 47
 #define N_FUNCS 10 
 #define MAX_N_PLUGINS 32
 #define PROTO_LEN 12
-#define MAX_MAP_ENTRIES 128
+#define MAX_MAP_ENTRIES 2048 /* allow maps */
+#define BGP_MD5_MAP_ENTRIES 8192
 #define AGG_FILTER_ENTRIES 128 
 #define FOLLOW_BGP_NH_ENTRIES 32 
+#define MAX_PROTOCOL_LEN 16
 #define UINT32T_THRESHOLD 4290000000UL
 #define UINT64T_THRESHOLD 18446744073709551360ULL
 #ifndef UINT8_MAX
@@ -56,13 +58,13 @@
 #define LARGEBUFLEN (8192+MOREBUFSZ)
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.12.1"
-#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.12.1"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.12.1"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.12.1"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.12.1"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.12.1"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.12.1"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.12.5"
+#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.12.5"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.12.5"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.12.5"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.12.5"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.12.5"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.12.5"
 
 #ifndef TRUE
 #define TRUE 1
@@ -95,7 +97,7 @@
 #define MAP_BGP_SRC_MED		103	/* bgp_src_med_map */
 #define MAP_BGP_IS_SYMMETRIC    104	/* bgp_is_symmetric_map */
 
-/* 44 primitives currently defined */
+/* 47 primitives currently defined */
 #define COUNT_SRC_HOST		0x0000000000000001ULL
 #define COUNT_DST_HOST		0x0000000000000002ULL
 #define COUNT_SUM_HOST          0x0000000000000004ULL
@@ -142,6 +144,7 @@
 #define COUNT_OUT_IFACE		0x0000080000000000ULL
 #define COUNT_SRC_NMASK		0x0000100000000000ULL
 #define COUNT_DST_NMASK		0x0000200000000000ULL
+#define COUNT_COS		0x0000400000000000ULL
 
 /* BYTES and PACKETS are used into templates; we let their values to
    overlap with some values we will not need into templates */ 
@@ -182,12 +185,26 @@
 #define PIPE_TYPE_PAYLOAD	0x00000002
 #define PIPE_TYPE_EXTRAS	0x00000004
 #define PIPE_TYPE_BGP		0x00000008
+#define PIPE_TYPE_MSG		0x00000010
 
 #define CHLD_WARNING		0x00000001
 #define CHLD_ALERT		0x00000002
 
 #define BGP_SRC_PRIMITIVES_MAP	0x00000001
 #define BGP_SRC_PRIMITIVES_BGP	0x00000002
+
+#define PRINT_OUTPUT_FORMATTED	0x00000001
+#define PRINT_OUTPUT_CSV	0x00000002
+
+#define DIRECTION_UNKNOWN	0x00000000
+#define DIRECTION_IN		0x00000001
+#define DIRECTION_OUT		0x00000002
+#define DIRECTION_TAG		0x00000004
+#define DIRECTION_TAG2		0x00000008
+
+#define IFINDEX_STATIC		0x00000001
+#define IFINDEX_TAG		0x00000002
+#define IFINDEX_TAG2		0x00000004
 
 typedef u_int32_t pm_class_t;
 typedef u_int32_t pm_id_t;

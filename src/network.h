@@ -36,6 +36,7 @@
 #define ETHER_HDRLEN    	14
 #define ETHERMTU		1500
 #define IEEE8021Q_TAGLEN	4
+#define IEEE8021AH_LEN		10
 #define PPP_TAGLEN              2
 #define MAX_MCAST_GROUPS	20
 #define ROUTING_SEGMENT_MAX	16
@@ -69,6 +70,7 @@ struct token_header {
 #define ETHERTYPE_8021Q		0x8100          /* 802.1Q */
 #define ETHERTYPE_MPLS          0x8847		/* MPLS */
 #define ETHERTYPE_MPLS_MULTI    0x8848		/* MPLS */
+#define ETHERTYPE_8021AH        0x88A8		/* 802.1ah */
 
 /* PPP protocol definitions */
 #define PPP_HDRLEN      4       /* octets for standard ppp header */
@@ -161,12 +163,51 @@ struct my_tcphdr
     u_int16_t th_urp;           /* urgent pointer */
 };
 
+/* For TCP_MD5SIG socket option.  */
+#ifndef TCP_MD5SIG_MAXKEYLEN 
+#define TCP_MD5SIG_MAXKEYLEN    80
+#endif
+
+#ifndef TCP_MD5SIG
+#define TCP_MD5SIG       14
+#endif
+
+struct my_tcp_md5sig
+{
+  struct sockaddr_storage tcpm_addr;            /* Address associated.  */
+  u_int16_t     __tcpm_pad1;                    /* Zero.  */
+  u_int16_t     tcpm_keylen;                    /* Key length.  */
+  u_int32_t     __tcpm_pad2;                    /* Zero.  */
+  u_int8_t      tcpm_key[TCP_MD5SIG_MAXKEYLEN]; /* Key (binary).  */
+};
+
 struct my_udphdr
 {
   u_int16_t uh_sport;           /* source port */
   u_int16_t uh_dport;           /* destination port */
   u_int16_t uh_ulen;            /* udp length */
   u_int16_t uh_sum;             /* udp checksum */
+};
+
+struct my_icmphdr
+{
+  u_int8_t type;                /* message type */
+  u_int8_t code;                /* type sub-code */
+  u_int16_t checksum;
+  union
+  {
+    struct
+    {
+      u_int16_t id;
+      u_int16_t sequence;
+    } echo;                     /* echo datagram */
+    u_int32_t   gateway;        /* gateway address */
+    struct
+    {
+      u_int16_t __unused;
+      u_int16_t mtu;
+    } frag;                     /* path mtu discovery */
+  } un;
 };
 
 struct my_tlhdr {
@@ -221,8 +262,10 @@ struct packet_ptrs {
   pm_id_t bta; /* bgp_to_agent */
   char *bgp_src; /* pointer to bgp_node structure for source prefix, if any */  
   char *bgp_dst; /* pointer to bgp_node structure for destination prefix, if any */ 
+  char *bgp_src_info; /* pointer to bgp_info structure for source prefix, if any */  
+  char *bgp_dst_info; /* pointer to bgp_info structure for destination prefix, if any */ 
   char *bgp_peer; /* record BGP peer's Router-ID */
-  char *bgp_nexthop; /* record BGP next-hop in case of follow-up */
+  char *bgp_nexthop_info; /* record bgp_info of BGP next-hop in case of follow-up */
   u_int16_t pf; /* pending fragments or packets */
   u_int8_t new_flow; /* pmacctd flows: part of a new flow ? */
   u_int8_t tcp_flags; /* pmacctd flows: TCP packet flags; URG, PUSH filtered out */ 
@@ -239,6 +282,8 @@ struct packet_ptrs {
   u_int16_t ifindex_out; /* output ifindex; only used by ULOG for the time being */
   u_int8_t tun_stack; /* tunnelling stack */
   u_int8_t tun_layer; /* tunnelling layer count */
+  u_int32_t seqno; /* sFlow/NetFlow sequence number */
+  u_int16_t f_len; /* sFlow/NetFlow payload length */
 };
 
 struct host_addr {
@@ -256,6 +301,7 @@ struct pkt_primitives {
   u_int8_t eth_dhost[ETH_ADDR_LEN];
   u_int8_t eth_shost[ETH_ADDR_LEN];
   u_int16_t vlan_id;
+  u_int8_t cos;
 #endif
   struct host_addr src_ip;
   struct host_addr dst_ip;
@@ -302,11 +348,24 @@ struct pkt_payload {
   u_int16_t ifindex_out;
   u_int8_t src_nmask;
   u_int8_t dst_nmask;
+  u_int16_t vlan;
+  u_int8_t priority;
+  struct host_addr bgp_next_hop;
 };
 
 struct pkt_extras {
   u_int8_t tcp_flags;
   u_int32_t mpls_top_label;
+  struct host_addr bgp_next_hop;
+};
+
+#define PKT_MSG_SIZE 1550
+struct pkt_msg {
+  struct sockaddr agent;
+  u_int32_t seqno;
+  u_int16_t len;
+  u_char payload[PKT_MSG_SIZE];
+  u_int16_t pad;
 };
 
 /* START: BGP section */
@@ -330,6 +389,7 @@ struct pkt_bgp_primitives {
   u_int32_t src_local_pref;
   u_int32_t src_med;
   u_int32_t is_symmetric;
+  u_int32_t pad;
 };
 
 /* same as above but pointers in place of strings */
@@ -368,6 +428,16 @@ struct packet_ptrs_vector {
 struct hosts_table {
   short int num;
   struct host_addr table[MAX_MAP_ENTRIES];
+};
+
+struct bgp_md5_table_entry {
+  struct host_addr addr;
+  char key[TCP_MD5SIG_MAXKEYLEN];
+};
+
+struct bgp_md5_table {
+  short int num;
+  struct bgp_md5_table_entry table[BGP_MD5_MAP_ENTRIES];
 };
 
 #define TUNNEL_PROTO_STRING	16

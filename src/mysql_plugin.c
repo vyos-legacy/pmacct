@@ -626,9 +626,11 @@ void MY_create_dyn_table(struct DBdesc *db, char *buf)
 {
   if (!db->fail) {
     if (mysql_query(db->desc, buf)) {
-      Log(LOG_DEBUG, "DEBUG ( %s/%s ): FAILED query follows:\n%s\n", config.name, config.type, buf);
-      MY_get_errmsg(db);
-      sql_db_errmsg(db);
+      if (mysql_errno(db->desc) != 1050 /* ER_TABLE_EXISTS_ERROR */) {
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): FAILED query follows:\n%s\n", config.name, config.type, buf);
+        MY_get_errmsg(db);
+        sql_db_errmsg(db);
+      }
     }
   }
 }
@@ -666,6 +668,7 @@ void MY_init_default_values(struct insert_data *idata)
   if (!config.sql_passwd) config.sql_passwd = mysql_pwd;
   if (!config.sql_table) {
     if (config.sql_table_version == (SQL_TABLE_VERSION_BGP+1)) config.sql_table = mysql_table_bgp;
+    else if (config.sql_table_version == 8) config.sql_table = mysql_table_v8;
     else if (config.sql_table_version == 7) config.sql_table = mysql_table_v7;
     else if (config.sql_table_version == 6) config.sql_table = mysql_table_v6;
     else if (config.sql_table_version == 5) config.sql_table = mysql_table_v5;
