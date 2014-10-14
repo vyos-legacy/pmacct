@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -19,23 +19,42 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+/* defines */
+#define ADD 0
+#define SUB 1
+
 /* prototypes */
-void setnonblocking(int);
-void setblocking(int);
-int daemonize();
-char *copy_argv(register char **);
-char *extract_token(char **, int);
-char *extract_plugin_name(char **);
-void trim_spaces(char *);
-void trim_all_spaces(char *);
-int isblankline(char *);
-int iscomment(char *);
-int check_not_valid_char(char *, int);
-void debug_packet(struct pkt_data *);
-time_t roundoff_time(time_t);
-void write_pid_file(char *);
-int sanitize_buf_net(char *, int);
-int sanitize_buf(char *);
-void mark_columns(char *);
-int Setsocksize(int, int, int, void *, int);
-void *map_shared(void *, size_t, int, int, int, off_t);
+#if (!defined __UTIL_C)
+#define EXT extern
+#else
+#define EXT
+#endif
+EXT void setnonblocking(int);
+EXT void setblocking(int);
+EXT int daemonize();
+EXT char *copy_argv(register char **);
+EXT char *extract_token(char **, int);
+EXT char *extract_plugin_name(char **);
+EXT void trim_spaces(char *);
+EXT void trim_all_spaces(char *);
+EXT void strip_quotes(char *);
+EXT int isblankline(char *);
+EXT int iscomment(char *);
+EXT int check_not_valid_char(char *, int);
+EXT time_t roundoff_time(time_t, char *);
+EXT time_t calc_monthly_timeslot(time_t, int, int);
+EXT void write_pid_file(char *);
+EXT int sanitize_buf_net(char *, int);
+EXT int sanitize_buf(char *);
+EXT void mark_columns(char *);
+EXT int Setsocksize(int, int, int, void *, int);
+EXT void *map_shared(void *, size_t, int, int, int, off_t);
+EXT void lower_string(char *);
+EXT void evaluate_sums(u_int32_t *);
+EXT int file_archive(const char *, int);
+EXT void stop_all_childs();
+EXT int file_lock(int);
+EXT int file_unlock(int);
+
+EXT unsigned int str_to_addr(const char *, struct host_addr *);
+#undef EXT

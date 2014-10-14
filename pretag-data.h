@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -20,10 +20,14 @@
 */
 
 static struct _map_dictionary_line map_dictionary[] = {
-  {"id", nf_map_id_handler},
-  {"ip", nf_map_ip_handler},
-  {"in", nf_map_input_handler},
-  {"out", nf_map_output_handler},
+  {"id", PT_map_id_handler},
+  {"ip", PT_map_ip_handler},
+  {"in", PT_map_input_handler},
+  {"out", PT_map_output_handler},
+  {"engine_type", PT_map_engine_type_handler},
+  {"engine_id", PT_map_engine_id_handler},
+  {"nexthop", PT_map_nexthop_handler},
+  {"bgp_nexthop", PT_map_bgp_nexthop_handler},
+  {"filter", PT_map_filter_handler},
   {"", NULL}
 };
-

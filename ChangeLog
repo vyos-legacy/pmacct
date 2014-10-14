@@ -1,5 +1,320 @@
-pmacct (Promiscuous mode IP Accounting package) v0.7.4
-pmacct is Copyright (C) 2004 by Paolo Lucente
+pmacct (Promiscuous mode IP Accounting package) v0.8.3
+pmacct is Copyright (C) 2003-2005 by Paolo Lucente
+
+0.8.3 -- 29-Mar-2005
+  + Pre-Tagging capabilities have been further enhanced: captured traffic can
+    be now marked basing on the NetFlow nexthop/BGP nexthop fields. While the
+    old NetFlow versions (v1, v5) carry an unique 'nexthop' field, NetFlow v9
+    supports them into two distinguished fields. 
+  + Packet/flows tagging is now explicit, gaining more flexibility: a new 'tag'
+    keyword has been added to the 'aggregate' directive. It causes the traffic
+    to be actually marked; the 'pre_tag_map' and 'post_tag' directives now just
+    evaluate the tag to be assigned. Read further details about this topic in
+    the UPGRADE document.
+  + The 'pre_tag_filter' directive now accepts 0 (zero) as valid value: we have 
+    to remember that zero is not a valid tag; hence, its support allows to split
+    or filter untagged traffic from tagged one. 
+  + Documentation has been expanded: a new FAQS entry now describes few and easy
+    tweaks needed to replace the bytes counter type from u_int32_t to u_int64_t
+    throughout the code (provided that the OS supports this type); it's useful
+    in conjunction with the In-Memory plugin while exposed to very sustained
+    traffic loads. A new FAQS entry describes the first efforts aimed to integrate
+    pmacctd with popular flow-tools software by the way of the flow-export tool.
+    A new UPGRADE document has been also created. 
+  ! pmacct client was handling counters returned by the '-N' switch as signed
+    integers, which is not correct. The issue has been fixed. Many thanks to
+    Tobias Bengtsson for signalling it. 
+  ! Two new routines file_lock()/file_unlock() have replaced the flock() calls
+    because they were preventing the pmacct code to compile on Solaris. Basing
+    over hints collected at configure time, the routines enable either the flock()
+    or fcntl() code. Many thanks to Jan Baumann for signalling and solving the
+    issue. 
+
+
+0.8.2 -- 08-Mar-2005
+  + Pre-Tagging capabilities have been enhanced: now, a Pre Tag Map allows to
+    mark either packets or flows basing on the outcome of a BPF filter. Because
+    of this new feature, Pre-tagging has been introduced in 'pmacctd' too.
+    Pre-tagging was already allowing 'nfacctd' to translate some NetFlow packet
+    fields (exporting agent IP address, Input/Output interface, Engine type and
+    Engine ID) into an ID (also referred as 'tag'), a small number in the range
+    1-65535. 
+  + A new 'pmacctd_force_frag_handling' configuration directive has been added;
+    it aims to support 'pmacctd' Pre-Tagging operations: whether the BPF filter
+    requires tag assignation based on transport layer primitives (e.g. src port
+    or dst port), this directive ensures the right tag is stamped to fragmented
+    traffic too. 
+  + Pre Tag filtering (which can be enabled via 'pre_tag_filter' configuration
+    directive) allows to filter aggregates basing on the previously evaluated 
+    ID: whether it matches with at least one of the filter values, the aggregate
+    is delivered to the plugin. It has been enhanced by allowing to assign more 
+    tags to a specific plugin. 
+  + pmacctd: a new feature to read libpcap savefiles has been added; it can be
+    enabled either via the 'pcap_savefile' configuration directive or the '-I'
+    commandline switch. Files need to be already closed and correctly finalized
+    in order to be read successfully. Many thanks to Rafael Portillo for proposing
+    the idea.
+  + pmacct client tool supports a new 'tag' keyword as value for the '-c' switch:
+    it allows to query the daemon requesting a match against aggregate tags.  
+  + pmacct client: the behaviour of the '-N' switch (which makes the client to
+    return a counter onto the screen suitable for data injection in tools like MRTG,
+    Cacti, RRDtool, etc.), has been enhanced: it was already allowing to ask data
+    from the daemon but basing only on exact matches. This concept has now extended,
+    adding both wildcarding of specific fields and partial matches. Furthermore,
+    when multiple requests are encapsulated into a single query, their results are
+    by default splitted (that is, each request has its result); a newly introduced
+    '-S' switch now allows to sum multiple results into a single counter.
+  ! Bugfix: proper checks for the existence of a 'pre_tag_map' file were bypassed
+    under certain conditions; however, this erroneous behaviour was not causing any
+    serious issue. The correct behaviour is to quit and report the problem to the
+    user. 
+  ! The sampling rate algorithm has been fixed from a minor issue: it was returning
+    not expected results when 'sampling_rate: 1'. It now works as expected. Thanks
+    to David Maple for his extensive support in gaining better understandings about
+    the problem. 
+
+0.8.1p1 -- 22-Feb-2005
+  ! 'sum_host' and 'sum_net' compound primitives have been fixed in order to
+    work with IPv6 addresses.
+  ! In-Memory Plugin: client queries spotted with both '-r' (reset counters) and
+    '-N' (exact match, print counters only) switches enabled were causing the
+    daemon to crash whether no entries were found. The problem has been fixed.
+    Many thanks to Zach Chambers for signalling the issue.
+  ! In-Memory Plugin: client queries spotted with either '-M' or '-N' switches
+    enabled were failing to match actual data when either 'sum_host', 'sum_net' 
+    or 'sum_as' primitives were in use. The issue has been fixed. 
+  ! The modulo function applied to NetFlow v9 Template Cache has been enhanced
+    in order to deal correctly with export agents having an IPv6 address. 
+  ! Networks/AS definition file: a new check has been added in order to verify 
+    whether network prefix/network mask pairs are compatible: if they are not,
+    the mask is applied to the prefix. 
+  ! Documentation has been expanded and revised.
+
+0.8.1 -- 25-Jan-2005
+  + Accounting and aggregation over DSCP, IPv4 ToS field and IPv6 traffic class
+    field have been introduced ('aggregate' directive, 'tos' value): these fields
+    are actually widely used to implement Layer-3 QoS policies by defining new
+    classes of service (most noticeably 'Less than Best Effort' and 'Premium IP').
+    MySQL and PostgreSQL tables v3 (third version) have been introduced (they
+    contain an additional 4-bytes 'tos' field) to support the new Layer-3 QoS
+    accounting.
+  + nfacctd core process has been slightly optimized: each flow is encapsulated
+    (thus, copied field-by-field) into a BPF-suitable structure only if one or
+    more plugins actually require BPF filtering ('aggregate_filter' directive).
+    Otherwise, if either filtering is not required or all requested filters fail
+    to compile, the copy is skipped. 
+  + 'pmacct', pmacct client tool: '-e' commandline option (which meaning is:
+    full memory table erase) now might be supplied in conjunction with other
+    options (thus avoiding the short time delays involved by two consecutive
+    queries, ask-then-erase, which may also lead to small losses).
+    The new implemented mechanism works as follow: queries over actual data
+    (if any) are served before; the table is locked, new aggregates are queued
+    until the erasure finishes (it may take seconds if the table is large enough);
+    the table is unlocked; the queue of aggregates is processed and all normal
+    operations are resumed. Many thanks to Piotr Gackiewicz for the valuable
+    exchange of ideas.
+  ! Bug fixed in nfacctd: source and destination AS numbers were incorrectly
+    read from NetFlow packets. Thanks to Piotr Gackiewicz for his support. 
+  ! Bug fixed in pmacct client: while retrieving the whole table content was
+    displaying espected data, asking just for 'dst_as' field was resulting in
+    no results instead. Thanks, once more, to Piotr Gackiewicz. 
+
+
+0.8.0 -- 12-Jan-2005
+  + PMACCT OPENS TO IPv6: IPv6 support has been introduced in both 'pmacctd' 
+    and 'nfacctd' daemons. Because it requires larger memory structures to
+    store its addresses, IPv6 support has been disabled by default. It could
+    be enabled at configure time via '--enable-ipv6' switch. All filtering,
+    tagging and mapping functions already support IPv6 addresses. Some notes 
+    about IPv6 and SQL table schema have been dropped into README.IPv6 file,
+    sql section of the tarball. 
+  + PMACCT OPENS TO NetFlow v9: support for the template-based Cisco NetFlow
+    v9 export protocol has been added. NetFlow v1/v5 were already supported.
+    'nfacctd' may now be bound to an IPv6 interface and is able to read both
+    IPv4 and IPv6 data flowsets. A single 'nfacctd' instance may read flows
+    of different versions and coming from multiple exporting agents. Source
+    and destination MAC addresses and VLAN tags are supported in addition to
+    the primitives already supported in v1/v5 (source/destination IP addresses,
+    AS, ports and IP protocol). Templates are cached and refreshed as soon as
+    they are resent by the exporting agent.  
+  + Pre Tag map ('pre_tag_map' configuration key), which allows to assign a
+    small integer (ID) to an incoming flow basing on NetFlow auxiliar data,
+    now may apply tags basing also over Engine Type (it provides uniqueness
+    with respect to the routing engine on the exporting device) and Engine
+    ID (it provides uniqueness with respect to the particular line card or
+    VIP on the exporting device) fields. Incoming and Outcoming interfaces
+    were already supported. See 'pretag.map.example' into tarball examples
+    section and CONFIG-KEYS document for further details. 
+  + Raw protocol (DLT_RAW) routine has been added; it usually allows to read
+    data from tunnels and sitX devices (used for IPv6-in-IPv4 encapsulation).
+  + Some tests for architecture endianess, CPU type and MMU unaligned memory
+    access capability have been added. A small and rough (yes, they work the
+    hard way) set of unaligned copy functions have been added. They are aimed
+    to be introduced through the code, however first tests over MIPS R10000
+    and Alpha EV67 (21264A) have shown positive results.  
+  ! PPPoE and VLAN layer handling routines have been slightly revised for some
+    additional checks. 
+  ! Given the fairly good portability reported from the mmap() code introduced
+    through the whole 0.7.x development stage, the use of shared memory segments
+    is now enabled by default. The configure switch '--enable-mmap' has been
+    replaced by '--disable-mmap'. 
+  ! 'pmacct' client tool: because of the IPv6 addresses introduction, separator 
+    character for multiple queries (commandline) have been changed to from
+    ':' to ';'. 
+  ! 'nfacctd': '-F' commandline switch was listed into available options list,
+    but getopt() stanza was missing, thus returning an invalid option message.
+    Thanks to Chris Koutras for his support in fixing the issue.
+  ! Some variable assignations were causing lvalue errors with gcc 4.0. Thanks
+    to Andreas Jochens for his support in signalling and solving the problem. 
+
+0.7.9 -- 21-Dec-2004
+  + A new data pre-processor has been introduced in both SQL plugins: it
+    allows to filter out data (via conditionals, checks and actions) during
+    a cache-to-DB purging event, before building SQL queries; this way, for
+    example, aggregates which have accounted just a few packets or bytes may
+    be either discarded or saved through the recovery mechanism (if enabled).
+    The small set of preprocessing directives is reported into CONFIG-KEYS
+    document. 
+  + Some new environment variables are now available when firing a trigger
+    from SQL plugins: $EFFECTIVE_ELEM_NUMBER reports the effective number
+    of aggregates (that is, excluding those filtered out at preprocessing
+    time) encapsulated in SQL queries; $TOTAL_ELEM_NUMBER reports the total
+    number of aggregates instead.
+    $INSERT_QUERIES_NUMBER and $UPDATE_QUERIES_NUMBER returns respectively
+    the number of aggregates being successfully encapsulated into INSERT
+    and UPDATE queries. $ELAPSED_TIME reports the time took to complete
+    the last purging event. For further details and the list of supported
+    environment variables take a look to TRIGGER_VARS document.
+  + Some additions to both logfile players: a new '-n' switch allows to play
+    N elements; this way, arbitrary portions of the file may be played using
+    '-n' in conjunction with the (already existing) '-o' switch which allows
+    to read the logfile starting at a specified offset. New switches '-H',
+    '-D', '-T', '-U', '-P' have been introduced to override SQL parameters
+    like hostname, DB, table, user and password. The '-t -d' combination
+    (test only, debug) now allows to print over the screen the content of
+    the logfile.
+  + Logfiles size is now limited to a maximum of 2Gb, thus avoiding issues
+    connected to the 32bit declaration of off_t. While many OS implment a
+    solution to the problem, seems there are few chances to solve it in a
+    portable way. When the maximum size is hit the old logfile is rotated
+    appending to its filename a trailing small integer ( in a way similar
+    to logrotate) and a fresh one is started.
+  ! Logfile players: '-s' switch, which was allowing to play one element
+    a time, has been superseded. Its current equivalent is: '-n 1'. 
+  ! The file opening algorithm has been slightly changed in SQL plugins:
+    flock() follows shortly the fopen() and all subsequent operations and
+    evaluations are thus strictly serialized. freopen() is avoided. 
+
+0.7.8 -- 02-Dec-2004
+  + Recovery logfile structure has been enhanced. Following the logfile
+    header has been created a new template structure. Templates will avoid 
+    the issue of being not able to read old logfiles because of changes to
+    internal data structures. Templates are made of an header and a number
+    of entries, each describing a single field of the following data.
+    Both players, pmmyplay and pmpgplay, are able to parse logfiles basing
+    over the template description. Backward logfile compatibility is broken.
+  + Execcutable triggering mechanism (from SQL plugins) has been enhanced:
+    some status informations (eg. stats of the last purging event) are now
+    passed to the trigged executable in the form of environment variables.
+    The list of supported variables has been summarized into TRIGGER_VARS
+    document. The mechanism allows to spawn executables for post-processsing
+    operations at arbitrary timeframes.
+  + Support for 'temporary' devices (like PPP and maybe PCMCIA cards too)
+    has been introduced. A new configuration directive 'interface_wait' (or
+    '-w' commandline) instructs pmacctd to wait for the listening device to 
+    become available. It works both when in startup phase and when already
+    into main loop. A big thanks to Andre Berger for his support.
+  ! ppp_handler() routine, which is in charge to handle PPP packets, have
+    been totally rewritten. Thanks, again, to Andre Berger for his support.
+  ! All link layer handling routines have been revised; some extra checks
+    have been added to overcome issues caused from malicious handcrafted
+    packets. 
+  ! Some time handling and timeout issues have been revised into PostgreSQL
+    plugin code. They were affecting only the triggering mechanism. 
+  ! Fixed an execv() bug into MY_Exec() and PG_Exec(). It was causing the
+    not correct execution of triggers. Now, a zeroed argv parameter is
+    passed to the function. The problem has been verified on FreeBSD. 
+
+0.7.7 -- 16-Nov-2004
+  + Added two new aggregation primitives: 'src_as' and 'dst_as'. They allow
+    accounting based over Autonomous System number; 'pmacctd' requires AS
+    numbers to be supplied into a 'networks_file' configuration directive
+    (which allows to specify the path to a networks definition file);
+    'nfacctd' may either look up AS numbers from the networks definition file
+    or read them from each NetFlow flow (this is default). 'nfacctd_as_new'
+    key could be used to switch 'nfacctd' behaviour.
+  + Added some new aggregation modes: 'sum_net', 'sum_as', 'sum_port' ('sum'
+    which is actually an alias for 'sum_host' has been already introduced
+    early). Sum is intended to be the total traffic (that is, inbound plus
+    outbound traffic amounts) for each entry.
+  + Added another aggregation primitive: 'none'. It does not make use of any
+    primitive: it allows to see total bytes and packets transferred through
+    an interface. 
+  + The definition of a 'networks_file' enables network lookup: hosts inside
+    defined networks are ok; hosts outside them are 'zeroed'. This behaviour
+    may now also be applied to 'src_host', 'dst_host' and 'sum_host'. Under
+    certain conditions (eg. when using only host/net/as primitives and defined 
+    networks comprise all transiting hosts) it may be seen an alternative
+    way to filter data. 
+  ! 'frontend'/'backend' PostgreSQL plugin operations have been obsoleted.
+    'unified'/'typed' operations have been introduced instead. See 'sql_data'
+    description, CONFIG-KEYS document, for further informations.
+  ! Optimizations have been applied to: core process, the newly introduced
+    cache code (see 0.7.6) and in-memory table plugin. 
+  ! Fixed some string handling routines: trim_all_spaces(), mark_columns()
+  ! Solved a potential race condition which was affecting write_pid_file() 
+
+0.7.6 -- 27-Oct-2004
+  + Many changes has been introduced on 'pmacct' client side. '-m' switch
+    (which output was suitable as MRTG input) has been obsoleted (though it
+    will continue to work for next few releases). A new '-N' switch has
+    been added: it returns counter value, suitable for integration with
+    either RRDtool or MRTG. 
+  + Support for batch queries have also been added into pmacct client. It
+    allows to join up to 4096 requests into a single query. Requests could
+    either be concatenated commandline or read from a file (more details are
+    in FAQS and EXAMPLES). Batch queries allow to handle efficiently high number
+    of requests in a single shot (for example to timely feed data to a large
+    amount of graphs). 
+  + Still pmacct client: '-r' switch, which already allows to reset counters
+    for matched entries, now it also applies to group of matches (also referred
+    as partial matches). 
+  + New scripts have been added into the examples tree which show how to
+    integrate memory and SQL plugins with RRDtool, MRTG and GNUplot. 
+  + Memory plugin (IMT) has been further enhanced; each query from pmacct
+    client is now evaluated and if involves just a short ride through the
+    memory structure, it is served by the plugin itself without spawning a
+    new child process. Batch queries support and reordering of fragmented
+    queries have also been added.  
+  + New cache has been introduced in both SQL plugins; its layout is still
+    an hash structure but it now features also chains, allocation, reuse and
+    retirement of chained nodes. It also sports a LRU list of nodes which eases
+    node handling. The new solution avoids the creation of a collision queue,
+    ensuring uniqueness of data placed onto the queries queue. While this
+    already greatly benefits a directive like 'sql_dont_try_update', it also
+    opens new chances for post-processing operations of queries queue. 
+
+0.7.5 -- 14-Oct-2004
+  + Introduced support for the definition of a 'known ports' list, when
+    either 'src_port' or 'dst_port' primitives are in use. Known ports
+    will get written into the backend; unknown ports will be simply zeroed.
+    It could be enabled via 'ports_file' configuration key or '-o' commandline
+    switch.
+  + Introduced support for weekly and monthly counters breakdown; hourly, 
+    minutely and daily were already supported. New breakdowns could be
+    enabled via 'w' and 'M' words in 'sql_history' and related configuration
+    keys.  
+  + Added a '-i' commandline switch to both 'pmmyplay' and 'pmpgplay' to
+    avoid UPDATE SQL queries and skip directly to INSERT ones. Many thanks 
+    to Jamie Wilkinson. 
+  ! 'pmmyplay' and 'pmpgplay' code has been optimized and updated; some 
+    pieces of locking and transactional code were included into the inner
+    loop. A big thanks goes to Wim Kerkhoff and Jamie Wilkinson.
+  ! Networks aggregation code has been revised and optimized; a direct-mapped
+    cache has been introduced to store (and search) last search results
+    from the networks table. A binary search algorithm, though optimized,
+    over the table has still been preferred over alternative approaches
+    (hash, tries).
 
 0.7.4 -- 30-Sep-2004
   + Enhanced packet tagging support; it's now broken in Pre-Tagging and

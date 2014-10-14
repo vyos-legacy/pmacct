@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -19,33 +19,37 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+#define __IMT_PLUGIN_C
+
 /* includes */
 #include "pmacct.h"
 #include "plugin_hooks.h"
 #include "imt_plugin.h"
 #include "net_aggr.h"
+#include "ports_aggr.h"
 
 /* Functions */
 void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr) 
 {
+  int maxqsize = (MAX_QUERIES*sizeof(struct pkt_primitives))+sizeof(struct query_header)+2;
   struct sockaddr cAddr;
-  struct acc *acc_elem;
   struct pkt_data *data;
   struct networks_table nt;
-  struct networks_table_entry *nte = NULL;
-  unsigned char srvbuf[SRVBUFLEN];
+  struct networks_cache nc;
+  struct ports_table pt;
+  unsigned char srvbuf[maxqsize];
+  unsigned char *srvbufptr;
+  struct query_header *qh;
   unsigned char *pipebuf;
   char path[] = "/tmp/collect.pipe";
-  unsigned int insert_status;
   short int go_to_clear = FALSE;
+  u_int32_t request, sz;
 #if defined (HAVE_MMAP)
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
   unsigned char *rgptr;
   int pollagain = 0;
   u_int32_t seq = 0;
   int rg_err_count = 0;
-#else 
-  short int go_to_reset = FALSE;
 #endif
 
   fd_set read_descs, bkp_read_descs; /* select() stuff */
@@ -66,7 +70,15 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   memset(pipebuf, 0, config.buffer_size);
   no_more_space = FALSE;
 
-  if (config.networks_file) load_networks(config.networks_file, &nt);
+  if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS))
+    insert_func = sum_host_insert;
+  else if (config.what_to_count & COUNT_SUM_PORT) insert_func = sum_port_insert;
+  else insert_func = insert_accounting_structure;
+
+  load_networks(config.networks_file, &nt, &nc);
+  set_net_funcs(&nt);
+
+  if (config.ports_file) load_ports(config.ports_file, &pt);
 
   if ((!config.num_memory_pools) && (!have_num_memory_pools))
     config.num_memory_pools = NUM_MEMORY_POOLS;
@@ -125,6 +137,8 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   select_fd++;
   memcpy(&bkp_read_descs, &read_descs, sizeof(read_descs));
 
+  qh = (struct query_header *) srvbuf;
+
   /* plugin main loop */
   for(;;) {
     select_again:
@@ -134,34 +148,79 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
     /* doing server tasks */
     if (FD_ISSET(sd, &read_descs)) {
+      struct pollfd pfd;
+      int ret;
+
       sd2 = accept(sd, &cAddr, &cLen);
       setblocking(sd2);
-      num = recv(sd2, srvbuf, SRVBUFLEN, 0);
-      if (((struct query_header *)srvbuf)->type == WANT_ERASE) go_to_clear = TRUE;  
+      srvbufptr = srvbuf;
+      sz = maxqsize;
+
+      pfd.fd = sd2;
+      pfd.events = POLLIN;
+
+      recv_again:
+      ret = poll(&pfd, 1, 1000);
+      if (ret == 0) {
+        Log(LOG_WARNING, "WARN: Timed out while processing fragmented query.\n"); 
+        close(sd2);
+	goto select_again;
+      }
+      else {
+        num = recv(sd2, srvbufptr, sz, 0);
+        if (srvbufptr[num-1] != '\x4') {
+	  srvbufptr += num;
+	  sz -= num;
+	  goto recv_again; /* fragmented query */
+        }
+      }
+
+      num = num+(maxqsize-sz);
+
+      if (qh->num > MAX_QUERIES) {
+	if (config.debug) Log(LOG_DEBUG, "DEBUG: request discarded. Too much queries.\n");
+	close(sd2);
+	continue;
+      }
+
+      request = qh->type;
+      if (request & WANT_RESET) request ^= WANT_RESET;
+
+      /* - if query involves a single short-lived walk through the memory table 
+           we avoid fork() and let the plugin serve directly the request;
+         - if we are requested a bulk table erasure along with some other option
+           (ex. pmacct -s -e) we don't fork, thus implementing an exclusive lock
+	   over the table. Core process will still enqueue packets in the ring.
+      */
+      if (request & WANT_ERASE) {
+	request ^= WANT_ERASE;
+	if (request) {
+	  if (num > 0) process_query_data(sd2, srvbuf, num, FALSE);
+	  else if (config.debug) Log(LOG_DEBUG, "DEBUG: %d incoming bytes. ERRNO: %d\n", num, errno);
+	}
+	if (config.debug) Log(LOG_DEBUG, "DEBUG: Closing connection with client ...\n");
+	go_to_clear = TRUE;  
+      }
+      else if (((request == WANT_COUNTER) || (request == WANT_MATCH)) &&
+	(qh->num == 1) && (qh->what_to_count == config.what_to_count)) {
+	if (num > 0) process_query_data(sd2, srvbuf, num, FALSE);
+        else if (config.debug) Log(LOG_DEBUG, "DEBUG: %d incoming bytes. ERRNO: %d\n", num, errno);
+        if (config.debug) Log(LOG_DEBUG, "DEBUG: Closing connection with client ...\n");
+      } 
       else {
         switch (fork()) {
         case 0: /* Child */
           close(sd);
-          if (num > 0) process_query_data(sd2, srvbuf, num);
-	  else {
-	    if (config.debug) Log(LOG_DEBUG, "DEBUG: recv() '%d' incoming bytes. errno: %d\n", num, errno);
-          }
+          if (num > 0) process_query_data(sd2, srvbuf, num, TRUE);
+	  else if (config.debug) Log(LOG_DEBUG, "DEBUG: %d incoming bytes. ERRNO: %d\n", num, errno);
           if (config.debug) Log(LOG_DEBUG, "DEBUG: Closing connection with client ...\n");
           close(sd2);
           exit(0);
         default: /* Parent */
-#if !defined (HAVE_MMAP)
-          if (((struct query_header *)srvbuf)->type & WANT_RESET) {
-	    if (((struct query_header *)srvbuf)->what_to_count == config.what_to_count)
-	      go_to_reset = TRUE;
-	    else {
-	      if (config.debug) Log(LOG_DEBUG, "DEBUG: Reset request ignored: not exact match.\n");
-	    }
-	  }
-#endif
-          close(sd2);
-        }
+          break;
+        } 
       }
+      close(sd2);
     }
 
     /* clearing stats if requested */
@@ -182,22 +241,6 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       go_to_clear = FALSE;
       no_more_space = FALSE;
     }
-
-#if !defined (HAVE_MMAP)
-    /* resetting counters if requested */
-    if (go_to_reset) {
-      struct acc *acc_elem;
-      unsigned char *elem = srvbuf+sizeof(struct query_header);
-
-      acc_elem = search_accounting_structure((struct pkt_primitives *)elem);
-      if (acc_elem) {
-        acc_elem->packet_counter = 0;
-        acc_elem->bytes_counter = 0;
-      }
-
-      go_to_reset = FALSE;
-    }
-#endif
 
     if (FD_ISSET(pipe_fd, &read_descs)) {
 #if !defined (HAVE_MMAP)
@@ -236,31 +279,17 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
       if (num > 0) {
 	data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
-        insert_status = 0;
-        acc_elem = NULL;
 
 	while (((struct ch_buf_hdr *)pipebuf)->num) {
-          if (config.what_to_count == COUNT_SUM_HOST) {
-	    struct pkt_data addr;
+	  for (num = 0; net_funcs[num]; num++)
+	    (*net_funcs[num])(&nt, &nc, &data->primitives);
 
-	    memset(&addr, 0, sizeof(addr));
-	    addr.primitives.src_ip.s_addr = data->primitives.src_ip.s_addr; 
-	    addr.pkt_num = data->pkt_num;
-	    addr.pkt_len = data->pkt_len;
-            acc_elem = insert_accounting_structure(&addr);
-            addr.primitives.src_ip.s_addr = data->primitives.dst_ip.s_addr;
-            acc_elem = insert_accounting_structure(&addr);
-            insert_status |= INSERT_ALREADY_DONE;
-          }
+	  if (config.ports_file) {
+	    if (!pt.table[data->primitives.src_port]) data->primitives.src_port = 0;
+	    if (!pt.table[data->primitives.dst_port]) data->primitives.dst_port = 0;
+	  }
 
-	  if (config.what_to_count & COUNT_SRC_NET) 
-	    binsearch(&nt, &data->primitives.src_ip);
-
-	  if (config.what_to_count & COUNT_DST_NET) 
-	    binsearch(&nt, &data->primitives.dst_ip);
-
-          if (!insert_status)
-            acc_elem = insert_accounting_structure(data);
+          (*insert_func)(data);
 
 	  ((struct ch_buf_hdr *)pipebuf)->num--;
 	  if (((struct ch_buf_hdr *)pipebuf)->num) data++;
@@ -273,4 +302,44 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 void exit_now(int signum)
 {
   exit(0);
+}
+
+void sum_host_insert(struct pkt_data *data)
+{
+  struct in_addr ip;
+#if defined ENABLE_IPV6
+  struct in6_addr ip6;
+#endif
+
+  if (data->primitives.dst_ip.family == AF_INET) {
+    ip.s_addr = data->primitives.dst_ip.address.ipv4.s_addr;
+    data->primitives.dst_ip.address.ipv4.s_addr = 0;
+    data->primitives.dst_ip.family = 0;
+    insert_accounting_structure(data);
+    data->primitives.src_ip.address.ipv4.s_addr = ip.s_addr;
+    insert_accounting_structure(data);
+    return;
+  }
+#if defined ENABLE_IPV6
+  if (data->primitives.dst_ip.family == AF_INET6) {
+    memcpy(&ip6, &data->primitives.dst_ip.address.ipv6, sizeof(struct in6_addr));
+    memset(&data->primitives.dst_ip.address.ipv6, 0, sizeof(struct in6_addr));
+    data->primitives.dst_ip.family = 0;
+    insert_accounting_structure(data);
+    memcpy(&data->primitives.src_ip.address.ipv6, &ip6, sizeof(struct in6_addr));
+    insert_accounting_structure(data);
+    return;
+  }
+#endif
+}
+
+void sum_port_insert(struct pkt_data *data)
+{
+  u_int16_t port;
+
+  port = data->primitives.dst_port;
+  data->primitives.dst_port = 0;
+  insert_accounting_structure(data);
+  data->primitives.src_port = port;
+  insert_accounting_structure(data);
 }

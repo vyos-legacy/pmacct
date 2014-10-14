@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -32,25 +32,33 @@ struct DBdesc {
 
 /* prototypes */
 void pgsql_plugin(int, struct configuration *, void *);
-int PG_cache_dbop(PGconn *, const struct db_cache *, const int);
-void PG_cache_purge(struct db_cache *[], int, const int, int);
-void PG_handle_collision(struct db_cache *);
+int PG_cache_dbop(PGconn *, const struct db_cache *, struct insert_data *);
+void PG_cache_purge(struct db_cache *[], int, struct insert_data *);
 int PG_evaluate_history(int);
 int PG_compose_static_queries();
 void PG_compose_conn_string(struct DBdesc *, char *);
-unsigned int PG_cache_modulo(struct pkt_primitives *);
+void PG_cache_modulo(struct pkt_primitives *, struct insert_data *);
 void PG_cache_insert(struct pkt_data *, struct insert_data *);
-int PG_cache_flush(struct db_cache *[], int, int);
+int PG_cache_flush(struct db_cache *[], int);
 int PG_evaluate_primitives(int);
 void PG_exit_gracefully(int);
-int PG_Query(struct DBdesc *, struct DBdesc *, struct logfile *, const struct db_cache *, int);
-FILE *PG_file_open(const char *, const char *);
+int PG_Query(struct DBdesc *, struct DBdesc *, struct logfile *, const struct db_cache *, struct insert_data *);
+FILE *PG_file_open(const char *, const char *, const struct insert_data *);
 void PG_file_close(struct logfile *);
 int PG_DB_Connect(struct DBdesc *);
 static int PG_affected_rows(PGresult *);
 int PG_Exec(char *);
+void PG_sum_host_insert(struct pkt_data *, struct insert_data *);
+void PG_sum_port_insert(struct pkt_data *, struct insert_data *);
+
 
 /* global vars */
+void (*insert_func)(struct pkt_data *, struct insert_data *);
+struct template_header th;
+struct template_entry *te;
+struct largebuf logbuf;
+struct largebuf envbuf;
 struct DBdesc p;
 struct DBdesc b;
-int frontend = TRUE;
+int typed = TRUE;
+time_t now;

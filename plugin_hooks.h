@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -55,7 +55,7 @@ struct sampling {
 };
 
 struct channels_list_entry {
-  unsigned int aggregation;
+  u_int32_t aggregation;
 #if !defined (HAVE_MMAP)
   char *buf;		/* ptr to buffer base address */
   char *bufptr;		/* ptr to buffer current address */
@@ -67,15 +67,15 @@ struct channels_list_entry {
   struct ring rg;	
   struct ch_buf_hdr hdr;
   struct ch_status *status;
-  u_int8_t request;	/* does the plugin support on-request wakeup ? */
+  u_int8_t request;			/* does the plugin support on-request wakeup ? */
 #endif
   int bufsize;		
   int same_aggregate;
   pkt_handler phandler[N_PRIMITIVES];
   struct bpf_program *filter;
   int pipe;
-  u_int16_t id;		/* pmacctd and nfacctd use it to tag packets passing through the channel (post tag) */
-  u_int16_t id_filter;  /* nfacctd uses it to filter pre-tagged packets basing on their id */
+  u_int16_t id;				/* used to tag packets passing through the channel (post tag) */
+  struct pretag_filter tag_filter; 	/* used it to filter pre-tagged packets basing on their id */
   struct sampling s;
 };
 
@@ -89,13 +89,14 @@ extern struct channels_list_entry channels_list[MAX_N_PLUGINS];
 #else
 #define EXT
 #endif
-EXT void load_plugins(struct pcap_device *);
+EXT void load_plugins(struct pcap_device *, struct plugin_requests *);
 EXT void exec_plugins(struct packet_ptrs *pptrs);
 EXT struct channels_list_entry *insert_pipe_channel(struct configuration *, int); 
 EXT void delete_pipe_channel(int);
 EXT void sort_pipe_channels();
 EXT void init_pipe_channels();
 EXT int evaluate_sampling(struct sampling *);
+EXT int evaluate_tags(struct pretag_filter *, u_int16_t);
 #undef EXT
 
 #if (defined __PLUGIN_HOOKS_C)

@@ -1,241 +1,411 @@
 SUPPORTED CONFIGURATION KEYS
-Due to the proliferation of command-line options, the support for a
-configuration file has been added. Configuration keys together with
-their correspective commandline switches and flags (in square brackets)
-are listed below.
-The configuration file consists of a key/value pairs, separated by
-a ":" character. A "!" at the beginning of the line, means a comment
-line. Please refer also to pmacctd.conf.example for some examples and
-to the output of 'pmacct -h' for a list of supported commandline switches.
-
-LEGEND:
-
-GLOBAL		The selected option does not apply to single plugins
-NO_GLOBAL	The selected option has to be applied to single plugins
-NO_PMACCTD	The selected option does not apply to 'pmacctd' 
+Configuration directives together with commandline switches are listed 
+below. The configuration file consists of key/value pairs, using the ':' 
+character as separator. The '!' at the beginning of the line, signals
+a comment. Comments are indeed ignored.
+Please refer also to the 'examples' tree for some examples and the 'docs'
+tree for further readings.
 
 
-KEY LIST:
+LEGEND of flags:
+
+GLOBAL		The option does not apply to single plugins
+NO_GLOBAL	The option has to be applied to single plugins
+NO_PMACCTD	The option does not apply to 'pmacctd' 
+NO_NFACCTD	The option does not apply to 'nfacctd' 
+
+
+LIST OF DIRECTIVES:
 
 KEY: 		debug (-d)
 VALUES:		[true|false]
-DESC:		Enables or disables debug (default: false).
+DESC:		enables debug (default: false).
 
 KEY:		daemonize (-D) [GLOBAL]
 VALUES:		[true|false]
-DESC:		Daemonizes the process (default: false).
+DESC:		daemonizes the process (default: false).
 
 KEY:		aggregate (-c)
-VALUES:		[src_mac,dst_mac,vlan,src_host,dst_host,src_net,dst_net,sum,src_port,dst_port,proto]
-DESC:		primitives for data aggregation (default: src_host). 
+VALUES:		[src_mac,dst_mac,vlan,src_host,dst_host,src_net,dst_net,src_as,dst_as,src_port,
+		 dst_port,tos,proto,none,sum_host,sum_net,sum_as,sum_port,tag]
+PREAMBLE:	individual packets are identified by their header fields (a rather large set of
+		primitives). Aggregates are identified by a reduced set of primitives instead.
+		Packets are framed into aggregates (a) by removing the primitives not included
+		in the reduced set, (b) by casting primitives into generic entities if requested
+		(like network prefixes or Autonomous Systems) and (c) by updating the aggregate
+		byte/packet counters.
+DESC:		selects the reduced set of primitives by which aggregate packets. sum_<primitive>
+		are compound primitives which allow to join inbound and outbound traffic into a
+		single aggregate. The 'none' primitive allows to make an unique aggregate which
+		accounts for the grand total of traffic flowing through a specific interface (it
+                gives best results when used in conjunction with packet tagging, where each tag
+		represents an interface or a group of them; refer to 'pre_tag_map' and 'post_tag'
+		configuration directives for further details). The 'tag' directive - intuitively -
+		specifies that the plugin wishes to receive the tags. (default: src_host).
 
 KEY:		aggregate_filter [NO_GLOBAL]
-DESC:		this filter is applied before data is passed to accountant plugin (memory, *SQL,
-		etc). Allows to run a single instance of pmacctd even when plugins have to account
-		different data. It is based over libpcap, so accepts has same capabilities and same
-		syntax of libpcap filters.
+DESC:		when multiple plugins are active, each one should sport an 'aggregate' directive
+		in order to be meaningful. By allowing to bind a filter (in libpcap syntax) to an
+		active plugin, this directive permits to select which packets (or flows if using
+		NetFlow) are to be delivered to the plugin and aggregated as specified by the
+		plugin 'aggregate' directive. For example, it allows to run a single instance of
+		the daemon with two plugins attached, each accounting/aggregating different data:
 
-KEY:		pcap_filter (like tcpdump syntax) [GLOBAL]
-DESC:		this filter gets passed to pcap library.
+		...
+		aggregate[inbound]: dst_host
+		aggregate[outbound]: src_host
+		aggregate_filter[inbound]: dst net 192.168.0.0/16
+		aggregate_filter[outbound]: src net 192.168.0.0/16
+		plugins: memory[inbound], memory[outbound]
+		...
+
+		It could be used in conjunction with 'pre_tag_filter' directive. 'pmacctd' you may
+		need to force fragmentation handling when setting up a filter which has to match
+		TCP/UDP ports. Read more, referring to the 'pmacctd_force_frag_handling' directive.
+
+KEY:		pcap_filter (like tcpdump syntax) [GLOBAL, NO_NFACCTD]
+DESC:		this filter is global and applied to all incoming packets. It's passed to libpcap
+		and, indeed, expects libpcap filter syntax. 
 
 KEY:		plugins (-P)
 VALUES:		[memory|print|mysql|pgsql]
-DESC:		plugin to be enabled, if compiled and configured. "memory" enables the use of memory
-		plugin; statistics are stored in a memory table and are fetched via pmacct client tool.
-		"mysql" and "pgsql" enable the use of MySQL and PostgreSQL plugins. "print" enables the
-		use of print plugin; statistics are pulled to stdout in a way similar to tcpdump and
-		cflowd's "flow-print" tool. 
+DESC:		plugins to be enabled, if compiled and configured. 'memory' enables the use of a
+		memory table to store data that can be later fetched via 'pmacct' client tool. 'mysql'
+		and 'pgsql' enable the use of respectively MySQL and PostgreSQL tables to store data.
+		'print' prints aggregates to stdout in a formatted way. Because config directives may
+		be either global or bounded to a specific module, each activated plugin may also given 
+		a name to be uniquely identified.
+		An unnamed plugin has the following form into the configuration: 'plugins: mysql'; a
+		named plugin is spelled the following way instead: 'plugins: mysql[name]'. Options may
+		be bound to a named plugin as follows: 'aggregate[name]: src_host'. 
 
 KEY:		plugin_pipe_size
-DESC:		size of the recv/send FIF0 queue between core pmacctd process and a plugin. The default
-		size is set by the OS. Change (mostly augment) this size is needed when facing with really
-		heavy traffic loads. Value is intended in bytes.
+DESC:		both core process and active plugins are encapsulated into (distinct) processes. To
+		exchange data, they set up a communication channel structured as a circular queue. 
+		This directive sets the total size, in bytes, of this queue. Its default size depends 
+		upon the Operating System. When facing heavy traffic loads, this size can be raised
+		to accomodate more data. Read INTERNALS, 'Communications between core process and
+		plugin' section for further details. 
 
 KEY:		plugin_buffer_size 
-DESC:		size of transfer buffer between core pmacctd process and plugins. This value has to be less 
-		than FIFO queue size. Default value is to disable bufferization. Value is intended in bytes.
+DESC:		by defining the transfer buffer size, in bytes, this directive enables bufferization
+		of data transfers between core process and an active plugin. It is disabled by default.
+		This value has to be <= the circular queue size, defined by 'plugin_pipe_size'. Hence,
+		the queue will be divided into plugin_buffer_size/plugin_pipe_size chunks. Once one
+		chunk is filled, it is assigned to the plugin and the next one is used. Read INTERNALS,
+		'Communications between core process and plugin' section for further details. (default: 0)
 
-KEY:		interface (-i) [GLOBAL]
-DESC:		interface used for listening (default: use pcap_lookupdev() to get a valid device).
+KEY:		interface (-i) [GLOBAL, NO_NFACCTD]
+DESC:		interface to which 'pmacctd' is bound for listening. If this directive is not supplied,
+		a library function is used to select a valid device. The directive is not applicable to
+		'nfacctd' for which 'nfacctd_ip' should be used instead; it's also mutually exclusive
+		with the 'pcap_savefile' directive.
 
-KEY:		promisc (-N) [GLOBAL]
+KEY:		pcap_savefile (-I) [GLOBAL, NO_NFACCTD]
+DESC:		file in libpcap savefile format from which read data (instead of binding to an interface).
+		The file needs to be correctly finalized in order to be read. As soon as 'pmacctd' is
+		finished with the file, it exits. It's suggested to disable 'plugin_buffer_size'; whether
+		it's strictly needed to use a small value. The directive doesn't apply to 'nfacctd'; it's
+		also mutually exclusive with the 'interface' directive. 
+
+KEY:		interface_wait (-w) [GLOBAL, NO_NFACCTD]
 VALUES:		[true|false]
-DESC:		Enables or disables the use of promiscuous mode of interface used to capture
-		traffic. Promiscuous mode is useful only when the machine is not a router (default: true).
+DESC:		if set to 'true', this option causes 'pmacctd' to wait for the listening device become
+		available, trying to reopen it every few seconds. If set to 'false', 'pmacctd' will exit
+		as soon as any error (related to the listening interface) is detected. (default: false) 
+
+KEY:		promisc (-N) [GLOBAL, NO_NFACCTD]
+VALUES:		[true|false]
+DESC:		if set to 'true', this option puts the listening interface in promiscuous mode. It is
+		mostly useful when running 'pmacctd' over a machine which is not a router, for example,
+		when the machine is attached to a traffic mirroring port. When the box handles packets
+		(for example, routes/bridges/switches them) it is adviceable to turn off this option.
+		(default: true)
 
 KEY:		imt_path (-p)
-DESC:		path for client/server fifo (used by in-memory table plugin only).
-
-KEY:		imt_passwd
-DESC:		passphrase to be supplied by pmacct client to access statistics of the in-memory table.
+DESC:		specifies the full file pathname where the memory plugin (IMT) has to listen for client
+		requests. When multiple IMTs are active, each one should use its own file to communicate
+		with the client tool. Note that placing these files into a carefully protected directory
+		(rather than /tmp, for example) is the right way to control who has access to data.
+		(default: /tmp/collect.pipe)
 
 KEY:		imt_buckets (-b)
-DESC:		number of buckets in the in-memory table.
+DESC:		defines the number of buckets of the memory table which is organized as a chained hash
+		table. A prime number is highly recommended. Read INTERNALS 'Memory table plugin' chapter
+		for further details. 
 
 KEY:		imt_mem_pools_number (-m)
-DESC:		numbers of memory pools (see INTERNALS file for further details).
+DESC:		defines the number of memory pools the memory table is able to allocate; the size of each
+		pool is defined by the 'imt_mem_pools_size' directive. Here, a value of 0 instructs the
+		memory plugin to allocate new memory chunks as they are needed, potentially allowing the
+		memory structure to grow undefinitely. A value > 0 instructs the plugin to not try to 
+		allocate more than the specified number of memory pools, thus placing an upper boundary
+		to the table size. (default: 16) 
 
 KEY:		imt_mem_pools_size (-s)
-DESC:		size of each memory pool (see INTERNALS file for further details).
+DESC:		defines the size of each memory pool. For further details read INTERNALS 'Memory table
+		plugin'. The number of memory pools is defined by the 'imt_mem_pools_number' directive.
+		(default: 8192).
 
 KEY:		syslog (-S)
 VALUES:		[auth|mail|daemon|kern|user|local[0-7]]
-DESC:		enables syslog logging to the specified facility (default: console logging).
+DESC:		enables syslog logging, using the specified facility (default: disabled, console logging).
 
 KEY:		pidfile (-F) [GLOBAL]
-DESC:		writes 'core' process PID to the specified file.
+DESC:		writes core process PID to the specified file.
 
 KEY:		networks_file (-n)
-DESC:		path to a file containing a list of networks (one for each line, alloweded
-		syntax are: 1.2.3.4/255.255.255.0 and 1.2.3.4/24). Networks will get written
-		to DB or memory table; unknown or not specified networks will be referred as
-		0.0.0.0. To be used in conjunction with 'src_net' or 'dst_net' primitives. 
+DESC:		full pathname to a file containing the list of known (maybe local) networks/AS (one for
+		each line, read more on the file syntax into examples section). The directive is twofold:
+		a) when it applies to [src|dst]_[host|net|as], it allows to filter out values (rewriting
+		them as zero) not included in the range of any defined network; b) when it applies to
+		[src|dst]_[net|as], it is of support for network/AS aggregation: [src|dst]_host is
+		rewritten as the matched network/AS.
+
+KEY:		networks_cache_entries
+DESC:		Networks Lookup Table (which is the memory structure where the 'networks_file' data is
+		loaded) is preeceded by a Network Lookup Cache where lookup results are saved to speed
+		up later searches. NLC is structured as an hash table, hence, this directive is aimed to
+		set the number of buckets for the hash table. The default value should be suitable for
+		most common scenarios, however when facing with large-scale network definitions, it is 
+		quite adviceable to tune this parameter to improve performances. A prime number is highly
+		recommended.
+
+KEY:		ports_file
+DESC:		full pathname to a file containing a list of 'interesting' ports (one for each line,
+		read more about the file syntax into examples section). The directive allows to filter
+		out port numbers (rewriting them as zero) not matching any port defined into the list.
+		Indeed, it applies to 'src_port' and 'dst_port' primitives. 
 
 KEY:		sql_db
-DESC:		name of the SQL database to be used (default: pmacct).
+DESC:		defines the SQL database to use (default: pmacct).
 
 KEY:            sql_table
-DESC:           name of the SQL table to be used (default: acct).
+DESC:           defines the SQL table to use (default: acct).
 
 KEY:		sql_table_version (-v)
-VALUES		[1|2]
-DESC:		version of the accounting SQL table (default: 1). 
+VALUES		[1|2|3]
+DESC:		defines the version of the SQL table. If not stated explicitely, for example using the
+		'sql_optimize_clauses' directive, the SQL plugins expect the SQL table to endorse a
+		known schema. Few default schemas have been introduced over the time, each identified
+		by a (incremental) version number (default: 1). 
 
 KEY:		sql_data
-VALUES:		[frontend|backend]
-DESC:		this switch makes sense only if using PostgreSQL plugin. If "frontend" is specified,
-		data (IP addresses, timestamps, etc.) will be written to the DB as strings; if "backend"
-		is specified data will be written as long integers (default: frontend).
+VALUES:		[typed|unified]
+DESC:		this switch makes sense only when using PostgreSQL plugin and a default table; each
+		pgsql script in 'sql' tree will create one 'unified' table and more 'typed' tables.
+		The 'unified' table has IP and MAC addresses specified as standard CHAR strings, slower
+		and not space savy but flexible; 'typed' tables sport PostgreSQL own types (inet, mac,
+		etc.), faster but rigid. When not supplying your custom 'sql_table', this directive
+		instructs the plugin about which table type it has to expect (default: 'typed').
 
 KEY:	 	sql_host
-DESC:		ip/hostname where is listening SQL server (default: localhost).
+DESC:		defines the SQL server IP/hostname (default: localhost).
 
 KEY:		sql_user
-DESC:		username to be used when connecting to SQL server (default: pmacct).
+DESC:		defines the username to use when connecting to the SQL server (default: pmacct).
 
 KEY:		sql_passwd
-DESC:		password to be used when connecting to SQL server (default: arealsmartpwd).
+DESC:		defines the password to use when connecting to the SQL server (default: arealsmartpwd).
 
 KEY:		[sql_refresh_time|print_refresh_time] (-r)
-DESC:		sets the time interval at which data has to be purged from in-memory cache into the SQL
-		database (sql) or on the screen (print). Value is in seconds.
+DESC:		sets the fixed time interval at which aggregates has to be purged from the Plugin Memory
+		Cache into the specified SQL table (sql plugins) or over the screen (print plugin). The
+		value is intended in seconds.
 
 KEY:		sql_startup_delay
-DESC:		time (in seconds) the first data flush to the DB has to be delayed. This setting allows 
-		for two or more instances to refresh data at same time intervals but in different moments to
-		avoid locking stalls or DB overkills.
+DESC:		defines the time, in seconds, the first purging event has to be delayed. Indeed, this
+		delay is propagated to all following purging events. This directive permits more plugins
+		to use the same 'sql_refresh_time' value, allowing them to spread the purging events over
+		the time interval. It is useful when multiple plugins write to the same SQL server or
+		even the same table.
 
 KEY:		sql_optimize_clauses
 VALUES:		[true|false]
-DESC:		enables the optimization of the SQL clauses. (default: false; read carefully
-		INTERNALS "SQL issues" before enabling it).
+DESC:		enables the optimization of the SQL clauses, telling explicitely the SQL plugin to not
+		adhere to any SQL table version but to generate queries containing only the primitives
+		actually in use (default: false; read carefully INTERNALS 'SQL issues and *SQL plugins'
+		section before enabling it).
 
 KEY:		sql_history
-VALUES:		#[m|h|d]
-DESC:		enables the historical recording of counters inserted in the specified database.
-		The selected value intuitively sets the granularity of the history (for example
-		"5m", "1h", "4h", "1d", "7d"; if "1h" is choosen then counters inserted in the
-		last hour are updated; each hour is created a new record). 
+VALUES:		#[m|h|d|w|M]
+DESC:		enables the historical breakdown of aggregates (historical accounting), giving value
+		to 'stamp_inserted' and 'stamp_updated' fields. The supplied value tells how much time
+		byte/packet counters of each entry have to be accumulated before creating a new entry,
+                thus setting the history's granularity (example of valid values are: '5m', '1h', '4h',
+		'1d', '1w', '1M'; let's give a practical example: suppose '1h' is selected, we are in
+		the middle of a purging event and it's 10.59am: all aggregates being written will join 
+		counters of 10am; suppose we have 'sql_refresh_time: 60' (seconds); one minute later
+		we have a new purging event and it's 11am: each aggregate being written will create a
+		new entry into the SQL table. Their counters will be joined by the subsequent hour
+		aggregates).
 
 KEY:		sql_history_roundoff
-VALUES		[m,h,d]
-DESC:		enables the rounding of minutes, hours of days. How it works ? Suppose you launch
-		a run with "sql_history: 1h" and "sql_history_roundoff: m" and they are 18:34.
-		Rounding off minutes gives you an hourly timeslot (1h) that starts at 18:00; so,
-		subsequent ones will start at 19:00, 20:00, etc. Suppose, now, you launch a run
-		with "sql_history: 5m" and sql_history_roundoff: m" and they are 18:37. Rounding
-		off minutes gives you a 5m slot starting at first non-empty timeslot that would
-		be filled with data you are accounting; so a 5m slot that starts at 18:35. Next
-		slot will start at 18:40 and subsequent every 5 minutes (18:45 ... 19:00, etc.). 
+VALUES		[m,h,d,w,M]
+DESC:		enables the zeroing of minutes (m), hours (h), days of month (d), weeks (w) and months (M).
+		Suppose you go with 'sql_history: 1h', 'sql_history_roundoff: m' and it's 6:34pm. Rounding
+		off minutes gives you an hourly timeslot (1h) starting at 6:00pm; so, subsequent ones will
+		start at 7:00pm, 8:00pm, etc. Now, you go with 'sql_history: 5m', 'sql_history_roundoff: m'
+		and it's 6:37pm. Rounding off minutes will result in a first slot starting at 6:35pm; next
+		slot will start at 6:40pm, and then every 5 minutes (6:45pm ... 7:00pm, etc.). 'w' and 'd'
+		are mutually exclusive, that is: you can either reset the date to last Monday or reset the
+		date to the first day of the month. 
 
 KEY:		sql_recovery_logfile
-DESC:		enables recovery mode; recovery mode takes an action if DB fails, checking for the
-		successful result of each query. By default it is disabled. This key enables writing
-		data from memory cache straight to a specified logfile. The file produced could be
-		later played with either "pmmyplay" or "pmpgplay" tools. See INTERNALS for details
-		about recovery mode. 
+DESC:		enables recovery mode; recovery mechanism takes an action if DB fails, checking for
+		the successful result of each SQL query. By default it is disabled. By using this key
+		aggregates are recovered to the specified logfile. It may be later played by either
+		'pmmyplay' or 'pmpgplay' tools. Each time the pmacct package is updated it's good rule
+		not continue writing old files but start a new ones. Each plugin instance has to write
+		to a different logfile in order to avoid inconsistencies over data. And, finally, the
+		maximum size for a logfile is set to 2Gb: if the logfile reaches such size, it's
+		automatically rotated (in a way similar to logrotate: old file is renamed, appending
+		a little sequential integer to it, and a new file is started). See INTERNALS 'Recovery
+		modes' section for details about this topic. 
 
 KEY:            sql_recovery_backup_host
-DESC:           enables recovery mode; recovery mode takes an action if DB fails, checking for the
-                successful result of each query. By default it is disabled. This key enables writing
-                data to a backup DB. See INTERNALS for details about recovery mode.
+DESC:           enables recovery mode; recovery mechanism takes an action if DB fails, checking for
+		the successful result of each SQL query. By default it is disabled. By using this key
+		aggregates are recovered to a backup DB. See INTERNALS 'Recovery modes' section for 
+		etails about this topic.
 
 KEY:		[sql_cache_entries|print_cache_entries]
-DESC:		number of cache buckets (or entries). A default value is set, if any value is supplied.
-		This value is suitable for most scenarios, however when facing with large environments,
-		the advice is to carefully tune this parameter to improve performances. Remember to use
-		a prime number of buckets.
+DESC:		SQL plugins and print plugin sport a Plugin Memory Cache (PMC) to accumulate counters
+		for each aggregate; it has been thought to limit the interaction with the backend. Data
+		is pushed (to stdout or SQL database) each '[sql|print]_refresh_time'; this directive
+		sets the number of PMC buckets. The default value is suitable for most common scenarios,
+		however when facing with large-scale networks, it's higly recommended to carefully tune
+		this parameter to improve performances. Use a prime number of buckets.
 
 KEY:		sql_dont_try_update
 VALUES:         [true|false]
-DESC:		avoid to try UPDATE counters and skip directly to INSERT phase (read about data insertion
-		in INTERNALS file, section "SQL issues and *SQL plugins"). Useful in gaining performances
-		when UPDATE queries are not necessary (example: sql_history = sql_refresh_time). WARNING: 
-		if used not caring about timing constraints, it will lead to duplicate entries and
-		potentially to data loss.
-		  
+DESC:		instructs the plugin to build SQL queries skipping directly to the INSERT phase (read about
+		data insertion into INTERNALS, 'SQL issues and *SQL plugins' section). This directive is
+		useful in gaining performances when UPDATE queries are not necessary (a typical example is
+		when sql_history = sql_refresh_time). Note that the use of this directive imposes particular
+		care at timing constraints otherwise it may lead to duplicate entries and, potentially, to
+		loss of data (default: false).
+
 KEY:		sql_trigger_exec
-DESC:		executable to be launched at fixed intervals for data post-processing purposes; intervals
-		are specified by if 'sql_trigger_time'; if any interval is supplied 'sql_refresh_time'
-		value is used as interval, this will result in a trigger being executed each time data
-		is purged into the DB. 
+DESC:		defines the executable to be launched at fixed time intervals to post-process aggregates;
+		intervals are specified by the 'sql_trigger_time' directive; if no interval is supplied,
+		'sql_refresh_time' value is used instead: this will result in a trigger being fired each 
+		purging event. A number of environment variables are set to allow the trigger take actions;
+		take a look to TRIGGER_VARS to check them out.
 
 KEY:		sql_trigger_time
-VALUES:		#[m|h|d]
-DESC:		specifies time intervals at which the executable specified by 'sql_trigger_exec' has to be
-		launched; if any executable is specified this key is simply ignored. Values are  expressed
-		like 'sql_history' key (for example valid values are "5m", "1h", "4h", "1d", "7d"; if "1h"
-		is choosen then executable will be triggered each hour).
+VALUES:		#[m|h|d|w|M]
+DESC:		specifies time interval at which the executable specified by 'sql_trigger_exec' has to
+		be launched; if no executable is specified, this key is simply ignored. Values are intended
+		like 'sql_history' directive syntax (for example, valid values are '5m', '1h', '4h', '1d',
+		'1w', '1M'; if '1h' is selected, the executable will be fired each hour).
 
+KEY:		sql_preprocess
+DESC:		allows to process (via conditionals and subsequent checks) aggregates on queue during a
+		cache-to-DB purging event thus resulting in a powerful sampling tier; aggregates filtered
+		out may be just discarded or saved through the recovery mechanism (if enabled). The set of
+		available preprocessing directives follows:
+		
+		KEY: qnum
+		DESC: conditional. Subsequent checks will be evaluated only if the number of queries to be
+		      created during the current cache-to-DB purging event is '>=' qnum value. 
+
+		KEY: minp
+		DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
+		      only if the number of packets is '>=' minp value. 
+
+		KEY: minb
+                DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
+		      only if the bytes counter is '>=' minb value. An interesting idea is to set its value 
+		      to a fraction of the link capacity. Remember that you have also a timeframe reference:
+		      the 'sql_refresh_time' seconds.
+
+		      For example, given the following parameters:
+		      Link Capacity = 8Mbit/s, THreshold = 0.1%, TImeframe = 60s 
+		      minb = ((LC / 8) * TI) * TH -> ((8Mbit/s / 8) * 60s) * 0.1% = 60000 bytes.
+
+		      Given a 8Mbit link, all aggregates which have accounted for at least 60Kb of traffic
+		      in the last 60 seconds, will be written to the DB. 
+
+		KEY: recover
+		DESC: action. If previously evaluated checks have marked the aggregate as invalid, a positive
+		      'recover' value makes the packet to be handled through the recovery mechanism (if enabled).  
+		
 KEY:		print_markers
 VALUES:		[true|false]
-DESC:		Valid only when using "print" plugin. Enables the use of START/END markers when purging data 
-		to the stdout. Start marker includes also informations about current timeslot and refresh time
-		(default: false).
+DESC:		this directive applies only to 'print' plugin. Enables the use of START/END markers each time 
+		purging aggregates to 'stdout'. Start marker includes also informations about current timeslot
+		and refresh time (default: false).
 
-KEY:		nfacctd_port [GLOBAL]
-DESC:		makes the 'nfacctd' daemon to listen on the specified port. (default: 2100) 
+KEY:		nfacctd_port [GLOBAL, NO_PMACCTD]
+DESC:		defines the UDP port where to bind the 'nfacctd' daemon (default: 2100). 
 
-KEY:		nfacctd_ip [GLOBAL]
-DESC:		makes the 'nfacctd' daemon to bind on the specified ip address. (default: all interfaces)
+KEY:		nfacctd_ip [GLOBAL, NO_PMACCTD]
+DESC:		defines the IPv4/IPv6 address where to bind the 'nfacctd' daemon (default: all interfaces).
 
-KEY:		nfacctd_allow_file [GLOBAL]
-DESC:		path to a file containing the list of ip addresses (one for each line) allowed to send Netflow
-		data to 'nfacctd'. Current syntax doesn't implement network masks. The 'allow list' is intended
-		to be small. If you need some complicated network-wide filter, you may prefer to choose a firewall
-		rule instead. 
+KEY:		nfacctd_allow_file [GLOBAL, NO_PMACCTD]
+DESC:		full pathname to a file containing the list of IPv4/IPv6 addresses (one for each line) allowed
+		to send NetFlow packets to 'nfacctd'. Current syntax does not implement network masks but only
+		individual IP addresses. The Allow List is intended to be small. If you really need complex,
+		network-prefixed filters, you may prefer a few firewall rules instead. 
 
-KEY:		nfacctd_time_secs [GLOBAL]
+KEY:		nfacctd_time_secs [GLOBAL, NO_PMACCTD]
 VALUES:		[true|false]
-DESC:		makes 'nfacctd' expect times included in Netflow header to be in seconds instead of msecs. This
-		seems to be a quite common case. (default: false; times are expected in msecs)
+DESC:		makes 'nfacctd' expect times included in NetFlow header to be in seconds rather than msecs. This
+		seems to be quite a common case. (default: false; times are expected in msecs)
 
-KEY:		nfacctd_time_new [GLOBAL]
+KEY:		nfacctd_time_new [GLOBAL, NO_PMACCTD]
 VALUES:		[true|false]
-DESC:		makes 'nfacctd' to ignore times included in Netflow header and makes it build new times. Although
-		this could be useful to avoid date skews, remember that newly generated times will be strictly connected
-		with the arrival of Netflow packets. (default: false)
+DESC:		makes 'nfacctd' to ignore timestamps included in NetFlow header and makes it build new timestamps.
+		Although this can result useful to avoid time skews (for example, the NetFlow export agent is not 
+		connected to a NTP server), remember that the newly generated timestamps will be further delayed 
+		(in fact, they might have already waited for some timer expiration before being purged) to the
+		arrival of NetFlow packets (default: false).
 
-KEY:		pre_tag_map [GLOBAL, NO_PMACCTD]
-DESC:		path to a file containing the IDs mapping. This map allows to translate some Netflow packet fields
-		(currently: exporting agent IP address, Input interface, Output interface) into an ID (a small number in
-		the range 1-65535). For further informations about map syntax, see 'id_map.example' into 'examples'
-		directory. Pre Tagging is done shortly after the packet is collected by the daemon from the network. 
+KEY:		nfacctd_as_new [GLOBAL, NO_PMACCTD]
+VALUES:		[true|false]
+DESC:		if either 'src_as' or 'dst_as' primitives are in use, this directive makes 'nfacctd' generate
+		new AS numbers starting from IP addresses carried by flows. This way, the NetFlow export agent 
+		hasn't to generate AS numbers on its own. Note that 'nfacctd' generates them basing over a
+		networks definition file (see 'networks_file' directive). (default: false) 
 
-KEY:            pre_tag_filter [NO_GLOBAL, NO_PMACCTD]
-VALUES:         [1-65535]
-DESC:		it expects an ID as its value. It allows to filter packets basing on their Pre Tag ID: if it matches
-		the supplied value then it's allowed to be delivered to the plugin, otherwise it's discarded.
+KEY:		pre_tag_map [GLOBAL]
+DESC:		full pathname to a file containing ID mappings. In 'nfacctd' this map allows (a) to translate some
+		NetFlow packet fields ('ip' exporting agent IP address, 'in' agent Input interface, 'out' agent
+		Output interface, 'engine_type', 'engine_id', 'nexthop' and 'bgp_nexthop' are actually supported)
+		and (b) to match a filter expression (in libpcap syntax) into an ID (a small number in the range
+		1-65535). In 'pmacctd' it allows just the (b). Take also a look to the 'examples' tree for some
+		practical examples. Pre Tagging is enforced shortly after the packet collection from the network. 
+
+KEY:            pre_tag_filter [NO_GLOBAL]
+VALUES:         [0-65535]
+DESC:		it expects one or more ID (when multiple ID are supplied, they need to be comma separated) as
+		value and allows to filter aggregates basing on their Pre Tag ID: whether it matches with one of
+		the supplied values, the aggregate is delivered to the plugin. This directive has to be bound
+		to a plugin (that is, it cannot be global) and is suitable to split tagged data among the active
+		plugins. While the IDs need to be in the range 1-65535, this directive also allows to specify an
+		ID '0' thus allowing to split tagged traffic from untagged one. It could be used in conjunction
+		with 'aggregate_filter' directive.
 
 KEY:            post_tag 
 VALUES:         [1-65535]
-DESC:           it expects an ID as its value. Once the packet has passed all filters and is on the final way to be
-		delivered to the plugin, 'post_tag' allows to assign the specified value as ID of the packet. This is
-		the unique way to tag a packet when using 'pmacctd' and speaking more generally it may be useful to
-		tag packets when not using Pre Tagging but 'aggregate_filter'.
+DESC:           it expects an ID as its value. Once the aggregate has passed all filters and is on the final way
+		to the plugin, this directive allows to tag it using the specified value. This is the unique way
+		to tag an aggregate in 'pmacctd' and speaking more generally it may be useful to tag aggregates
+		when not using Pre Tagging but 'aggregate_filter'.
 
 KEY:		sampling_rate
 VALUES:		[>= 1]
-DESC:		enables packet sampling. It expects a number which is the ratio of packets to be sampled (1 out of N).
-		The currently implemented sampling algorithm is a simple systematic one. 
+DESC:		enables packet sampling. It expects a number which is the ratio of packets to be sampled (1 out
+		of N). The currently implemented sampling algorithm is a simple systematic one. Whether using any
+		SQL plugin, look also at the more powerful 'sql_preprocess' directive which allows to deal with
+		more advanced sampling scenarios.
+
+KEY:		pmacctd_force_frag_handling [GLOBAL]
+VALUES:		[true|false]
+DESC:		forces 'pmacctd' to join IPv4/IPv6 fragments: 'pmacctd' does this only whether one or more port 
+		primitives are selected (src_port, dst_port, sum_port); in fact, when not dealing with any upper
+		layer primitive, fragments are just handled as normal packets. However, available filtering rules
+		('aggregate_filter', Pre-Tag filter rules) will need such functionality enabled whether they need
+		to match TCP/UDP ports. So, this directive aims to support such scenarios. 
 

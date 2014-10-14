@@ -1,3 +1,26 @@
+/*
+    pmacct (Promiscuous mode IP Accounting package)
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
+*/
+
+/*
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+*/
+
+#define __UTIL_C
+
 /* includes */
 #include "pmacct.h"
 
@@ -53,14 +76,19 @@ char *extract_token(char **string, int delim)
 {
   char *token, *delim_ptr;
 
-  if ((delim_ptr = strchr(*string, delim))) {
+  if (!strlen(*string)) return NULL;
+
+  start:
+  if (delim_ptr = strchr(*string, delim)) {
     *delim_ptr = '\0';
     token = *string;
     *string = delim_ptr+1;
+    if (!strlen(token)) goto start;
   }
   else {
     token = *string;
     *string += strlen(*string);
+    if (!strlen(token)) return NULL;
   }
 
   return token;
@@ -166,16 +194,40 @@ void trim_spaces(char *buf)
 void trim_all_spaces(char *buf)
 {
   char *ptr;
-  int i, len;
+  int i = 0, len, quotes = FALSE;
 
   ptr = buf;
   len = strlen(buf);
 
   /* trimming all spaces */
-  for (i = 0; i <= len; i++) {
-    if (isspace(ptr[i])) {
-      strcpy(&buf[i], &ptr[i+1]);
+  while (i <= len) {
+    if (ptr[i] == '\'') {
+      if (!quotes) quotes = TRUE;
+      else if (quotes) quotes = FALSE;
     }
+    if (isspace(ptr[i]) && !quotes) {
+      strcpy(&buf[i], &ptr[i+1]);
+      len--;
+    }
+    else i++;
+  }
+}
+
+void strip_quotes(char *buf)
+{
+  char *ptr;
+  int i = 0, len;
+
+  ptr = buf;
+  len = strlen(buf);
+
+  /* stripping all quote marks */
+  while (i <= len) {
+    if (ptr[i] == '\'') {
+      strcpy(&buf[i], &ptr[i+1]);
+      len--;
+    }
+    else i++;
   }
 }
 
@@ -211,36 +263,9 @@ int iscomment(char *line)
   return FALSE;
 }
 
-void debug_packet(struct pkt_data *data)
+time_t roundoff_time(time_t t, char *value)
 {
-  if (data != NULL) {
-    Log(LOG_DEBUG, "This packet len: %d\n", ntohs(data->pkt_len));
-    if (config.what_to_count & COUNT_SRC_MAC)
-      Log(LOG_DEBUG, "Src MAC: %s\n", (char *)ether_ntoa(data->primitives.eth_shost));
-
-    if (config.what_to_count & COUNT_DST_MAC)
-      Log(LOG_DEBUG, "Dst MAC: %s\n", (char *)ether_ntoa(data->primitives.eth_dhost));
-
-    if (config.what_to_count & COUNT_SRC_HOST)
-      Log(LOG_DEBUG, "Src host: %s\n", inet_ntoa(data->primitives.src_ip));
-
-    if (config.what_to_count & COUNT_DST_HOST)
-      Log(LOG_DEBUG, "Dst host: %s\n", inet_ntoa(data->primitives.dst_ip));
-
-    if (config.what_to_count & COUNT_SRC_PORT)
-      Log(LOG_DEBUG, "Src port: %d\n", ntohs(data->primitives.src_port));
-
-    if (config.what_to_count & COUNT_DST_PORT)
-      Log(LOG_DEBUG, "Dst port: %d\n", ntohs(data->primitives.dst_port));
-
-    if (config.what_to_count & COUNT_IP_PROTO)
-      Log(LOG_DEBUG, "Proto: %d\n", data->primitives.proto);
-  }
-}
-
-time_t roundoff_time(time_t t)
-{
-  char *value = config.sql_history_roundoff;
+  // char *value = config.sql_history_roundoff;
   struct tm *rounded;
   int len, j;
 
@@ -251,8 +276,29 @@ time_t roundoff_time(time_t t)
     len = strlen(value);
     for (j = 0; j < len; j++) {
       if (value[j] == 'm') rounded->tm_min = 0;
-      else if (value[j] == 'h') rounded->tm_hour = 0;
-      else if (value[j] == 'd') rounded->tm_mday = 1;
+      else if (value[j] == 'h') {
+	rounded->tm_min = 0;
+	rounded->tm_hour = 0;
+      }
+      else if (value[j] == 'd') {
+        rounded->tm_min = 0;
+        rounded->tm_hour = 0;
+	rounded->tm_mday = 1;
+      }
+      else if (value[j] == 'w') {
+        rounded->tm_min = 0;
+        rounded->tm_hour = 0;
+	while (rounded->tm_wday > 1) {
+	  rounded->tm_mday--;
+	  rounded->tm_wday--;
+	}
+      }
+      else if (value[j] == 'M') {
+        rounded->tm_min = 0;
+        rounded->tm_hour = 0;
+	rounded->tm_mday = 1;
+	rounded->tm_mon = 0;
+      }
       else Log(LOG_WARNING, "WARN: ignoring unknown round off value: %c\n", value[j]); 
     }
   }
@@ -261,19 +307,87 @@ time_t roundoff_time(time_t t)
   return t;
 }
 
+/* op = 0 (add); op = 1 (sub) */
+time_t calc_monthly_timeslot(time_t t, int howmany, int op)
+{
+  time_t base = t, final;
+  struct tm *tmt;
+
+  tmt = localtime(&t);
+
+  while (howmany) {
+    tmt->tm_mday = 1;
+    if (op == ADD) tmt->tm_mon++;
+    else if (op == SUB) tmt->tm_mon--;
+    howmany--;
+  }
+
+  final = mktime(tmt);
+  
+  return (final-base);
+}	
+
 void write_pid_file(char *filename)
 {
   FILE *file;
   char pid[10];
 
-  if ((file = fopen(filename,"w")) == NULL) {
-    Log(LOG_ERR, "ERROR: file %s not found\n", filename);
+  unlink(filename); 
+    
+  file = fopen(filename,"w");
+  if (file) {
+    if (file_lock(fileno(file))) {
+      Log(LOG_ALERT, "ALERT: Unable to obtain lock of '%s'.\n", filename);
+      return;
+    }
+    sprintf(pid, "%d\n", getpid());
+    fwrite(pid, strlen(pid), 1, file);
+
+    file_unlock(fileno(file));
+    fclose(file);
+  }
+  else {
+    Log(LOG_ERR, "ERROR: Unable to open file '%s'\n", filename);
     return;
   }
-  
-  sprintf(pid, "%d\n", getpid()); 
-  fwrite(pid, strlen(pid), 1, file);
-  fclose(file);
+}
+
+int file_lock(int fd)
+{
+  int ret;
+#if defined SOLARIS
+  flock_t lock;
+
+  lock.l_type = F_WRLCK;
+  lock.l_whence = 0;
+  lock.l_start = 0;
+  lock.l_len = 0;
+
+  ret = fcntl(fd, F_SETLK, &lock);
+  return((ret == -1) ? -1 : 0);
+#else
+  ret = flock(fd, LOCK_EX);
+  return ret;
+#endif
+}
+
+int file_unlock(int fd)
+{
+  int ret;
+#if defined SOLARIS
+  flock_t lock;
+
+  lock.l_type = F_UNLCK;
+  lock.l_whence = 0;
+  lock.l_start = 0;
+  lock.l_len = 0;
+
+  ret = fcntl(fd, F_SETLK, &lock);
+  return((ret == -1) ? -1 : 0);
+#else
+  ret = flock(fd, LOCK_UN);
+  return ret;
+#endif
 }
 
 int sanitize_buf_net(char *buf, int rows)
@@ -317,25 +431,29 @@ int check_not_valid_char(char *buf, int c)
 
 void mark_columns(char *buf)
 {
-  int len, x, word = FALSE;
+  int len, x, word = FALSE, quotes = FALSE;
 
   if (!buf) return;
 
   len = strlen(buf);
   for (x = 0; x < len; x++) {
+    if (buf[x] == '\'') {
+      if (!quotes) quotes = TRUE;
+      else if (quotes) quotes = FALSE;
+    }
     if ((isalpha(buf[x])||isdigit(buf[x])||ispunct(buf[x])) && !word) word = TRUE;
-    if (isspace(buf[x]) && word) {
-      buf[x] = ';';
+    if (isspace(buf[x]) && word && !quotes) {
+      buf[x] = '|';
       word = FALSE;
     }
   }
 
-  /* removing trailing ';' if any */
+  /* removing trailing '|' if any */
   x = strlen(buf);
   word = FALSE;
 
   while (x > 0) {
-    if (buf[x] == ';' && !word) buf[x] = '\0';
+    if (buf[x] == '|' && !word) buf[x] = '\0';
     if ((isalpha(buf[x])||isdigit(buf[x])||ispunct(buf[x])) && !word) word = TRUE;
     x--;
   }
@@ -374,4 +492,69 @@ void *map_shared(void *addr, size_t len, int prot, int flags, int fd, off_t off)
 #else /* MAP_ANON or MAP_ANONYMOUS */
   return (void *)mmap(addr, len, prot, flags, fd, off);
 #endif
+}
+
+void lower_string(char *string)
+{
+  int i = 0;
+
+  while (string[i] != '\0') {
+    string[i] = tolower(string[i]);
+    i++;
+  }
+}
+
+void evaluate_sums(u_int32_t *wtc)
+{
+  if (*wtc & COUNT_SUM_HOST) {
+    if (*wtc != COUNT_SUM_HOST) {
+      *wtc = COUNT_SUM_HOST;
+      Log(LOG_WARNING, "WARN: SUM aggregation is to be used alone. Resetting other aggregation methods.\n");
+    }
+  }
+  else if (*wtc & COUNT_SUM_NET) {
+    if (*wtc != COUNT_SUM_NET) {
+      *wtc = COUNT_SUM_NET;
+      Log(LOG_WARNING, "WARN: SUM aggregation is to be used alone. Resetting other aggregation methods.\n");
+    }
+  }
+  else if (*wtc & COUNT_SUM_AS) {
+    if (*wtc != COUNT_SUM_AS) {
+      *wtc = COUNT_SUM_AS;
+      Log(LOG_WARNING, "WARN: SUM aggregation is to be used alone. Resetting other aggregation methods.\n");
+    }
+  }
+  else if (*wtc & COUNT_SUM_PORT) {
+    if (*wtc != COUNT_SUM_PORT) {
+      *wtc = COUNT_SUM_PORT;
+      Log(LOG_WARNING, "WARN: SUM aggregation is to be used alone. Resetting other aggregation methods.\n");
+    }
+  }
+}
+
+int file_archive(const char *path, int rotations)
+{
+  struct stat st;
+  char *new_path;
+  int j, ret, len = strlen(path)+11;
+  
+  new_path = malloc(len);
+  memset(new_path, 0, len);
+  for (j = 1; j < rotations; j++) {
+    snprintf(new_path, len, "%s.%d", path, j); 
+    ret = stat(new_path, &st);
+    if (ret < 0) {
+      rename(path, new_path);
+      return 0;
+    }
+  }
+
+  /* we should never reach this point */
+  Log(LOG_ALERT, "ALERT: No more logfile rotations allowed. Data is getting lost.\n");  
+  return -1;
+}
+
+void stop_all_childs()
+{
+  my_sigint_handler(0); /* it does same thing */
 }

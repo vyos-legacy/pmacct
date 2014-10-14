@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -19,6 +19,7 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+#define __SERVER_C
 
 /* includes */
 #include "pmacct.h"
@@ -52,30 +53,35 @@ int build_query_server(char *path_ptr)
 
   setnonblocking(sd);
   listen(sd, 1);
-  Log(LOG_INFO, "OK: waiting for data on: %s .\n", path_ptr);
+  Log(LOG_INFO, "OK: waiting for data on: '%s'\n", path_ptr);
 
   return sd;
 }
 
 
-void process_query_data(int sd, unsigned char *buf, int len)
+void process_query_data(int sd, unsigned char *buf, int len, int forked)
 {
-  struct acc *acc_elem = 0;
+  struct acc *acc_elem = 0, tmpbuf;
   struct bucket_desc bd;
-  struct query_header *q;
-  struct pkt_primitives addr;
-  char lbuf[LARGEBUFLEN], *elem, *lbufptr, *lbufbase;
-  int counter=0, packed=sizeof(struct query_header); 
-  int following_chain=0, buflen = LARGEBUFLEN-sizeof(struct query_header);
-  unsigned int i;
+  struct query_header *q, *uq;
+  struct query_entry request;
+  struct reply_buffer rb;
+  unsigned char *elem, *bufptr;
+  int following_chain=0;
+  unsigned int idx;
+  struct pkt_data dummy;
 
-  memset(lbuf, 0, LARGEBUFLEN);
-  memcpy(lbuf, buf, len);
+  memset(&dummy, 0, sizeof(struct pkt_data));
+  memset(&rb, 0, sizeof(struct reply_buffer));
+  memcpy(rb.buf, buf, sizeof(struct query_header));
+  rb.len = LARGEBUFLEN-sizeof(struct query_header);
+  rb.packed = sizeof(struct query_header);
 
   /* arranging some pointer */
-  q = (struct query_header *) lbuf;
-  lbufptr = lbuf+sizeof(struct query_header);
-  lbufbase = lbuf+sizeof(struct query_header);
+  uq = (struct query_header *) buf;
+  q = (struct query_header *) rb.buf;
+  rb.ptr = rb.buf+sizeof(struct query_header);
+  bufptr = buf+sizeof(struct query_header);
 
   if (config.debug) Log(LOG_DEBUG, "Processing data received from client ...\n");
 
@@ -84,71 +90,29 @@ void process_query_data(int sd, unsigned char *buf, int len)
     else return;
   }
 
-  elem = (char *) a;
-
-  /* We should increase elegance ;) */
-#if defined (HAVE_MMAP)
-  if (q->type & WANT_RESET) {
-    if (config.what_to_count != q->what_to_count) {
-      q->type ^= WANT_RESET;
-      if (config.debug) Log(LOG_DEBUG, "DEBUG: Reset request ignored: not exact match.\n");
-    }
-  }
-#endif
+  elem = (unsigned char *) a;
 
   if (q->type & WANT_STATS) {
-    memset(lbufbase, 0, buflen);
     q->what_to_count = config.what_to_count; 
-    for (i = 0; i < config.buckets; i++) {
+    for (idx = 0; idx < config.buckets; idx++) {
       if (!following_chain) acc_elem = (struct acc *) elem;
-#if !defined (HAVE_MMAP)
-      if (acc_elem->packet_counter) {
-#else
-      if (acc_elem->packet_counter && !acc_elem->reset_flag) {
-#endif
-        if ((packed + sizeof(struct acc)) < buflen) {
-          memcpy(lbufptr, acc_elem, sizeof(struct acc));
-          lbufptr += sizeof(struct acc);
-          packed += sizeof(struct acc);
-          if (config.debug) counter++;
-        }
-        else {
-          if (config.debug) {
-            Log(LOG_DEBUG, "Entries: %d\n", counter);
-            counter = 0;
-          }
-          send (sd, lbuf, packed, 0);
-	  buflen = LARGEBUFLEN;
-          memset(lbuf, 0, buflen);
-          packed = 0;
-          lbufptr = lbuf;
-          memcpy(lbufptr, acc_elem, sizeof(struct acc));
-          lbufptr += sizeof(struct acc);
-          packed += sizeof(struct acc);
-          if (config.debug) counter++;
-        }
-      }
+      if (acc_elem->packet_counter && !acc_elem->reset_flag)
+	enQueue_elem(sd, &rb, acc_elem, sizeof(struct pkt_data));
       if (acc_elem->next != NULL) {
         if (config.debug) Log(LOG_DEBUG, "Following chain in reply ...\n");
         acc_elem = acc_elem->next;
         following_chain = TRUE;
-        i--;
+        idx--;
       }
       else {
         elem += sizeof(struct acc);
         following_chain = FALSE;
       }
     }
-    if (config.debug) {
-      Log(LOG_DEBUG, "Entries: %d\n", counter);
-      counter = 0;
-    }
-    send (sd, lbuf, packed, 0);
+    send(sd, rb.buf, rb.packed, 0); /* send remainder data */
   }
-  // else if (q->type == WANT_ERASE) /* removed */ 
   else if (q->type & WANT_STATUS) {
-    memset(lbufbase, 0, buflen);
-    for (i = 0; i < config.buckets; i++) {
+    for (idx = 0; idx < config.buckets; idx++) {
 
       /* Administrativia */
       following_chain = FALSE;
@@ -158,142 +122,124 @@ void process_query_data(int sd, unsigned char *buf, int len)
 
       do {
         if (following_chain) acc_elem = acc_elem->next;
-#if !defined (HAVE_MMAP)
-        if (acc_elem->packet_counter) bd.howmany++;
-#else
         if (acc_elem->packet_counter && !acc_elem->reset_flag) bd.howmany++;
-#endif
-        bd.num = i; /* we need to avoid this redundancy */
+        bd.num = idx; /* we need to avoid this redundancy */
         following_chain = TRUE;
       } while (acc_elem->next != NULL);
 
-      if ((packed + sizeof(struct bucket_desc)) < buflen) {
-        memcpy(lbufptr, &bd, sizeof(struct bucket_desc));
-        lbufptr += sizeof(struct bucket_desc);
-        packed += sizeof(struct bucket_desc);
-      }
-      else {
-        if (config.debug) Log(LOG_DEBUG, "Sending status, up to bucket %d ...\n", i);
-        send(sd, lbuf, packed, 0);
-	buflen = LARGEBUFLEN;
-        memset(lbuf, 0, buflen);
-        packed = 0;
-        lbufptr = lbuf;
-        memcpy(lbufptr, &bd, sizeof(struct bucket_desc));
-        lbufptr += sizeof(struct bucket_desc);
-        packed += sizeof(struct bucket_desc);
-      }
+      enQueue_elem(sd, &rb, &bd, sizeof(struct bucket_desc));
       elem += sizeof(struct acc);
     }
-    send(sd, lbuf, packed, 0);
+    send(sd, rb.buf, rb.packed, 0);
   }
-  else if (q->type & WANT_MRTG) {
-    memcpy(&addr, lbufptr, sizeof(struct pkt_primitives)); 
-    if (config.debug) Log(LOG_DEBUG, "Searching into accounting structure ...\n");
-    memset(lbufbase, 0, buflen);
-    acc_elem = search_accounting_structure(&addr);
-    if (!acc_elem) packed += sizeof(int); 
-    else {
-      memcpy(lbufptr, acc_elem, sizeof(struct acc));
-#if defined (HAVE_MMAP)
-      if (((struct acc *)lbufptr)->reset_flag) {
-	((struct acc *)lbufptr)->packet_counter = 0;
-	((struct acc *)lbufptr)->bytes_counter = 0;
-      }
-      if (q->type & WANT_RESET) set_reset_flag(acc_elem);
-#endif
-      packed += sizeof(struct acc);
-    }
-    send(sd, lbuf, packed, 0);
-  }
-  else if (q->type & WANT_MATCH) {
-    unsigned int what_to_count = q->what_to_count;
-
-    q->what_to_count = config.what_to_count; 
-    memcpy(&addr, lbufptr, sizeof(struct pkt_primitives));
-    memset(lbufbase, 0, buflen);
-    if (config.debug) Log(LOG_DEBUG, "Searching into accounting structure ...\n"); 
-    if (what_to_count == config.what_to_count) { 
-      acc_elem = search_accounting_structure(&addr);
-      if (acc_elem) { 
-#if !defined (HAVE_MMAP)
-	if (acc_elem->packet_counter) {
-#else
-	if (acc_elem->packet_counter && !acc_elem->reset_flag) {
-#endif
-          memcpy(lbufptr, acc_elem, sizeof(struct acc));
-#if defined (HAVE_MMAP)
-	  if (q->type & WANT_RESET) set_reset_flag(acc_elem);
-#endif
-          packed += sizeof(struct acc);
-	}
-      }
-      send(sd, lbuf, packed, 0);
-    }
-    else {
-      struct pkt_primitives tbuf;  
-
-      for (i = 0; i < config.buckets; i++) {
-        if (!following_chain) acc_elem = (struct acc *) elem;
-#if !defined (HAVE_MMAP)
-	if (acc_elem->packet_counter) {
-#else
-	if (acc_elem->packet_counter && !acc_elem->reset_flag) {
-#endif
-	  mask_elem(&tbuf, acc_elem, what_to_count); 
-          if (!memcmp(&tbuf, &addr, sizeof(struct pkt_primitives))) {
-            if ((packed + sizeof(struct acc)) < buflen) {
-              memcpy(lbufptr, acc_elem, sizeof(struct acc));
-              lbufptr += sizeof(struct acc);
-              packed += sizeof(struct acc);
-              if (config.debug) counter++;
-            }
-            else {
-              if (config.debug) {
-                Log(LOG_DEBUG, "Entries: %d\n", counter);
-                counter = 0;
-              }
-              send (sd, lbuf, packed, 0);
-	      buflen = LARGEBUFLEN;
-              memset(lbuf, 0, buflen);
-              packed = 0;
-              lbufptr = lbuf;
-              memcpy(lbufptr, acc_elem, sizeof(struct acc));
-              lbufptr += sizeof(struct acc);
-              packed += sizeof(struct acc);
-              if (config.debug) counter++;
+  else if (q->type & WANT_MATCH || q->type & WANT_COUNTER) {
+    unsigned int j;
+   
+    q->what_to_count = config.what_to_count;
+    for (j = 0; j < uq->num; j++, bufptr += sizeof(struct query_entry)) {
+      memcpy(&request, bufptr, sizeof(struct query_entry));
+      if (config.debug) Log(LOG_DEBUG, "Searching into accounting structure ...\n"); 
+      if (request.what_to_count == config.what_to_count) { 
+        acc_elem = search_accounting_structure(&request.data);
+        if (acc_elem) { 
+	  if (acc_elem->packet_counter && !acc_elem->reset_flag) {
+	    enQueue_elem(sd, &rb, acc_elem, sizeof(struct pkt_data));
+	    if (q->type & WANT_RESET) {
+	      if (forked) set_reset_flag(acc_elem);
+	      else reset_counters(acc_elem);
 	    }
 	  }
+	  else {
+	    if (q->type & WANT_COUNTER) enQueue_elem(sd, &rb, &dummy, sizeof(struct pkt_data));
+	  }
         }
-        if (acc_elem->next) {
-          acc_elem = acc_elem->next;
-          following_chain = TRUE;
-          i--;
-        }
-        else {
-          elem += sizeof(struct acc);
-          following_chain = FALSE;
-        }
+	else {
+	  if (q->type & WANT_COUNTER) enQueue_elem(sd, &rb, &dummy, sizeof(struct pkt_data));
+	}
       }
-      if (config.debug) {
-        Log(LOG_DEBUG, "Entries: %d\n", counter);
-        counter = 0;
+      else {
+        struct pkt_primitives tbuf;  
+	struct pkt_data abuf;
+        following_chain = FALSE;
+	elem = (unsigned char *) a;
+	memset(&abuf, 0, sizeof(abuf));
+
+        for (idx = 0; idx < config.buckets; idx++) {
+          if (!following_chain) acc_elem = (struct acc *) elem;
+	  if (acc_elem->packet_counter && !acc_elem->reset_flag) {
+	    mask_elem(&tbuf, acc_elem, request.what_to_count); 
+            if (!memcmp(&tbuf, &request.data, sizeof(struct pkt_primitives))) {
+	      if (q->type & WANT_COUNTER) Accumulate_Counters(&abuf, acc_elem); 
+	      else enQueue_elem(sd, &rb, acc_elem, sizeof(struct pkt_data)); /* q->type == WANT_MATCH */
+	      if (q->type & WANT_RESET) set_reset_flag(acc_elem);
+	    }
+          }
+          if (acc_elem->next) {
+            acc_elem = acc_elem->next;
+            following_chain = TRUE;
+            idx--;
+          }
+          else {
+            elem += sizeof(struct acc);
+            following_chain = FALSE;
+          }
+        }
+	if (q->type & WANT_COUNTER) enQueue_elem(sd, &rb, &abuf, sizeof(struct pkt_data)); /* enqueue accumulated data */
       }
-      send (sd, lbuf, packed, 0);
     }
+    send(sd, rb.buf, rb.packed, 0); /* send remainder data */
   }
 }
 
-void mask_elem(struct pkt_primitives *d, struct acc *s, unsigned int w)
+void mask_elem(struct pkt_primitives *d, struct acc *s, u_int32_t w)
 {
   memset(d, 0, sizeof(struct pkt_primitives));
 
   if (w & COUNT_SRC_MAC) memcpy(d->eth_shost, s->eth_shost, ETH_ADDR_LEN); 
   if (w & COUNT_DST_MAC) memcpy(d->eth_dhost, s->eth_dhost, ETH_ADDR_LEN); 
   if (w & COUNT_VLAN) d->vlan_id = s->vlan_id; 
-  if (w & COUNT_SRC_HOST) d->src_ip.s_addr = s->src_ip.s_addr; 
-  if (w & COUNT_DST_HOST) d->dst_ip.s_addr = s->dst_ip.s_addr; 
+  if ((w & COUNT_SRC_HOST) || (w & COUNT_SRC_AS)) {
+    if (s->src_ip.family == AF_INET) d->src_ip.address.ipv4.s_addr = s->src_ip.address.ipv4.s_addr; 
+#if defined ENABLE_IPV6
+    else if (s->src_ip.family == AF_INET6) memcpy(&d->src_ip.address.ipv6,  &s->src_ip.address.ipv6, sizeof(struct in6_addr));
+#endif
+    d->src_ip.family = s->src_ip.family;
+  }
+  if ((w & COUNT_DST_HOST) || (w & COUNT_DST_AS)) {
+    if (s->src_ip.family == AF_INET) d->dst_ip.address.ipv4.s_addr = s->dst_ip.address.ipv4.s_addr; 
+#if defined ENABLE_IPV6
+    else if (s->dst_ip.family == AF_INET6) memcpy(&d->dst_ip.address.ipv6,  &s->dst_ip.address.ipv6, sizeof(struct in6_addr));
+#endif
+    d->dst_ip.family = s->dst_ip.family;
+  }
   if (w & COUNT_SRC_PORT) d->src_port = s->src_port; 
   if (w & COUNT_DST_PORT) d->dst_port = s->dst_port; 
+  if (w & COUNT_IP_TOS) d->tos = s->tos;
   if (w & COUNT_IP_PROTO) d->proto = s->proto; 
+  if (w & COUNT_ID) d->id = s->id; 
+}
+
+void enQueue_elem(int sd, struct reply_buffer *rb, void *elem, int size)
+{
+  if ((rb->packed + size) < rb->len) {
+    memcpy(rb->ptr, elem, size);
+    rb->ptr += size;
+    rb->packed += size; 
+  }
+  else {
+    send(sd, rb->buf, rb->packed, 0);
+    rb->len = LARGEBUFLEN;
+    memset(rb->buf, 0, sizeof(rb->buf));
+    rb->packed = 0;
+    rb->ptr = rb->buf;
+    memcpy(rb->ptr, elem, size);
+    rb->ptr += size;
+    rb->packed += size;
+  }
+}
+
+void Accumulate_Counters(struct pkt_data *abuf, struct acc *elem)
+{
+  abuf->pkt_len += elem->bytes_counter;
+  abuf->pkt_num += elem->packet_counter;
 }

@@ -1,11 +1,18 @@
 dnl Process this file with autoconf to produce a configure script.
-AC_INIT([pmacctd.c], [0.7.4], [paolo.lucente@ic.cnr.it])
-AM_INIT_AUTOMAKE([pmacctd], [0.7.4])
+AC_INIT([pmacctd.c], [0.8.3], [paolo.lucente@ic.cnr.it])
+AM_INIT_AUTOMAKE([pmacctd], [0.8.3])
 AC_PREFIX_DEFAULT([/usr/local])
 
 dnl Checks for programs.
 AC_PROG_CC
 host_os=`uname`
+host_cpu=`uname -m`
+
+AC_MSG_CHECKING(OS)
+AC_MSG_RESULT($host_os)
+
+AC_MSG_CHECKING(hardware)
+AC_MSG_RESULT($host_cpu)
 
 dnl initial checks; tweakings to CFLAGS and LDFLAGS
 dnl see final checks for tweakings to LIBS
@@ -77,12 +84,127 @@ static inline func()
 ],
 [AC_MSG_RESULT(yes)], [AC_MSG_RESULT(no); AC_DEFINE(NOINLINE, 1)])
 
-AC_MSG_CHECKING([whether to enable mmap()])
+dnl
+dnl Check for architecture endianess: big | little 
+dnl
+dnl XXX: switch to manually define this feature 
+ac_cv_endianess="unknown"
+if test x"$ac_cv_endianess" = x"unknown"; then
+  AC_MSG_CHECKING(endianess)
+  AC_TRY_RUN([main () {
+
+  union
+  {
+    long l;
+    char c[sizeof (long)];
+  } u;
+  u.l = 1;
+  exit (u.c[sizeof (long) - 1] == 1);
+  }], ac_cv_endianess="little", ac_cv_endianess="big", ac_cv_endianess="little")
+  AC_MSG_RESULT($ac_cv_endianess)
+fi
+
+if test x"$ac_cv_endianess" = x"big"; then
+  AC_DEFINE(BIG_ENDIAN, 1)
+fi
+if test x"$ac_cv_endianess" = x"little"; then
+  AC_DEFINE(LITTLE_ENDIAN, 1)
+fi
+
+dnl
+dnl Check for unaligned memory access; based entirely over
+dnl AC_LBL_UNALIGNED_ACCESS
+dnl
+dnl XXX: switch to manually define this feature;
+ac_cv_unaligned="unknown"
+case "$host_cpu" in
+  alpha*|arm*|hp*|mips*|sh*|sparc*|ia64|nv1)
+    ac_cv_unaligned="fail"
+    AC_MSG_CHECKING(unaligned accesses)
+    AC_MSG_RESULT($ac_cv_unaligned)
+    ;;
+esac
+
+if test x"$ac_cv_unaligned" = x"unknown"; then
+  AC_MSG_CHECKING(unaligned accesses)
+  cat > conftest.c << EOF
+    #include <sys/types.h>
+    #include <sys/wait.h>
+    #include <stdio.h>
+    unsigned char a[[5]] = { 1, 2, 3, 4, 5 };
+    main () {
+    	unsigned int i;
+        pid_t pid;
+        int status;
+        /* avoid "core dumped" message */
+        pid = fork();
+        if (pid <  0) exit(2);
+        if (pid > 0) {
+        	/* parent */
+                pid = waitpid(pid, &status, 0);
+                if (pid < 0) exit(3);
+                exit(!WIFEXITED(status));
+        }
+        /* child */
+        i = *(unsigned int *)&a[[1]];
+        printf("%d\n", i);
+        exit(0);
+    }
+EOF
+  ${CC-cc} -o conftest $CFLAGS $CPPFLAGS $LDFLAGS \
+	conftest.c $LIBS >/dev/null 2>&1
+  if test ! -x conftest ; then
+    ac_cv_unaligned="fail"
+  else
+    ./conftest >conftest.out
+    if test ! -s conftest.out ; then ac_cv_unaligned="fail"
+    else ac_cv_unaligned="ok"
+    fi
+  fi
+  rm -f conftest* core core.conftest
+  AC_MSG_RESULT($ac_cv_unaligned)
+fi
+
+if test x"$ac_cv_unaligned" = x"fail"; then
+  AC_DEFINE(NEED_ALIGN, 1)
+fi
+
+AC_MSG_CHECKING([whether to disable mmap()])
 AC_ARG_ENABLE(mmap,
-	[  --enable-mmap                    enable mmap() shared memory],
-	AC_MSG_RESULT(yes)
-	AC_CHECK_FUNCS(mmap),
+	[  --disable-mmap                   disable mmap() shared memory],
+	if test x$enableval = x"yes" ; then
+	  AC_MSG_RESULT(no)
+	  AC_CHECK_FUNCS(mmap)
+	else
+	  AC_MSG_RESULT(yes)
+	fi
+	,
 	AC_MSG_RESULT(no)
+	AC_CHECK_FUNCS(mmap)
+)
+
+AC_MSG_CHECKING([whether to enable IPv6 code])
+AC_ARG_ENABLE(ipv6,
+        [  --enable-ipv6                    enable IPv6 code],
+	[ 
+        AC_MSG_RESULT(yes)
+        AC_CHECK_FUNCS(inet_pton)
+        if test x"$ac_cv_func_inet_pton" = x"no"; then
+          AC_MSG_ERROR(ERROR: missing inet_pton(); disable IPv6 hooks !)
+        fi
+
+	AC_CHECK_FUNCS(inet_ntop)
+	if test x"$ac_cv_func_inet_ntop" = x"no"; then
+          AC_MSG_ERROR(ERROR: missing inet_ntop(); disable IPv6 hooks !)
+        fi
+
+	AC_DEFINE(ENABLE_IPV6, 1)
+	case "$host_os" in
+	IRIX*)
+	  AC_DEFINE(INET6, 1)
+	  ;;
+	esac ],
+        AC_MSG_RESULT(no)
 )
 
 AC_ARG_WITH(pcap-includes,
@@ -404,7 +526,7 @@ AC_MSG_RESULT(no))
 dnl finish: pgsql handling
   
   if test x"$USING_SQL" = x"yes"; then
-    PLUGINS="${PLUGINS} sql_handlers.c"
+    PLUGINS="${PLUGINS} sql_handlers.c log_templates.c preprocess.c"
     LIBS="${LIBS} -lm -lz"
   fi
 
@@ -419,7 +541,7 @@ dnl Checks for library functions.
 AC_TYPE_SIGNAL
 
 dnl AC_CHECK_FUNCS(inet_ntoa socket)
-AC_CHECK_FUNCS([inet_ntoa socket])
+AC_CHECK_FUNCS([inet_aton inet_ntoa socket])
 
 dnl final checks
 dnl trivial solution to portability issue 
@@ -442,6 +564,8 @@ LDFLAGS ...... : ${LDFLAGS}
 
 Ok. I have done with all.
 Type 'make' to compile.
+
+Upgrading from previous pmacct releases ? Check out the 'UPGRADE' document to ensure a smooth transition !
 "
 AC_SUBST([PLUGINS])
 AC_SUBST([EXTRABIN])

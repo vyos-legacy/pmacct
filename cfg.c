@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -156,10 +156,10 @@ int parse_configuration_file(char *filename)
 void sanitize_cfg(int rows)
 {
   int rindex = 0, len;
-  char localbuf[SRVBUFLEN];
+  char localbuf[10240];
 
   while (rindex < rows) {
-    memset(localbuf, 0, SRVBUFLEN);
+    memset(localbuf, 0, 10240);
 
     /* checking the whole line: if it's a comment starting with
        '!', it will be removed */

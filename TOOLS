@@ -1,11 +1,23 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2004 by Paolo Lucente
+pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 
-pmacctd		pmacct daemon; gathers statistics.
-pmacct  	pmacct client; retrieves data from in-memory table is used. 
-pmmyplay	pmacct MySQL logfile player; plays MySQL plugin's recovery
-		logfiles. 
-pmpgplay	pmacct PGSQL logfile player; plays PGSQL plugin's recovery
-		logfiles. 
-nfacctd		Netflow accounting daemon; listens for Netflow packets and
-		gathers statistics.
+pmacctd		pcap-based accounting daemon; it gathers packets from an
+		interface it is bound to (enabling optionally Promiscuous
+		mode); statistics may be either pushed to stdout, stored
+		in a memory table or a PostgreSQL/MySQL database.
+nfacctd		NetFlow accounting daemon; listens for NetFlow v1/v5/v9
+		packets on one or more interfaces; statistics may be either
+		pushed to stdout, stored in a memory table or a PostgreSQL/
+		MySQL database.
+pmacct  	commandline pmacct client; used to retrieve data from an
+		active memroy plugin; it may ask for specific entries or
+		perform a bulk data retrieval; output may be text-formatted
+		or counters-only, suitable for data injection in tools like
+		MRTG, RRDtool, SNMP server or Gnuplot. 
+pmmyplay	pmacct MySQL logfile player; it is able to play logfiles,
+		previously produced by a SQL plugin, connecting to a MySQL
+		server.
+pmpgplay	pmacct PostgreSQL logfile player; it is able to play logfiles,
+		previously produced by a SQL plugin, connecting to a PostgreSQL
+		server.
+

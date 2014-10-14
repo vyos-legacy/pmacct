@@ -1,0 +1,51 @@
+! 
+! nfacctd ID file -- maps Netflow export agents' IP to a small (1-65535) numerical ID 
+!
+! File syntax is key-based. Position of keys inside the same row (rule) is not relevant.
+! An atomic expression (example: 'id=1') does not allow spaces. The first full match wins
+! (like in firewall rules); take care to the order you write rules. 
+!
+! 'nfacctd': valid keys: 'id', 'ip', 'in', 'out', 'engine_type', 'engine_id' and 'filter';
+! mandatory keys for each rule: 'id' and 'ip'.
+!
+! 'pmacctd': valid keys: 'id' and 'filter'. 'id' is mandatory for each rule. All remaining
+! primitives don't apply.
+!
+! list of currently supported keys follow:
+!
+! 'id'			ID value to assign to a full matching flow
+! 'ip'			IP address of the exporter (router, probe, etc.) which is
+!			sending NetFlow packets.
+! 'in'  		Input interface of the flow 
+! 'out' 		Output interface of the flow 
+! 'engine_type'		In NetFlow V5 it's compared against the 'engine_type' header
+!			field. In NetFlow V9 it's compared against the 3rd byte of
+!			the 'source_id' header field. provides uniqueness with respect
+!			to the routing engine on the exporting device.
+! 'engine_id'		In NetFlow V5 it's compared against the 'engine_id' header
+!			field. In NetFlow V9 it's compared against the 4th byte of
+!			the 'source_id' header field. It provides uniqueness with
+!			respect to the particular line card or VIP on the exporting
+!			device.
+! 'nexthop'		IPv4/IPv4 address of the next-hop router
+! 'bgp_nexthop'		IPv4/IPv4 address of the next-hop BGP router
+! 'filter'		Matches incoming packets against the supplied filter expression
+!			(expected in libpcap syntax); the filter needs to be enclosed in
+!			quotes ('). 
+!
+
+!
+! The following rules apply to 'nfacctd'; they will return an error if applied to 'pmacctd'
+!
+id=1	ip=192.168.2.1	in=4
+id=10	ip=192.168.1.1 	in=5	out=3
+id=11	ip=192.168.1.1 	in=3	out=5
+id=12	ip=192.168.1.1	in=3 
+id=13	ip=192.168.1.1  nexthop=10.0.0.254
+id=14	ip=192.168.1.1  engine_type=1 engine_id=0
+id=15	ip=192.168.1.1  in=3 filter='src net 192.168.0.0/24' 
+
+!
+! The following rule applies to 'pmacctd'; it will return an error if applied to 'nfacctd'
+!
+id=21	filter='src net 192.168.0.0/16'

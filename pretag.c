@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -20,21 +20,25 @@
 */
 
 /* defines */
-#define __NFACCTD_MAP_C
+#define __PRETAG_C
 
 /* includes */
 #include "pmacct.h"
 #include "nfacctd.h"
-#include "nf_map_handlers.h"
-#include "nfacctd-data.h"
+#include "pretag_handlers.h"
+#include "pretag-data.h"
 
-void load_id_file(char *filename, struct id_table *t)
+void load_id_file(int acct_type, char *filename, struct id_table *t)
 {
   struct id_table tmp;
   struct id_entry *ptr;
   FILE *file;
   char buf[SRVBUFLEN];
-  int to_sort, x, tot_lines = 0, err, index;
+  int v4_num = 0, x, tot_lines = 0, err, index;
+
+#if defined ENABLE_IPV6
+  int v6_num = 0;
+#endif
 
   /* parsing engine vars */
   char *start, *key = NULL, *value = NULL;
@@ -42,7 +46,7 @@ void load_id_file(char *filename, struct id_table *t)
 
   if (filename) {
     if ((file = fopen(filename, "r")) == NULL) {
-      Log(LOG_ERR, "ERROR: Agent ID file '%s' not found\n", filename);
+      Log(LOG_ERR, "ERROR: Pre-Tagging map '%s' not found\n", filename);
       exit(1);
     }
 
@@ -56,9 +60,10 @@ void load_id_file(char *filename, struct id_table *t)
       memset(buf, 0, SRVBUFLEN);
       if (fgets(buf, SRVBUFLEN, file)) {
         if (!iscomment(buf) && !isblankline(buf)) {
-          if (!check_not_valid_char(buf, ';')) {
+          if (!check_not_valid_char(buf, '|')) {
             mark_columns(buf);
             trim_all_spaces(buf);
+	    strip_quotes(buf);
 
             memset(&tmp.e[tmp.num], 0, sizeof(struct id_entry));
             err = FALSE; key = NULL; value = NULL;
@@ -68,17 +73,14 @@ void load_id_file(char *filename, struct id_table *t)
             for (x = 0; x <= len; x++) {
               if (buf[x] == '=') {
                 if (start == &buf[x]) continue;
-                buf[x] = '\0';
-                if (key) {
-                  Log(LOG_ERR, "ERROR: %s: malformed line %d. Ignored.\n", filename, tot_lines);
-                  err = TRUE;
-                  break;
-                }
-                else key = start;
-                x++;
-                start = &buf[x];
+                if (!key) {
+                  buf[x] = '\0';
+		  key = start;
+                  x++;
+                  start = &buf[x];
+		}
               }
-              if ((buf[x] == ';') || (buf[x] == '\0')) {
+              if ((buf[x] == '|') || (buf[x] == '\0')) {
                 if (start == &buf[x]) continue;
                 buf[x] = '\0';
                 if (value || !key) {
@@ -110,17 +112,35 @@ void load_id_file(char *filename, struct id_table *t)
               }
             }
             /* verifying errors and required fields */
-            if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].agent_ip.s_addr) {
-              int j;
+	    if (acct_type == ACCT_NF) {
+              if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].agent_ip.family) {
+                int j;
 
-              for (j = 0; tmp.e[tmp.num].func[j]; j++);
-              tmp.e[tmp.num].func[j] = nf_pktmap_id_handler;
-              tmp.num++;
-            }
-	    /* if a required is missing and any other error have been signalled before
-	       we will trap an error message */
-	    else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.s_addr) && !err)
-	      Log(LOG_ERR, "ERROR: required key missing at line: %d. Required keys are: 'id', 'ip'.\n", tot_lines); 
+                for (j = 0; tmp.e[tmp.num].func[j]; j++);
+                tmp.e[tmp.num].func[j] = pretag_id_handler;
+	        if (tmp.e[tmp.num].agent_ip.family == AF_INET) v4_num++;
+#if defined ENABLE_IPV6
+	        else if (tmp.e[tmp.num].agent_ip.family == AF_INET6) v6_num++;
+#endif
+                tmp.num++;
+              }
+	      /* if any required field is missing and other errors have been signalled
+	         before we will trap an error message */
+	      else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.family) && !err)
+	        Log(LOG_ERR, "ERROR: required key missing at line: %d. Required keys are: 'id', 'ip'.\n", tot_lines); 
+	    }
+	    else if (acct_type == ACCT_PM) {
+	      if (tmp.e[tmp.num].agent_ip.family)
+		Log(LOG_ERR, "ERROR: key 'ip' not applicable here. Invalid line: %d.\n", tot_lines);
+	      else if (!err && tmp.e[tmp.num].id) {
+                int j;
+
+		for (j = 0; tmp.e[tmp.num].func[j]; j++);
+		tmp.e[tmp.num].agent_ip.family = AF_INET; /* we emulate a dummy '0.0.0.0' IPv4 address */
+		tmp.e[tmp.num].func[j] = pretag_id_handler;
+		v4_num++; tmp.num++;
+	      } 
+	    }
           }
           else Log(LOG_ERR, "%s: malformed line %d. Ignored.\n", filename, tot_lines);
         }
@@ -128,27 +148,49 @@ void load_id_file(char *filename, struct id_table *t)
     }
     fclose(file);
 
-    // for (x = 0; x < tmp.num; x++) {
-    //  printf("id: %d, ip: %s, in: %d\n", tmp.e[x].id, inet_ntoa(tmp.e[x].agent_ip), tmp.e[x].input);
-    // }
+    /* second stage: rearranging things in a sorted memory table
+       we will break the process into two parts: IPv4 and IPv6 */
 
-    /* second stage: rearranging things in a sorted memory table */
-    to_sort = tmp.num;
-    t->num = tmp.num;
     x = 0;
-    while (to_sort) {
+    t->num = tmp.num;
+    t->ipv4_num = v4_num; 
+    t->ipv4_base = &t->e[x];
+    while (v4_num) {
       for (index = 0, ptr = NULL; index < tmp.num; index++) {
         if (!ptr) {
-          if (tmp.e[index].id) ptr = &tmp.e[index];
+          if (tmp.e[index].id && tmp.e[index].agent_ip.family == AF_INET) ptr = &tmp.e[index];
         }
         else {
-          if ((ptr->agent_ip.s_addr > tmp.e[index].agent_ip.s_addr) && tmp.e[index].id) ptr = &tmp.e[index];
+	  if (tmp.e[index].id && (tmp.e[index].agent_ip.family == AF_INET)) { 
+            if (ptr->agent_ip.address.ipv4.s_addr > tmp.e[index].agent_ip.address.ipv4.s_addr)
+	      ptr = &tmp.e[index];
+	  }
         }
       }
       memcpy(&t->e[x], ptr, sizeof(struct id_entry));
       ptr->id = FALSE;
-      to_sort--; x++;
+      v4_num--; x++;
     }
+#if defined ENABLE_IPV6
+    t->ipv6_num = v6_num;
+    t->ipv6_base = &t->e[x];
+    while (v6_num) {
+      for (index = 0, ptr = NULL; index < tmp.num; index++) {
+        if (!ptr) {
+          if (tmp.e[index].id && tmp.e[index].agent_ip.family == AF_INET6) ptr = &tmp.e[index];
+        }
+        else {
+          if (tmp.e[index].id && (tmp.e[index].agent_ip.family == AF_INET6)) {
+            if (ip6_addr_cmp(&ptr->agent_ip.address.ipv6, &tmp.e[index].agent_ip.address.ipv6) > 0)
+              ptr = &tmp.e[index];
+          }
+        }
+      }
+      memcpy(&t->e[x], ptr, sizeof(struct id_entry));
+      ptr->id = FALSE;
+      v6_num--; x++;
+    }
+#endif
   }
 }
 

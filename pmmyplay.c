@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -28,56 +28,139 @@
 #include "mysql_plugin.h"
 #include "util.h"
 
-#define WANT_ALL_ELEMENTS	1
-#define WANT_SINGLE_ELEMENT	2
-#define DEFLEN 255
-#define ARGS "dp:f:o:sth"
+#define ARGS "df:o:n:thiP:T:U:D:H:"
 
 MYSQL db_desc;
 struct logfile_header lh;
 int re = 0, we = 0;
 int debug = 0;
+int sql_dont_try_update = 0;
+char timebuf[SRVBUFLEN];
+char *sql_table;
 
 void usage(char *prog)
 {
   printf("%s\n", PMMYPLAY_USAGE_HEADER);
   printf("Usage: %s -f [filename]\n\n", prog);
-  printf("other options:\n");
+  printf("Available options:\n");
   printf("  -d\tenable debug\n");
   printf("  -f\t[filename]\n\tplay specified file\n");
   printf("  -o\t[element]\n\tplay file starting at specified offset element\n");
-  printf("  -s\tplay a single element\n");
-  printf("  -t\ttest only; don't write anything to the DB.\n");
-  printf("  -p\t[password]\n\tconnect to DB using the specified password\n");
+  printf("  -n\t[num]\n\tnumbers of elements to play\n");
+  printf("  -t\ttest only; don't actually write to the DB\n");
+  printf("  -P\t[password]\n\tconnect to SQL server using the specified password\n");
+  printf("  -U\t[user]\n\tuse the specified user when connecting to SQL server\n");
+  printf("  -H\t[host]\n\tconnect to SQL server listening at specified hostname\n");
+  printf("  -D\t[DB]\n\tuse the specified SQL database\n");
+  printf("  -T\t[table]\n\tuse the specified SQL table\n");
+  printf("  -i\tdon't try update, use insert only.\n");
   printf("\n");
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
 
+void print_header()
+{
+  printf("NUM       ");
+  printf("ID     ");
+  printf("SRC MAC            ");
+  printf("DST MAC            ");
+  printf("VLAN   ");
+#if defined ENABLE_IPV6
+  printf("SRC IP                                         ");
+  printf("DST IP                                         ");
+#else
+  printf("SRC IP           ");
+  printf("DST IP           ");
+#endif
+  printf("SRC PORT  ");
+  printf("DST PORT  ");
+  printf("PROTOCOL    ");
+  printf("TOS    ");
+  printf("PACKETS     ");
+  printf("BYTES       ");
+  printf("BASETIME\n");
+}
+
+void print_data(struct db_cache *data, u_int32_t wtc, int num)
+{
+  struct tm *lt;
+  char *src_mac, *dst_mac, src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
+
+  printf("%-8d  ", num);
+  printf("%-5d  ", data->id);
+  src_mac = (char *) ether_ntoa(data->eth_shost);
+  printf("%-17s  ", src_mac);
+  dst_mac = (char *) ether_ntoa(data->eth_dhost);
+  printf("%-17s  ", dst_mac);
+  printf("%-5d  ", data->vlan_id);
+#if defined ENABLE_IPV6
+  if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-45d  ", ntohl(data->src_ip.address.ipv4.s_addr));
+  else {
+    addr_to_str(src_host, &data->src_ip);
+    printf("%-45s  ", src_host);
+  }
+  if (wtc & COUNT_DST_AS) printf("%-45d  ", ntohl(data->dst_ip.address.ipv4.s_addr));
+  else {
+    addr_to_str(dst_host, &data->dst_ip);
+    printf("%-45s  ", dst_host);
+  }
+#else
+  if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-15d  ", ntohl(data->src_ip.address.ipv4.s_addr));
+  else {
+    addr_to_str(src_host, &data->src_ip);
+    printf("%-15s  ", src_host);
+  }
+  if (wtc & COUNT_DST_AS) printf("%-15d  ", ntohl(data->dst_ip.address.ipv4.s_addr));
+  else {
+    addr_to_str(dst_host, &data->dst_ip);
+    printf("%-15s  ", dst_host);
+  }
+#endif
+  printf("%-5d     ", data->src_port);
+  printf("%-5d     ", data->dst_port);
+  printf("%-10s  ", _protocols[data->proto].name);
+  printf("%-3d    ", data->tos);
+  printf("%-10u  ", data->packet_counter);
+  printf("%-10u  ", data->bytes_counter);
+  if (lh.sql_history) {
+    lt = localtime(&data->basetime); 
+    strftime(timebuf, SRVBUFLEN, "%Y-%m-%d %H:%M:%S" , lt); 
+    printf("%s\n", timebuf);
+  }
+  else printf("0\n"); 
+}
+
 int main(int argc, char **argv)
 {
+  struct insert_data idata;
   FILE *f;
   unsigned char fbuf[SRVBUFLEN];
-  char logfile[DEFLEN];
-  char sql_pwd[DEFLEN];
+  char logfile[SRVBUFLEN];
   char default_pwd[] = "arealsmartpwd";
   int have_pwd = 0, have_logfile = 0, n;
-  int result, type = 0, position = 0; 
-  int do_nothing = 0, first_cycle = TRUE;
+  int result = 0, position = 0, howmany = 0; 
+  int do_nothing = 0; 
+  char *cl_sql_host = NULL, *cl_sql_user = NULL, *cl_sql_db = NULL, *cl_sql_table = NULL;
 
-  struct db_cache *data;
-  int num_primitives;
+  char sql_pwd[SRVBUFLEN];
+  char *sql_host, *sql_user, *sql_db;
+  
+  struct template_entry *teptr;
+  int tot_size = 0, cnt = 0;
+  u_char *te;
+
+  struct template_header th;
+  struct db_cache data;
 
   /* getopt() stuff */
   extern char *optarg;
   extern int optind, opterr, optopt;
   int errflag = 0, cp;
 
-  /* daemonization stuff */
-  char default_sock[] = "/tmp/pmmyplay.sock";
-
   /* signal handling */
   signal(SIGINT, MY_exit_gracefully);
 
+  memset(&idata, 0, sizeof(idata));
   memset(sql_data, 0, sizeof(sql_data));
   memset(lock_clause, 0, sizeof(lock_clause));
   memset(unlock_clause, 0, sizeof(unlock_clause));
@@ -85,6 +168,8 @@ int main(int argc, char **argv)
   memset(insert_clause, 0, sizeof(insert_clause));
   memset(where, 0, sizeof(where));
   memset(values, 0, sizeof(values));
+  memset(&data, 0, sizeof(data));
+  memset(timebuf, 0, sizeof(timebuf));
 
   pp_size = sizeof(struct db_cache);
 
@@ -93,22 +178,53 @@ int main(int argc, char **argv)
     case 'd':
       debug = TRUE;
       break;
-    case 'p':
-      strlcpy(sql_pwd, optarg, sizeof(sql_pwd));
-      have_pwd = TRUE;
-      break;
     case 'f':
       strlcpy(logfile, optarg, sizeof(logfile));
       have_logfile = TRUE;
       break;
     case 'o':
       position = atoi(optarg);
+      if (!position) {
+	printf("ERROR: invalid offset. Exiting.\n");
+	exit(1);
+      }
       break;
-    case 's':
-      type = WANT_SINGLE_ELEMENT;
+    case 'n':
+      howmany = atoi(optarg);
+      if (!howmany) {
+	printf("ERROR: invalid number of elements. Exiting.\n");
+	exit(1);
+      }
       break;
     case 't':
       do_nothing = TRUE;
+      break;
+    case 'i':
+      sql_dont_try_update = TRUE;
+      break;
+    case 'P':
+      strlcpy(sql_pwd, optarg, sizeof(sql_pwd));
+      have_pwd = TRUE;
+      break;
+    case 'U':
+      cl_sql_user = malloc(SRVBUFLEN);
+      memset(cl_sql_user, 0, SRVBUFLEN);
+      strlcpy(cl_sql_user, optarg, SRVBUFLEN);
+      break;
+    case 'D':
+      cl_sql_db = malloc(SRVBUFLEN);
+      memset(cl_sql_db, 0, SRVBUFLEN);
+      strlcpy(cl_sql_db, optarg, SRVBUFLEN);
+      break;
+    case 'H':
+      cl_sql_host = malloc(SRVBUFLEN);
+      memset(cl_sql_host, 0, SRVBUFLEN);
+      strlcpy(cl_sql_host, optarg, SRVBUFLEN);
+      break;
+    case 'T':
+      cl_sql_table = malloc(SRVBUFLEN);
+      memset(cl_sql_table, 0, SRVBUFLEN);
+      strlcpy(cl_sql_table, optarg, SRVBUFLEN);
       break;
     case 'h':
       usage(argv[0]);
@@ -121,7 +237,7 @@ int main(int argc, char **argv)
   }
 
   /* searching for user supplied values */ 
-  if (!type) type = WANT_ALL_ELEMENTS;
+  if (!howmany) howmany = -1; 
   if (!have_pwd) memcpy(sql_pwd, default_pwd, sizeof(default_pwd));
   if (!have_logfile) {
     usage(argv[0]);
@@ -136,25 +252,83 @@ int main(int argc, char **argv)
   }
 
   fread(&lh, sizeof(lh), 1, f);
+  lh.sql_table_version = ntohs(lh.sql_table_version);
+  lh.sql_optimize_clauses = ntohs(lh.sql_optimize_clauses);
+  lh.sql_history = ntohs(lh.sql_history);
+  lh.what_to_count = ntohl(lh.what_to_count);
+  lh.magic = ntohl(lh.magic);
+
   if (lh.magic == MAGIC) {
     if (debug) printf("OK: Valid logfile header read.\n");
     printf("sql_db: %s\n", lh.sql_db); 
     printf("sql_table: %s\n", lh.sql_table);
     printf("sql_user: %s\n", lh.sql_user);
     printf("sql_host: %s\n", lh.sql_host);
+    if (cl_sql_db||cl_sql_table||cl_sql_user||cl_sql_host)
+      printf("OK: Overrided by commandline options:\n"); 
+    if (cl_sql_db) printf("sql_db: %s\n", cl_sql_db);
+    if (cl_sql_table) printf("sql_table: %s\n", cl_sql_table);
+    if (cl_sql_user) printf("sql_user: %s\n", cl_sql_user);
+    if (cl_sql_host) printf("sql_host: %s\n", cl_sql_host);
   }
   else {
-    printf("ERROR: Invalid magic number.\nExiting...\n");
+    printf("ERROR: Invalid magic number. Exiting.\n");
     exit(1);
   }
+
+  /* binding SQL stuff */
+  if (cl_sql_db) sql_db = cl_sql_db;
+  else sql_db = lh.sql_db;
+  if (cl_sql_table) sql_table = cl_sql_table;
+  else sql_table = lh.sql_table;
+  if (cl_sql_user) sql_user = cl_sql_user;
+  else sql_user = lh.sql_user;
+  if (cl_sql_host) sql_host = cl_sql_host;
+  else sql_host = lh.sql_host;
   
+  fread(&th, sizeof(th), 1, f);
+  th.magic = ntohl(th.magic);
+  th.num = ntohs(th.num);
+  th.sz = ntohs(th.sz);
+
+  if (th.magic == TH_MAGIC) {
+    if (debug) printf("OK: Valid template header read.\n");
+    if (th.num > N_PRIMITIVES) {
+      printf("ERROR: maximum number of primitives exceeded. Exiting.\n");
+      exit(1);
+    }
+    te = malloc(th.num*sizeof(struct template_entry));
+    memset(te, 0, th.num*sizeof(struct template_entry));
+    fread(te, th.num*sizeof(struct template_entry), 1, f);
+  }
+  else {
+    if (debug) printf("ERROR: no template header found.\n");
+    exit(1);
+  }
+
+  /* checking template */
+  if (th.sz >= sizeof(fbuf)) { 
+    printf("ERROR: Objects are too big. Exiting.\n");
+    exit(1); 
+  }
+  teptr = (struct template_entry *) te; 
+  for (tot_size = 0, cnt = 0; cnt < th.num; cnt++, teptr++)
+    tot_size += teptr->size;
+  if (tot_size != th.sz) {
+    printf("ERROR: malformed template header. Size mismatch. Exiting.\n");
+    exit(1);
+  }
+  TPL_check_sizes(&th, &data, te); 
 
   if (!do_nothing) {
     mysql_init(&db_desc); 
-    if (mysql_real_connect(&db_desc, lh.sql_host, lh.sql_user, sql_pwd, lh.sql_db, 0, NULL, 0) == NULL) {
+    if (mysql_real_connect(&db_desc, sql_host, sql_user, sql_pwd, sql_db, 0, NULL, 0) == NULL) {
       printf("%s\n", mysql_error(&db_desc));
       exit(1);
     }
+  }
+  else {
+    if (debug) print_header();
   }
 
   /* setting number of entries in _protocols structure */
@@ -162,82 +336,69 @@ int main(int argc, char **argv)
 
   /* composing the proper (filled with primitives used during
      the current execution) SQL strings */
-  num_primitives = MY_compose_static_queries();
+  idata.num_primitives = MY_compose_static_queries();
 
   /* handling offset */ 
-  if (position) n = fseek(f, (sizeof(struct db_cache)*position), SEEK_CUR);
+  if (position) n = fseek(f, (th.sz*position), SEEK_CUR);
 
   /* handling single or iterative request */
-  if (type == WANT_ALL_ELEMENTS) {
-    while(!feof(f)) {
-      memset(fbuf, 0, sizeof(struct db_cache));
-      n = fread(fbuf, sizeof(struct db_cache), 1, f); 
-      if (n) {
-        re++;
-        data = (struct db_cache *) fbuf;
+  if (!do_nothing) mysql_query(&db_desc, lock_clause);
+  while(!feof(f)) {
+    if (!howmany) break;
+    else if (howmany > 0) howmany--;
 
-	if (!do_nothing) {
-          mysql_query(&db_desc, lock_clause);
-          result = MY_cache_dbop(&db_desc, data, num_primitives);
-          mysql_query(&db_desc, unlock_clause);
-	}
-
-        if (!result) we++;
-        if (re != we) printf("WARN: unable to write element %d.\n", re);
-      }
-    }
-  }
-
-  if (type == WANT_SINGLE_ELEMENT) {
-    memset(fbuf, 0, sizeof(struct db_cache));
-    n = fread(fbuf, sizeof(struct db_cache), 1, f);
+    memset(fbuf, 0, th.sz);
+    n = fread(fbuf, th.sz, 1, f); 
     if (n) {
-      data = (struct db_cache *) fbuf;
+      re++;
+      TPL_pop(fbuf, &data, &th, te);
 
-      if (!do_nothing) {
-        mysql_query(&db_desc, lock_clause);
-        result = MY_cache_dbop(&db_desc, data, num_primitives);
-        mysql_query(&db_desc, unlock_clause);
+      if (!do_nothing) result = MY_cache_dbop(&db_desc, &data, &idata);
+      else {
+	if (debug) print_data(&data, lh.what_to_count, (position+re));
       }
 
-      if (!result) {
-        re = TRUE;
-        we = TRUE;
-      }
-      else printf("WARN: unable to write element.\n");
+      if (!result) we++;
+      if (re != we) printf("WARN: unable to write element %u.\n", re);
     }
   }
 
-  if (!do_nothing) printf("\nOK: written [%d/%d] elements.\n", we, re);
-  else printf("OK: read [%d] elements.\n", re);
+  if (!do_nothing) {
+    mysql_query(&db_desc, unlock_clause);
+    printf("\nOK: written [%u/%u] elements.\n", we, re);
+  }
+  else printf("OK: read [%u] elements.\n", re);
   mysql_close(&db_desc);
   fclose(f);
 
   return 0;
 }
 
-int MY_cache_dbop(MYSQL *db_desc, const struct db_cache *cache_elem, const int num_primitives)
+int MY_cache_dbop(MYSQL *db_desc, const struct db_cache *cache_elem, struct insert_data *idata)
 {
   char *ptr_values, *ptr_where;
   int num=0, ret=0;
 
   ptr_where = where_clause;
   ptr_values = values_clause; 
-  while (num < num_primitives) {
+  while (num < idata->num_primitives) {
     (*where[num].handler)(cache_elem, num, &ptr_values, &ptr_where);
     num++;
   }
   
   /* constructing sql query */
+  
   snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter);
   strncat(sql_data, where_clause, SPACELEFT(sql_data));
-  ret = mysql_query(db_desc, sql_data);
-  if (ret) return ret; 
+  if (!sql_dont_try_update) {
+    ret = mysql_query(db_desc, sql_data);
+    if (ret) return ret; 
+  }
 
-  if (mysql_affected_rows(db_desc) == 0) {
+  if (sql_dont_try_update || (mysql_affected_rows(db_desc) == 0)) {
     /* UPDATE failed, trying with an INSERT query */ 
     strncpy(sql_data, insert_clause, sizeof(sql_data));
-    snprintf(ptr_values, SPACELEFT(values_clause), ", %d, %d)", cache_elem->packet_counter, cache_elem->bytes_counter);
+    snprintf(ptr_values, SPACELEFT(values_clause), ", %u, %u)", cache_elem->packet_counter, cache_elem->bytes_counter);
     strncat(sql_data, values_clause, SPACELEFT(sql_data));
     ret = mysql_query(db_desc, sql_data);
     if (ret) return ret;
@@ -259,11 +420,11 @@ int MY_evaluate_history(int primitive)
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    strncat(where[primitive].string, "FROM_UNIXTIME(%d) = ", SPACELEFT(where[primitive].string));
+    strncat(where[primitive].string, "FROM_UNIXTIME(%u) = ", SPACELEFT(where[primitive].string));
     strncat(where[primitive].string, "stamp_inserted", SPACELEFT(where[primitive].string));
 
     strncat(insert_clause, "stamp_updated, stamp_inserted", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "now(), FROM_UNIXTIME(%d)", SPACELEFT(values[primitive].string));
+    strncat(values[primitive].string, "now(), FROM_UNIXTIME(%u)", SPACELEFT(values[primitive].string));
 
     where[primitive].type = values[primitive].type = TIMESTAMP;
     values[primitive].handler = where[primitive].handler = count_timestamp_handler;
@@ -275,7 +436,7 @@ int MY_evaluate_history(int primitive)
 
 int MY_evaluate_primitives(int primitive)
 {
-  register unsigned long int what_to_count=0;
+  u_int32_t what_to_count = 0;
   short int assume_custom_table = FALSE;
 
   if (lh.sql_optimize_clauses) {
@@ -286,9 +447,23 @@ int MY_evaluate_primitives(int primitive)
     /* we are requested to avoid optimization;
        then we'll construct an all-true "what
        to count" bitmap */ 
-    what_to_count |= COUNT_SRC_HOST|COUNT_DST_HOST;
-    what_to_count |= COUNT_SRC_MAC|COUNT_DST_MAC;
-    what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_IP_PROTO|COUNT_ID|COUNT_VLAN;
+    if (lh.what_to_count & COUNT_SRC_AS) what_to_count |= COUNT_SRC_AS;
+    else if (lh.what_to_count & COUNT_SUM_HOST) what_to_count |= COUNT_SUM_HOST;
+    else if (lh.what_to_count & COUNT_SUM_NET) what_to_count |= COUNT_SUM_NET;
+    else if (lh.what_to_count & COUNT_SUM_AS) what_to_count |= COUNT_SUM_AS;
+    else what_to_count |= COUNT_SRC_HOST;
+
+    if (lh.what_to_count & COUNT_DST_AS) what_to_count |= COUNT_DST_AS;
+    else what_to_count |= COUNT_DST_HOST;
+    what_to_count |= COUNT_SRC_MAC;
+    what_to_count |= COUNT_DST_MAC;
+    what_to_count |= COUNT_SRC_PORT;
+    what_to_count |= COUNT_DST_PORT;
+    what_to_count |= COUNT_IP_TOS;
+    what_to_count |= COUNT_IP_PROTO;
+    what_to_count |= COUNT_ID;
+    what_to_count |= COUNT_VLAN;
+    if (lh.what_to_count & COUNT_SUM_PORT) what_to_count |= COUNT_SUM_PORT; 
   }
 
   /* 1st part: arranging pointers to an opaque structure and 
@@ -341,15 +516,15 @@ int MY_evaluate_primitives(int primitive)
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "vlan", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "%d", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "vlan=%d", SPACELEFT(where[primitive].string));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "vlan=%u", SPACELEFT(where[primitive].string));
       values[primitive].type = where[primitive].type = COUNT_VLAN;
       values[primitive].handler = where[primitive].handler = count_vlan_handler;
       primitive++;
     }
   }
 
-  if (what_to_count & COUNT_SRC_HOST) {
+  if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SUM_HOST|COUNT_SUM_NET)) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
@@ -363,7 +538,7 @@ int MY_evaluate_primitives(int primitive)
     primitive++;
   }
 
-  if (what_to_count & COUNT_DST_HOST) {
+  if (what_to_count & (COUNT_DST_HOST|COUNT_DST_NET)) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
@@ -377,15 +552,43 @@ int MY_evaluate_primitives(int primitive)
     primitive++;
   }
 
-  if (what_to_count & COUNT_SRC_PORT) {
+  if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
+    }
+    strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
+    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "ip_src=%u", SPACELEFT(where[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_SRC_AS;
+    values[primitive].handler = where[primitive].handler = count_src_as_handler;
+    primitive++;
+  }
+
+  if (what_to_count & COUNT_DST_AS) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+      strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
+    }
+    strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
+    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "ip_dst=%u", SPACELEFT(where[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_DST_AS;
+    values[primitive].handler = where[primitive].handler = count_dst_as_handler;
+    primitive++;
+  }
+
+  if (what_to_count & (COUNT_SRC_PORT|COUNT_SUM_PORT)) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "src_port", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "\'%d\'", SPACELEFT(values[primitive].string));
-    strncat(where[primitive].string, "src_port=\'%d\'", SPACELEFT(where[primitive].string));
+    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "src_port=%u", SPACELEFT(where[primitive].string));
     values[primitive].type = where[primitive].type = COUNT_SRC_PORT;
     values[primitive].handler = where[primitive].handler = count_src_port_handler;
     primitive++;
@@ -398,11 +601,38 @@ int MY_evaluate_primitives(int primitive)
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
     strncat(insert_clause, "dst_port", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "\'%d\'", SPACELEFT(values[primitive].string));
-    strncat(where[primitive].string, "dst_port=\'%d\'", SPACELEFT(where[primitive].string));
+    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "dst_port=%u", SPACELEFT(where[primitive].string));
     values[primitive].type = where[primitive].type = COUNT_DST_PORT;
     values[primitive].handler = where[primitive].handler = count_dst_port_handler;
     primitive++;
+  }
+
+  if (what_to_count & COUNT_IP_TOS) {
+    int count_it = FALSE;
+
+    if ((lh.sql_table_version < 3) && !assume_custom_table) {
+      if (lh.what_to_count & COUNT_IP_TOS) {
+        printf("ERROR: The use of ToS/DSCP accounting requires SQL table v3. Exiting.\n");
+	exit(1);
+      }
+      else what_to_count ^= COUNT_IP_TOS;
+    }
+    else count_it = TRUE;
+
+    if (count_it) {
+      if (primitive) {
+        strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+	strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
+	strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
+      }
+      strncat(insert_clause, "tos", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "tos=%u", SPACELEFT(where[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_IP_TOS;
+      values[primitive].handler = where[primitive].handler = count_ip_tos_handler;
+      primitive++;
+    }
   }
 
   if (what_to_count & COUNT_IP_PROTO) {
@@ -438,8 +668,8 @@ int MY_evaluate_primitives(int primitive)
         strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
       }
       strncat(insert_clause, "agent_id", SPACELEFT(insert_clause));
-      strncat(values[primitive].string, "%d", SPACELEFT(values[primitive].string));
-      strncat(where[primitive].string, "agent_id=%d", SPACELEFT(where[primitive].string));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "agent_id=%u", SPACELEFT(where[primitive].string));
       values[primitive].type = where[primitive].type = COUNT_ID;
       values[primitive].handler = where[primitive].handler = count_id_handler;
       primitive++;
@@ -455,19 +685,19 @@ int MY_compose_static_queries()
 
   /* "INSERT INTO ... VALUES ... " and "... WHERE ..." stuff */
   strncpy(where[primitives].string, " WHERE ", sizeof(where[primitives].string));
-  snprintf(insert_clause, sizeof(insert_clause), "INSERT INTO %s (", lh.sql_table);
+  snprintf(insert_clause, sizeof(insert_clause), "INSERT INTO %s (", sql_table);
   strncpy(values[primitives].string, " VALUES (", sizeof(values[primitives].string));
   primitives = MY_evaluate_history(primitives);
   primitives = MY_evaluate_primitives(primitives);
   strncat(insert_clause, ", packets, bytes)", SPACELEFT(insert_clause));
 
   /* "LOCK ..." stuff */
-  snprintf(lock_clause, sizeof(lock_clause), "LOCK TABLES %s WRITE", lh.sql_table);
+  snprintf(lock_clause, sizeof(lock_clause), "LOCK TABLES %s WRITE", sql_table);
   strncpy(unlock_clause, "UNLOCK TABLES", sizeof(unlock_clause));
 
   /* "UPDATE ... SET ..." stuff */
-  snprintf(update_clause, sizeof(update_clause), "UPDATE %s ", lh.sql_table);
-  strncat(update_clause, "SET packets=packets+%d, bytes=bytes+%d", SPACELEFT(update_clause));
+  snprintf(update_clause, sizeof(update_clause), "UPDATE %s ", sql_table);
+  strncat(update_clause, "SET packets=packets+%u, bytes=bytes+%u", SPACELEFT(update_clause));
   if (lh.sql_history) strncat(update_clause, ", stamp_updated=now()", SPACELEFT(update_clause));
 
   return primitives;
@@ -475,6 +705,6 @@ int MY_compose_static_queries()
 
 void MY_exit_gracefully(int signum)
 {
-  printf("\nOK: written [%d/%d] elements.\n", we, re);
+  printf("\nOK: written [%u/%u] elements.\n", we, re);
   exit(0);
 }

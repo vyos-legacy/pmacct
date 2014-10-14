@@ -1,10 +1,10 @@
 pmacct (Promiscuous mode IP Accounting package) 
-pmacct is Copyright (C) 2004 by Paolo Lucente
+pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 
-This is mostly a default INSTALL file where you'll find generic infos about
-how a configure script and make work together with compiler options. For
-detailed instructions and examples about pmacct installation, please divert
-your eyes over the EXAMPLES textfile. 
+This is mostly a default INSTALL file. PLEASE, divert your eyes to EXAMPLES
+documentation for installation and configuration tips. Here you will find
+generic tips about how a configure script and Makefile work together with
+compiler options.
 
 
 QUICK INSTALLATION:

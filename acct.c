@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -19,6 +19,7 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+#define __ACCT_C
 
 /* includes */
 #include "pmacct.h"
@@ -29,48 +30,41 @@
 struct acc *search_accounting_structure(struct pkt_primitives *addr)
 {
   struct acc *elem_acc;
-  unsigned char *elem;
-  unsigned long int pos;
-  int solved;
+  unsigned int hash, pos;
   unsigned int pp_size = sizeof(struct pkt_primitives); 
 
-  pos = cache_crc32((unsigned char *)addr, pp_size);
-  pos %= config.buckets;
+  hash = cache_crc32((unsigned char *)addr, pp_size);
+  pos = hash % config.buckets;
 
   if (config.debug) Log(LOG_DEBUG, "Bucket: %u\n", pos);
 
   elem_acc = (struct acc *) a;
   elem_acc += pos;  
   
-  solved = FALSE;
-
-  while (solved == FALSE) {
-    if (memcmp(elem_acc, addr, sizeof(struct pkt_primitives)) == 0) return elem_acc;
-    else if ((memcmp(elem_acc, addr, sizeof(struct pkt_primitives)) != 0) && (elem_acc->next != NULL)) {
-      if (config.debug) Log(LOG_DEBUG, "Walking through the collision-chain in this bucket.\n");
-      elem_acc = elem_acc->next;
+  while (elem_acc) {
+    if (elem_acc->signature == hash) {
+      if (!memcmp(elem_acc, addr, sizeof(struct pkt_primitives))) return elem_acc;
     }
-    else if ((memcmp(elem_acc, addr, sizeof(struct pkt_primitives)) != 0) && (elem_acc->next == NULL))
-      return NULL;
+    elem_acc = elem_acc->next;
   } 
 
   return NULL;
 }
 
 
-struct acc *insert_accounting_structure(struct pkt_data *data)
+void insert_accounting_structure(struct pkt_data *data)
 {
   struct pkt_primitives *addr = &data->primitives;
   struct acc *elem_acc;
   unsigned char *elem, *new_elem;
   int solved = FALSE;
-  unsigned long int pos;
+  unsigned int hash, pos;
   unsigned int pp_size = sizeof(struct pkt_primitives);
 
   elem = a;
 
-  pos = cache_crc32((char *)addr, pp_size);
-  pos %= config.buckets;
+  hash = cache_crc32((unsigned char *)addr, pp_size);
+  pos = hash % config.buckets;
       
   if (config.debug) Log(LOG_DEBUG, "Bucket: %u\n", pos);
   /* 
@@ -79,13 +73,13 @@ struct acc *insert_accounting_structure(struct pkt_data *data)
   */
   if (lru_elem_ptr[pos]) {
     elem_acc = lru_elem_ptr[pos];
-    if (memcmp(elem_acc, addr, sizeof(struct pkt_primitives)) == 0) {
-#if defined (HAVE_MMAP)
-      if (elem_acc->reset_flag) reset_counters(elem_acc);
-#endif
-      elem_acc->packet_counter += ntohl(data->pkt_num);
-      elem_acc->bytes_counter += ntohl(data->pkt_len);
-      return (struct acc *) elem_acc;
+    if (elem_acc->signature == hash) {
+      if (memcmp(elem_acc, addr, sizeof(struct pkt_primitives)) == 0) {
+        if (elem_acc->reset_flag) reset_counters(elem_acc);
+        elem_acc->packet_counter += ntohl(data->pkt_num);
+        elem_acc->bytes_counter += ntohl(data->pkt_len);
+        return;
+      }
     }
   }
 
@@ -93,24 +87,23 @@ struct acc *insert_accounting_structure(struct pkt_data *data)
   elem_acc += pos;
 
   while (solved == FALSE) {
-    if (memcmp(elem_acc, addr, sizeof(struct pkt_primitives)) == 0) {
-#if defined (HAVE_MMAP)
-      if (elem_acc->reset_flag) reset_counters(elem_acc);
-#endif
-      elem_acc->packet_counter += ntohl(data->pkt_num);
-      elem_acc->bytes_counter += ntohl(data->pkt_len);
-      lru_elem_ptr[config.buckets] = elem_acc;
-      return (struct acc *) elem_acc;
+    if (elem_acc->signature == hash) {
+      if (memcmp(elem_acc, addr, sizeof(struct pkt_primitives)) == 0) {
+        if (elem_acc->reset_flag) reset_counters(elem_acc);
+        elem_acc->packet_counter += ntohl(data->pkt_num);
+        elem_acc->bytes_counter += ntohl(data->pkt_len);
+        lru_elem_ptr[config.buckets] = elem_acc;
+        return;
+      }
     }
-    else if (!elem_acc->bytes_counter && !elem_acc->packet_counter) { /* hmmm */
-#if defined (HAVE_MMAP)
+    if (!elem_acc->bytes_counter && !elem_acc->packet_counter) { /* hmmm */
       if (elem_acc->reset_flag) elem_acc->reset_flag = FALSE; 
-#endif
       memcpy(elem_acc, addr, sizeof(struct pkt_primitives));
       elem_acc->packet_counter += ntohl(data->pkt_num);
       elem_acc->bytes_counter += ntohl(data->pkt_len);
+      elem_acc->signature = hash;
       lru_elem_ptr[config.buckets] = elem_acc;
-      return (struct acc *) elem_acc;
+      return;
     }
 
     /* Handling collisions */
@@ -122,7 +115,7 @@ struct acc *insert_accounting_structure(struct pkt_data *data)
     else if (elem_acc->next == NULL) {
       /* We have to know if there is enough space for a new element;
          if not we are losing informations; conservative approach */
-      if (no_more_space) return NULL;
+      if (no_more_space) return;
 
       /* We have to allocate new space for this address */
       if (config.debug) Log(LOG_DEBUG, "Creating new element in this bucket\n");
@@ -137,7 +130,7 @@ struct acc *insert_accounting_structure(struct pkt_data *data)
 	if (current_pool == NULL) {
           Log(LOG_WARNING, "WARN: unable to allocate more memory pools, clear stats manually!\n");
 	  no_more_space = TRUE;
-	  return NULL;
+	  return;
         }
         else {
           new_elem = current_pool->ptr;
@@ -151,14 +144,14 @@ struct acc *insert_accounting_structure(struct pkt_data *data)
       memcpy(elem_acc, addr, sizeof(struct pkt_primitives));
       elem_acc->packet_counter += ntohl(data->pkt_num);
       elem_acc->bytes_counter += ntohl(data->pkt_len);
+      elem_acc->signature = hash;
       elem_acc->next = NULL;
       lru_elem_ptr[config.buckets] = elem_acc;
-      return (struct acc *) elem_acc;
+      return;
     }
   }
 }
 
-#if defined (HAVE_MMAP)
 void set_reset_flag(struct acc *elem)
 {
   elem->reset_flag = TRUE;
@@ -170,4 +163,3 @@ void reset_counters(struct acc *elem)
   elem->packet_counter = 0;
   elem->bytes_counter = 0;
 }
-#endif

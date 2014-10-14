@@ -8,7 +8,7 @@ WorkDir: /var/www/html/monitor
 Options[_]: growright, bits
 
 # Target specific definitions
-Target[ezwf]: `/home/pmacct/pmacct -c dst_host -m 10.0.0.1`
+Target[ezwf]: `./mrtg-example.sh`
 SetEnv[ezwf]: MRTG_INT_IP="10.0.0.1" MRTG_INT_DESCR="yourip.yourdomain.com"
 MaxBytes[ezwf]: 1250000
 LegendI[ezwf]: 

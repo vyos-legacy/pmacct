@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -26,7 +26,6 @@
 #define EXT
 #endif
 
-EXT void lower_string(char *);
 EXT int set_all_int(unsigned int, int);
 EXT int set_one_int(unsigned int, char *, int);
 EXT int set_all_char_ptr(unsigned int, char *);
@@ -40,6 +39,7 @@ EXT int cfg_key_aggregate(char *, char *);
 EXT int cfg_key_aggregate_filter(char *, char *);
 EXT int cfg_key_pcap_filter(char *, char *);
 EXT int cfg_key_interface(char *, char *);
+EXT int cfg_key_interface_wait(char *, char *);
 EXT int cfg_key_promisc(char *, char *);
 EXT int cfg_key_imt_path(char *, char *);
 EXT int cfg_key_imt_passwd(char *, char *);
@@ -64,9 +64,12 @@ EXT int cfg_key_sql_trigger_exec(char *, char *);
 EXT int cfg_key_sql_trigger_time(char *, char *);
 EXT int cfg_key_sql_cache_entries(char *, char *);
 EXT int cfg_key_sql_dont_try_update(char *, char *);
+EXT int cfg_key_sql_preprocess(char *, char *);
 EXT int cfg_key_plugin_pipe_size(char *, char *);
 EXT int cfg_key_plugin_buffer_size(char *, char *);
 EXT int cfg_key_networks_file(char *, char *);
+EXT int cfg_key_networks_cache_entries(char *, char *);
+EXT int cfg_key_ports_file(char *, char *);
 EXT int cfg_key_print_refresh_time(char *, char *);
 EXT int cfg_key_print_cache_entries(char *, char *);
 EXT int cfg_key_print_markers(char *, char *);
@@ -75,6 +78,9 @@ EXT int cfg_key_nfacctd_ip(char *, char *);
 EXT int cfg_key_nfacctd_allow_file(char *, char *);
 EXT int cfg_key_nfacctd_time_secs(char *, char *);
 EXT int cfg_key_nfacctd_time_new(char *, char *);
+EXT int cfg_key_nfacctd_as_new(char *, char *);
+EXT int cfg_key_pmacctd_force_frag_handling(char *, char *);
+EXT int cfg_key_pcap_savefile(char *, char *);
 EXT int cfg_key_pre_tag_map(char *, char *);
 EXT int cfg_key_pre_tag_filter(char *, char *);
 EXT int cfg_key_post_tag(char *, char *);

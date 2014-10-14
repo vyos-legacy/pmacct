@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -51,9 +51,7 @@
 #include <sys/select.h>
 #include <signal.h>
 #include <syslog.h>
-#include "once.h"
 
-#if defined (HAVE_MMAP)
 #include <sys/mman.h>
 #if !defined (MAP_ANONYMOUS)
 #if defined (MAP_ANON)
@@ -63,6 +61,12 @@
 #define USE_DEVZERO 1
 #endif
 #endif
+
+#if !defined INET_ADDRSTRLEN 
+#define INET_ADDRSTRLEN 16
+#endif
+#if !defined INET6_ADDRSTRLEN
+#define INET6_ADDRSTRLEN 46
 #endif
 
 #ifdef SOLARIS
@@ -87,11 +91,54 @@
 #define Inline static inline
 #endif
 
+/* Let work the unaligned copy macros the hard way: byte-per byte copy via
+   u_char pointers. We discard the packed attribute way because it fits just
+   to GNU compiler */
+#if !defined NEED_ALIGN
+#define Assign8(a, b) a = b
+#else
+#define Assign8(a, b)		\
+{             			\
+  u_char *ptr = (u_char *)&a;	\
+  *ptr = b;			\
+}
+#endif
+
+#if !defined NEED_ALIGN
+#define Assign16(a, b) a = b
+#else
+#define Assign16(a, b)		\
+{      				\
+  u_int16_t c = b;		\
+  u_char *dst = (u_char *)&a;	\
+  u_char *src = (u_char *)&c;	\
+  *(dst + 0) = *(src + 0);	\
+  *(dst + 1) = *(src + 1);	\
+}
+#endif
+
+#if !defined NEED_ALIGN
+#define Assign32(a, b) a = b
+#else
+#define Assign32(a, b)		\
+{             			\
+  u_int32_t c = b;		\
+  u_char *dst = (u_char *)&a;	\
+  u_char *src = (u_char *)&c;	\
+  *(dst + 0) = *(src + 0);	\
+  *(dst + 1) = *(src + 1);	\
+  *(dst + 2) = *(src + 2);	\
+  *(dst + 3) = *(src + 3);	\
+}
+#endif
+
 #include "pmacct-defines.h"
 #include "network.h"
+#include "pretag.h"
 #include "cfg.h"
 #include "util.h"
 #include "log.h"
+#include "once.h"
 
 /* structures */
 struct pcap_device {
@@ -99,6 +146,11 @@ struct pcap_device {
   int link_type;
   int active;
   struct _devices_struct *data; 
+};
+
+struct pcap_callback_data {
+  u_char * idt; 
+  struct pcap_device *device;
 };
 
 struct _protocols_struct {
@@ -111,25 +163,59 @@ struct _devices_struct {
   int link_type;
 };
 
+struct smallbuf {
+  u_char base[SRVBUFLEN];
+  u_char *end;
+  u_char *ptr;
+};	
+
+struct largebuf {
+  u_char base[LARGEBUFLEN];
+  u_char *end;
+  u_char *ptr;
+};
+
+#define INIT_BUF(x) \
+	memset(x.base, 0, sizeof(x.base)); \
+	x.end = x.base+sizeof(x.base); \
+	x.ptr = x.base;
+
+struct plugin_requests {
+  u_int8_t bpf_filter; /* On-request packet copy for BPF purposes */
+};
+
 /* prototypes */
-void usage_collector(char *);
 void startup_handle_falling_child();
 void handle_falling_child();
 void ignore_falling_child();
 void my_sigint_handler();
 void reload();
 
-void eth_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
-void fddi_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
-void ppp_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
-void ieee_802_11_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
-void sll_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
-u_char *llc_handler(const struct pcap_pkthdr *, u_int, register u_char *);
+#if (!defined __LL_C)
+#define EXT extern
+#else
+#define EXT
+#endif
+EXT void eth_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
+EXT void fddi_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
+EXT void ppp_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
+EXT void ieee_802_11_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
+EXT void sll_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
+EXT void raw_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
+EXT u_char *llc_handler(const struct pcap_pkthdr *, u_int, register u_char *, register struct packet_ptrs *);
+#undef EXT
 
-void usage_collector(char *);
-int ip_handler(register struct packet_ptrs *);
-void pcap_cb(u_char *, const struct pcap_pkthdr *, const u_char *);
-void compute_once();
+#if (!defined __PMACCTD_C) 
+#define EXT extern
+#else
+#define EXT
+#endif
+EXT int ip_handler(register struct packet_ptrs *);
+EXT int ip6_handler(register struct packet_ptrs *);
+EXT void pcap_cb(u_char *, const struct pcap_pkthdr *, const u_char *);
+EXT int PM_find_id(struct packet_ptrs *);
+EXT void compute_once();
+#undef EXT
 
 size_t strlcpy(char *, const char *, size_t);
 

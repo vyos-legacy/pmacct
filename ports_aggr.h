@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2004 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 */
 
 /*
@@ -15,23 +15,24 @@
     GNU General Public License for more details.
 
     You should have received a copy of the GNU General Public License
-    along with this program; if no, write to the Free Software
+    along with this program; if not, write to the Free Software
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+/* defines */
+#define PORTS_TABLE_ENTRIES 65536 
+
+/* structures */
+struct ports_table {
+  u_int8_t table[PORTS_TABLE_ENTRIES];
+};
+
 /* prototypes */
-#if (!defined __NF_MAP_HANDLERS_C)
+#if (!defined __NET_AGGR_C)
 #define EXT extern
 #else
 #define EXT
 #endif
-
-EXT int nf_map_id_handler(struct id_entry *, char *);
-EXT int nf_map_ip_handler(struct id_entry *, char *);
-EXT int nf_map_input_handler(struct id_entry *, char *);
-EXT int nf_map_output_handler(struct id_entry *, char *);
-EXT int nf_pktmap_input_handler(struct packet_ptrs *, void *, void *);
-EXT int nf_pktmap_id_handler(struct packet_ptrs *, void *, void *);
-EXT int nf_pktmap_output_handler(struct packet_ptrs *, void *, void *);
-
+EXT void load_ports(char *, struct ports_table *); 
 #undef EXT
+
