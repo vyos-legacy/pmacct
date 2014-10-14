@@ -1,7 +1,7 @@
 Before reading this document, read either 'README.mysql' or 'README.pgsql' depending
 upon which DB you are currently using.
 
-MySQL.
+MySQL and SQLite.
 Into MySQL tables 'ip_src' and 'ip_dst' fields are both defined as 15-bytes character
 strings. They are large enough to hold an IPv4 address but not IPv6. This is in order
 to avoid penalties derived by the use of longer strings to people not interested to be 

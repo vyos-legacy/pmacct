@@ -1,11 +1,11 @@
 !
 ! Sample networks-list; enabled by 'networks_file' key.
 !
-! Format supported: [<AS number>',']<Network>'/'<numeric mask>|<dotted mask>
+! Format supported: [<AS number>',']<Network>'/'<numeric mask>
 !
-192.168.95.0/255.255.255.0
-192.168.94.0/255.255.255.128
-192.168.94.128/255.255.255.128
+192.168.95.0/24
+192.168.94.0/25
+192.168.94.128/25
 192.168.92.0/26
 192.168.92.64/26
 192.168.92.128/26

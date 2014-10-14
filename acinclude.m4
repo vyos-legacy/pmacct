@@ -30,7 +30,23 @@ AC_DEFUN(AC_CHECK_TYPEDEF,
  AC_CHECK_TYPEDEF_($1,$2, [ 
 	AC_MSG_RESULT(yes)
 	AC_DEFINE(HAVE_[]translit($1, [a-z], [A-Z]))
+	HAVE_[]translit($1, [a-z], [A-Z])="1"
 	],
 	AC_MSG_RESULT(no))dnl
 ])
 
+
+#
+# Author:               Paolo Lucente <paolo.lucente@ic.cnr.it>
+# Last Modified:        2006-03-07
+# Synopsis:             AC_LINEARIZE_PATH(PATH)
+# Reference:            
+#
+
+AC_DEFUN(AC_LINEARIZE_PATH,
+[
+	absdir=`cd $1 2>/dev/null && pwd`
+	if test x$absdir != x ; then
+		[$2]
+	fi
+])

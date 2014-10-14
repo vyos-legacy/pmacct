@@ -23,13 +23,18 @@ To create v4 tables:
 shell> psql -d template1 -f /tmp/pmacct-create-db.pgsql
 shell> psql -d pmacct -f /tmp/pmacct-create-table_v4.pgsql
 
+To create v5 tables:
+shell> psql -d template1 -f /tmp/pmacct-create-db.pgsql
+shell> psql -d pmacct -f /tmp/pmacct-create-table_v5.pgsql
+
 A few tables will be created into 'pmacct' DB. 'acct' (or 'acct_vN') table is
 the default table where data will be written when in 'typed' mode (see 'sql_data'
 option in CONFIG-KEYS text file; default value is 'typed'); 'acct_uni' (or
 'acct_uni_vN') is the default table where data will be written when in 'unified'
 mode. A pair of brief explanations: 
 
-- To understand difference between v1, v2, v3 and v4 tables:
+- To understand difference between v1, v2, v3, v4 and v5 tables:
+  - Do you need packet classification ? Then you have to use v5.
   - Do you need flows (other than packets) accounting ? Then you have to use v4.
   - Do you need ToS/DSCP field (QoS) accounting ? Then you have to use v3.
   - Do you need agent ID for distributed accounting and packet tagging ? Then you have to use v2. 
@@ -51,5 +56,5 @@ in looking up protocol names by their number and viceversa. Because joins are ex
 NOTE: don't forget to specify which SQL table version you are currently using when running
 'pmacctd' or 'nfacctd':
 
-commandline:    '-v [1|2|3|4]'
-configuration:  'sql_table_version: [1|2|3|4]'
+commandline:    '-v [1|2|3|4|5]'
+configuration:  'sql_table_version: [1|2|3|4|5]'

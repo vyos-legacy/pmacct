@@ -1,5 +1,253 @@
-pmacct (Promiscuous mode IP Accounting package) v0.9.1
-pmacct is Copyright (C) 2003-2005 by Paolo Lucente
+pmacct (Promiscuous mode IP Accounting package) v0.10.0
+pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+
+0.10.0 -- 22-03-2006
+  + Collectors (ie. pmacctd) are now compiled exporting full Dynamic
+    Symbol Table. This allows shared object (SO) classifiers to call
+    routines included in the collector code. Moreover, a small set
+    of library functions - specifically aimed to deal smoothly with
+    the classifiers' table - are now included in the collector code:
+    pmct_un|register(), pmct_find_first|last_free(), pmct_isfree(),
+    pmct_get() and pmct_get_num_entries(). For further reading, take
+    a look to README.developers document in classifiers tarball.
+  + Classifiers table, which is the linked-list structure containing
+    all the active classifiers (RE + SO), is now loaded into a shared
+    memory segment, allowing plugins to keep updated about changes to
+    the table. Furthermore, the table is now dynamically allocated at
+    runtime, allowing an arbitrary number of classifiers to be loaded
+    via the new 'classifier_table_num' configuration directive.
+  + Pre-Tagging infrastructure adds two new primitives to tag network
+    traffic: src_as and dst_as, the source and destination Autonomous
+    System Number (ASN). In pmacctd they work against a Network Map
+    ('networks_file' configuration directive). In nfacctd and sfacctd
+    they work against both sFlow/NetFlow ASN fields and Network Maps.
+    Many thanks to Aaron Glenn for his strong support.
+  ! PostgreSQL plugin and pmpgplay no more make use of EXCLUSIVE LOCKS 
+    whenever the sql_dont_try_update directive is activated. We assume
+    there is no need for them in a INSERTs-only framework as integrity
+    of data is still guaranteed by transactions. The patch has been
+    contributed by Jamie Wilkinson, many thanks ! 
+  ! Commandline switches and a configuration file should cohexist and
+    the formers need to take precedence over the latter, if required.
+    This is a rather standard (and definitely more flexible) approach;
+    before this release they were mutual exclusive. Read UPGRADE notes
+    at this propo. Thanks for the suggestion to Ivan A. Beveridge.
+  ! Some glibc functions (noticeably syslog()) rely upon a rather non-
+    standard "extern char *__progname" pointer. Now, its existence is
+    properly checked at configuration time. On Linux, setproctitle()
+    was causing plugin name/type to get cutted down in messages sent
+    to the syslog facility. Thanks to Karl Latiss for his bug report.
+  ! Solved a bug involving the load of IPv6 entries from Networks Maps.
+    It was causing the count of such entries to be always zero.
+
+0.10.0rc3 -- 01-03-2006
+  + Aapplication layer (L7) classification capabilities of pmacctd have
+    been improved: shared object (SO) classifiers have been introduced;
+    they are loaded runtime through dlopen(). pmacct offers them support
+    for contexts (informations gathered - by the same classifier - from
+    previous packets either in the same uni-directional flow or in the
+    reverse one), private memory areas and lower layer header pointers,
+    resulting in extra flexibility. Some examples can be found at the
+    webpage: http://www.ba.cnr.it/~paolo/pmacct/classification/ 
+  + 'classifier_tentatives' configuration key has been added: it allows
+    to customize the number of tentatives made in order to classify a
+    flow. The default number is five, which has proven to be ok but for
+    certain types of classification it might result restrictive.
+  + 'pmacctd_conntrack_buffer_size' configuration key has been added: it
+    (intuitively) defines the size for the connection tracking buffer.
+  + Support for Token Ring (IEEE 802.5) interfaces has been introduced
+    in pmacctd. Many thanks to Flavio Piccolo for his strong support. 
+  + 'savefile_wait' (-W commandline) configuration key has been added: if 
+    set to true causes pmacctd to not return but wait to be killed after
+    being finished with the supplied savefile. Useful when pushing data
+    from a tcpdump/ethereal tracefile into a memory table (ie. to build
+    graphs).
+  ! An erroneous replacement of dst with src in mask_elem() was causing
+    queries like "pmacct -c dst_host -M|-N <IP address>" to return zero
+    counters. Thanks to Ryan Sleevi for signalling the weird behaviour. 
+  ! Management of the connection tracking buffer has been changed: now,
+    a successful search frees the matched entry instead of moving it in
+    a chain of stale entries, available for quick reuse.
+  ! Error logging of SQL plugins has been somewhat improved: now, error
+    messages returned by the SQL software are forwarded to sql_db_error() 
+    This will definitely allow to exit from the obscure crypticism of
+    some generic error strings.
+
+0.10.0rc2 -- 14-02-2006
+  + CONNECTION TRACKING modules has been introduced into pmacctd: they are
+    C routines that hint IP address/port couples for upcoming data streams
+    as signalled by one of the parties into the control channel whenever
+    is not possible to go with a RE classificator. Conntrack modules for
+    FTP, SIP and RTSP protocols are included.
+  + 'pidfile' directive way of work has been improved: firstly, whenever 
+    a collector shuts down nicely, it now removes its pidfile. Secondly,
+    active plugins now create a pidfile too: it takes the following form:
+    <pidfile>-<plugin type>.<plugin name>. Thanks to Ivan A. Beveridge
+    for sharing his thoughts at this propo.
+  ! Minor fixes to the classification engine: TCP packets with no payload
+    are not considered useful classification tentatives; a new flow can
+    inherit the class of his reverse flow whenever it's still reasonably
+    valid.
+  ! Solved a segmentation fault issue affecting the classificator engine,
+    whenever the 'snaplen' directive was not specified. Thanks to Flavio
+    Piccolo for signalling it.
+  ! Fixed a bug in the PostgreSQL plugin: it appeared in 0.10.0rc1 and was
+    uniquely related to the newly introduced negative UPDATE SQL query.  
+  ! INTERNALS has been updated with few notes about the new classification
+    and connection tracking features. 
+
+0.10.0rc1 -- 24-01-2006
+  + PACKET CLASSIFICATION capabilities have been introduced into pmacctd:
+    the implemented approach is fully extensible: classification patterns
+    are based on regular expressions (RE), human-readable, must be placed
+    into a common directory and have a .pat file extension. Many patterns
+    for widespread protocols are available at L7-filter project homepage. 
+    To support this feature, a new 'classifiers' configuration directive
+    has been added. It expects full path to a spool directory containing
+    the patterns.
+  + A new 'sql_aggressive_classification' directive has been added aswell:
+    it allows to move unclassified packets even in the case they are no
+    more cached by the SQL plugin. This aggressive policy works by firing
+    negative UPDATE SQL queries that, whenever successful, are followed
+    by positive ones charging the extra packets to their final class.
+  ! Input and Output interface fields (Pre-Tagging) have been set to be  
+    32 bits wide. While NetFlow is ok with 16 bits, some sFlow agents are
+    used to bigger integer values in order to identify their interfaces.
+    The fix is courtesy of Aaron Glenn. Thank you. 
+  ! Flow filtering troubles have been noticed while handling MPLS-tagged
+    flows inside NetFlow v9 datagrams. Thanks to Nitzan Tzelniker for his
+    cooperation in solving the issue.
+  ! A new exit_all() routine now handles nicely fatal errors detected by
+    the Core Process, after plugins creation. It avoids leaving orphan
+    plugins after the Core Process shutdown.
+
+0.9.6 -- 27-Dec-2005
+  + Support for 'sql_multi_values' has been introduced into the new SQLite
+    3.x plugin. It allows to chain multiple INSERT queries into a single
+    SQL statement. The idea is that inserting many rows at the same time
+    is much faster than using separate single-row statements.
+  ! MySQL plugin fix: AS numbers were sent to the database unquoted while 
+    the corresponding field was declared as CHAR. By correctly wrapping AS
+    numbers, a major performance increase (expecially when UPDATE queries
+    are spawned) has been confirmed. Many thanks to Inge Bjørnvall Arnesen
+    for discovering, signalling and solving the issue.
+  ! MySQL plugin fix: multi-values INSERT queries have been optimized by
+    pushing out of the queue purging loop the proper handling for the EOQ
+    event.
+  ! The introduction of the intermidiate SQL layer in the 0.9.5 version
+    choked the dynamic SQL table creation capability. This has been fixed.
+    Thanks to Vitalij Brajchuk for promptly signalling the issue. 
+  ! The 'pidfile' configuration key has got incorrectly disabled in both 
+    nfacctd and sfacctd. Thanks to Aaron Glenn for signalling the issue.
+  ! The 'daemonize' (-D) configuration key was incorrectly disabling the
+    signal handlers from the Core Process once backgrounded. As a result
+    the daemon was not listening for incoming SIGINTs. Again, many thanks 
+    go to Aaron Glenn.
+ 
+0.9.5 -- 07-Dec-2005
+  + PMACCT OPENS TO SQLITE 3.x: a fully featured SQLite, version 3.x only,
+    plugin has been introduced; SQLite is a small C library that implements
+    a self-contained, embeddable, zero-configuration SQL (almost all SQL92)
+    database engine. The plugin is LOCK-based and supports the "recovery
+    mode" via an alternate database action. Expecially suitable for tiny
+    and embedded environments. The plugin can be fired using the keyword
+    'sqlite3'. See CONFIG-KEYS and EXAMPLES for further informations. 
+  + A new SQL layer - common to MySQL, PostgreSQL and SQLite plugins - has
+    been introduced. It's largely callback-based and results in a major
+    architectural change: it sits below the specific SQL code (facing the
+    Core Process's abstraction layer) and will (hopefully) help in reducing
+    potential bugs and will allow for a quick implementation of new SQL
+    plugins.
+  ! A bug concerning the setup of insert callback functions for summed (in
+    + out) IPv6 traffic has been fixed. The issue was affecting all SQL
+    plugins. 
+  ! A bug concerning the handling of MPLS labels has been fixed in pmacctd.
+    Many thanks to Gregoire Tourres and Frontier Online for their support.
+
+0.9.4p1 -- 14-Nov-2005
+  ! Minor bugfix in pretag.c: a wrongly placed memcpy() was preventing the
+    code to be compiled by gcc 2.x . Many thanks to Kirill Ponomarew and
+    Kris Kennaway for signalling the issue.
+  ! Fixed an alignment issue revealed in the query_header structure; it has
+    been noticed only under some circumstances: '--enable-64bit' enabled,
+    64bit platform and gcc 3.x . Many thanks to Aaron Glenn for his strong
+    support in solving the issue.
+
+0.9.4 -- 08-Nov-2005
+  + Hot map reload has been introduced. Maps now can be modified and then
+    reloaded without having to stop the daemon. SIGUSR2 has been reserved for
+    this use. The feature applies to Pre-Tagging map (pre_tag_map), Networks
+    map (networks_file) and Ports map (ports_file). It is enabled by default
+    and might be disabled via the new 'refresh_maps' configuration directive.
+    Further details are in CONFIG-KEYS. 
+  ! Some major issues have been solved in the processing of libpcap-format
+    savefiles. Some output inconsistencies were caused by a corruption of the
+    pcap file handler; bufferization is now enabled by default and the last
+    buffer is correctly processed. Many thanks go to Amir Plivatsky for his
+    strong support.  
+  ! 'sql_table_schema' directive: in read_SQLquery_from_file() the strchr()
+    has been replaced by strrchr() allowing to chain more SQL statements as
+    part of the SQL table creation. This results useful, for example, to do
+    CREATE INDEX after CREATE TABLE. The patch is courtesy of Dmitriy Nikulin. 
+  ! SIGTERM signal is now handled properly to ensure a better compatibility
+    of all pmacct daemons under the daemontools framework. The patch is
+    courtesy of David C. Maple.
+  ! Memory plugin: some issues caused by the mix of not compatible compilation
+    parameters have been fixed. Now the pmacct client now correctly returns a
+    warning message if: counters are of different size (32bit vs 64bit) or IP
+    addresses are of different size (IPv4-only vs IPv6-enabled packages). 
+  ! Print plugin, few bugfixes: the handling of the data ring shared with the
+    Core Process was not optimal; it has been rewritten. P_exit() routine was
+    not correctly clearing cached data. 
+
+0.9.3 -- 11-Oct-2005
+  + IPv4/IPv6 multicast support has been introduced in the NetFlow (nfacctd)
+    and the sFlow (sfacctd) daemons. A maximum of 20 multicast groups may be
+    joined by a single daemon instance. Groups can be defined by using the two
+    sister configuration keys: nfacctd_mcast_groups and sfacctd_mcast_groups. 
+  + sfacctd: a new 'sfacctd_renormalize' config key allows to automatically 
+    renormalize byte/packet counters value basing on informations acquired
+    from the sFlow datagram. In particular, it allows to deal with scenarios
+    in which multiple interfaces have been configured at different sampling
+    rates. It also calculates an effective sampling rate which could differ
+    from the configured one - expecially at high rates - because of various
+    losses. Such estimated rate is then used for renormalization purposes.
+    Many thanks go to Arnaud De-Bermingham and Ovanet for the strong support
+    offered during the development.
+  + sfacctd: a new 'sampling_rate' keyword is supported into the Pre-Tagging 
+    layer. It allows to tag aggregates - generated from sFlow datagrams - on
+    a sampling rate basis. 
+  + setproctitle() calls have been introduced (quite conservatively) and are
+    actually supported on Linux and BSDs. The process title is rewritten in
+    the aim of giving the user more informations about the running processes
+    (that is, it's not intended to be just a cosmetic stuff).
+  ! sql_preprocess tier was suffering a bug: actions (eg. usrf, adjb), even
+    if defined, were totally ignored if no checks were defined aswell. Many
+    thanks to Draschl Clemens for signalling the issue.
+  ! Some minor bugs have been catched around sfacctd and fixed accordingly.
+    Again, many thanks to Arnaud De-Bermingham.
+
+0.9.2 -- 14-Sep-2005
+  + A new 'usrf' keyword is now supported into the 'sql_preprocess' tier: it
+    allows to apply a generic uniform renormalization factor to counters. Its
+    use is particularly suitable for use in conjunction with uniform sampling
+    methods (for example simple random - e.g. sFlow, 'sampling_rate' directive
+    or simple systematic - e.g. sampled NetFlow by Cisco and Juniper). 
+  + A new 'adjb' keyword is now supported into the 'sql_preprocess' tier: it
+    allows to add (or subtract in case of negative value) 'adjb' bytes to the
+    bytes counter. This comes useful when fixed lower (link, llc, etc.) layer 
+    sizes need to be included into the bytes counter (as explained by the Q7
+    in the updated FAQS document).
+  + A new '--enable-64bit' configuration switch allows to compile the package
+    with byte/packet/flow counters of 64bit (instead of the usual 32bit ones). 
+  ! The sampling algorithm endorsed by the 'sampling_rate' feature has been 
+    enhanced to a simple randomic one (it was a simple systematic). 
+  ! Some static memory structures are now declared as constants allowing to
+    save memory space (given the multi-process architecture) and offering an
+    overral better efficiency. The patch is courtesy of Andreas Mohr. Thanks.
+  ! Some noisy compiler warnings have been troubleshooted along with some minor
+    code cleanups; the contribution is from Jamie Wilkinson. Thanks.
+  ! Some unaligned pointer issues have been solved. 
 
 0.9.1 -- 16-Aug-2005
   + Probabilistic, flow size dependent sampling has been introduced into the
@@ -277,8 +525,8 @@ pmacct is Copyright (C) 2003-2005 by Paolo Lucente
     user. 
   ! The sampling rate algorithm has been fixed from a minor issue: it was returning
     not expected results when 'sampling_rate: 1'. It now works as expected. Thanks
-    to David Maple for his extensive support in gaining better understandings about
-    the problem. 
+    to David C. Maple for his extensive support in gaining a better understanding
+    of the problem. 
 
 0.8.1p1 -- 22-Feb-2005
   ! 'sum_host' and 'sum_net' compound primitives have been fixed in order to
