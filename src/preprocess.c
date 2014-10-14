@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -24,7 +24,6 @@
 #include "pmacct.h"
 #include "pmacct-data.h"
 #include "sql_common.h"
-#include "util.h"
 
 void set_preprocess_funcs(char *string, struct preprocess *prep)
 {
@@ -506,7 +505,7 @@ int mandatory_invalidate(struct db_cache *queue[], int *num)
 {
   int x;
 
-  for (x = 0; x < *num; x++) queue[x]->valid = 0; 
+  for (x = 0; x < *num; x++) queue[x]->valid = SQL_CACHE_FREE; 
 
   return FALSE;
 }
@@ -514,15 +513,16 @@ int mandatory_invalidate(struct db_cache *queue[], int *num)
 /*
   - 'sql_preprocess_type == 0' means match 'any' of the checks
   - 'sql_preprocess_type == 1' means match 'all' checks
+  - queue[x]->valid floor value is 2 (SQL_CACHE_COMMITTED)
 */
 int mandatory_validate(struct db_cache *queue[], int *num)
 {
   int x;
 
   for (x = 0; x < *num; x++) {
-    if (!prep.checkno) queue[x]->valid = 1; 
-    if (config.sql_preprocess_type == 1 && queue[x]->valid < (prep.num-prep.actionno)) queue[x]->valid = 0; 
-    if ((!queue[x]->valid) && prep.recover) queue[x]->valid = -1;
+    if (!prep.checkno) queue[x]->valid = SQL_CACHE_INUSE; 
+    if (config.sql_preprocess_type == 1 && (queue[x]->valid-1) < (prep.num-prep.actionno)) queue[x]->valid = SQL_CACHE_FREE; 
+    if (queue[x]->valid == SQL_CACHE_FREE && prep.recover) queue[x]->valid = SQL_CACHE_ERROR;
   }
 
   return FALSE;

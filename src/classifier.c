@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -44,7 +44,6 @@
 #include "ip_flow.h"
 #include "classifier.h"
 #include "jhash.h"
-#include "util.h"
 #if defined HAVE_DLOPEN
 #include <dlfcn.h>
 #endif
@@ -101,6 +100,18 @@ void init_classifiers(char *path)
     Log(LOG_ERR, "ERROR: Unable to open: '%s'\n", path);
     exit(1); 
   }
+}
+
+pm_class_t NF_evaluate_classifiers(char *string)
+{
+  int j = 0, max = pmct_get_num_entries();
+
+  while (class[j].id && j < max) {
+    if ( !strcmp(class[j].protocol, string) ) return class[j].id; 
+    j++;
+  }
+
+  return 0; 
 }
 
 void evaluate_classifiers(struct packet_ptrs *pptrs, struct ip_flow_common *fp, unsigned int idx)
@@ -214,6 +225,7 @@ void handle_class_accumulators(struct packet_ptrs *pptrs, struct ip_flow_common 
     /* We have more chances to classify the flow */ 
     if (fp->cst[idx].tentatives) {
       memset(&pptrs->cst, 0, CSSz);
+      pptrs->cst.tentatives = fp->cst[idx].tentatives; // XXX
       if (pptrs->l3_proto == ETHERTYPE_IP)
 	fp->cst[idx].ba += ntohs(iphp->ip_len); 
 #if defined ENABLE_IPV6

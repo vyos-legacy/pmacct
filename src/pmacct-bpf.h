@@ -37,7 +37,7 @@
  *
  *      @(#)bpf.h       7.1 (Berkeley) 5/7/91
  *
- * @(#) $Header: /tcpdump/master/libpcap/pcap-bpf.h,v 1.9.2.4 2003/12/20 02:37:55 guy Exp $ (LBL)
+ * @(#) $Header: /home/repo/pmacct/src/pmacct-bpf.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ (LBL)
  */
 
 /*

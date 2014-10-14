@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -327,6 +327,37 @@ time_t calc_monthly_timeslot(time_t t, int howmany, int op)
   return (final-base);
 }	
 
+FILE *open_logfile(char *filename)
+{
+  char timebuf[SRVBUFLEN];
+  FILE *file = NULL;
+  struct tm *tmnow;
+  time_t now;
+
+
+  file = fopen(filename, "a"); 
+  if (file) {
+    if (file_lock(fileno(file))) {
+      Log(LOG_ALERT, "ALERT: Unable to obtain lock for logfile '%s'.\n", filename);
+      file = NULL;
+    }
+  }
+  else {
+    Log(LOG_ERR, "ERROR: Unable to open logfile '%s'\n", filename);
+    file = NULL;
+  }
+
+  if (file) {
+    now = time(NULL);
+    tmnow = localtime(&now);
+    strftime(timebuf, SRVBUFLEN, "%Y-%m-%d %H:%M:%S" , tmnow);
+    fprintf(file, "\n\n=== Start logging: %s ===\n\n", timebuf); 
+    fflush(file);
+  }
+
+  return file;
+}
+
 void write_pid_file(char *filename)
 {
   FILE *file;
@@ -337,7 +368,7 @@ void write_pid_file(char *filename)
   file = fopen(filename,"w");
   if (file) {
     if (file_lock(fileno(file))) {
-      Log(LOG_ALERT, "ALERT: Unable to obtain lock of '%s'.\n", filename);
+      Log(LOG_ALERT, "ALERT: Unable to obtain lock for pidfile '%s'.\n", filename);
       return;
     }
     sprintf(pid, "%d\n", getpid());
@@ -347,7 +378,7 @@ void write_pid_file(char *filename)
     fclose(file);
   }
   else {
-    Log(LOG_ERR, "ERROR: Unable to open file '%s'\n", filename);
+    Log(LOG_ERR, "ERROR: Unable to open pidfile '%s'\n", filename);
     return;
   }
 }
@@ -620,7 +651,7 @@ int file_archive(const char *path, int rotations)
   }
 
   /* we should never reach this point */
-  Log(LOG_ALERT, "ALERT: No more logfile ( %s ) rotations allowed. Data is getting lost.\n", path);  
+  Log(LOG_ALERT, "ALERT: No more recovery logfile ( %s ) rotations allowed. Data is getting lost.\n", path);  
   return -1;
 }
 
@@ -714,3 +745,162 @@ void exit_plugin(int status)
 
   exit(status);
 }
+
+void reset_tag_status(struct packet_ptrs_vector *pptrsv)
+{
+  pptrsv->v4.tag = FALSE;
+  pptrsv->vlan4.tag = FALSE;
+  pptrsv->mpls4.tag = FALSE;
+  pptrsv->vlanmpls4.tag = FALSE;
+
+#if defined ENABLE_IPV6
+  pptrsv->v6.tag = FALSE;
+  pptrsv->vlan6.tag = FALSE;
+  pptrsv->mpls6.tag = FALSE;
+  pptrsv->vlanmpls6.tag = FALSE;
+#endif
+}
+
+void reset_shadow_status(struct packet_ptrs_vector *pptrsv)
+{
+  pptrsv->v4.shadow = FALSE;
+  pptrsv->vlan4.shadow = FALSE;
+  pptrsv->mpls4.shadow = FALSE;
+  pptrsv->vlanmpls4.shadow = FALSE;
+
+#if defined ENABLE_IPV6
+  pptrsv->v6.shadow = FALSE;
+  pptrsv->vlan6.shadow = FALSE;
+  pptrsv->mpls6.shadow = FALSE;
+  pptrsv->vlanmpls6.shadow = FALSE;
+#endif
+}
+
+void reset_tagdist_status(struct packet_ptrs_vector *pptrsv)
+{
+  pptrsv->v4.tag_dist = TRUE;
+  pptrsv->vlan4.tag_dist = TRUE;
+  pptrsv->mpls4.tag_dist = TRUE;
+  pptrsv->vlanmpls4.tag_dist = TRUE;
+
+#if defined ENABLE_IPV6
+  pptrsv->v6.tag_dist = TRUE;
+  pptrsv->vlan6.tag_dist = TRUE;
+  pptrsv->mpls6.tag_dist = TRUE;
+  pptrsv->vlanmpls6.tag_dist = TRUE;
+#endif
+}
+
+void set_shadow_status(struct packet_ptrs *pptrs)
+{
+  pptrs->shadow = TRUE;
+}
+
+#if 0
+
+Fields denoted by X will have their content modified
+
+From network.h
+
+  struct packet_ptrs {
+D   struct pcap_pkthdr *pkthdr; /* ptr to header structure passed by libpcap */
+    u_char *f_agent; /* ptr to flow export agent */
+    u_char *f_header; /* ptr to NetFlow packet header */
+    u_char *f_data; /* ptr to NetFlow data */
+    u_char *f_tpl; /* ptr to NetFlow V9 template */
+    u_char *f_status; /* ptr to status table entry */
+    u_char *idtable; /* ptr to pretag table map */
+D   u_char *packet_ptr; /* ptr to the whole packet */
+    u_char *mac_ptr; /* ptr to mac addresses */
+    u_int16_t l3_proto; /* layer-3 protocol: IPv4, IPv6 */
+    int (*l3_handler)(register struct packet_ptrs *); /* layer-3 protocol handler */
+    u_int16_t l4_proto; /* layer-4 protocol */
+    u_int16_t tag; /* pre tag id */
+    u_int16_t pf; /* pending fragments or packets */
+    u_int8_t new_flow; /* pmacctd flows: part of a new flow ? */
+    u_int8_t tcp_flags; /* pmacctd flows: TCP packet flags; URG, PUSH filtered out */
+    u_char *vlan_ptr; /* ptr to vlan id */
+    u_char *mpls_ptr; /* ptr to base MPLS label */
+X   u_char *iph_ptr; /* ptr to ip header */
+X   u_char *tlh_ptr; /* ptr to transport level protocol header */
+X   u_char *payload_ptr; /* classifiers: ptr to packet payload */
+    pm_class_t class; /* classifiers: class id */
+    struct class_st cst; /* classifiers: class status */
+    u_int8_t shadow; /* 0=the packet is being distributed for the 1st time
+            1=the packet is being distributed for the 2nd+ time */
+    u_int8_t tag_dist; /* tagged packet: 0=do not distribute the packet; 1=distribute it */
+  };
+#endif
+
+struct packet_ptrs *copy_packet_ptrs(struct packet_ptrs *pptrs)
+{
+  struct packet_ptrs *new_pptrs;
+  int offset;
+  u_char dummy_tlhdr[16];
+
+  /* Copy the whole structure first */
+  if ((new_pptrs = malloc(sizeof(struct packet_ptrs))) == NULL) {
+    return NULL;
+  }
+  memcpy(new_pptrs, pptrs, sizeof(struct packet_ptrs));
+
+  /* Copy the packet buffer */
+  if ((new_pptrs->packet_ptr = malloc(pptrs->pkthdr->caplen)) == NULL) {
+    free(new_pptrs);
+    return NULL;
+  }
+  memcpy(new_pptrs->packet_ptr, pptrs->packet_ptr, pptrs->pkthdr->caplen);
+
+  /* Copy the pcap packet header */
+  if ((new_pptrs->pkthdr = malloc(sizeof(struct pcap_pkthdr))) == NULL) {
+    free(new_pptrs->packet_ptr);
+    free(new_pptrs);
+    return NULL;
+  }
+  memcpy(new_pptrs->pkthdr, pptrs->pkthdr, sizeof(struct pcap_pkthdr));
+
+  /* Fix the pointers */
+  offset = (int) new_pptrs->packet_ptr - (int) pptrs->packet_ptr;
+
+  /* Pointers can be NULL */
+  if (pptrs->iph_ptr)
+    new_pptrs->iph_ptr += offset;
+  if (pptrs->tlh_ptr)
+    if(pptrs->tlh_ptr > pptrs->packet_ptr && pptrs->tlh_ptr < pptrs->packet_ptr+offset) // If it is not a dummy tlh_ptr
+      new_pptrs->tlh_ptr += offset;
+    else {
+      memset(dummy_tlhdr, 0, sizeof(dummy_tlhdr));
+      new_pptrs->tlh_ptr = dummy_tlhdr;
+    }
+  if (pptrs->payload_ptr)
+    new_pptrs->payload_ptr += offset;
+
+  return new_pptrs;
+}
+
+void free_packet_ptrs(struct packet_ptrs *pptrs)
+{
+  free(pptrs->pkthdr);
+  free(pptrs->packet_ptr);
+  free(pptrs);
+}
+
+#if DEBUG_TIMING
+void start_timer(struct mytimer *t)
+{
+  gettimeofday(&t->t0, NULL);
+}
+
+void stop_timer(struct mytimer *t, const char *format, ...)
+{
+  char msg[1024];
+  va_list ap;
+
+  gettimeofday(&t->t1, NULL);
+  va_start(ap, format);
+  vsnprintf(msg, 1024, format, ap);
+  va_end(ap);
+
+  fprintf(stderr, "TIMER:%s:%d\n", msg, (t->t1.tv_sec - t->t0.tv_sec) * 1000000 + (t->t1.tv_usec - t->t0.tv_usec));
+}
+#endif

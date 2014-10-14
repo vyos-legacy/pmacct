@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -197,8 +197,6 @@ void process_query_data(int sd, unsigned char *buf, int len, int forked)
     struct stripped_class dummy;
     int idx = 0;
 
-    if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) goto send_ct_dummy; 
-
     /* XXX: we should try using pmct_get_max_entries() */
     q->num = config.classifier_table_num;
     if (!q->num) q->num = MAX_CLASSIFIERS;
@@ -274,5 +272,5 @@ void Accumulate_Counters(struct pkt_data *abuf, struct acc *elem)
   abuf->pkt_len += elem->bytes_counter;
   abuf->pkt_num += elem->packet_counter;
   abuf->flo_num += elem->flow_counter;
-  abuf->pkt_time++; /* XXX: this unused field works as counter of how much entries we are accumulating */
+  abuf->time_start++; /* XXX: this unused field works as counter of how much entries we are accumulating */
 }

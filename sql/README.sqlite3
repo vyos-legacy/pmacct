@@ -34,9 +34,13 @@ Data will be available in 'acct_v5' table of '/tmp/pmacct.db' DB.
 - To create v6 tables:
 shell> sqlite3 /tmp/pmacct.db < pmacct-create-table_v6.sqlite3
 
+- To create v7 tables:
+shell> sqlite3 /tmp/pmacct.db < pmacct-create-table_v7.sqlite3
+
 Data will be available in 'acct_v6' table of '/tmp/pmacct.db' DB.
 
-- To understand difference between v1, v2, v3, v4, v5 and v6 tables:
+- To understand difference between v1, v2, v3, v4, v5, v6 and v7 tables:
+  - Do you need TCP flags ? Then you have to use v7.
   - Do you need both IP addresses and AS numbers in the same table ? Then you have to use v6.
   - Do you need packet classification ? Then you have to use v5.
   - Do you need flows (other than packets) accounting ? Then you have to use v4.
@@ -48,5 +52,5 @@ Data will be available in 'acct_v6' table of '/tmp/pmacct.db' DB.
 NOTE: mind to specify EVERYTIME which SQL table version you
 intend to adhere to by using either of the following rules:
 
-commandline:    -v [ 1 | 2 | 3 | 4 | 5 | 6 ]
-configuration:  sql_table_version: [ 1 | 2 | 3 | 4 | 5 | 6 ]
+commandline:    -v [ 1 | 2 | 3 | 4 | 5 | 6 | 7 ]
+configuration:  sql_table_version: [ 1 | 2 | 3 | 4 | 5 | 6 | 7 ]

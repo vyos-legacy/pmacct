@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -36,6 +36,8 @@ void write_class_table_header();
 char *extract_token(char **, int);
 int CHECK_Q_TYPE(int);
 int check_data_sizes(struct query_header *, struct pkt_data *);
+void client_counters_merge_sort(struct pkt_data *, int, int, int);
+void client_counters_merge(struct pkt_data *, int, int, int, int);
 
 /* functions */
 int CHECK_Q_TYPE(int type)
@@ -44,6 +46,7 @@ int CHECK_Q_TYPE(int type)
 
   if (type & WANT_RESET) type ^= WANT_RESET;
   if (type & WANT_ERASE) type ^= WANT_ERASE;
+  if (type & WANT_LOCK_OP) type ^= WANT_LOCK_OP;
 
   return type;
 }
@@ -60,8 +63,10 @@ void usage_client(char *prog)
   printf("  -M\t[matching data[';' ... ]] | ['file:'[filename]] \n\tMatch primitives; print formatted table (requires -c)\n");
   printf("  -a\tDisplay all table fields (even those currently unused)\n");
   printf("  -c\t[ src_mac | dst_mac | vlan | src_host | dst_host | src_port | dst_port | tos | proto | \n\t src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag | flows | \n\t class ] \n\tSelect primitives to match (required by -N and -M)\n");
+  printf("  -T\t[bytes|packets|flows] \n\tOutput top N statistics (applies to -M and -s)\n");
   printf("  -e\tClear statistics\n");
   printf("  -r\tReset counters (applies to -N and -M)\n");
+  printf("  -l\tPerform locking of the table\n");
   printf("  -t\tShow memory table status\n");
   printf("  -C\tShow classifiers table\n");
   printf("  -p\t[file] \n\tSocket for client-server communication (DEFAULT: /tmp/collect.pipe)\n");
@@ -129,6 +134,7 @@ void write_stats_header(u_int32_t what_to_count, u_int8_t have_wtc)
 #endif
     printf("SRC_PORT  ");
     printf("DST_PORT  ");
+    printf("TCP_FLAGS  ");
     printf("PROTOCOL    ");
     printf("TOS    ");
 #if defined HAVE_64BIT_COUNTERS
@@ -162,6 +168,7 @@ void write_stats_header(u_int32_t what_to_count, u_int8_t have_wtc)
 #endif
     if (what_to_count & (COUNT_SRC_PORT|COUNT_SUM_PORT)) printf("SRC_PORT  ");
     if (what_to_count & COUNT_DST_PORT) printf("DST_PORT  "); 
+    if (what_to_count & COUNT_TCPFLAGS) printf("TCP_FLAGS  "); 
     if (what_to_count & COUNT_IP_PROTO) printf("PROTOCOL    ");
     if (what_to_count & COUNT_IP_TOS) printf("TOS    ");
 #if defined HAVE_64BIT_COUNTERS
@@ -244,7 +251,7 @@ int main(int argc,char **argv)
   extern int optind, opterr, optopt;
   int errflag, cp, want_stats, want_erase, want_reset, want_class_table; 
   int want_status, want_mrtg, want_counter, want_match, want_all_fields;
-  int which_counter, fetch_from_file, sum_counters, num_counters;
+  int which_counter, topN_counter, fetch_from_file, sum_counters, num_counters;
   u_int32_t what_to_count, have_wtc, tmpnum;
 
   /* Administrativia */
@@ -256,6 +263,7 @@ int main(int argc,char **argv)
   strcpy(path, "/tmp/collect.pipe");
   unpacked = 0; printed = 0;
   errflag = 0; buflen = 0;
+  protocols_number = 0;
   want_stats = FALSE;
   want_erase = FALSE;
   want_status = FALSE;
@@ -266,6 +274,7 @@ int main(int argc,char **argv)
   want_reset = FALSE;
   want_class_table = FALSE;
   which_counter = FALSE;
+  topN_counter = FALSE;
   sum_counters = FALSE;
   num_counters = FALSE;
   fetch_from_file = FALSE;
@@ -394,6 +403,9 @@ int main(int argc,char **argv)
       q.type |= WANT_STATUS; 
       want_status = TRUE;
       break;
+    case 'l':
+      q.type |= WANT_LOCK_OP;
+      break;
     case 'm': /* obsoleted */
       want_mrtg = TRUE;
     case 'N':
@@ -408,7 +420,13 @@ int main(int argc,char **argv)
       else if (!strcmp(optarg, "packets")) which_counter = 1;
       else if (!strcmp(optarg, "flows")) which_counter = 3;
       else if (!strcmp(optarg, "all")) which_counter = 2;
-      else printf("WARN: ignoring unknown counter: %s.\n", optarg);
+      else printf("WARN: -n, ignoring unknown counter type: %s.\n", optarg);
+      break;
+    case 'T':
+      if (!strcmp(optarg, "bytes")) topN_counter = 1;
+      else if (!strcmp(optarg, "packets")) topN_counter = 2;
+      else if (!strcmp(optarg, "flows")) topN_counter = 3;
+      else printf("WARN: -T, ignoring unknown counter type: %s.\n", optarg);
       break;
     case 'S':
       sum_counters = TRUE;
@@ -461,7 +479,13 @@ int main(int argc,char **argv)
   }
 
   if ((which_counter||sum_counters) && !want_counter) {
-    printf("ERROR: -n and -S options apply only to -N .\n  Exiting...\n\n");
+    printf("ERROR: -n and -S options apply only to -N\n  Exiting...\n\n");
+    usage_client(argv[0]);
+    exit(1);
+  }
+
+  if (topN_counter && (!want_match && !want_stats)) {
+    printf("ERROR: -T option apply only to -M or -s\n  Exiting...\n\n");
     usage_client(argv[0]);
     exit(1);
   }
@@ -478,6 +502,9 @@ int main(int argc,char **argv)
   }
 
   memcpy(q.passwd, password, sizeof(password));
+
+  /* setting number of entries in _protocols structure */
+  while (_protocols[protocols_number].number != -1) protocols_number++;
   
   if (want_counter || want_match) {
     FILE *f;
@@ -771,6 +798,10 @@ int main(int argc,char **argv)
     write_stats_header(what_to_count, have_wtc);
     elem = largebuf+sizeof(struct query_header);
     unpacked -= sizeof(struct query_header);
+
+    acc_elem = (struct pkt_data *) elem;
+    if (topN_counter) client_counters_merge_sort(acc_elem, 0, unpacked/sizeof(struct pkt_data), topN_counter);
+
     while (printed < unpacked) {
       acc_elem = (struct pkt_data *) elem;
       if (memcmp(&acc_elem, &empty_addr, sizeof(struct pkt_primitives)) != 0) {
@@ -827,8 +858,14 @@ int main(int argc,char **argv)
 	if (!have_wtc || (what_to_count & COUNT_DST_PORT))
 	  printf("%-5d     ", acc_elem->primitives.dst_port);
 
-	if (!have_wtc || (what_to_count & COUNT_IP_PROTO))
-	  printf("%-10s  ", _protocols[acc_elem->primitives.proto].name);
+	if (!have_wtc || (what_to_count & COUNT_TCPFLAGS))
+	  printf("%-6d     ", acc_elem->tcp_flags);
+
+	if (!have_wtc || (what_to_count & COUNT_IP_PROTO)) {
+	  if (acc_elem->primitives.proto < protocols_number)
+	    printf("%-10s  ", _protocols[acc_elem->primitives.proto].name);
+	  else printf("%-3d  ", acc_elem->primitives.proto);
+	}
 
 	if (!have_wtc || (what_to_count & COUNT_IP_TOS))
 	  printf("%-3d    ", acc_elem->primitives.tos); 
@@ -892,7 +929,7 @@ int main(int argc,char **argv)
 	pcnt += acc_elem->pkt_num;
 	fcnt += acc_elem->flo_num;
 	bcnt += acc_elem->pkt_len;
-	num_counters += acc_elem->pkt_time; /* XXX: this field is used here to count how much entries we are accumulating */
+	num_counters += acc_elem->time_start; /* XXX: this field is used here to count how much entries we are accumulating */
       }
       else {
 #if defined HAVE_64BIT_COUNTERS
@@ -901,13 +938,13 @@ int main(int argc,char **argv)
 	/* print packets */
 	else if (which_counter == 1) printf("%llu\n", acc_elem->pkt_num); 
 	/* print packets+bytes+flows+num */
-	else if (which_counter == 2) printf("%llu %llu %llu %lu\n", acc_elem->pkt_num, acc_elem->pkt_len, acc_elem->flo_num, acc_elem->pkt_time);
+	else if (which_counter == 2) printf("%llu %llu %llu %lu\n", acc_elem->pkt_num, acc_elem->pkt_len, acc_elem->flo_num, acc_elem->time_start);
 	/* print flows */
 	else if (which_counter == 3) printf("%llu\n", acc_elem->flo_num);
 #else
         if (which_counter == 0) printf("%lu\n", acc_elem->pkt_len); 
         else if (which_counter == 1) printf("%lu\n", acc_elem->pkt_num); 
-        else if (which_counter == 2) printf("%lu %lu %lu %lu\n", acc_elem->pkt_num, acc_elem->pkt_len, acc_elem->flo_num, acc_elem->pkt_time); 
+        else if (which_counter == 2) printf("%lu %lu %lu %lu\n", acc_elem->pkt_num, acc_elem->pkt_len, acc_elem->flo_num, acc_elem->time_start); 
         else if (which_counter == 3) printf("%lu\n", acc_elem->flo_num); 
 #endif
       }
@@ -1025,4 +1062,82 @@ int check_data_sizes(struct query_header *qh, struct pkt_data *acc_elem)
   } 
 
   return 0;
+}
+
+/* sort the (sub)array v from start to end */
+void client_counters_merge_sort(struct pkt_data *table, int start, int end, int order)
+{
+  int middle;
+
+  /* no elements to sort */
+  if ((start == end) || (start == end-1)) return;
+
+  /* find the middle of the array, splitting it into two subarrays */
+  middle = (start+end)/2;
+
+  /* sort the subarray from start..middle */
+  client_counters_merge_sort(table, start, middle, order);
+
+  /* sort the subarray from middle..end */
+  client_counters_merge_sort(table, middle, end, order);
+
+  /* merge the two sorted halves */
+  client_counters_merge(table, start, middle, end, order);
+}
+
+/*
+   merge the subarray v[start..middle] with v[middle..end], placing the
+   result back into v.
+*/
+void client_counters_merge(struct pkt_data *table, int start, int middle, int end, int order)
+{
+  struct pkt_data *v1, *v2;
+  int  v1_n, v2_n, v1_index, v2_index, i, s = sizeof(struct pkt_data);
+
+  v1_n = middle-start;
+  v2_n = end-middle;
+
+  v1 = malloc(v1_n*s);
+  v2 = malloc(v2_n*s);
+
+  if ((!v1) || (!v2)) printf("ERROR: Memory sold out while sorting statistics.\n");
+
+  for (i=0; i<v1_n; i++) memcpy(&v1[i], &table[start+i], s);
+  for (i=0; i<v2_n; i++) memcpy(&v2[i], &table[middle+i], s);
+
+  v1_index = 0;
+  v2_index = 0;
+
+  /* as we pick elements from one or the other to place back into the table */
+  if (order == 1) { /* bytes */ 
+    for (i=0; (v1_index < v1_n) && (v2_index < v2_n); i++) {
+      /* current v1 element less than current v2 element? */
+      if (v1[v1_index].pkt_len < v2[v2_index].pkt_len) memcpy(&table[start+i], &v2[v2_index++], s);
+      else if (v1[v1_index].pkt_len == v2[v2_index].pkt_len) memcpy(&table[start+i], &v2[v2_index++], s);
+      else memcpy(&table[start+i], &v1[v1_index++], s);
+    }
+  }
+  else if (order == 2) { /* packets */
+    for (i=0; (v1_index < v1_n) && (v2_index < v2_n); i++) {
+      /* current v1 element less than current v2 element? */
+      if (v1[v1_index].pkt_num < v2[v2_index].pkt_num) memcpy(&table[start+i], &v2[v2_index++], s);
+      else if (v1[v1_index].pkt_num == v2[v2_index].pkt_num) memcpy(&table[start+i], &v2[v2_index++], s);
+      else memcpy(&table[start+i], &v1[v1_index++], s);
+    }
+  }
+  else if (order == 3) { /* flows */
+    for (i=0; (v1_index < v1_n) && (v2_index < v2_n); i++) {
+      /* current v1 element less than current v2 element? */
+      if (v1[v1_index].flo_num < v2[v2_index].flo_num) memcpy(&table[start+i], &v2[v2_index++], s);
+      else if (v1[v1_index].flo_num == v2[v2_index].flo_num) memcpy(&table[start+i], &v2[v2_index++], s);
+      else memcpy(&table[start+i], &v1[v1_index++], s);
+    }
+  }
+
+  /* clean up; either v1 or v2 may have stuff left in it */
+  for (; v1_index < v1_n; i++) memcpy(&table[start+i], &v1[v1_index++], s);
+  for (; v2_index < v2_n; i++) memcpy(&table[start+i], &v2[v2_index++], s);
+
+  free(v1);
+  free(v2);
 }

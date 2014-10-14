@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -169,6 +169,17 @@ Inline void SQL_SetENV()
     count++;
   }
 
+  {
+    u_char *tmpptr;
+
+    strncat(envbuf.ptr, "SQL_MAX_WRITERS=", envbuf.end-envbuf.ptr);
+    tmpptr = envbuf.ptr + strlen(envbuf.ptr);
+    snprintf(tmpptr, envbuf.end-tmpptr, "%d", config.sql_max_writers);
+    ptrs[count] = envbuf.ptr;
+    envbuf.ptr += strlen(envbuf.ptr)+1;
+    count++;
+  }
+
   for (i = 0; i < count; i++)
     putenv(ptrs[i]);
 }
@@ -265,6 +276,17 @@ Inline void SQL_SetENV_child(const struct insert_data *idata)
     strncat(envbuf.ptr, "EFFECTIVE_SQL_TABLE=", envbuf.end-envbuf.ptr);
     tmpptr = envbuf.ptr + strlen(envbuf.ptr);
     strftime(tmpptr, envbuf.end-tmpptr, config.sql_table, nowtm); 
+    ptrs[count] = envbuf.ptr;
+    envbuf.ptr += strlen(envbuf.ptr)+1;
+    count++;
+  }
+
+  {
+    u_char *tmpptr;
+
+    strncat(envbuf.ptr, "SQL_ACTIVE_WRITERS=", envbuf.end-envbuf.ptr);
+    tmpptr = envbuf.ptr + strlen(envbuf.ptr);
+    snprintf(tmpptr, envbuf.end-tmpptr, "%d", sql_writers.active);
     ptrs[count] = envbuf.ptr;
     envbuf.ptr += strlen(envbuf.ptr)+1;
     count++;

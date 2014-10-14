@@ -2,8 +2,6 @@
 #define DEFAULT_SFACCTD_PORT 6343 
 #define SFLOW_MIN_MSG_SIZE 200 
 #define SFLOW_MAX_MSG_SIZE 65536 /* inflated ? */
-#define RENORM_TABLE_SZ 9973 
-#define RENORM_TABLE_MAX_ENTRIES 100000 /* ~3Mb IPv4, 4Mb IPv6 */ 
 
 #if (!defined NF_AS_KEEP)
 #define NF_AS_KEEP 0 /* Keep AS numbers in NetFlow packets */
@@ -187,6 +185,10 @@ typedef struct _SFSample {
   u_int32_t statsSamplingInterval;
   u_int32_t counterBlockVersion;
 
+  /* classification */
+  pm_class_t class;
+  pm_id_t tag;
+
   SFLAddress ipsrc;
   SFLAddress ipdst;
 } SFSample;
@@ -236,19 +238,6 @@ struct SF_icmphdr
   /* ignore the rest */
 };
 
-struct SF_renorm_entry
-{
-  SFLAddress agent_addr;
-  u_int32_t agentSubId;
-  u_int32_t ds;
-  u_int32_t sample_pool;
-  u_int32_t seqno;
-  struct SF_renorm_entry *next;
-};
-
-struct SF_renorm_entry *renorm_table[RENORM_TABLE_SZ];
-u_int32_t renorm_table_entries;
-
 #if (!defined __SFACCTD_C)
 #define EXT extern
 #else
@@ -270,8 +259,8 @@ EXT u_int32_t getAddress(SFSample *, SFLAddress *);
 EXT void skipBytes(SFSample *, int);
 EXT int lengthCheck(SFSample *, u_char *, int);
 
-EXT void process_SFv2v4_packet(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *);
-EXT void process_SFv5_packet(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *);
+EXT void process_SFv2v4_packet(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *, struct sockaddr *);
+EXT void process_SFv5_packet(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *, struct sockaddr *);
 EXT void readv2v4FlowSample(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT void readv5FlowSample(SFSample *, int, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT void readv2v4CountersSample(SFSample *);
@@ -303,6 +292,8 @@ EXT void readFlowSample_header(SFSample *);
 EXT void readFlowSample_ethernet(SFSample *);
 EXT void readFlowSample_IPv4(SFSample *);
 EXT void readFlowSample_IPv6(SFSample *);
+
+EXT char *sfv245_check_status(SFSample *spp, struct sockaddr *);
 
 EXT void usage_daemon(char *);
 EXT void compute_once();

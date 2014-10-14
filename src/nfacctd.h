@@ -19,6 +19,7 @@ struct struct_header_v5 {
   u_int32_t flow_sequence;	/* Sequence number of total flows seen */
   unsigned char engine_type;    /* Type of flow switching engine (RP,VIP,etc.) */
   unsigned char engine_id;      /* Slot number of the flow switching engine */
+  u_int16_t sampling;
 };
 
 /*  NetFlow Export Version 7 Header Format  */
@@ -95,8 +96,8 @@ struct struct_export_v5 {
   unsigned char tcp_flags;    	/* Cumulative OR of tcp flags */
   unsigned char prot;         	/* IP protocol, e.g., 6=TCP, 17=UDP, etc... */
   unsigned char tos;          	/* IP Type-of-Service */
-  u_int16_t dst_as;  		/* dst peer/origin Autonomous System */
   u_int16_t src_as;  		/* source peer/origin Autonomous System */
+  u_int16_t dst_as;  		/* dst peer/origin Autonomous System */
   unsigned char dst_mask;       /* destination route's mask bits */
   unsigned char src_mask;       /* source route's mask bits */
   u_int16_t pad_1;   		/* pad to word boundary */
@@ -390,7 +391,8 @@ struct data_hdr_v9 {
 #define NF9_TEMPLATE_FLOWSET_ID         0
 #define NF9_OPTIONS_FLOWSET_ID          1
 #define NF9_MIN_RECORD_FLOWSET_ID       256
-#define NF9_MAX_DEFINED_FIELD		100
+// #define NF9_MAX_DEFINED_FIELD	100
+#define NF9_MAX_DEFINED_FIELD		210
 
 /* Flowset record types the we care about */
 #define NF9_IN_BYTES			1
@@ -445,6 +447,9 @@ struct data_hdr_v9 {
 #define NF9_MPLS_LABEL_8		77
 #define NF9_MPLS_LABEL_9		78
 #define NF9_MPLS_LABEL_10		79
+/* ... */
+#define NF9_CUST_CLASS			200
+#define NF9_CUST_TAG			201
 
 #define NF9_FTYPE_IPV4			0
 #define NF9_FTYPE_IPV6			1
@@ -506,6 +511,9 @@ EXT void reset_ip4(struct packet_ptrs *);
 EXT void reset_ip6(struct packet_ptrs *);
 EXT void notify_malf_packet(short int, char *, struct sockaddr *);
 EXT int NF_find_id(struct packet_ptrs *);
+
+EXT char *nfv578_check_status(struct packet_ptrs *);
+EXT char *nfv9_check_status(struct packet_ptrs *);
 
 EXT struct template_cache tpl_cache;
 EXT struct v8_handler_entry v8_handlers[15];

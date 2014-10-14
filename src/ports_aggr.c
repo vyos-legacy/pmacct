@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -26,7 +26,6 @@
 #include "pmacct-data.h"
 #include "plugin_hooks.h"
 #include "ports_aggr.h"
-#include "util.h"
 
 void load_ports(char *filename, struct ports_table *pt)
 {

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -43,16 +43,14 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   char path[] = "/tmp/collect.pipe";
   short int go_to_clear = FALSE;
   u_int32_t request, sz;
-#if defined (HAVE_MMAP)
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
   unsigned char *rgptr;
   int pollagain = 0;
   u_int32_t seq = 0;
   int rg_err_count = 0;
-#endif
 
   fd_set read_descs, bkp_read_descs; /* select() stuff */
-  int select_fd;
+  int select_fd, lock = FALSE;
   int cLen, num, sd, sd2;
 
   /* XXX: glue */
@@ -62,10 +60,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
 
   reload_map = FALSE;
-
-#if defined (HAVE_MMAP)
   status->wakeup = TRUE;
-#endif
 
   /* a bunch of default definitions and post-checks */
   pipebuf = (unsigned char *) malloc(config.buffer_size);
@@ -207,13 +202,23 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
       request = qh->type;
       if (request & WANT_RESET) request ^= WANT_RESET;
+      if (request & WANT_LOCK_OP) {
+	lock = TRUE;
+	request ^= WANT_LOCK_OP;
+      }
 
-      /* - if query involves a single short-lived walk through the memory table 
-           we avoid fork() and let the plugin serve directly the request;
-         - if we are requested a bulk table erasure along with some other option
-           (ex. pmacct -s -e) we don't fork, thus implementing an exclusive lock
-	   over the table. Core process will still enqueue packets in the ring.
+      /* 
+	 - if explicitely required, we do not fork: query obtains exclusive
+	   control - lock - over the memory table; 
+	 - operations that may cause inconsistencies (full erasure, counter
+	   reset for individual entries, etc.) are entitled of an exclusive
+	   lock.
+	 - if query is matter of just a single short-lived walk through the
+	   table, we avoid fork(): the plugin will serve the request;
+         - in all other cases, we fork; the newly created child will serve
+	   queries asyncronously.
       */
+
       if (request & WANT_ERASE) {
 	request ^= WANT_ERASE;
 	if (request) {
@@ -235,18 +240,25 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
       }
       else {
-        switch (fork()) {
-        case 0: /* Child */
-          close(sd);
-	  pm_setproctitle("%s [%s]", "IMT Plugin -- serving client", config.name);
-          if (num > 0) process_query_data(sd2, srvbuf, num, TRUE);
-	  else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. Errno: %d\n", config.name, config.type, num, errno);
+	if (lock) {
+	  if (num > 0) process_query_data(sd2, srvbuf, num, FALSE);
+          else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. Errno: %d\n", config.name, config.type, num, errno);
           Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
-          close(sd2);
-          exit(0);
-        default: /* Parent */
-          break;
-        } 
+	}
+	else { 
+          switch (fork()) {
+          case 0: /* Child */
+            close(sd);
+	    pm_setproctitle("%s [%s]", "IMT Plugin -- serving client", config.name);
+            if (num > 0) process_query_data(sd2, srvbuf, num, TRUE);
+	    else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. Errno: %d\n", config.name, config.type, num, errno);
+            Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
+            close(sd2);
+            exit(0);
+          default: /* Parent */
+            break;
+          } 
+	}
       }
       close(sd2);
     }
@@ -272,12 +284,6 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     }
 
     if (FD_ISSET(pipe_fd, &read_descs)) {
-#if !defined (HAVE_MMAP)
-      if ((num = read(pipe_fd, pipebuf, config.buffer_size)) == 0)
-        exit_plugin(1); /* we exit silently; something happened at the write end */
-
-      if (num < 0) goto select_again;
-#else
       if (!pollagain) {
         seq++;
         seq %= MAX_SEQNUM;
@@ -304,7 +310,6 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           seq = ((struct ch_buf_hdr *)pipebuf)->seq;
 	}
       }
-#endif
 
       if (num > 0) {
 	data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));

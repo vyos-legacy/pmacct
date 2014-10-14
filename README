@@ -1,17 +1,18 @@
 NAME:
-  pmacct (Promiscuous mode IP Accounting package) v0.10.1
-  pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+  pmacct (Promiscuous mode IP Accounting package) v0.11.4
+  pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 
 
 DESCRIPTION:
   pmacct is a small set of passive network monitoring tools to measure, account,
-  classify and aggregate IPv4 and IPv6 traffic; a pluggable and flexible architecture
-  allows to store the collected traffic data into memory tables or SQL (MySQL, SQLite,
-  PostgreSQL) databases. pmacct supports fully customizable historical data breakdown,
-  flow sampling, filtering and tagging, recovery actions, and triggers. Libpcap, sFlow
-  v2/v4/v5 and NetFlow v1/v5/v7/v8/v9 are supported, both unicast and multicast.
-  Also, a client program makes it easy to export data to tools like RRDtool, GNUPlot,
-  Net-SNMP, MRTG, and Cacti.
+  classify, aggregate and export IPv4 and IPv6 traffic; a pluggable and flexible
+  architecture allows to store collected network data into memory tables or SQL
+  (MySQL, SQLite, PostgreSQL) databases and export them through NetFlow or sFlow
+  protocols to remote collectors. pmacct supports fully customizable historical
+  data breakdown, flow sampling, filtering and tagging, recovery actions, and
+  triggers. Libpcap, sFlow v2/v4/v5 and NetFlow v1/v5/v7/v8/v9 are supported, both
+  unicast and multicast. Also, a client program makes it easy to export data to
+  tools like RRDtool, GNUPlot, Net-SNMP, MRTG, and Cacti.
 
   Aggregation revolves around the key concept of primitives (source and destination
   MAC addresses, hosts, networks, ports, AS numbers, VLAN id, IP protocol and ToS/DSCP
@@ -46,17 +47,17 @@ PLATFORMS:
   It has been tested and reported to work on:
 
   Red Hat Linux 7.x/8.x/9.x
-  Fedora Core 1/2/3/4
-  Slackware Linux 8.x/9.x
+  Fedora Core 1/2/3/4/5
+  Slackware Linux 8.x/9.x/10.x
   Gentoo Linux 1.4.x/1.6.x
-  SuSE Linux 9.x
+  SuSE Linux 9.x/10.x
   Debian 3.x
   Solaris 8/9/10 x86/sparc
   FreeBSD 4.x/5.x/6.x x86/sparc 
-  OpenBSD 3.8 x86/sparc
+  OpenBSD 3.7/3.8/3.9 x86/sparc
   NetBSD 2.0 x86
+  MacOS X 10.4
   LEAF Bering-uClibc
-  Tru64 5.x
 
   Did you successfully completed compilation and installation of the
   software on some other operating system or architecture not listed

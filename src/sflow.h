@@ -1,6 +1,6 @@
 /* Copyright (C) InMon Corporation 2002-2003 ALL RIGHTS RESERVED */
 
-/* $Header: /usr/src/redhat/SOURCES/sflow_tools-3.7/src/RCS/sflow.h,v 1.3 2005/03/27 16:51:05 nhm Exp $ */
+/* $Header: /home/repo/pmacct/src/sflow.h,v 1.2 2007/02/24 23:00:05 paolo Exp $ */
 
 /////////////////////////////////////////////////////////////////////////////////
 /////////////////////// sFlow Sampling Packet Data Types ////////////////////////
@@ -290,6 +290,9 @@ enum SFLFlow_type_tag {
   SFLFLOW_EX_MPLS_FTN     = 1010,
   SFLFLOW_EX_MPLS_LDP_FEC = 1011,
   SFLFLOW_EX_VLAN_TUNNEL  = 1012,   /* VLAN stack */
+  /* enterprise = 8800 pmacct */
+  SFLFLOW_EX_CLASS        = (8800 << 12) + 1,
+  SFLFLOW_EX_TAG	= (8800 << 12) + 2,
   /* enterprise = 4300 (inmon)...*/
   SFLFLOW_EX_PROCESS   = (4300 << 12) + 3, /* =17612803 Extended Process information */
 };

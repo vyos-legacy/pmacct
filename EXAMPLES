@@ -1,5 +1,5 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 
 pmacct EXAMPLES file.
 
@@ -12,6 +12,8 @@ V.	Running the NetFlow and sFlow daemons (nfacctd/sfacctd)
 VI.	Running the pmacct client (pmacct)
 VII.	Running the logfile players (pmmyplay/pmpgplay) 
 VIII.	Quickstart guide to packet/stream classifiers
+IX.	Quickstart guide to setup a NetFlow agent/probe 
+X.	Quickstart guide to setup a sFlow agent/probe 
 
 
 I. Plugins included with pmacct distribution
@@ -63,11 +65,12 @@ to run stripped-down versions of each SQL table thus allowing to save both disk 
 cycles required to run the SQL engine (read more about it in CONFIG-KEYS). To specify the SQL
 table version, you an use either of the following rules: 
 
-commandline: 	'-v [ 1 | 2 | 3 | 4 | 5 | 6 ]'
-configuration:  'sql_table_version: [ 1 | 2 | 3 | 4 | 5 | 6 ]'
+commandline: 	'-v [ 1 | 2 | 3 | 4 | 5 | 6 | 7 ]'
+configuration:  'sql_table_version: [ 1 | 2 | 3 | 4 | 5 | 6 | 7 ]'
 
 To understand difference between v1, v2, v3, v4, v5 and v6 tables:
 
+- Do you need TCP flags ? Then you have to use v7.
 - Do you need both IP addresses and AS numbers in the same table ? Then you have to use v6.
 - Do you need packet classification ? Then you have to use v5.
 - Do you need flows (other than packets) accounting ? Then you have to use v4.
@@ -400,6 +403,81 @@ e) Ok, we are done ! Fire the pmacct collector daemon:
 
    You can now play with the SQL or pmacct client; furthermore, you can add/remove/write patterns and load
    them by restarting the pmacct daemon. If using the memory plugin you can check out the list of loaded
-   plugins with 'pmacct -C'. Don't underestimate the importance of 'snaplen' values; get the time to take
-   a read about it in the CONFIG-KEYS document. Enjoy !
+   plugins with 'pmacct -C'. Don't underestimate the importance of 'snaplen', 'pmacctd_flow_buffer_size',
+   and 'pmacctd_flow_buffer_buckets' values; get the time to take a read about them in the CONFIG-KEYS
+   document.
+
+
+IX. Quickstart guide to setup a NetFlow agent/probe
+pmacct 0.11.0 sees the introduction of new probing capabilities, both on NetFlow and sFlow sides. 
+Exporting traffic data from multiple probes through NetFlow to a collector (one or a set of them)
+is efficient and highly beneficial from a network management standpoint. NetFlow v9 adds further
+flexibility by allowing to transport custom informations (for example, pmacctd NetFlow probe can
+send flow classification tag to a remote collector). Now, the quickstarter guide:
+
+a) usual initial steps: download pmacct, unpack it, compile it.
+
+b) build NetFlow probe configuration, using pmacctd:
+!
+daemonize: true
+interface: eth0
+aggregate: src_host, dst_host, src_port, dst_port, proto, tos
+plugins: nfprobe
+nfprobe_receiver: 1.2.3.4:2100
+nfprobe_version: 9
+! nfprobe_engine: 1:1
+! nfprobe_timeouts: tcp=120:maxlife=3600
+!
+! networks_file: /path/to/networks.lst
+! classifiers: /path/to/classifiers/
+! snaplen: 700
+!...
+
+   This is very simple (and working) configuration. You can complicate it by adding features. 1) you
+   can generate AS numbers by uncommenting 'networks_file' line, crafting a proper Networks File and
+   piling up  'src_as,dst_as' to the 'aggregate' directive; 2) you can embed flow classification
+   informations in your NetFlow v9 datagrams by uncommenting 'classifiers' and 'snaplen' lines,
+   setting up a proper directory for your classification patterns and piling up 'class' to the
+   'aggregate' directive; 3) you can add L2 (MAC addresses, VLANs) informations to your NetFlow v9
+   flowsets.
+
+c) build NetFlow collector configuration, using nfacctd:
+!
+daemonize: true
+nfacctd_ip: 1.2.3.4
+nfacctd_port: 2100
+plugins: memory[display]
+aggregate[display]: src_host, dst_host, src_port, dst_port, proto
+!
+! classifiers: /path/to/classifiers
+
+d) Ok, we are done ! Now fire both daemons:
+
+   shell a> pmacctd -f /path/to/configuration/file
+   shell b> nfacctd -f /path/to/configuration/file
+
+
+X. Quickstart guide to setup a sFlow agent/probe
+pmacct 0.11.0 sees the introduction of new probing capabilities, both on NetFlow and sFlow sides.
+Even if interested in sFlow, take a moment to read the previous chapter. Furthermore, steps a/c/d
+will be cut as they are very similar to the previous example. sFlow relies heavily on random packet
+sampling rather than joining proper sets of packets into shared flows; this less-stateful and light
+approach makes it a valuable export protocol expecially tailored for high-speed networks. Further,
+you can exploit the great flexibility offered by sFlow v5 for, ie., embedding packet classification
+informations or adding basic (ie. src_as, dst_as) Extended Gateway informations through the use of
+a 'networks_file'. Now, the quickstarter guide:
+
+b) build sFlow probe configuration, using pmacctd:
+!
+daemonize: true
+interface: eth0
+plugins: sfprobe
+sfprobe_agentsubid: 1402
+sfprobe_receiver: 1.2.3.4:6343
+sfprobe_sampling_rate: 20
+!
+! networks_file: /path/to/networks.lst
+! classifiers: /path/to/classifiers/
+! snaplen: 700
+!...
 

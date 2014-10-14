@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -19,6 +19,9 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+#ifndef _PMACCT_H_
+#define _PMACCT_H_
+
 /* includes */
 #ifdef HAVE_PCAP_PCAP_H
 #include <pcap/pcap.h>
@@ -32,6 +35,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <errno.h>
+#include <assert.h>
 
 #ifdef HAVE_GETOPT_H
 #include <getopt.h> 
@@ -157,6 +161,7 @@ struct plugin_requests {
 #include "pretag.h"
 #include "cfg.h"
 #include "util.h"
+#include "xflow_status.h"
 #include "log.h"
 #include "once.h"
 #include "mpls.h"
@@ -213,6 +218,12 @@ struct largebuf {
   u_char *ptr;
 };
 
+struct child_ctl {
+  u_int16_t active;
+  u_int16_t retired;
+  u_int32_t flags;
+};
+
 #define INIT_BUF(x) \
 	memset(x.base, 0, sizeof(x.base)); \
 	x.end = x.base+sizeof(x.base); \
@@ -232,6 +243,7 @@ void reload_maps();
 #else
 #define EXT
 #endif
+EXT void null_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 EXT void eth_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 EXT void fddi_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
 EXT void tr_handler(const struct pcap_pkthdr *, register struct packet_ptrs *);
@@ -263,6 +275,7 @@ EXT void compute_once();
 #endif
 EXT struct host_addr mcast_groups[MAX_MCAST_GROUPS];
 EXT int reload_map;
+EXT struct child_ctl sql_writers;
 #undef EXT
 
 size_t strlcpy(char *, const char *, size_t);
@@ -280,3 +293,4 @@ extern pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup pha
 extern u_char dummy_tlhdr[16];
 #endif
 
+#endif /* _PMACCT_H_ */

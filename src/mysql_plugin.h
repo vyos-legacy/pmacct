@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -32,7 +32,6 @@ int MY_cache_dbop(struct DBdesc *, struct db_cache *, struct insert_data *);
 void MY_cache_purge(struct db_cache *[], int, struct insert_data *);
 int MY_evaluate_history(int);
 int MY_compose_static_queries();
-void MY_delete_shadows(struct BE_descs *);
 void MY_Lock(struct DBdesc *);
 void MY_Unlock(struct BE_descs *);
 void MY_DB_Connect(struct DBdesc *, char *);
@@ -53,3 +52,4 @@ static char mysql_table_v3[] = "acct_v3";
 static char mysql_table_v4[] = "acct_v4";
 static char mysql_table_v5[] = "acct_v5";
 static char mysql_table_v6[] = "acct_v6";
+static char mysql_table_v7[] = "acct_v7";

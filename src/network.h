@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 #include "../include/extract.h"
@@ -165,6 +165,7 @@ struct packet_ptrs {
   u_char *f_header; /* ptr to NetFlow packet header */ 
   u_char *f_data; /* ptr to NetFlow data */ 
   u_char *f_tpl; /* ptr to NetFlow V9 template */
+  u_char *f_status; /* ptr to status table entry */
   u_char *idtable; /* ptr to pretag table map */
   u_char *packet_ptr; /* ptr to the whole packet */
   u_char *mac_ptr; /* ptr to mac addresses */
@@ -182,6 +183,9 @@ struct packet_ptrs {
   u_char *payload_ptr; /* classifiers: ptr to packet payload */
   pm_class_t class; /* classifiers: class id */
   struct class_st cst; /* classifiers: class status */
+  u_int8_t shadow; /* 0=the packet is being distributed for the 1st time
+		      1=the packet is being distributed for the 2nd+ time */
+  u_int8_t tag_dist; /* tagged packet: 0=do not distribute the packet; 1=distribute it */
 };
 
 struct host_addr {
@@ -214,17 +218,30 @@ struct pkt_primitives {
 
 struct pkt_data {
   struct pkt_primitives primitives;
-#if defined HAVE_64BIT_COUNTERS
-  u_int64_t pkt_len;
-  u_int64_t pkt_num;
-  u_int64_t flo_num;
-#else
-  u_int32_t pkt_len;
-  u_int32_t pkt_num;
-  u_int32_t flo_num;
-#endif
-  u_int32_t pkt_time;
+  pm_counter_t pkt_len;
+  pm_counter_t pkt_num;
+  pm_counter_t flo_num;
+  u_int32_t tcp_flags; /* XXX */
+  u_int32_t time_start;
+  u_int32_t time_end;
   struct class_st cst;
+};
+
+struct pkt_payload {
+  u_int16_t cap_len;
+  pm_counter_t sample_pool;
+  pm_counter_t pkt_len;
+  pm_counter_t pkt_num;
+  u_int32_t time_start;
+  pm_class_t class;
+  pm_id_t tag;
+  struct host_addr src_ip;
+  struct host_addr dst_ip;
+};
+
+struct pkt_extras {
+  u_int8_t tcp_flags;
+  u_int32_t mpls_top_label;
 };
 
 struct packet_ptrs_vector {

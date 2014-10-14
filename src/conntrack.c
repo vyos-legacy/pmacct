@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -27,7 +27,6 @@
 #include "ip_flow.h"
 #include "classifier.h"
 #include "jhash.h"
-#include "util.h"
 
 u_int32_t conntrack_total_nodes_v4;
 u_int32_t conntrack_total_nodes_v6;

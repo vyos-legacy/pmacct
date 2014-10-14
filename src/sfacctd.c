@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -60,11 +60,11 @@ void usage_daemon(char *prog_name)
   printf("  -L  \tBind to the specified IP address\n");
   printf("  -l  \tListen on the specified UDP port\n");
   printf("  -f  \tLoad configuration from the specified file\n");
-  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t flows | class | none] \n\tAggregation string (DEFAULT: src_host)\n");
+  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t flows | class | tcpflags | none] \n\tAggregation string (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
   printf("  -n  \tPath to a file containing Network definitions\n");
   printf("  -o  \tPath to a file containing Port definitions\n");
-  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 ] \n\tActivate plugin\n"); 
+  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | nfprobe | sfprobe ] \n\tActivate plugin\n"); 
   printf("  -d  \tEnable debug\n");
   printf("  -S  \t[ auth | mail | daemon | kern | user | local[0-7] ] \n\ttLog to the specified syslog facility\n");
   printf("  -F  \tWrite Core Process PID into the specified file\n");
@@ -76,7 +76,7 @@ void usage_daemon(char *prog_name)
   printf("  -s  \tMemory pool size\n");
   printf("\nPostgreSQL (-P pgsql)/MySQL (-P mysql)/SQLite (-P sqlite3) plugin options:\n");
   printf("  -r  \tRefresh time (in seconds)\n");
-  printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 ] \n\tTable version\n");
+  printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 | 7 ] \n\tTable version\n");
   printf("\n");
   printf("Examples:\n");
   printf("  Daemonize the process and write data into a MySQL database\n");
@@ -97,7 +97,7 @@ int main(int argc,char **argv, char **envp)
   struct packet_ptrs_vector pptrs;
   char config_file[SRVBUFLEN];
   unsigned char sflow_packet[SFLOW_MAX_MSG_SIZE];
-  int logf, sd, rc, yes=1, allowed;
+  int logf, rc, yes=1, allowed;
   struct host_addr addr;
   struct hosts_table allow;
   struct id_table idt;
@@ -145,7 +145,8 @@ int main(int argc,char **argv, char **envp)
   /* a bunch of default definitions */ 
   have_num_memory_pools = FALSE;
   reload_map = FALSE;
-  renorm_table_entries = 0;
+  xflow_status_table_entries = 0;
+  xflow_tot_bad_datagrams = 0;
   errflag = 0;
 
   memset(cfg_cmdline, 0, sizeof(cfg_cmdline));
@@ -156,11 +157,12 @@ int main(int argc,char **argv, char **envp)
   memset(&pptrs, 0, sizeof(pptrs));
   memset(&req, 0, sizeof(req));
   memset(&spp, 0, sizeof(spp));
-  memset(&renorm_table, 0, sizeof(renorm_table));
   memset(&class, 0, sizeof(class));
+  memset(&xflow_status_table, 0, sizeof(xflow_status_table));
   config.acct_type = ACCT_SF;
 
   rows = 0;
+  glob_pcapt = NULL;
 
   /* getting commandline values */
   while (!errflag && ((cp = getopt(argc, argv, ARGS_SFACCTD)) != -1)) {
@@ -310,31 +312,77 @@ int main(int argc,char **argv, char **envp)
     Log(LOG_INFO, "INFO ( default/core ): Start logging ...\n");
   }
 
+  if (config.logfile) config.logfile_fd = open_logfile(config.logfile);
+
   /* Enforcing policies over aggregation methods */
   list = plugins_list;
   while (list) {
-    if (strcmp(list->type.string, "core")) {  
-      evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
-      if (!list->cfg.what_to_count) {
-	Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
+    if (list->type.id != PLUGIN_ID_CORE) {  
+      if (list->type.id == PLUGIN_ID_NFPROBE) {
+	list->cfg.nfprobe_what_to_count = list->cfg.what_to_count;
+	list->cfg.what_to_count = 0;
+#if defined (HAVE_L2)
+	if (list->cfg.nfprobe_version == 9) {
+	  list->cfg.what_to_count |= COUNT_SRC_MAC;
+	  list->cfg.what_to_count |= COUNT_DST_MAC;
+	  list->cfg.what_to_count |= COUNT_VLAN;
+	}
+#endif
 	list->cfg.what_to_count |= COUNT_SRC_HOST;
+	list->cfg.what_to_count |= COUNT_DST_HOST;
+	list->cfg.what_to_count |= COUNT_SRC_PORT;
+	list->cfg.what_to_count |= COUNT_DST_PORT;
+	list->cfg.what_to_count |= COUNT_IP_TOS;
+	list->cfg.what_to_count |= COUNT_IP_PROTO;
+	if (list->cfg.networks_file || list->cfg.nfacctd_as == NF_AS_KEEP) {
+	  list->cfg.what_to_count |= COUNT_SRC_AS;
+	  list->cfg.what_to_count |= COUNT_DST_AS;
+	}
+	if (list->cfg.nfprobe_version == 9 && list->cfg.classifiers_path)
+	  list->cfg.what_to_count |= COUNT_CLASS;
+	if (list->cfg.nfprobe_version == 9 && list->cfg.pre_tag_map)
+	  list->cfg.what_to_count |= COUNT_ID;
+	list->cfg.what_to_count |= COUNT_COUNTERS;
+
+	list->cfg.data_type = PIPE_TYPE_METADATA;
+	list->cfg.data_type |= PIPE_TYPE_EXTRAS;
       }
-      if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file && list->cfg.nfacctd_as != NF_AS_KEEP) {
-        Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
-        exit(1);
+      else if (list->type.id == PLUGIN_ID_SFPROBE) {
+	list->cfg.what_to_count = COUNT_PAYLOAD;
+	if (list->cfg.classifiers_path) list->cfg.what_to_count |= COUNT_CLASS;
+	if (list->cfg.pre_tag_map) list->cfg.what_to_count |= COUNT_ID;
+
+	list->cfg.data_type = PIPE_TYPE_PAYLOAD;
       }
-      if ((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) && !list->cfg.networks_file && !list->cfg.networks_mask) {
-        Log(LOG_ERR, "ERROR ( %s/%s ): NET aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
-        exit(1);
+      else {
+	evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
+	if (!list->cfg.what_to_count) {
+	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
+	  list->cfg.what_to_count |= COUNT_SRC_HOST;
+	}
+	if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file && list->cfg.nfacctd_as != NF_AS_KEEP) {
+	  Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
+	  exit(1);
+	}
+	if ((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) && !list->cfg.networks_file && !list->cfg.networks_mask) {
+	  Log(LOG_ERR, "ERROR ( %s/%s ): NET aggregation has been selected but NO 'networks_file' has been specified. Exiting...\n\n", list->name, list->type.string);
+	  exit(1);
+	}
+	if (list->cfg.what_to_count & COUNT_CLASS && !list->cfg.classifiers_path) {
+	  Log(LOG_ERR, "ERROR ( %s/%s ): 'class' aggregation selected but NO 'classifiers' key specified. Exiting...\n\n", list->name, list->type.string);
+	  exit(1);
+	}
+	list->cfg.what_to_count |= COUNT_COUNTERS;
+	list->cfg.data_type = PIPE_TYPE_METADATA;
       }
-    } 
+    }
     list = list->next;
   }
 
   /* signal handling we want to inherit to plugins (when not re-defined elsewhere) */
   signal(SIGCHLD, startup_handle_falling_child); /* takes note of plugins failed during startup phase */
   signal(SIGHUP, reload); /* handles reopening of syslog channel */
-  signal(SIGUSR1, SIG_IGN); /* ignore this signal */ 
+  signal(SIGUSR1, push_stats); /* logs various statistics via Log() calls */ 
   signal(SIGUSR2, reload_maps); /* sets to true the reload_maps flag */
   signal(SIGPIPE, SIG_IGN); /* we want to exit gracefully when a pipe is broken */
 
@@ -370,22 +418,22 @@ int main(int argc,char **argv, char **envp)
   }
 
   /* socket creation */
-  sd = socket(((struct sockaddr *)&server)->sa_family, SOCK_DGRAM, 0);
-  if (sd < 0) {
+  config.sock = socket(((struct sockaddr *)&server)->sa_family, SOCK_DGRAM, 0);
+  if (config.sock < 0) {
     Log(LOG_ERR, "ERROR ( default/core ): socket() failed.\n");
     exit(1);
   }
 
   /* bind socket to port */
-  rc = Setsocksize(sd, SOL_SOCKET, SO_REUSEADDR, (char *)&yes, sizeof(yes));
+  rc = Setsocksize(config.sock, SOL_SOCKET, SO_REUSEADDR, (char *)&yes, sizeof(yes));
   if (rc < 0) Log(LOG_ERR, "WARN ( default/core ): Setsocksize() failed for SO_REUSEADDR.\n");
 
   if (config.pipe_size) {
-    rc = Setsocksize(sd, SOL_SOCKET, SO_RCVBUF, &config.pipe_size, sizeof(config.pipe_size));
+    rc = Setsocksize(config.sock, SOL_SOCKET, SO_RCVBUF, &config.pipe_size, sizeof(config.pipe_size));
     if (rc < 0) Log(LOG_ERR, "WARN ( default/core ): Setsocksize() failed for 'plugin_pipe_size' = '%d'.\n", config.pipe_size); 
   }
 
-  rc = bind(sd, (struct sockaddr *) &server, slen);
+  rc = bind(config.sock, (struct sockaddr *) &server, slen);
   if (rc < 0) {
     Log(LOG_ERR, "ERROR ( default/core): bind() to ip=%s port=%d/udp failed (errno: %d).\n", config.nfacctd_ip, config.nfacctd_port, errno);
     exit(1);
@@ -396,7 +444,7 @@ int main(int argc,char **argv, char **envp)
     if (mcast_groups[idx].family == AF_INET) {
       memset(&multi_req4, 0, sizeof(multi_req4));
       multi_req4.imr_multiaddr.s_addr = mcast_groups[idx].address.ipv4.s_addr;
-      if (setsockopt(sd, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char *)&multi_req4, sizeof(multi_req4)) < 0) {
+      if (setsockopt(config.sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char *)&multi_req4, sizeof(multi_req4)) < 0) {
 	Log(LOG_ERR, "ERROR: IPv4 multicast address - ADD membership failed.\n");
 	exit(1);
       }
@@ -405,7 +453,7 @@ int main(int argc,char **argv, char **envp)
     if (mcast_groups[idx].family == AF_INET6) {
       memset(&multi_req6, 0, sizeof(multi_req6));
       ip6_addr_cpy(&multi_req6.ipv6mr_multiaddr, &mcast_groups[idx].address.ipv6);
-      if (setsockopt(sd, IPPROTO_IPV6, IPV6_JOIN_GROUP, (char *)&multi_req6, sizeof(multi_req6)) < 0) {
+      if (setsockopt(config.sock, IPPROTO_IPV6, IPV6_JOIN_GROUP, (char *)&multi_req6, sizeof(multi_req6)) < 0) {
 	Log(LOG_ERR, "ERROR: IPv6 multicast address - ADD membership failed.\n");
 	exit(1);
       }
@@ -425,8 +473,11 @@ int main(int argc,char **argv, char **envp)
     pptrs.v4.idtable = NULL;
   }
 
+  if (config.classifiers_path) init_classifiers(config.classifiers_path);
+
   /* plugins glue: creation */
   load_plugins(&req);
+  load_plugin_filters(1);
   evaluate_packet_handlers();
   pm_setproctitle("%s [%s]", "Core Process", "default");
   if (config.pidfile) write_pid_file(config.pidfile);
@@ -452,7 +503,8 @@ int main(int argc,char **argv, char **envp)
   pptrs.v4.iph_ptr = pptrs.v4.packet_ptr + ETHER_HDRLEN; 
   pptrs.v4.tlh_ptr = pptrs.v4.packet_ptr + ETHER_HDRLEN + sizeof(struct my_iphdr); 
   Assign8(((struct my_iphdr *)pptrs.v4.iph_ptr)->ip_vhl, 5);
-  pptrs.v4.pkthdr->caplen = 38; /* eth_header + my_iphdr + my_tlhdr */
+  // pptrs.v4.pkthdr->caplen = 38; /* eth_header + my_iphdr + my_tlhdr */
+  pptrs.v4.pkthdr->caplen = 55;
   pptrs.v4.pkthdr->len = 100; /* fake len */ 
   pptrs.v4.l3_proto = ETHERTYPE_IP;
 
@@ -469,7 +521,8 @@ int main(int argc,char **argv, char **envp)
   pptrs.vlan4.iph_ptr = pptrs.vlan4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
   pptrs.vlan4.tlh_ptr = pptrs.vlan4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN + sizeof(struct my_iphdr);
   Assign8(((struct my_iphdr *)pptrs.vlan4.iph_ptr)->ip_vhl, 5);
-  pptrs.vlan4.pkthdr->caplen = 42; /* eth_header + vlan + my_iphdr + my_tlhdr */
+  // pptrs.vlan4.pkthdr->caplen = 42; /* eth_header + vlan + my_iphdr + my_tlhdr */
+  pptrs.vlan4.pkthdr->caplen = 59;
   pptrs.vlan4.pkthdr->len = 100; /* fake len */
   pptrs.vlan4.l3_proto = ETHERTYPE_IP;
 
@@ -482,7 +535,8 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.mpls4.packet_ptr)->ether_type, htons(ETHERTYPE_MPLS));
   pptrs.mpls4.mac_ptr = (u_char *)((struct eth_header *)pptrs.mpls4.packet_ptr)->ether_dhost;
   pptrs.mpls4.mpls_ptr = pptrs.mpls4.packet_ptr + ETHER_HDRLEN;
-  pptrs.mpls4.pkthdr->caplen = 78; /* eth_header + upto 10 MPLS labels + my_iphdr + my_tlhdr */
+  // pptrs.mpls4.pkthdr->caplen = 78; /* eth_header + upto 10 MPLS labels + my_iphdr + my_tlhdr */
+  pptrs.mpls4.pkthdr->caplen = 95;
   pptrs.mpls4.pkthdr->len = 100; /* fake len */
   pptrs.mpls4.l3_proto = ETHERTYPE_IP;
 
@@ -497,7 +551,8 @@ int main(int argc,char **argv, char **envp)
   pptrs.vlanmpls4.vlan_ptr = pptrs.vlanmpls4.packet_ptr + ETHER_HDRLEN;
   Assign16(*(pptrs.vlanmpls4.vlan_ptr+2), htons(ETHERTYPE_MPLS));
   pptrs.vlanmpls4.mpls_ptr = pptrs.vlanmpls4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
-  pptrs.vlanmpls4.pkthdr->caplen = 82; /* eth_header + vlan + upto 10 MPLS labels + my_iphdr + my_tlhdr */
+  // pptrs.vlanmpls4.pkthdr->caplen = 82; /* eth_header + vlan + upto 10 MPLS labels + my_iphdr + my_tlhdr */
+  pptrs.vlanmpls4.pkthdr->caplen = 99;
   pptrs.vlanmpls4.pkthdr->len = 100; /* fake len */
   pptrs.vlanmpls4.l3_proto = ETHERTYPE_IP;
 
@@ -514,7 +569,8 @@ int main(int argc,char **argv, char **envp)
   pptrs.v6.tlh_ptr = pptrs.v6.packet_ptr + ETHER_HDRLEN + sizeof(struct ip6_hdr);
   Assign16(((struct ip6_hdr *)pptrs.v6.iph_ptr)->ip6_plen, htons(100));
   Assign16(((struct ip6_hdr *)pptrs.v6.iph_ptr)->ip6_hlim, htons(64));
-  pptrs.v6.pkthdr->caplen = 60; /* eth_header + ip6_hdr + my_tlhdr */
+  // pptrs.v6.pkthdr->caplen = 60; /* eth_header + ip6_hdr + my_tlhdr */
+  pptrs.v6.pkthdr->caplen = 77;
   pptrs.v6.pkthdr->len = 100; /* fake len */
   pptrs.v6.l3_proto = ETHERTYPE_IPV6;
 
@@ -532,7 +588,8 @@ int main(int argc,char **argv, char **envp)
   pptrs.vlan6.tlh_ptr = pptrs.vlan6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN + sizeof(struct ip6_hdr);
   Assign16(((struct ip6_hdr *)pptrs.vlan6.iph_ptr)->ip6_plen, htons(100));
   Assign16(((struct ip6_hdr *)pptrs.vlan6.iph_ptr)->ip6_hlim, htons(64));
-  pptrs.vlan6.pkthdr->caplen = 64; /* eth_header + vlan + ip6_hdr + my_tlhdr */
+  // pptrs.vlan6.pkthdr->caplen = 64; /* eth_header + vlan + ip6_hdr + my_tlhdr */
+  pptrs.vlan6.pkthdr->caplen = 81;
   pptrs.vlan6.pkthdr->len = 100; /* fake len */
   pptrs.vlan6.l3_proto = ETHERTYPE_IPV6;
 
@@ -545,7 +602,8 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.mpls6.packet_ptr)->ether_type, htons(ETHERTYPE_MPLS));
   pptrs.mpls6.mac_ptr = (u_char *)((struct eth_header *)pptrs.mpls6.packet_ptr)->ether_dhost;
   pptrs.mpls6.mpls_ptr = pptrs.mpls6.packet_ptr + ETHER_HDRLEN;
-  pptrs.mpls6.pkthdr->caplen = 100; /* eth_header + upto 10 MPLS labels + ip6_hdr + my_tlhdr */
+  // pptrs.mpls6.pkthdr->caplen = 100; /* eth_header + upto 10 MPLS labels + ip6_hdr + my_tlhdr */
+  pptrs.mpls6.pkthdr->caplen = 117;
   pptrs.mpls6.pkthdr->len = 128; /* fake len */
   pptrs.mpls6.l3_proto = ETHERTYPE_IPV6;
 
@@ -560,7 +618,8 @@ int main(int argc,char **argv, char **envp)
   pptrs.vlanmpls6.vlan_ptr = pptrs.vlanmpls6.packet_ptr + ETHER_HDRLEN;
   Assign16(*(pptrs.vlanmpls6.vlan_ptr+2), htons(ETHERTYPE_MPLS));
   pptrs.vlanmpls6.mpls_ptr = pptrs.vlanmpls6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
-  pptrs.vlanmpls6.pkthdr->caplen = 104; /* eth_header + vlan + upto 10 MPLS labels + ip6_hdr + my_tlhdr */
+  // pptrs.vlanmpls6.pkthdr->caplen = 104; /* eth_header + vlan + upto 10 MPLS labels + ip6_hdr + my_tlhdr */
+  pptrs.vlanmpls6.pkthdr->caplen = 121;
   pptrs.vlanmpls6.pkthdr->len = 128; /* fake len */
   pptrs.vlanmpls6.l3_proto = ETHERTYPE_IP;
 #endif
@@ -571,13 +630,16 @@ int main(int argc,char **argv, char **envp)
   /* Main loop */
   for (;;) {
     // memset(&spp, 0, sizeof(spp));
-    ret = recvfrom(sd, sflow_packet, SFLOW_MAX_MSG_SIZE, 0, (struct sockaddr *) &client, &clen);
+    ret = recvfrom(config.sock, sflow_packet, SFLOW_MAX_MSG_SIZE, 0, (struct sockaddr *) &client, &clen);
     spp.rawSample = sflow_packet;
     spp.rawSampleLen = ret;
     spp.datap = (u_int32_t *) spp.rawSample;
     spp.endp = sflow_packet + spp.rawSampleLen; 
+    reset_tag_status(&pptrs);
+    reset_shadow_status(&pptrs);
+    reset_tagdist_status(&pptrs);
 
-    if (ret < SFLOW_MIN_MSG_SIZE) continue; 
+    // if (ret < SFLOW_MIN_MSG_SIZE) continue; 
 
     /* check if Hosts Allow Table is loaded; if it is, we will enforce rules */
     if (allow.num) allowed = check_allow(&allow, (struct sockaddr *)&client); 
@@ -592,15 +654,16 @@ int main(int argc,char **argv, char **envp)
     switch(spp.datagramVersion = getData32(&spp)) {
     case 5:
       getAddress(&spp, &spp.agent_addr);
-      process_SFv5_packet(&spp, &pptrs, &req);
+      process_SFv5_packet(&spp, &pptrs, &req, (struct sockaddr *) &client);
       break;
     case 4:
     case 2:
       getAddress(&spp, &spp.agent_addr);
-      process_SFv2v4_packet(&spp, &pptrs, &req);
+      process_SFv2v4_packet(&spp, &pptrs, &req, (struct sockaddr *) &client);
       break;
     default:
       notify_malf_packet(LOG_INFO, "INFO: Discarding unknown packet", (struct sockaddr *) pptrs.v4.f_agent);
+      xflow_tot_bad_datagrams++;
       break;
     }
   }
@@ -615,14 +678,18 @@ void InterSampleCleanup(SFSample *spp)
 }
 
 void process_SFv2v4_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
-		                struct plugin_requests *req)
+		                struct plugin_requests *req, struct sockaddr *agent)
 {
   u_int32_t samplesInPacket, idx;
   u_int32_t sampleType;
 
+  spp->agentSubId = 0; /* not supported */
   spp->sequenceNo = getData32(spp);
   spp->sysUpTime = getData32(spp);
   samplesInPacket = getData32(spp);
+  
+  pptrsv->v4.f_status = sfv245_check_status(spp, agent);
+  set_vector_f_status(pptrsv);
 
   for (idx = 0; idx < samplesInPacket; idx++) {
     InterSampleCleanup(spp);
@@ -636,6 +703,7 @@ void process_SFv2v4_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
       break;
     default:
       notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 sample", (struct sockaddr *) pptrsv->v4.f_agent);
+      xflow_tot_bad_datagrams++;
       return; /* unexpected sampleType; aborting packet */
     }
     if ((u_char *)spp->datap > spp->endp) return;
@@ -643,7 +711,7 @@ void process_SFv2v4_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
 }
 
 void process_SFv5_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
-		struct plugin_requests *req)
+		struct plugin_requests *req, struct sockaddr *agent)
 {
   u_int32_t samplesInPacket, idx;
   u_int32_t sampleType;
@@ -652,6 +720,8 @@ void process_SFv5_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
   spp->sequenceNo = getData32(spp);
   spp->sysUpTime = getData32(spp);
   samplesInPacket = getData32(spp);
+  pptrsv->v4.f_status = sfv245_check_status(spp, agent);
+  set_vector_f_status(pptrsv);
 
   for (idx = 0; idx < samplesInPacket; idx++) {
     InterSampleCleanup(spp);
@@ -671,6 +741,7 @@ void process_SFv5_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
       break;
     default:
       notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v5 sample", (struct sockaddr *) pptrsv->v4.f_agent);
+      xflow_tot_bad_datagrams++;
       return; /* unexpected sampleType; aborting packet */ 
     }
     if ((u_char *)spp->datap > spp->endp) return; 
@@ -732,13 +803,15 @@ void compute_once()
 
   CounterSz = sizeof(dummy.pkt_len);
   PdataSz = sizeof(struct pkt_data);
+  PpayloadSz = sizeof(struct pkt_payload);
+  PextrasSz = sizeof(struct pkt_extras);
   ChBufHdrSz = sizeof(struct ch_buf_hdr);
   CharPtrSz = sizeof(char *);
   IP4HdrSz = sizeof(struct my_iphdr);
   IP4TlSz = sizeof(struct my_iphdr)+sizeof(struct my_tlhdr);
   SFSampleSz = sizeof(SFSample);
   SFLAddressSz = sizeof(SFLAddress);
-  SFrenormEntrySz = sizeof(struct SF_renorm_entry);
+  SFrenormEntrySz = sizeof(struct xflow_status_entry_sampling);
   PptrsSz = sizeof(struct packet_ptrs);
   CSSz = sizeof(struct class_st);
   HostAddrSz = sizeof(struct host_addr);
@@ -1382,6 +1455,35 @@ void readExtendedProcess(SFSample *sample)
   for (i = 0; i < num_processes; i++) skipBytes(sample, 4);
 }
 
+void readExtendedClass(SFSample *sample)
+{
+  u_int32_t ret;
+  u_char buf[MAX_PROTOCOL_LEN+1], *bufptr = buf;
+
+  if (config.classifiers_path) {
+    ret = getData32_nobswap(sample);
+    memcpy(bufptr, &ret, 4);
+    bufptr += 4;
+    ret = getData32_nobswap(sample);
+    memcpy(bufptr, &ret, 4);
+    bufptr += 4;
+    ret = getData32_nobswap(sample);
+    memcpy(bufptr, &ret, 4);
+    bufptr += 4;
+    ret = getData32_nobswap(sample);
+    memcpy(bufptr, &ret, 4);
+    bufptr += 4;
+
+    sample->class = NF_evaluate_classifiers(buf);
+  }
+  else skipBytes(sample, MAX_PROTOCOL_LEN);
+}
+
+void readExtendedTag(SFSample *sample)
+{
+  sample->tag = getData32(sample);
+}
+
 void decodeMpls(SFSample *sample)
 {
   struct packet_ptrs dummy_pptrs;
@@ -1600,7 +1702,10 @@ void readv2v4FlowSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, str
   case INMPACKETTYPE_HEADER: readFlowSample_header(sample); break;
   case INMPACKETTYPE_IPV4: readFlowSample_IPv4(sample); break;
   case INMPACKETTYPE_IPV6: readFlowSample_IPv6(sample); break;
-  default: notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 Data Tag", (struct sockaddr *) pptrsv->v4.f_agent); break;
+  default: 
+    notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 Data Tag", (struct sockaddr *) pptrsv->v4.f_agent);
+    xflow_tot_bad_datagrams++;
+    break;
   }
 
   sample->extended_data_tag = 0;
@@ -1619,7 +1724,10 @@ void readv2v4FlowSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, str
 	break;
       case INMEXTENDED_USER: readExtendedUser(sample); break;
       case INMEXTENDED_URL: readExtendedUrl(sample); break;
-      default: notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 Extended Data Tag", (struct sockaddr *) pptrsv->v4.f_agent); break;
+      default: 
+	notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 Extended Data Tag", (struct sockaddr *) pptrsv->v4.f_agent);
+	xflow_tot_bad_datagrams++;
+	break;
       }
     }
   }
@@ -1697,6 +1805,8 @@ void readv5FlowSample(SFSample *sample, int expanded, struct packet_ptrs_vector 
       case SFLFLOW_EX_MPLS_LDP_FEC: readExtendedMplsLDP_FEC(sample); break;
       case SFLFLOW_EX_VLAN_TUNNEL:  readExtendedVlanTunnel(sample); break;
       case SFLFLOW_EX_PROCESS:      readExtendedProcess(sample); break;
+      case SFLFLOW_EX_CLASS:	    readExtendedClass(sample); break;
+      case SFLFLOW_EX_TAG:	    readExtendedTag(sample); break;
       default: skipBytes(sample, length); break; 
       }
       if (lengthCheck(sample, start, length) == ERR) return;
@@ -1753,6 +1863,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 {
   struct packet_ptrs *pptrs = &pptrsv->v4;
   u_int16_t dcd_sport = htons(sample->dcd_sport), dcd_dport = htons(sample->dcd_dport);
+  u_int8_t dcd_ipProtocol = sample->dcd_ipProtocol, dcd_ipTos = sample->dcd_ipTos;
   u_int16_t in_vlan = htons(sample->in_vlan);
   u_int16_t flow_type;
 
@@ -1776,8 +1887,8 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 	((struct my_iphdr *)pptrs->iph_ptr)->ip_vhl = 0x45;
         memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
         memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
-        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_p, &sample->dcd_ipProtocol, 1);
-        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, &sample->dcd_ipTos, 1);
+        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_p, &dcd_ipProtocol, 1);
+        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, &dcd_ipTos, 1);
         memcpy(&((struct my_tlhdr *)pptrs->tlh_ptr)->src_port, &dcd_sport, 2);
         memcpy(&((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port, &dcd_dport, 2);
       }
@@ -1797,7 +1908,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(pptrsv->v6.mac_ptr, &sample->eth_dst, ETH_ADDR_LEN);
         memcpy(&((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_src, &sample->ipsrc.address.ip_v6, IP6AddrSz);
         memcpy(&((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz);
-        memcpy(&((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_nxt, &sample->dcd_ipProtocol, 1);
+        memcpy(&((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1);
         /* XXX: class ID ? */
         memcpy(&((struct my_tlhdr *)pptrsv->v6.tlh_ptr)->src_port, &dcd_sport, 2); 
         memcpy(&((struct my_tlhdr *)pptrsv->v6.tlh_ptr)->dst_port, &dcd_dport, 2);
@@ -1819,8 +1930,8 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 	((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_vhl = 0x45;
         memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
         memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
-        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_p, &sample->dcd_ipProtocol, 1);
-        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_tos, &sample->dcd_ipTos, 1); 
+        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_p, &dcd_ipProtocol, 1);
+        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_tos, &dcd_ipTos, 1); 
         memcpy(&((struct my_tlhdr *)pptrsv->vlan4.tlh_ptr)->src_port, &dcd_sport, 2);
         memcpy(&((struct my_tlhdr *)pptrsv->vlan4.tlh_ptr)->dst_port, &dcd_dport, 2);
       }
@@ -1841,7 +1952,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 	((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_ctlun.ip6_un2_vfc = 0x60;
         memcpy(&((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_src, &sample->ipsrc.address.ip_v6, IP6AddrSz); 
         memcpy(&((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz);
-        memcpy(&((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_nxt, &sample->dcd_ipProtocol, 1); 
+        memcpy(&((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1); 
         /* XXX: class ID ? */
         memcpy(&((struct my_tlhdr *)pptrsv->vlan6.tlh_ptr)->src_port, &dcd_sport, 2); 
         memcpy(&((struct my_tlhdr *)pptrsv->vlan6.tlh_ptr)->dst_port, &dcd_dport, 2); 
@@ -1864,7 +1975,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(pptrsv->mpls4.mac_ptr, &sample->eth_dst, ETH_ADDR_LEN); 
 
         for (idx = 0; idx <= sample->lstk.depth && idx < 10; idx++) { 
-          label = htonl(sample->lstk.stack[idx]);
+          label = sample->lstk.stack[idx];
           memcpy(ptr, &label, 4);
           ptr += 4;
         }
@@ -1876,8 +1987,8 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 	((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_vhl = 0x45;
         memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
         memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4); 
-        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_p, &sample->dcd_ipProtocol, 1); 
-        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_tos, &sample->dcd_ipTos, 1); 
+        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_p, &dcd_ipProtocol, 1); 
+        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_tos, &dcd_ipTos, 1); 
         memcpy(&((struct my_tlhdr *)pptrsv->mpls4.tlh_ptr)->src_port, &dcd_sport, 2); 
         memcpy(&((struct my_tlhdr *)pptrsv->mpls4.tlh_ptr)->dst_port, &dcd_dport, 2); 
       }
@@ -1898,7 +2009,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(pptrsv->mpls6.mac_ptr, &sample->eth_dst, ETH_ADDR_LEN); 
 
 	for (idx = 0; idx <= sample->lstk.depth && idx < 10; idx++) {
-	  label = htonl(sample->lstk.stack[idx]);
+	  label = sample->lstk.stack[idx];
 	  memcpy(ptr, &label, 4);
 	  ptr += 4;
 	}
@@ -1910,7 +2021,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 	((struct ip6_hdr *)pptrsv->mpls6.iph_ptr)->ip6_ctlun.ip6_un2_vfc = 0x60;
         memcpy(&((struct ip6_hdr *)pptrsv->mpls6.iph_ptr)->ip6_src, &sample->ipsrc.address.ip_v6, IP6AddrSz); 
         memcpy(&((struct ip6_hdr *)pptrsv->mpls6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz); 
-        memcpy(&((struct ip6_hdr *)pptrsv->mpls6.iph_ptr)->ip6_nxt, &sample->dcd_ipProtocol, 1); 
+        memcpy(&((struct ip6_hdr *)pptrsv->mpls6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1); 
         /* XXX: class ID ? */
         memcpy(&((struct my_tlhdr *)pptrsv->mpls6.tlh_ptr)->src_port, &dcd_sport, 2); 
         memcpy(&((struct my_tlhdr *)pptrsv->mpls6.tlh_ptr)->dst_port, &dcd_dport, 2);
@@ -1933,7 +2044,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(pptrsv->vlanmpls4.vlan_ptr, &in_vlan, 2); 
 
 	for (idx = 0; idx <= sample->lstk.depth && idx < 10; idx++) {
-	  label = htonl(sample->lstk.stack[idx]);
+	  label = sample->lstk.stack[idx];
 	  memcpy(ptr, &label, 4);
 	  ptr += 4;
 	}
@@ -1945,8 +2056,8 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 	((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_vhl = 0x45;
         memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4); 
         memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
-        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_p, &sample->dcd_ipProtocol, 1);
-        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_tos, &sample->dcd_ipTos, 1);
+        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_p, &dcd_ipProtocol, 1);
+        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_tos, &dcd_ipTos, 1);
         memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls4.tlh_ptr)->src_port, &dcd_sport, 2);
         memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls4.tlh_ptr)->dst_port, &dcd_dport, 2);
       }
@@ -1968,7 +2079,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(pptrsv->vlanmpls6.vlan_ptr, &in_vlan, 2); 
 
 	for (idx = 0; idx <= sample->lstk.depth && idx < 10; idx++) {
-	  label = htonl(sample->lstk.stack[idx]);
+	  label = sample->lstk.stack[idx];
 	  memcpy(ptr, &label, 4);
 	  ptr += 4;
 	}
@@ -1980,7 +2091,7 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 	((struct ip6_hdr *)pptrsv->vlanmpls6.iph_ptr)->ip6_ctlun.ip6_un2_vfc = 0x60;
         memcpy(&((struct ip6_hdr *)pptrsv->vlanmpls6.iph_ptr)->ip6_src, &sample->ipsrc.address.ip_v6, IP6AddrSz); 
         memcpy(&((struct ip6_hdr *)pptrsv->vlanmpls6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz); 
-        memcpy(&((struct ip6_hdr *)pptrsv->vlanmpls6.iph_ptr)->ip6_nxt, &sample->dcd_ipProtocol, 1); 
+        memcpy(&((struct ip6_hdr *)pptrsv->vlanmpls6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1); 
         /* XXX: class ID ? */
         memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls6.tlh_ptr)->src_port, &dcd_sport, 2); 
         memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls6.tlh_ptr)->dst_port, &dcd_dport, 2);
@@ -2011,22 +2122,46 @@ int SF_find_id(struct packet_ptrs *pptrs)
   id = 0;
   if (sample->agent_addr.type == SFLADDRESSTYPE_IP_V4) {
     for (x = 0; x < t->ipv4_num; x++) {
-      if (t->e[x].agent_ip.address.ipv4.s_addr == sample->agent_addr.address.ip_v4.s_addr) {
+      if (t->e[x].agent_ip.a.address.ipv4.s_addr == sample->agent_addr.address.ip_v4.s_addr) {
         for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
-        if (id) break;
+        if (id) {
+	  if (t->e[x].stack.func) id = (*t->e[x].stack.func)(id, pptrs->tag);
+          pptrs->tag = id;
+	  pptrs->tag_dist = t->e[x].ret;
+          if (t->e[x].jeq.ptr) {
+            exec_plugins(pptrs);
+
+            x = t->e[x].jeq.ptr->pos;
+            x--; /* yes, it will be automagically incremented by the for() cycle */
+            if (t->e[x].ret) set_shadow_status(pptrs);
+            id = 0;
+          }
+          else break;
+        }
       }
-      else if (t->e[x].agent_ip.address.ipv4.s_addr > sample->agent_addr.address.ip_v4.s_addr) break;
     }
   }
 #if defined ENABLE_IPV6
   else if (sample->agent_addr.type == SFLADDRESSTYPE_IP_V6) { 
     for (x = (t->num-t->ipv6_num); x < t->num; x++) {
-      if (!ip6_addr_cmp(&t->e[x].agent_ip.address.ipv6, &sample->agent_addr.address.ip_v6)) {
+      if (!ip6_addr_cmp(&t->e[x].agent_ip.a.address.ipv6, &sample->agent_addr.address.ip_v6)) {
         for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
-        if (id) break;
+        if (id) {
+	  if (t->e[x].stack.func) id = (*t->e[x].stack.func)(id, pptrs->tag);
+          pptrs->tag = id;
+	  pptrs->tag_dist = t->e[x].ret;
+
+          if (t->e[x].jeq.ptr) {
+            exec_plugins(pptrs);
+
+            x = t->e[x].jeq.ptr->pos;
+            x--; /* yes, it will be automagically incremented by the for() cycle */
+            if (t->e[x].ret) set_shadow_status(pptrs);
+            id = 0;
+          }
+          else break;
+        }
       }
-      else if (ip6_addr_cmp(&t->e[x].agent_ip.address.ipv6, &sample->agent_addr.address.ip_v6) > 0)
-        break;
     }
   }
 #endif
@@ -2081,3 +2216,22 @@ int ip6_handler(register struct packet_ptrs *pptrs)
 {
 }
 
+char *sfv245_check_status(SFSample *spp, struct sockaddr *sa)
+{
+  struct sockaddr salocal;
+  u_int32_t aux1 = spp->agentSubId;
+  struct xflow_status_entry *entry = NULL;
+  int hash; 
+
+  memcpy(&salocal, sa, sizeof(struct sockaddr));
+  ( (struct sockaddr_in *)&salocal )->sin_addr = spp->agent_addr.address.ip_v4;
+  hash = hash_status_table(aux1, &salocal, XFLOW_STATUS_TABLE_SZ);
+
+  if (hash >= 0) {
+    entry = search_status_table(&salocal, aux1, hash, XFLOW_STATUS_TABLE_MAX_ENTRIES);
+    update_status_table(entry, spp->sequenceNo);
+    entry->inc = 1;
+  }
+
+  return (char *) entry;
+}

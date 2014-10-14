@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -18,6 +18,17 @@
     along with this program; if not, write to the Free Software
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
+
+/* defines */
+#define PLUGIN_ID_CORE          0
+#define PLUGIN_ID_MEMORY        1
+#define PLUGIN_ID_PRINT         2
+#define PLUGIN_ID_NFPROBE       3
+#define PLUGIN_ID_SFPROBE       4
+#define PLUGIN_ID_MYSQL		5 
+#define PLUGIN_ID_PGSQL         6
+#define PLUGIN_ID_SQLITE3       7
+#define PLUGIN_ID_UNKNOWN       -1
 
 /* vars */
 int protocols_number;
@@ -164,6 +175,7 @@ static const struct _protocols_struct _protocols[] = {
 
 #ifdef __PMACCTD_C
 static struct _devices_struct _devices[] = {
+  {null_handler, DLT_NULL},
   {eth_handler, DLT_EN10MB},
   {ppp_handler, DLT_PPP},
   {fddi_handler, DLT_FDDI},
@@ -191,6 +203,7 @@ static struct _devices_struct _devices[] = {
 static const struct _dictionary_line dictionary[] = {
   {"debug", cfg_key_debug},
   {"syslog", cfg_key_syslog},
+  {"logfile", cfg_key_logfile},
   {"pidfile", cfg_key_pidfile},
   {"daemonize", cfg_key_daemonize},
   {"aggregate", cfg_key_aggregate},
@@ -228,8 +241,10 @@ static const struct _dictionary_line dictionary[] = {
   {"sql_optimize_clauses", cfg_key_sql_optimize_clauses},
   {"sql_history", cfg_key_sql_history},
   {"sql_history_roundoff", cfg_key_sql_history_roundoff},
+  {"sql_history_since_epoch", cfg_key_sql_history_since_epoch},
   {"sql_recovery_backup_host", cfg_key_sql_recovery_backup_host},
   {"sql_recovery_logfile", cfg_key_sql_recovery_logfile},
+  {"sql_max_writers", cfg_key_sql_max_writers},
   {"sql_trigger_exec", cfg_key_sql_trigger_exec},
   {"sql_trigger_time", cfg_key_sql_trigger_time},
   {"sql_cache_entries", cfg_key_sql_cache_entries},
@@ -238,6 +253,8 @@ static const struct _dictionary_line dictionary[] = {
   {"sql_preprocess_type", cfg_key_sql_preprocess_type},
   {"sql_multi_values", cfg_key_sql_multi_values},
   {"sql_aggressive_classification", cfg_key_sql_aggressive_classification},
+  {"sql_locking_style", cfg_key_sql_locking_style},
+  {"sql_use_copy", cfg_key_sql_use_copy},
   {"print_refresh_time", cfg_key_print_refresh_time},
   {"print_cache_entries", cfg_key_print_cache_entries},
   {"print_markers", cfg_key_print_markers},
@@ -248,15 +265,18 @@ static const struct _dictionary_line dictionary[] = {
   {"nfacctd_time_new", cfg_key_nfacctd_time_new},
   {"nfacctd_as_new", cfg_key_nfacctd_as_new},
   {"nfacctd_mcast_groups", cfg_key_nfacctd_mcast_groups},
+  {"nfacctd_sql_log", cfg_key_nfacctd_sql_log},
   {"pmacctd_force_frag_handling", cfg_key_pmacctd_force_frag_handling},
   {"pmacctd_frag_buffer_size", cfg_key_pmacctd_frag_buffer_size},
   {"pmacctd_flow_buffer_size", cfg_key_pmacctd_flow_buffer_size},
+  {"pmacctd_flow_buffer_buckets", cfg_key_pmacctd_flow_buffer_buckets},
   {"pmacctd_conntrack_buffer_size", cfg_key_pmacctd_conntrack_buffer_size},
   {"pmacctd_flow_lifetime", cfg_key_pmacctd_flow_lifetime},
   {"pmacctd_id", cfg_key_post_tag},	/* obsolete */
   {"nfacctd_id_file", cfg_key_pre_tag_map},	/* obsolete */
   {"pcap_savefile", cfg_key_pcap_savefile},
   {"pre_tag_map", cfg_key_pre_tag_map},	
+  {"pre_tag_map_entries", cfg_key_pre_tag_map_entries},	
   {"pre_tag_filter", cfg_key_pre_tag_filter},
   {"post_tag", cfg_key_post_tag},
   {"sampling_rate", cfg_key_sampling_rate},
@@ -265,27 +285,45 @@ static const struct _dictionary_line dictionary[] = {
   {"sfacctd_allow_file", cfg_key_nfacctd_allow_file},
   {"sfacctd_as_new", cfg_key_nfacctd_as_new},
   {"sfacctd_renormalize", cfg_key_sfacctd_renormalize},
+  {"nfacctd_renormalize", cfg_key_sfacctd_renormalize},
+  {"nfacctd_disable_checks", cfg_key_nfacctd_disable_checks},
+  {"sfacctd_disable_checks", cfg_key_nfacctd_disable_checks},
   {"sfacctd_mcast_groups", cfg_key_nfacctd_mcast_groups},
   {"classifiers", cfg_key_classifiers},
   {"classifier_tentatives", cfg_key_classifier_tentatives},
   {"classifier_table_num", cfg_key_classifier_table_num},
+  {"nfprobe_timeouts", cfg_key_nfprobe_timeouts},
+  {"nfprobe_hoplimit", cfg_key_nfprobe_hoplimit},
+  {"nfprobe_maxflows", cfg_key_nfprobe_maxflows},
+  {"nfprobe_receiver", cfg_key_nfprobe_receiver},
+  {"nfprobe_engine", cfg_key_nfprobe_engine},
+  {"nfprobe_version", cfg_key_nfprobe_version},
+  {"sfprobe_receiver", cfg_key_sfprobe_receiver},
+//  {"sfprobe_sampling_rate", cfg_key_sfprobe_sampling_rate},
+  {"sfprobe_sampling_rate", cfg_key_sampling_rate},
+  {"sfprobe_agentip", cfg_key_sfprobe_agentip},
+  {"sfprobe_agentsubid", cfg_key_sfprobe_agentsubid},
+  {"flow_handling_threads", cfg_key_flow_handling_threads},
+
   {"", NULL},
 };
 
 static struct plugin_type_entry plugin_types_list[] = {
-  {"core", NULL},
-  {"memory", imt_plugin},
-  {"print", print_plugin},
+  {PLUGIN_ID_CORE, 	"core", 	NULL},
+  {PLUGIN_ID_MEMORY, 	"memory", 	imt_plugin},
+  {PLUGIN_ID_PRINT,	"print",	print_plugin},
+  {PLUGIN_ID_NFPROBE,	"nfprobe",	nfprobe_plugin},
+  {PLUGIN_ID_SFPROBE,	"sfprobe",	sfprobe_plugin},
 #ifdef WITH_MYSQL
-  {"mysql", mysql_plugin},
+  {PLUGIN_ID_MYSQL,	"mysql",	mysql_plugin},
 #endif
 #ifdef WITH_PGSQL
-  {"pgsql", pgsql_plugin},
+  {PLUGIN_ID_PGSQL,	"pgsql",	pgsql_plugin},
 #endif
 #ifdef WITH_SQLITE3
-  {"sqlite3", sqlite3_plugin},
+  {PLUGIN_ID_SQLITE3,	"sqlite3",	sqlite3_plugin},
 #endif
-  {"", NULL},
+  {PLUGIN_ID_UNKNOWN,	"",		NULL},
 };
 
 #endif

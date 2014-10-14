@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -30,7 +30,6 @@ int SQLI_evaluate_history(int);
 int SQLI_compose_static_queries();
 void SQLI_Lock(struct DBdesc *);
 void SQLI_Unlock(struct BE_descs *);
-void SQLI_delete_shadows(struct BE_descs *);
 void SQLI_DB_Connect(struct DBdesc *, char *);
 void SQLI_DB_Close(struct BE_descs *); 
 void SQLI_create_dyn_table(struct DBdesc *, char *);
@@ -47,3 +46,4 @@ static char sqlite3_table_v3[] = "acct_v3";
 static char sqlite3_table_v4[] = "acct_v4";
 static char sqlite3_table_v5[] = "acct_v5";
 static char sqlite3_table_v6[] = "acct_v6";
+static char sqlite3_table_v7[] = "acct_v7";

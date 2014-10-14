@@ -31,6 +31,10 @@ To create v6 tables:
 shell> psql -d template1 -f /tmp/pmacct-create-db.pgsql
 shell> psql -d pmacct -f /tmp/pmacct-create-table_v6.pgsql
 
+To create v7 tables:
+shell> psql -d template1 -f /tmp/pmacct-create-db.pgsql
+shell> psql -d pmacct -f /tmp/pmacct-create-table_v7.pgsql
+
 Until v5 a few tables are created in the 'pmacct' database. 'acct' (or 'acct_vN')
 table is the default table where data will be written when in 'typed' mode (see
 'sql_data' option in CONFIG-KEYS text file; default value is 'typed'); 'acct_uni'
@@ -38,7 +42,8 @@ table is the default table where data will be written when in 'typed' mode (see
 mode. Since v6 unified mode will be no longer supported: an unique table ('acct_vN')
 is used instead. A pair of brief explanations: 
 
-- To understand difference between v1, v2, v3, v4, v5 and v6 tables:
+- To understand difference between v1, v2, v3, v4, v5, v6 and v7 tables:
+  - Do you need TCP flags ? Then you have to use v7.
   - Do you need both IP addresses and AS numbers in the same table ? Then you have to use v6.
   - Do you need packet classification ? Then you have to use v5.
   - Do you need flows (other than packets) accounting ? Then you have to use v4.
@@ -63,5 +68,5 @@ in looking up protocol names by their number and viceversa. Because joins are ex
 NOTE: mind to specify EVERYTIME which SQL table version you
 intend to adhere to by using either of the following rules:
 
-commandline:    -v [ 1 | 2 | 3 | 4 | 5 | 6 ]
-configuration:  sql_table_version: [ 1 | 2 | 3 | 4 | 5 | 6 ]
+commandline:    -v [ 1 | 2 | 3 | 4 | 5 | 6 | 7 ]
+configuration:  sql_table_version: [ 1 | 2 | 3 | 4 | 5 | 6 | 7 ]

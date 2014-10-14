@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -58,12 +58,12 @@ void handle_falling_child()
     if (failed_plugins[j]) { 
       list = search_plugin_by_pid(failed_plugins[j]);
       if (list) {
-        Log(LOG_ERR, "ERROR: connection lost to '%s-%s'; closing connection.\n", list->name, list->type.string);
+        Log(LOG_INFO, "INFO: connection lost to '%s-%s'; closing connection.\n", list->name, list->type.string);
         close(list->pipe[1]);
         delete_pipe_channel(list->pipe[1]);
         ret = delete_plugin_by_id(list->id);
         if (!ret) {
-          Log(LOG_ERR, "ERROR: no more plugins active. Shutting down.\n");
+          Log(LOG_INFO, "INFO: no more plugins active. Shutting down.\n");
 	  if (config.pidfile) remove_pid_file(config.pidfile);
           exit(1);
         }
@@ -76,12 +76,12 @@ void handle_falling_child()
   j = waitpid(-1, 0, WNOHANG);
   list = search_plugin_by_pid(j);
   if (list) {
-    Log(LOG_ERR, "ERROR: connection lost to '%s-%s'; closing connection.\n", list->name, list->type.string);
+    Log(LOG_INFO, "INFO: connection lost to '%s-%s'; closing connection.\n", list->name, list->type.string);
     close(list->pipe[1]);
     delete_pipe_channel(list->pipe[1]);
     ret = delete_plugin_by_id(list->id);
     if (!ret) {
-      Log(LOG_ERR, "ERROR: no more plugins active. Shutting down.\n");
+      Log(LOG_INFO, "INFO: no more plugins active. Shutting down.\n");
       if (config.pidfile) remove_pid_file(config.pidfile);
       exit(1);
     }
@@ -92,7 +92,8 @@ void handle_falling_child()
 
 void ignore_falling_child()
 {
-  while (waitpid(-1, 0, WNOHANG) > 0);
+  while (waitpid(-1, 0, WNOHANG) > 0) sql_writers.retired++;
+  signal(SIGCHLD, ignore_falling_child);
 }
 
 void my_sigint_handler(int signum)
@@ -101,6 +102,11 @@ void my_sigint_handler(int signum)
 
   if (config.syslog) closelog();
 
+  /* We are about to exit, but it may take a while - because of the
+     wait() call. Let's release collector's socket to improve turn-
+     around times when restarting the daemon */
+  if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) close(config.sock);
+
 #if defined (IRIX) || (SOLARIS)
   signal(SIGCHLD, SIG_IGN);
 #else
@@ -108,7 +114,8 @@ void my_sigint_handler(int signum)
 #endif
 
   fill_pipe_buffer();
-  sleep(2);
+  sleep(2); /* XXX: we should really choose an adaptive value here. It should be
+	            closely bound to, say, biggestplugin_buffer_size value */ 
 
   while (list) {
     if (memcmp(list->type.string, "core", sizeof("core"))) kill(list->pid, SIGINT);
@@ -160,6 +167,8 @@ void push_stats()
       Log(LOG_NOTICE, "%s: (%u) %u packets dropped by kernel\n", config.dev, now, ps.ps_drop);
     }
   }
+  else if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF)
+    print_status_table(now, XFLOW_STATUS_TABLE_SZ);
 
   signal(SIGUSR1, push_stats);
 }

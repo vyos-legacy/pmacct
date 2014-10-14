@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -22,6 +22,8 @@
 /* defines */
 #define ADD 0
 #define SUB 1
+
+#define DEBUG_TIMING 0
 
 /* prototypes */
 #if (!defined __UTIL_C)
@@ -63,6 +65,25 @@ EXT void stick_bosbit(u_char *);
 EXT int timeval_cmp(struct timeval *, struct timeval *);
 EXT void exit_all(int);
 EXT void exit_plugin(int);
+EXT void reset_tag_status(struct packet_ptrs_vector *);
+EXT void reset_shadow_status(struct packet_ptrs_vector *);
+EXT void reset_tagdist_status(struct packet_ptrs_vector *);
+EXT void set_shadow_status(struct packet_ptrs *);
+EXT FILE *open_logfile(char *);
 
 EXT unsigned int str_to_addr(const char *, struct host_addr *);
+
+EXT struct packet_ptrs *copy_packet_ptrs(struct packet_ptrs *);
+EXT void free_packet_ptrs(struct packet_ptrs *);
 #undef EXT
+
+/* Timing Stuff */
+#if DEBUG_TIMING
+struct mytimer {
+  struct timeval t0;
+	struct timeval t1;
+};
+
+void start_timer(struct mytimer *);
+void stop_timer(struct mytimer *, const char *, ...);
+#endif

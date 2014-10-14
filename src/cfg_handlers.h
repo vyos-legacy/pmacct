@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -29,6 +29,7 @@
 EXT int parse_truefalse(char *);
 EXT int cfg_key_debug(char *, char *, char *);
 EXT int cfg_key_syslog(char *, char *, char *);
+EXT int cfg_key_logfile(char *, char *, char *);
 EXT int cfg_key_pidfile(char *, char *, char *);
 EXT int cfg_key_daemonize(char *, char *, char *);
 EXT int cfg_key_aggregate(char *, char *, char *);
@@ -57,8 +58,10 @@ EXT int cfg_key_sql_startup_delay(char *, char *, char *);
 EXT int cfg_key_sql_optimize_clauses(char *, char *, char *);
 EXT int cfg_key_sql_history(char *, char *, char *);
 EXT int cfg_key_sql_history_roundoff(char *, char *, char *);
+EXT int cfg_key_sql_history_since_epoch(char *, char *, char *);
 EXT int cfg_key_sql_recovery_logfile(char *, char *, char *);
 EXT int cfg_key_sql_recovery_backup_host(char *, char *, char *);
+EXT int cfg_key_sql_max_writers(char *, char *, char *);
 EXT int cfg_key_sql_trigger_exec(char *, char *, char *);
 EXT int cfg_key_sql_trigger_time(char *, char *, char *);
 EXT int cfg_key_sql_cache_entries(char *, char *, char *);
@@ -67,6 +70,8 @@ EXT int cfg_key_sql_preprocess(char *, char *, char *);
 EXT int cfg_key_sql_preprocess_type(char *, char *, char *);
 EXT int cfg_key_sql_multi_values(char *, char *, char *);
 EXT int cfg_key_sql_aggressive_classification(char *, char *, char *);
+EXT int cfg_key_sql_locking_style(char *, char *, char *);
+EXT int cfg_key_sql_use_copy(char *, char *, char *);
 EXT int cfg_key_plugin_pipe_size(char *, char *, char *);
 EXT int cfg_key_plugin_buffer_size(char *, char *, char *);
 EXT int cfg_key_networks_mask(char *, char *, char *);
@@ -83,21 +88,35 @@ EXT int cfg_key_nfacctd_allow_file(char *, char *, char *);
 EXT int cfg_key_nfacctd_time_secs(char *, char *, char *);
 EXT int cfg_key_nfacctd_time_new(char *, char *, char *);
 EXT int cfg_key_nfacctd_as_new(char *, char *, char *);
+EXT int cfg_key_nfacctd_disable_checks(char *, char *, char *);
 EXT int cfg_key_nfacctd_mcast_groups(char *, char *, char *);
+EXT int cfg_key_nfacctd_sql_log(char *, char *, char *);
 EXT int cfg_key_pmacctd_force_frag_handling(char *, char *, char *);
 EXT int cfg_key_pmacctd_frag_buffer_size(char *, char *, char *);
 EXT int cfg_key_pmacctd_flow_buffer_size(char *, char *, char *);
+EXT int cfg_key_pmacctd_flow_buffer_buckets(char *, char *, char *);
 EXT int cfg_key_pmacctd_conntrack_buffer_size(char *, char *, char *);
 EXT int cfg_key_pmacctd_flow_lifetime(char *, char *, char *);
 EXT int cfg_key_sfacctd_renormalize(char *, char *, char *);
 EXT int cfg_key_pcap_savefile(char *, char *, char *);
 EXT int cfg_key_pre_tag_map(char *, char *, char *);
+EXT int cfg_key_pre_tag_map_entries(char *, char *, char *);
 EXT int cfg_key_pre_tag_filter(char *, char *, char *);
 EXT int cfg_key_post_tag(char *, char *, char *);
 EXT int cfg_key_sampling_rate(char *, char *, char *);
 EXT int cfg_key_classifiers(char *, char *, char *);
 EXT int cfg_key_classifier_tentatives(char *, char *, char *);
 EXT int cfg_key_classifier_table_num(char *, char *, char *);
+EXT int cfg_key_nfprobe_timeouts(char *, char *, char *);
+EXT int cfg_key_nfprobe_hoplimit(char *, char *, char *);
+EXT int cfg_key_nfprobe_maxflows(char *, char *, char *);
+EXT int cfg_key_nfprobe_receiver(char *, char *, char *);
+EXT int cfg_key_nfprobe_version(char *, char *, char *);
+EXT int cfg_key_nfprobe_engine(char *, char *, char *);
+EXT int cfg_key_sfprobe_receiver(char *, char *, char *);
+EXT int cfg_key_sfprobe_agentip(char *, char *, char *);
+EXT int cfg_key_sfprobe_agentsubid(char *, char *, char *);
+EXT int cfg_key_flow_handling_threads(char *, char *, char *);
 
 EXT void parse_time(char *, char *, int *, int *);
 #undef EXT

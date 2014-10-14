@@ -11,7 +11,8 @@ VI.	Memory table plugin
 VII.	SQL issues and *SQL plugins
 VIII.	Recovery modes
 IX.	pmacctd flows counter implementation
-X.	classifier and connection tracking engines
+X.	Classifier and connection tracking engines
+XI.	Jumps and flow diversions in Pre-Tagging infrastructure
 
 
 I. Introduction
@@ -370,7 +371,7 @@ structure (ie. pmacct -e, pmacct ... -r, etc.) or the beginning of a new timefra
 accounting is enabled (ie. print plugin, 'sql_history', etc.).
 
 
-X. classifier and connection tracking engines
+X. Classifier and connection tracking engines
 pmacct 0.10.0 sees the introduction of new packet/stream classification and connection tracking
 features in the pmacctd daemon. Firstly, let's give a look to the global picture; then how they
 work:
@@ -421,3 +422,13 @@ more system resources. Thus, the right value need to be traded-off. By enabling 
 values under 200 bytes are often meaningless. 500-750 bytes should be enough even for text-based
 protocols.
 
+
+XI. Jumps and flow diversions in Pre-Tagging infrastructure
+Pre-Tagging infrastructure allows to flexibly mark either packets or flows collected from the
+network. It's basically a chain of rules: the first matching rule wins (ie. tags collected data).
+This approach is effective to mantain a 1-to-1 relationship between data and tags; but this is
+somewhat limiting in some scenarios, ie. the need to account internal data to both the sender
+and the receiver: this time you would need a 1-to-2 relationship. In this context, being able
+to handle 1-to-2 relationships becomes a requirement when sampling comes into play as any
+single sample is required to be assigned to both parties in order for the algorithms to work
+correctly. Relationships 1-to->1 are precisely the aim for jeq, stack and return keys. 

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -35,7 +35,6 @@
 #include "sql_common.h"
 #include "ip_flow.h"
 #include "classifier.h"
-#include "util.h"
 
 static const char fake_mac[] = "0:0:0:0:0:0";
 static const char fake_host[] = "0.0.0.0";
@@ -51,6 +50,7 @@ void count_src_mac_handler(const struct db_cache *cache_elem, const struct inser
   memcpy(&ubuf, &cache_elem->primitives.eth_shost, ETH_ADDR_LEN);
   etheraddr_string(ubuf, sbuf);
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, sbuf);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, sbuf);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, sbuf);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
@@ -132,6 +132,12 @@ void count_dst_port_handler(const struct db_cache *cache_elem, const struct inse
   *ptr_values += strlen(*ptr_values);
 }
 
+void count_tcpflags_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->tcp_flags);
+  *ptr_values += strlen(*ptr_values);
+}
+
 void count_ip_tos_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->primitives.tos);
@@ -143,13 +149,16 @@ void count_ip_tos_handler(const struct db_cache *cache_elem, const struct insert
 
 void MY_count_ip_proto_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
-  if (cache_elem->primitives.proto <= protocols_number) {
+  if (cache_elem->primitives.proto < protocols_number) {
     snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, _protocols[cache_elem->primitives.proto].name);
     snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, _protocols[cache_elem->primitives.proto].name);
   }
   else {
-    snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->primitives.proto);
-    snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->primitives.proto);
+    char proto_str[PROTO_LEN];
+
+    snprintf(proto_str, sizeof(proto_str), "%d", cache_elem->primitives.proto);
+    snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, proto_str);
+    snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, proto_str);
   }
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
@@ -163,10 +172,32 @@ void PG_count_ip_proto_handler(const struct db_cache *cache_elem, const struct i
   *ptr_values += strlen(*ptr_values);
 }
 
+void count_copy_timestamp_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  static char btime_str[LONGSRVBUFLEN], now_str[LONGSRVBUFLEN];
+  struct tm *tme;
+
+  tme = localtime(&cache_elem->basetime);
+  strftime(btime_str, LONGSRVBUFLEN, "%Y-%m-%d %H:%M:%S", tme);
+
+  if (!glob_nfacctd_sql_log) tme = localtime(&idata->now);
+  else tme = localtime(&cache_elem->endtime);
+  strftime(now_str, LONGSRVBUFLEN, "%Y-%m-%d %H:%M:%S", tme);
+  
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->basetime); // dummy
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, now_str, btime_str);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
 void count_timestamp_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
+  time_t tme = idata->now;
+
+  if (glob_nfacctd_sql_log) tme = cache_elem->endtime;
+
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->basetime);
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, idata->now, cache_elem->basetime);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, tme, cache_elem->basetime);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
@@ -194,6 +225,36 @@ void count_class_id_handler(const struct db_cache *cache_elem, const struct inse
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, buf);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
+}
+
+void count_counters_setclause_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_set, char **ptr_none)
+{
+  snprintf(*ptr_set, SPACELEFT(set_clause), set[num].string, cache_elem->packet_counter, cache_elem->bytes_counter);
+  *ptr_set  += strlen(*ptr_set);
+}
+
+void count_flows_setclause_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_set, char **ptr_none)
+{
+  snprintf(*ptr_set, SPACELEFT(set_clause), set[num].string, cache_elem->flows_counter);
+  *ptr_set  += strlen(*ptr_set);
+}
+
+void count_timestamp_setclause_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_set, char **ptr_none)
+{
+  snprintf(*ptr_set, SPACELEFT(set_clause), set[num].string, cache_elem->endtime);
+  *ptr_set  += strlen(*ptr_set);
+}
+
+void count_tcpflags_setclause_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_set, char **ptr_none)
+{
+  snprintf(*ptr_set, SPACELEFT(set_clause), set[num].string, cache_elem->tcp_flags);
+  *ptr_set  += strlen(*ptr_set);
+}
+
+void count_noop_setclause_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_set, char **ptr_none)
+{
+  strncpy(*ptr_set, set[num].string, SPACELEFT(set_clause));
+  *ptr_set  += strlen(*ptr_set);
 }
 
 /* Fake handlers next */ 

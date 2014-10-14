@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -24,7 +24,6 @@
 #include "pmacct.h"
 #include "pmacct-data.h"
 #include "sql_common.h"
-#include "util.h"
 
 struct template_entry *build_template(struct template_header *th)
 {
@@ -57,7 +56,7 @@ struct template_entry *build_template(struct template_header *th)
   ptr++;
 #else 
   th->num--; th->num--; /* we replace 3 entries with just 1 */
-  ptr->tag = NO_L2;
+  ptr->tag = LT_NO_L2;
   ptr->size = 14; 
   tot_size += ptr->size;
   ptr++;
@@ -113,17 +112,17 @@ struct template_entry *build_template(struct template_header *th)
   tot_size += ptr->size;
   ptr++;
 
-  ptr->tag = BYTES;
+  ptr->tag = LT_BYTES;
   ptr->size = sizeof(dummy.bytes_counter);
   tot_size += ptr->size;
   ptr++;
 
-  ptr->tag = PACKETS;
+  ptr->tag = LT_PACKETS;
   ptr->size = sizeof(dummy.packet_counter);
   tot_size += ptr->size;
   ptr++;
 
-  ptr->tag = FLOWS;
+  ptr->tag = LT_FLOWS;
   ptr->size = sizeof(dummy.flows_counter);
   tot_size += ptr->size;
   ptr++;
@@ -189,19 +188,19 @@ void set_template_funcs(struct template_header *th, struct template_entry *head)
     case COUNT_CLASS:
       template_funcs[cnt] = TPL_push_class;
       break;
-    case BYTES:
+    case LT_BYTES:
       template_funcs[cnt] = TPL_push_bytes_counter;
       break;
-    case PACKETS:
+    case LT_PACKETS:
       template_funcs[cnt] = TPL_push_packet_counter;
       break;
-    case FLOWS:
+    case LT_FLOWS:
       template_funcs[cnt] = TPL_push_flows_counter;
       break;
     case TIMESTAMP:
       template_funcs[cnt] = TPL_push_timestamp;
       break;
-    case NO_L2:
+    case LT_NO_L2:
       template_funcs[cnt] = TPL_push_nol2;
       break;
     default:
@@ -439,7 +438,7 @@ void TPL_pop(u_char *src, struct db_cache *dst, struct template_header *th, u_ch
     case COUNT_CLASS:
       memcpy(&dst->primitives.class, ptr, sz);
       break;
-    case BYTES:
+    case LT_BYTES:
       if (sz == 4) {
 	memcpy(&t32, ptr, sz);
 	dst->bytes_counter = t32;
@@ -449,7 +448,7 @@ void TPL_pop(u_char *src, struct db_cache *dst, struct template_header *th, u_ch
 	dst->bytes_counter = t64;
       }
       break;
-    case PACKETS:
+    case LT_PACKETS:
       if (sz == 4) {
         memcpy(&t32, ptr, sz);
         dst->packet_counter = t32;
@@ -459,7 +458,7 @@ void TPL_pop(u_char *src, struct db_cache *dst, struct template_header *th, u_ch
         dst->packet_counter = t64;
       }
       break;
-    case FLOWS:
+    case LT_FLOWS:
       if (sz == 4) {
         memcpy(&t32, ptr, sz);
         dst->flows_counter = t32;
@@ -472,7 +471,7 @@ void TPL_pop(u_char *src, struct db_cache *dst, struct template_header *th, u_ch
     case TIMESTAMP:
       memcpy(&dst->basetime, ptr, sz);
       break;
-    case NO_L2:
+    case LT_NO_L2:
       break;
     default:
       printf("ERROR: template entry not supported: '%d'\n", teptr->tag);
@@ -529,19 +528,19 @@ void TPL_check_sizes(struct template_header *th, struct db_cache *elem, u_char *
     case COUNT_CLASS:
       if (teptr->size > sizeof(elem->primitives.class)) goto exit_lane;
       break;
-    case BYTES:
+    case LT_BYTES:
       if (teptr->size != 4 && teptr->size != 8) goto exit_lane;
       break;
-    case PACKETS:
+    case LT_PACKETS:
       if (teptr->size != 4 && teptr->size != 8) goto exit_lane;
       break;
-    case FLOWS:
+    case LT_FLOWS:
       if (teptr->size != 4 && teptr->size != 8) goto exit_lane;
       break;
     case TIMESTAMP:
       if (teptr->size > sizeof(elem->basetime)) goto exit_lane;
       break;
-    case NO_L2:
+    case LT_NO_L2:
       break;
     default:
       printf("ERROR: template entry not supported: '%d'\n", teptr->tag);

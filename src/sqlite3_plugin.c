@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -27,7 +27,6 @@
 #include "plugin_hooks.h"
 #include "sql_common.h"
 #include "sqlite3_plugin.h"
-#include "util.h"
 #include "sql_common_m.c"
 
 /* Functions */
@@ -41,7 +40,6 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   time_t now, refresh_deadline;
   int timeout;
   int ret, num;
-#if defined (HAVE_MMAP)
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
@@ -49,7 +47,6 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   unsigned char *rgptr;
   int pollagain = TRUE;
   u_int32_t seq = 1, rg_err_count = 0; 
-#endif
 
   /* XXX: glue */
   memcpy(&config, cfgptr, sizeof(struct configuration));
@@ -95,9 +92,7 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   /* plugin main loop */
   for(;;) {
     poll_again:
-#if defined (HAVE_MMAP)
     status->wakeup = TRUE;
-#endif
     ret = poll(&pfd, 1, timeout);
     if (ret < 0) goto poll_again;
 
@@ -105,6 +100,7 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
     switch (ret) {
     case 0: /* timeout */
+      if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata);
       switch (fork()) {
       case 0: /* Child */
 	/* we have to ignore signals to avoid loops:
@@ -113,7 +109,8 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	signal(SIGHUP, SIG_IGN);
 	pm_setproctitle("%s [%s]", "SQLite3 Plugin -- DB Writer", config.name);
 
-	if (qq_ptr) {
+        if (qq_ptr && sql_writers.flags != CHLD_ALERT) {
+	  if (sql_writers.flags == CHLD_WARNING) sql_db_fail(&p);
           (*sqlfunc_cbr.connect)(&p, NULL); 
           (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, &idata);
 	  (*sqlfunc_cbr.close)(&bed);
@@ -125,7 +122,6 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	  
         exit(0);
       default: /* Parent */
-	if (qq_ptr) qq_ptr = sql_cache_flush(queries_queue, qq_ptr);
 	gettimeofday(&idata.flushtime, &tz);
 	refresh_deadline += config.sql_refresh_time; 
 	if (idata.now > idata.triggertime) {
@@ -135,6 +131,9 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	}
 	idata.new_basetime = FALSE;
 	glob_new_basetime = FALSE;
+	qq_ptr = pqq_ptr;
+	memcpy(queries_queue, pending_queries_queue, sizeof(queries_queue));
+
 	if (reload_map) {
 	  load_networks(config.networks_file, &nt, &nc);
 	  load_ports(config.ports_file, &pt);
@@ -144,12 +143,6 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
       break;
     default: /* we received data */
-#if !defined (HAVE_MMAP)
-      if ((ret = read(pipe_fd, pipebuf, config.buffer_size)) == 0) 
-        exit_plugin(1); /* we exit silently; something happened at the write end */
-
-      if (ret < 0) goto poll_again;
-#else
       read_data:
       if (!pollagain) {
         seq++;
@@ -184,10 +177,10 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       memcpy(pipebuf, rg->ptr, bufsz);
       if ((rg->ptr+bufsz) >= rg->end) rg->ptr = rg->base;
       else rg->ptr += bufsz;
-#endif
 
       /* lazy sql refresh handling */ 
       if (idata.now > refresh_deadline) {
+        if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata);
         switch (fork()) {
         case 0: /* Child */
           /* we have to ignore signals to avoid loops:
@@ -196,7 +189,8 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           signal(SIGHUP, SIG_IGN);
 	  pm_setproctitle("%s [%s]", "SQLite3 Plugin -- DB Writer", config.name);
 
-	  if (qq_ptr) {
+          if (qq_ptr && sql_writers.flags != CHLD_ALERT) {
+	    if (sql_writers.flags == CHLD_WARNING) sql_db_fail(&p);
             (*sqlfunc_cbr.connect)(&p, NULL);
             (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, &idata);
 	    (*sqlfunc_cbr.close)(&bed);
@@ -208,7 +202,6 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
           exit(0);
         default: /* Parent */
-          if (qq_ptr) qq_ptr = sql_cache_flush(queries_queue, qq_ptr);
 	  gettimeofday(&idata.flushtime, &tz);
 	  refresh_deadline += config.sql_refresh_time; 
           if (idata.now > idata.triggertime) {
@@ -218,6 +211,9 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	  }
 	  idata.new_basetime = FALSE;
 	  glob_new_basetime = FALSE;
+	  qq_ptr = pqq_ptr;
+	  memcpy(queries_queue, pending_queries_queue, sizeof(queries_queue));
+
 	  if (reload_map) {
 	    load_networks(config.networks_file, &nt, &nc);
 	    load_ports(config.ports_file, &pt);
@@ -261,16 +257,14 @@ void sqlite3_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	((struct ch_buf_hdr *)pipebuf)->num--;
         if (((struct ch_buf_hdr *)pipebuf)->num) data++;
       }
-#if defined (HAVE_MMAP)
       goto read_data;
-#endif
     }
   }
 }
 
 int SQLI_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_data *idata)
 {
-  char *ptr_values, *ptr_where, *ptr_mv;
+  char *ptr_values, *ptr_where, *ptr_mv, *ptr_set;
   int num=0, ret=0, have_flows=0, len=0;
 
   if (idata->mv.last_queue_elem) {
@@ -284,57 +278,28 @@ int SQLI_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct inser
 
     return FALSE;
   }
-
+  
   if (config.what_to_count & COUNT_FLOWS) have_flows = TRUE;
 
   /* constructing sql query */
   ptr_where = where_clause;
   ptr_values = values_clause; 
+  ptr_set = set_clause;
   memset(where_clause, 0, sizeof(where_clause));
   memset(values_clause, 0, sizeof(values_clause));
-  while (num < idata->num_primitives) {
+  memset(set_clause, 0, sizeof(set_clause));
+
+  for (num = 0; num < idata->num_primitives; num++)
     (*where[num].handler)(cache_elem, idata, num, &ptr_values, &ptr_where);
-    num++;
-  }
+
+  for (num = 0; set[num].type; num++)
+    (*set[num].handler)(cache_elem, idata, num, &ptr_set, NULL);
   
   /* sending UPDATE query */
   if (!config.sql_dont_try_update) {
-    /* searching for pending accumulators: this means we know of unclassified counters has been
-       kicked to the DB previously; we now try to remove such data by issuing a negative UPDATE
-       query. If we are successfull, we add the counters to the new class. Otherwise we discard
-       them. */
-    if (config.what_to_count & COUNT_CLASS && cache_elem->ba) {
-      char local_where_clause[LONGSRVBUFLEN], local_values_clause[LONGSRVBUFLEN];
-      char *local_ptr_where = local_where_clause, *local_ptr_values = local_values_clause;
-      pm_class_t tmp = cache_elem->primitives.class;
-
-      cache_elem->primitives.class = 0; num = 0;
-      memset(local_where_clause, 0, sizeof(local_where_clause));
-      memset(local_values_clause, 0, sizeof(local_values_clause));
-      while (num < idata->num_primitives) {
-        (*where[num].handler)(cache_elem, idata, num, &local_ptr_values, &local_ptr_where);
-        num++;
-      }
-      if (have_flows) ret = snprintf(sql_data, sizeof(sql_data), update_negative_clause, cache_elem->pa, cache_elem->ba, cache_elem->fa);
-      else ret = snprintf(sql_data, sizeof(sql_data), update_negative_clause, cache_elem->pa, cache_elem->ba);
-      strncpy(sql_data+ret, local_where_clause, SPACELEFT_LEN(sql_data, ret));
-      cache_elem->primitives.class = tmp;
-
-      ret = sqlite3_exec(db->desc, sql_data, NULL, NULL, NULL);
-      if (ret) goto signal_error;
-      if (sqlite3_changes(db->desc)) {
-        cache_elem->bytes_counter += cache_elem->ba;
-        cache_elem->packet_counter += cache_elem->pa;
-        cache_elem->flows_counter += cache_elem->fa;
-
-        Log(LOG_DEBUG, "( %s/%s ): %s\n\n", config.name, config.type, sql_data);
-        // idata->uqn++; /* XXX: negative UPDATE queries number ? */
-      }
-    }
-
-    if (have_flows) ret = snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
-    else ret = snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter);
-    strncpy(sql_data+ret, where_clause, SPACELEFT_LEN(sql_data, ret));
+    strncpy(sql_data, update_clause, SPACELEFT(sql_data));
+    strncat(sql_data, set_clause, SPACELEFT(sql_data));
+    strncat(sql_data, where_clause, SPACELEFT(sql_data));
 
     ret = sqlite3_exec(db->desc, sql_data, NULL, NULL, NULL);
     if (ret) goto signal_error; 
@@ -399,8 +364,8 @@ int SQLI_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct inser
   }
 
   idata->een++;
-  cache_elem->valid = FALSE; /* committed */
-
+  // cache_elem->valid = FALSE; /* committed */
+  
   return ret;
 
   signal_error:
@@ -440,13 +405,10 @@ void SQLI_cache_purge(struct db_cache *queue[], int index, struct insert_data *i
 
     strftime_same(insert_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
     strftime_same(update_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
-    strftime_same(update_negative_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
     strftime_same(lock_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
-    strftime_same(delete_shadows_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
     if (config.sql_table_schema && idata->new_basetime) sql_create_table(bed.p, idata);
   }
-  strncat(update_clause, set_clause, SPACELEFT(update_clause));
-  strncat(update_negative_clause, set_negative_clause, SPACELEFT(update_negative_clause));
+  // strncat(update_clause, set_clause, SPACELEFT(update_clause));
 
   (*sqlfunc_cbr.lock)(bed.p); 
 
@@ -457,13 +419,10 @@ void SQLI_cache_purge(struct db_cache *queue[], int index, struct insert_data *i
   /* multi-value INSERT query: wrap-up */
   if (idata->mv.buffer_elem_num) {
     idata->mv.last_queue_elem = TRUE;
-    queue[idata->current_queue_elem-1]->valid = TRUE;
+    queue[idata->current_queue_elem-1]->valid = SQL_CACHE_COMMITTED;
     sql_query(&bed, queue[idata->current_queue_elem-1], idata);
   }
-
-  if (config.what_to_count & COUNT_CLASS && !config.sql_dont_try_update)
-    (*sqlfunc_cbr.delete_shadows)(&bed);
-
+  
   /* rewinding stuff */
   (*sqlfunc_cbr.unlock)(&bed);
   if (b.fail) Log(LOG_ALERT, "ALERT ( %s/%s ): recovery for SQLite3 daemon failed.\n", config.name, config.type);
@@ -471,7 +430,7 @@ void SQLI_cache_purge(struct db_cache *queue[], int index, struct insert_data *i
   if (config.debug) {
     idata->elap_time = time(NULL)-start; 
     Log(LOG_DEBUG, "( %s/%s ) *** Purging cache - END (QN: %u, ET: %u) ***\n", 
-		    config.name, config.type, index, idata->elap_time); 
+		    config.name, config.type, idata->qn, idata->elap_time); 
   }
 
   if (config.sql_trigger_exec) {
@@ -482,17 +441,23 @@ void SQLI_cache_purge(struct db_cache *queue[], int index, struct insert_data *i
 
 int SQLI_evaluate_history(int primitive)
 {
-  if (config.sql_history) {
+  if (config.sql_history || config.nfacctd_sql_log) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    strncat(where[primitive].string, "DATETIME(%u, 'unixepoch', 'localtime') = ", SPACELEFT(where[primitive].string));
+    if (!config.sql_history_since_epoch)
+      strncat(where[primitive].string, "DATETIME(%u, 'unixepoch', 'localtime') = ", SPACELEFT(where[primitive].string));
+    else
+      strncat(where[primitive].string, "%u = ", SPACELEFT(where[primitive].string));
     strncat(where[primitive].string, "stamp_inserted", SPACELEFT(where[primitive].string));
 
     strncat(insert_clause, "stamp_updated, stamp_inserted", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "DATETIME(%u, 'unixepoch', 'localtime'), DATETIME(%u, 'unixepoch', 'localtime')", SPACELEFT(values[primitive].string));
+    if (!config.sql_history_since_epoch)
+      strncat(values[primitive].string, "DATETIME(%u, 'unixepoch', 'localtime'), DATETIME(%u, 'unixepoch', 'localtime')", SPACELEFT(values[primitive].string));
+    else
+      strncat(values[primitive].string, "%u, %u", SPACELEFT(values[primitive].string));
 
     where[primitive].type = values[primitive].type = TIMESTAMP;
     values[primitive].handler = where[primitive].handler = count_timestamp_handler;
@@ -504,7 +469,7 @@ int SQLI_evaluate_history(int primitive)
 
 int SQLI_compose_static_queries()
 {
-  int primitives=0, have_flows=0;
+  int primitives=0, set_primitives=0, have_flows=0;
 
   if (config.what_to_count & COUNT_FLOWS || (config.sql_table_version >= 4 && !config.sql_optimize_clauses)) {
     config.what_to_count |= COUNT_FLOWS;
@@ -527,44 +492,51 @@ int SQLI_compose_static_queries()
   strncat(insert_clause, ")", SPACELEFT(insert_clause));
 
   /* "LOCK ..." stuff */
+  if (config.sql_locking_style) Log(LOG_WARNING, "WARN ( %s/%s ): sql_locking_style is not supported. Ignored.\n", config.name, config.type);
   snprintf(lock_clause, sizeof(lock_clause), "BEGIN", config.sql_table);
   strncpy(unlock_clause, "COMMIT", sizeof(unlock_clause));
 
   /* "UPDATE ... SET ..." stuff */
   snprintf(update_clause, sizeof(update_clause), "UPDATE %s ", config.sql_table);
-  snprintf(update_negative_clause, sizeof(update_negative_clause), "UPDATE %s ", config.sql_table);
-#if defined HAVE_64BIT_COUNTERS
-  strncpy(set_clause, "SET packets=packets+%llu, bytes=bytes+%llu", SPACELEFT(set_clause));
-  if (have_flows) strncat(set_clause, ", flows=flows+%llu", SPACELEFT(set_clause));
-#else
-  strncpy(set_clause, "SET packets=packets+%lu, bytes=bytes+%lu", SPACELEFT(set_clause));
-  if (have_flows) strncat(set_clause, ", flows=flows+%lu", SPACELEFT(set_clause));
-#endif
-  if (config.sql_history) strncat(set_clause, ", stamp_updated=DATETIME('now', 'localtime')", SPACELEFT(set_clause));
-  strncpy(set_negative_clause, "SET packets=packets-%lu, bytes=bytes-%lu", SPACELEFT(set_negative_clause));
-  if (have_flows) strncat(set_negative_clause, ", flows=flows-%lu", SPACELEFT(set_negative_clause));
-  if (config.sql_history) strncat(set_negative_clause, ", stamp_updated=DATETIME('now', 'localtime')", SPACELEFT(set_negative_clause));
 
-  /* "DELETE ..." stuff */
-  snprintf(delete_shadows_clause, sizeof(delete_shadows_clause), "DELETE FROM %s WHERE packets = 0 AND bytes = 0 AND flows = 0", config.sql_table);
+  set_primitives = sql_compose_static_set(have_flows);
 
-  return primitives;
-}
-
-void SQLI_delete_shadows(struct BE_descs *bed)
-{
-  struct DBdesc *db = NULL;
-
-  if (bed->p->connected) db = bed->p;
-  else if (bed->b->connected) db = bed->b;
-
-  if (!db->fail) {
-    if (sqlite3_exec(db->desc, delete_shadows_clause, NULL, NULL, NULL)) {
-      SQLI_get_errmsg(db);
-      sql_db_errmsg(db);
-      sql_db_fail(db);
+  if (config.sql_history || config.nfacctd_sql_log) {
+    if (!config.nfacctd_sql_log) {
+      if (!config.sql_history_since_epoch) {
+	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+	strncat(set[set_primitives].string, "stamp_updated=DATETIME('now', 'localtime')", SPACELEFT(set[set_primitives].string));
+	set[set_primitives].type = TIMESTAMP;
+	set[set_primitives].handler = count_noop_setclause_handler;
+	set_primitives++;
+      }
+      else {
+	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+	strncat(set[set_primitives].string, "stamp_updated=STRFTIME('%%s', 'now')", SPACELEFT(set[set_primitives].string));
+	set[set_primitives].type = TIMESTAMP;
+	set[set_primitives].handler = count_noop_setclause_handler;
+	set_primitives++;
+      }
+    }
+    else {
+      if (!config.sql_history_since_epoch) {
+	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+	strncat(set[set_primitives].string, "stamp_updated=DATETIME(%u, 'unixepoch', 'localtime')", SPACELEFT(set[set_primitives].string));
+	set[set_primitives].type = TIMESTAMP;
+	set[set_primitives].handler = count_timestamp_setclause_handler;
+	set_primitives++;
+      }
+      else {
+	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+	strncat(set[set_primitives].string, "stamp_updated=%u", SPACELEFT(set[set_primitives].string));
+	set[set_primitives].type = TIMESTAMP;
+	set[set_primitives].handler = count_timestamp_setclause_handler;
+	set_primitives++;
+      }
     }
   }
+
+  return primitives;
 }
 
 void SQLI_Lock(struct DBdesc *db)
@@ -586,12 +558,14 @@ void SQLI_Unlock(struct BE_descs *bed)
 
 void SQLI_DB_Connect(struct DBdesc *db, char *host)
 {
-  if (sqlite3_open(db->filename, (sqlite3 **)&db->desc)) {
-    sql_db_fail(db);
-    SQLI_get_errmsg(db);
-    sql_db_errmsg(db);
+  if (!db->fail) {
+    if (sqlite3_open(db->filename, (sqlite3 **)&db->desc)) {
+      sql_db_fail(db);
+      SQLI_get_errmsg(db);
+      sql_db_errmsg(db);
+    }
+    else sql_db_ok(db);
   }
-  else sql_db_ok(db);
 }
 
 void SQLI_DB_Close(struct BE_descs *bed)
@@ -602,10 +576,12 @@ void SQLI_DB_Close(struct BE_descs *bed)
 
 void SQLI_create_dyn_table(struct DBdesc *db, char *buf)
 {
-  if (sqlite3_exec(db->desc, buf, NULL, NULL, NULL)) {
-    Log(LOG_DEBUG, "DEBUG ( %s/%s ): FAILED query follows:\n%s\n", config.name, config.type, buf);
-    SQLI_get_errmsg(db);
-    sql_db_errmsg(db);
+  if (!db->fail) {
+    if (sqlite3_exec(db->desc, buf, NULL, NULL, NULL)) {
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): FAILED query follows:\n%s\n", config.name, config.type, buf);
+      SQLI_get_errmsg(db);
+      sql_db_errmsg(db);
+    }
   }
 }
 
@@ -632,7 +608,6 @@ void SQLI_set_callbacks(struct sqlfunc_cb_registry *cbr)
   cbr->create_table = SQLI_create_dyn_table; 
   cbr->purge = SQLI_cache_purge;
   cbr->create_backend = SQLI_create_backend;
-  cbr->delete_shadows = SQLI_delete_shadows;
 }
 
 void SQLI_init_default_values(struct insert_data *idata)
@@ -642,7 +617,8 @@ void SQLI_init_default_values(struct insert_data *idata)
   /* Linking database parameters */
   if (!config.sql_db) config.sql_db = sqlite3_db;
   if (!config.sql_table) {
-    if (config.sql_table_version == 6) config.sql_table = sqlite3_table_v6;
+    if (config.sql_table_version == 7) config.sql_table = sqlite3_table_v7;
+    else if (config.sql_table_version == 6) config.sql_table = sqlite3_table_v6;
     else if (config.sql_table_version == 5) config.sql_table = sqlite3_table_v5;
     else if (config.sql_table_version == 4) config.sql_table = sqlite3_table_v4;
     else if (config.sql_table_version == 3) config.sql_table = sqlite3_table_v3;

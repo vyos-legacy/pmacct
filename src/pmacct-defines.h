@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2006 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2007 by Paolo Lucente
 */
 
 /*
@@ -20,15 +20,16 @@
 */
 
 /* defines */
-#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:"
+#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:R"
 #define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:R"
 #define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:wWL:"
-#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:"
+#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:"
 #define N_PRIMITIVES 21
 #define N_FUNCS 10 
 #define MAX_N_PLUGINS 32
 #define PROTO_LEN 12
 #define MAX_MAP_ENTRIES 128
+#define AGG_FILTER_ENTRIES 128 
 #define UINT32T_THRESHOLD 4290000000UL
 #define UINT64T_THRESHOLD 18446744073709551360ULL
 
@@ -44,12 +45,12 @@
 #define LARGEBUFLEN (8192+MOREBUFSZ)
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.10.1"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.10.1"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.10.1"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.10.1"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.10.1"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.10.1"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.11.4"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.11.4"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.11.4"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.11.4"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.11.4"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.11.4"
 
 #ifndef TRUE
 #define TRUE 1
@@ -60,7 +61,13 @@
 
 #define	E_NOTFOUND	2
 
+#ifndef MIN
 #define MIN(x, y) (x <= y ? x : y)
+#endif
+
+#ifndef MAX
+#define MAX(x, y) (x <= y ? y : x)
+#endif
 
 /* acct_type */ 
 #define ACCT_PM		1	/* promiscuous mode */
@@ -90,13 +97,16 @@
 #define COUNT_FLOWS		0x00100000
 #define COUNT_SUM_MAC		0x00200000
 #define COUNT_CLASS		0x00400000
+#define COUNT_COUNTERS		0x00800000
+#define COUNT_PAYLOAD		0x01000000
+#define COUNT_TCPFLAGS		0x02000000
 
 /* BYTES and PACKETS are used into templates; we let their values to
    overlap with some values we will not need into templates */ 
-#define BYTES			COUNT_SRC_NET
-#define PACKETS			COUNT_DST_NET
-#define FLOWS			COUNT_SUM_HOST
-#define NO_L2			COUNT_SUM_NET
+#define LT_BYTES		COUNT_SRC_NET
+#define LT_PACKETS		COUNT_DST_NET
+#define LT_FLOWS		COUNT_SUM_HOST
+#define LT_NO_L2		COUNT_SUM_NET
 
 #define FAKE_SRC_MAC		0x00000001
 #define FAKE_DST_MAC		0x00000002
@@ -118,6 +128,20 @@
 #define WANT_MATCH		0x00000010
 #define WANT_RESET		0x00000020
 #define WANT_CLASS_TABLE	0x00000040
+#define WANT_LOCK_OP		0x00000080
+
+#define PIPE_TYPE_METADATA	0x00000001
+#define PIPE_TYPE_PAYLOAD	0x00000002
+#define PIPE_TYPE_EXTRAS	0x00000004
+
+#define CHLD_WARNING		0x00000001
+#define CHLD_ALERT		0x00000002
 
 typedef u_int32_t pm_class_t;
 typedef u_int16_t pm_id_t;
+
+#if defined HAVE_64BIT_COUNTERS
+typedef u_int64_t pm_counter_t;
+#else
+typedef u_int32_t pm_counter_t;
+#endif
