@@ -48,6 +48,7 @@ EXT void ip_tos_handler(struct channels_list_entry *, struct packet_ptrs *, stru
 EXT void ip_proto_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void counters_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void id_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void flows_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 
 EXT void NF_src_mac_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_dst_mac_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
@@ -63,6 +64,7 @@ EXT void NF_ip_proto_handler(struct channels_list_entry *, struct packet_ptrs *,
 EXT void NF_counters_msecs_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_counters_secs_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_counters_new_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void NF_flows_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 
 EXT void ptag_id_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 #undef EXT

@@ -33,7 +33,7 @@ int build_query_server(char *path_ptr)
 
   sd=socket(AF_UNIX, SOCK_STREAM, 0);
   if (sd < 0) {
-    Log(LOG_ERR, "ERROR: cannot open socket.\n");
+    Log(LOG_ERR, "ERROR ( %s/%s ): cannot open socket.\n", config.name, config.type);
     exit(1);
   }
 
@@ -43,7 +43,7 @@ int build_query_server(char *path_ptr)
   
   rc = bind(sd, (struct sockaddr *) &sAddr,sizeof(sAddr));
   if (rc < 0) { 
-    Log(LOG_ERR, "ERROR: cannot bind to file %s .\n", path_ptr);
+    Log(LOG_ERR, "ERROR ( %s/%s ): cannot bind to file %s .\n", config.name, config.type, path_ptr);
     exit(1);
   } 
 
@@ -53,7 +53,7 @@ int build_query_server(char *path_ptr)
 
   setnonblocking(sd);
   listen(sd, 1);
-  Log(LOG_INFO, "OK: waiting for data on: '%s'\n", path_ptr);
+  Log(LOG_INFO, "OK ( %s/%s ): waiting for data on: '%s'\n", config.name, config.type, path_ptr);
 
   return sd;
 }
@@ -83,7 +83,7 @@ void process_query_data(int sd, unsigned char *buf, int len, int forked)
   rb.ptr = rb.buf+sizeof(struct query_header);
   bufptr = buf+sizeof(struct query_header);
 
-  if (config.debug) Log(LOG_DEBUG, "Processing data received from client ...\n");
+  Log(LOG_DEBUG, "DEBUG ( %s/%s ): Processing data received from client ...\n", config.name, config.type);
 
   if (config.imt_plugin_passwd) {
     if (!strncmp(config.imt_plugin_passwd, q->passwd, MIN(strlen(config.imt_plugin_passwd), 8)));
@@ -99,7 +99,7 @@ void process_query_data(int sd, unsigned char *buf, int len, int forked)
       if (acc_elem->packet_counter && !acc_elem->reset_flag)
 	enQueue_elem(sd, &rb, acc_elem, sizeof(struct pkt_data));
       if (acc_elem->next != NULL) {
-        if (config.debug) Log(LOG_DEBUG, "Following chain in reply ...\n");
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): Following chain in reply ...\n", config.name, config.type);
         acc_elem = acc_elem->next;
         following_chain = TRUE;
         idx--;
@@ -138,7 +138,7 @@ void process_query_data(int sd, unsigned char *buf, int len, int forked)
     q->what_to_count = config.what_to_count;
     for (j = 0; j < uq->num; j++, bufptr += sizeof(struct query_entry)) {
       memcpy(&request, bufptr, sizeof(struct query_entry));
-      if (config.debug) Log(LOG_DEBUG, "Searching into accounting structure ...\n"); 
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): Searching into accounting structure ...\n", config.name, config.type); 
       if (request.what_to_count == config.what_to_count) { 
         acc_elem = search_accounting_structure(&request.data);
         if (acc_elem) { 
@@ -195,9 +195,11 @@ void mask_elem(struct pkt_primitives *d, struct acc *s, u_int32_t w)
 {
   memset(d, 0, sizeof(struct pkt_primitives));
 
+#if defined (HAVE_L2)
   if (w & COUNT_SRC_MAC) memcpy(d->eth_shost, s->eth_shost, ETH_ADDR_LEN); 
   if (w & COUNT_DST_MAC) memcpy(d->eth_dhost, s->eth_dhost, ETH_ADDR_LEN); 
   if (w & COUNT_VLAN) d->vlan_id = s->vlan_id; 
+#endif
   if ((w & COUNT_SRC_HOST) || (w & COUNT_SRC_AS)) {
     if (s->src_ip.family == AF_INET) d->src_ip.address.ipv4.s_addr = s->src_ip.address.ipv4.s_addr; 
 #if defined ENABLE_IPV6
@@ -242,4 +244,5 @@ void Accumulate_Counters(struct pkt_data *abuf, struct acc *elem)
 {
   abuf->pkt_len += elem->bytes_counter;
   abuf->pkt_num += elem->packet_counter;
+  abuf->flo_num += elem->flow_counter;
 }

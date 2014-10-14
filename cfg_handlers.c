@@ -41,7 +41,7 @@ int parse_truefalse(char *value_ptr)
   return value;
 }
 
-int cfg_key_debug(char *name, char *value_ptr)
+int cfg_key_debug(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -63,7 +63,7 @@ int cfg_key_debug(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_syslog(char *name, char *value_ptr)
+int cfg_key_syslog(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -82,18 +82,18 @@ int cfg_key_syslog(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_pidfile(char *name, char *value_ptr)
+int cfg_key_pidfile(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
 
   for (; list; list = list->next, changes++) list->cfg.pidfile = value_ptr;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'pidfile'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pidfile'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_daemonize(char *name, char *value_ptr)
+int cfg_key_daemonize(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -102,12 +102,12 @@ int cfg_key_daemonize(char *name, char *value_ptr)
   if (value < 0) return ERR;
 
   for (; list; list = list->next, changes++) list->cfg.daemon = value;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'daemonize'. Globalized.\n"); 
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'daemonize'. Globalized.\n", filename); 
 
   return changes;
 }
 
-int cfg_key_aggregate(char *name, char *value_ptr)
+int cfg_key_aggregate(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   char *count_token;
@@ -124,9 +124,12 @@ int cfg_key_aggregate(char *name, char *value_ptr)
     else if (!strcmp(count_token, "src_port")) value |= COUNT_SRC_PORT;
     else if (!strcmp(count_token, "dst_port")) value |= COUNT_DST_PORT;
     else if (!strcmp(count_token, "proto")) value |= COUNT_IP_PROTO;
+#if defined (HAVE_L2)
     else if (!strcmp(count_token, "src_mac")) value |= COUNT_SRC_MAC;
     else if (!strcmp(count_token, "dst_mac")) value |= COUNT_DST_MAC;
     else if (!strcmp(count_token, "vlan")) value |= COUNT_VLAN;
+    else if (!strcmp(count_token, "sum_mac")) value |= COUNT_SUM_MAC;
+#endif
     else if (!strcmp(count_token, "tos")) value |= COUNT_IP_TOS;
     else if (!strcmp(count_token, "none")) value |= COUNT_NONE;
     else if (!strcmp(count_token, "src_as")) value |= COUNT_SRC_AS;
@@ -136,7 +139,8 @@ int cfg_key_aggregate(char *name, char *value_ptr)
     else if (!strcmp(count_token, "sum_as")) value |= COUNT_SUM_AS;
     else if (!strcmp(count_token, "sum_port")) value |= COUNT_SUM_PORT;
     else if (!strcmp(count_token, "tag")) value |= COUNT_ID;
-    else Log(LOG_WARNING, "WARN: ignoring unknown aggregation method: %s.\n", count_token);
+    else if (!strcmp(count_token, "flows")) value |= COUNT_FLOWS;
+    else Log(LOG_WARNING, "WARN ( %s ): ignoring unknown aggregation method: %s.\n", filename, count_token);
   }
 
   if (!name) for (; list; list = list->next, changes++) list->cfg.what_to_count = value;
@@ -153,13 +157,30 @@ int cfg_key_aggregate(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_aggregate_filter(char *name, char *value_ptr)
+int cfg_key_snaplen(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value < DEFAULT_SNAPLEN) {
+    Log(LOG_ERR, "WARN ( %s ): 'snaplen' has to be >= %d.\n", filename, DEFAULT_SNAPLEN);
+    return ERR;
+  }
+
+  for (; list; list = list->next, changes++) list->cfg.snaplen = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'snaplen'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_aggregate_filter(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
 
   if (!name) {
-    Log(LOG_ERR, "ERROR: aggregation filter cannot be global. Not loaded.\n");
+    Log(LOG_ERR, "ERROR ( %s ): aggregation filter cannot be global. Not loaded.\n", filename);
     changes++;
   }
   else {
@@ -175,14 +196,14 @@ int cfg_key_aggregate_filter(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_pre_tag_filter(char *name, char *value_ptr)
+int cfg_key_pre_tag_filter(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   char *count_token;
   int value, changes = 0;
 
   if (!name) {
-    Log(LOG_ERR, "ERROR: ID filter cannot be global. Not loaded.\n");
+    Log(LOG_ERR, "ERROR ( %s ): ID filter cannot be global. Not loaded.\n", filename);
     changes++;
   }
   else {
@@ -194,7 +215,7 @@ int cfg_key_pre_tag_filter(char *name, char *value_ptr)
 	while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_MAP_ENTRIES/4) {
 	  value = atoi(count_token);
 	  if ((value < 0) || (value > 65535)) {
-	    Log(LOG_ERR, "WARN: 'pre_tag_filter' values has to be in the range 0-65535. '%d' not loaded.\n", value);
+	    Log(LOG_ERR, "WARN ( %s ): 'pre_tag_filter' values has to be in the range 0-65535. '%d' not loaded.\n", filename, value);
 	    changes++;
 	  }
 	  else {
@@ -212,29 +233,29 @@ int cfg_key_pre_tag_filter(char *name, char *value_ptr)
 }
 
 
-int cfg_key_pcap_filter(char *name, char *value_ptr)
+int cfg_key_pcap_filter(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
 
   for (; list; list = list->next, changes++) list->cfg.clbuf = value_ptr;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'pcap_filter'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pcap_filter'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_interface(char *name, char *value_ptr)
+int cfg_key_interface(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
 
   for (; list; list = list->next, changes++) list->cfg.dev = value_ptr;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'interface'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'interface'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_interface_wait(char *name, char *value_ptr)
+int cfg_key_interface_wait(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -243,12 +264,12 @@ int cfg_key_interface_wait(char *name, char *value_ptr)
   if (value < 0) return ERR;
 
   for (; list; list = list->next, changes++) list->cfg.if_wait = value;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'interface_wait'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'interface_wait'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_promisc(char *name, char *value_ptr)
+int cfg_key_promisc(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -257,12 +278,12 @@ int cfg_key_promisc(char *name, char *value_ptr)
   if (value < 0) return ERR;
 
   for (; list; list = list->next, changes++) list->cfg.promisc = value;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'promisc'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'promisc'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_imt_path(char *name, char *value_ptr)
+int cfg_key_imt_path(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -281,7 +302,7 @@ int cfg_key_imt_path(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_imt_passwd(char *name, char *value_ptr)
+int cfg_key_imt_passwd(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -300,14 +321,14 @@ int cfg_key_imt_passwd(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_imt_buckets(char *name, char *value_ptr)
+int cfg_key_imt_buckets(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
 
   value = atoi(value_ptr);
   if (value <= 0) {
-    Log(LOG_ERR, "ERROR: invalid number of buckets.\n");
+    Log(LOG_ERR, "ERROR ( %s ): invalid number of buckets.\n", filename);
     exit(1);
   }
 
@@ -325,14 +346,14 @@ int cfg_key_imt_buckets(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_imt_mem_pools_number(char *name, char *value_ptr)
+int cfg_key_imt_mem_pools_number(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
   
   value = atoi(value_ptr);
   if (value < 0) {
-    Log(LOG_ERR, "ERROR: invalid number of memory pools.\n");
+    Log(LOG_ERR, "ERROR ( %s ): invalid number of memory pools.\n", filename);
     exit(1);
   }
 
@@ -351,7 +372,7 @@ int cfg_key_imt_mem_pools_number(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_imt_mem_pools_size(char *name, char *value_ptr)
+int cfg_key_imt_mem_pools_size(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -370,7 +391,7 @@ int cfg_key_imt_mem_pools_size(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_db(char *name, char *value_ptr)
+int cfg_key_sql_db(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -389,10 +410,59 @@ int cfg_key_sql_db(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_table(char *name, char *value_ptr)
+int cfg_key_sql_table(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
+
+  /* validations: we allow only a) certain variable names, b) a maximum of 8 variables
+     and c) a maximum table name length of 64 chars */ 
+  {
+    int num = 0;
+    char *c, *ptr = value_ptr;
+
+    while (c = strchr(ptr, '%')) {
+      c++;
+      ptr = c;
+      switch (*c) {
+      case 'd':
+	num++;
+	break;
+      case 'H':
+	num++;
+	break;
+      case 'm':
+	num++;
+	break;
+      case 'M':
+	num++;
+	break;
+      case 'w':
+	num++;
+	break;
+      case 'W':
+	num++;
+	break;
+      case 'Y':
+	num++;
+	break;
+      default:
+	Log(LOG_ERR, "ERROR ( %s ): sql_table, %%%c not supported.\n", filename, *c);
+	exit(1);
+	break;
+      } 
+    } 
+
+    if (num > 8) {
+      Log(LOG_ERR, "ERROR ( %s ): sql_table, exceeded the maximum allowed variables (8) into the table name.\n", filename);
+      exit(1);
+    }
+  }
+
+  if (strlen(value_ptr) > 64) {
+    Log(LOG_ERR, "ERROR ( %s ): sql_table, exceeded the maximum SQL table name length (64).\n", filename);
+    exit(1);
+  }
 
   if (!name) for (; list; list = list->next, changes++) list->cfg.sql_table = value_ptr;
   else {
@@ -408,14 +478,33 @@ int cfg_key_sql_table(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_table_version(char *name, char *value_ptr)
+int cfg_key_sql_table_schema(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sql_table_schema = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.sql_table_schema = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_sql_table_version(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
 
   value = atoi(value_ptr);
   if (value <= 0) {
-    Log(LOG_ERR, "ERROR: invalid 'sql_table_version' value.\n");
+    Log(LOG_ERR, "ERROR ( %s ): invalid 'sql_table_version' value.\n", filename);
     exit(1);
   }
 
@@ -433,7 +522,7 @@ int cfg_key_sql_table_version(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_data(char *name, char *value_ptr)
+int cfg_key_sql_data(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -452,7 +541,7 @@ int cfg_key_sql_data(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_host(char *name, char *value_ptr)
+int cfg_key_sql_host(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -471,7 +560,7 @@ int cfg_key_sql_host(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_recovery_backup_host(char *name, char *value_ptr)
+int cfg_key_sql_recovery_backup_host(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -490,7 +579,7 @@ int cfg_key_sql_recovery_backup_host(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_trigger_exec(char *name, char *value_ptr)
+int cfg_key_sql_trigger_exec(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -509,12 +598,12 @@ int cfg_key_sql_trigger_exec(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_trigger_time(char *name, char *value_ptr)
+int cfg_key_sql_trigger_time(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0, t, t_howmany;
 
-  parse_time(value_ptr, &t, &t_howmany);
+  parse_time(filename, value_ptr, &t, &t_howmany);
 
   if (!name) {
     for (; list; list = list->next, changes++) {
@@ -536,7 +625,7 @@ int cfg_key_sql_trigger_time(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_user(char *name, char *value_ptr)
+int cfg_key_sql_user(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -555,7 +644,7 @@ int cfg_key_sql_user(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_passwd(char *name, char *value_ptr)
+int cfg_key_sql_passwd(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -574,14 +663,14 @@ int cfg_key_sql_passwd(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_refresh_time(char *name, char *value_ptr)
+int cfg_key_sql_refresh_time(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
 
   value = atoi(value_ptr);
   if (value <= 0) {
-    Log(LOG_ERR, "WARN: 'sql_refresh_time' has to be > 0\n");
+    Log(LOG_ERR, "WARN ( %s ): 'sql_refresh_time' has to be > 0.\n", filename);
     return ERR;
   }
      
@@ -599,7 +688,7 @@ int cfg_key_sql_refresh_time(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_startup_delay(char *name, char *value_ptr)
+int cfg_key_sql_startup_delay(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -618,7 +707,7 @@ int cfg_key_sql_startup_delay(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_optimize_clauses(char *name, char *value_ptr)
+int cfg_key_sql_optimize_clauses(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -640,7 +729,7 @@ int cfg_key_sql_optimize_clauses(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_history_roundoff(char *name, char *value_ptr)
+int cfg_key_sql_history_roundoff(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -653,7 +742,7 @@ int cfg_key_sql_history_roundoff(char *name, char *value_ptr)
     if (value_ptr[i] == 'M') check |= COUNT_MONTHLY;
   } 
   if (((check & COUNT_DAILY) || (check & COUNT_MONTHLY)) && (check & COUNT_WEEKLY)) {
-    Log(LOG_ERR, "WARN: 'sql_history_roundoff' 'w' is not compatible with either 'd' or 'M'.\n");
+    Log(LOG_ERR, "WARN ( %s ): 'sql_history_roundoff' 'w' is not compatible with either 'd' or 'M'.\n", filename);
     return ERR;
   }
 
@@ -671,7 +760,7 @@ int cfg_key_sql_history_roundoff(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_recovery_logfile(char *name, char *value_ptr)
+int cfg_key_sql_recovery_logfile(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -690,12 +779,12 @@ int cfg_key_sql_recovery_logfile(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_history(char *name, char *value_ptr)
+int cfg_key_sql_history(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0, sql_history, sql_history_howmany;
 
-  parse_time(value_ptr, &sql_history, &sql_history_howmany);
+  parse_time(filename, value_ptr, &sql_history, &sql_history_howmany);
 
   if (!name) {
     for (; list; list = list->next, changes++) {
@@ -717,7 +806,7 @@ int cfg_key_sql_history(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_cache_entries(char *name, char *value_ptr)
+int cfg_key_sql_cache_entries(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -736,7 +825,7 @@ int cfg_key_sql_cache_entries(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_dont_try_update(char *name, char *value_ptr)
+int cfg_key_sql_dont_try_update(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -758,7 +847,7 @@ int cfg_key_sql_dont_try_update(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sql_preprocess(char *name, char *value_ptr)
+int cfg_key_sql_preprocess(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -777,7 +866,54 @@ int cfg_key_sql_preprocess(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_plugin_pipe_size(char *name, char *value_ptr)
+int cfg_key_sql_preprocess_type(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0, value = 0;
+
+  if (!strncmp(value_ptr, "any", 3)) value = FALSE;
+  if (!strncmp(value_ptr, "all", 3)) value = TRUE;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sql_preprocess_type = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+	list->cfg.sql_preprocess_type = value;
+	changes++;
+	break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_sql_multi_values(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0, value = 0;
+
+  value = atoi(value_ptr);
+  if (value <= 0) {
+    Log(LOG_ERR, "ERROR ( %s ): invalid 'sql_multi_values' value.\n", filename);
+    exit(1);
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.sql_multi_values = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.sql_multi_values = value; 
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_plugin_pipe_size(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -796,7 +932,7 @@ int cfg_key_plugin_pipe_size(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_plugin_buffer_size(char *name, char *value_ptr)
+int cfg_key_plugin_buffer_size(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -815,7 +951,7 @@ int cfg_key_plugin_buffer_size(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_networks_file(char *name, char *value_ptr)
+int cfg_key_networks_file(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -834,7 +970,7 @@ int cfg_key_networks_file(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_networks_cache_entries(char *name, char *value_ptr)
+int cfg_key_networks_cache_entries(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -853,7 +989,7 @@ int cfg_key_networks_cache_entries(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_ports_file(char *name, char *value_ptr)
+int cfg_key_ports_file(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -872,14 +1008,14 @@ int cfg_key_ports_file(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_print_refresh_time(char *name, char *value_ptr)
+int cfg_key_print_refresh_time(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
 
   value = atoi(value_ptr);
   if (value <= 0) {
-    Log(LOG_ERR, "WARN: 'print_refresh_time' has to be > 0\n");
+    Log(LOG_ERR, "WARN ( %s ): 'print_refresh_time' has to be > 0.\n", filename);
     return ERR;
   }
 
@@ -897,7 +1033,7 @@ int cfg_key_print_refresh_time(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_print_cache_entries(char *name, char *value_ptr)
+int cfg_key_print_cache_entries(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
@@ -916,7 +1052,7 @@ int cfg_key_print_cache_entries(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_print_markers(char *name, char *value_ptr)
+int cfg_key_print_markers(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -938,14 +1074,14 @@ int cfg_key_print_markers(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_post_tag(char *name, char *value_ptr)
+int cfg_key_post_tag(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
 
   value = atoi(value_ptr);
   if ((value < 1) || (value > 65535)) {
-    Log(LOG_ERR, "WARN: 'post_tag' has to be in the range 1-65535.\n");
+    Log(LOG_ERR, "WARN ( %s ): 'post_tag' has to be in the range 1-65535.\n", filename);
     return ERR;
   }
 
@@ -963,14 +1099,14 @@ int cfg_key_post_tag(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_sampling_rate(char *name, char *value_ptr)
+int cfg_key_sampling_rate(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
 
   value = atoi(value_ptr);
   if (value < 1) {
-    Log(LOG_ERR, "WARN: 'sampling_rate' has to be >= 1.\n");
+    Log(LOG_ERR, "WARN ( %s ): 'sampling_rate' has to be >= 1.\n", filename);
     return ERR;
   }
 
@@ -988,57 +1124,57 @@ int cfg_key_sampling_rate(char *name, char *value_ptr)
   return changes;
 }
 
-int cfg_key_nfacctd_port(char *name, char *value_ptr)
+int cfg_key_nfacctd_port(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
 
   value = atoi(value_ptr);
   if ((value <= 0) || (value > 65535)) {
-    Log(LOG_ERR, "WARN: 'nfacctd_port' has to be in the range 0-65535.\n");
+    Log(LOG_ERR, "WARN ( %s ): 'nfacctd_port' has to be in the range 0-65535.\n", filename);
     return ERR;
   }
 
   for (; list; list = list->next, changes++) list->cfg.nfacctd_port = value;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'nfacctd_port'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'nfacctd_port'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_nfacctd_ip(char *name, char *value_ptr)
+int cfg_key_nfacctd_ip(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
 
   for (; list; list = list->next, changes++) list->cfg.nfacctd_ip = value_ptr;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'nfacctd_ip'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'nfacctd_ip'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_nfacctd_allow_file(char *name, char *value_ptr)
+int cfg_key_nfacctd_allow_file(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
 
   for (; list; list = list->next, changes++) list->cfg.nfacctd_allow_file = value_ptr;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'nfacctd_allow_file'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'nfacctd_allow_file'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_pre_tag_map(char *name, char *value_ptr)
+int cfg_key_pre_tag_map(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
 
   for (; list; list = list->next, changes++) list->cfg.pre_tag_map = value_ptr;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'pre_tag_map'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pre_tag_map'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_nfacctd_time_secs(char *name, char *value_ptr)
+int cfg_key_nfacctd_time_secs(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -1047,12 +1183,12 @@ int cfg_key_nfacctd_time_secs(char *name, char *value_ptr)
   if (value < 0) return ERR;
 
   for (; list; list = list->next, changes++) list->cfg.nfacctd_time = NF_TIME_SECS;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'nfacctd_time_secs'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'nfacctd_time_secs'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_nfacctd_time_new(char *name, char *value_ptr)
+int cfg_key_nfacctd_time_new(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -1061,12 +1197,12 @@ int cfg_key_nfacctd_time_new(char *name, char *value_ptr)
   if (value < 0) return ERR;
 
   for (; list; list = list->next, changes++) list->cfg.nfacctd_time = NF_TIME_NEW;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'nfacctd_time_new'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'nfacctd_time_new'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_pmacctd_force_frag_handling(char *name, char *value_ptr)
+int cfg_key_pmacctd_force_frag_handling(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -1075,23 +1211,62 @@ int cfg_key_pmacctd_force_frag_handling(char *name, char *value_ptr)
   if (value < 0) return ERR;
 
   for (; list; list = list->next, changes++) list->cfg.handle_fragments = TRUE;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'pmacctd_force_frag_handling'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pmacctd_force_frag_handling'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_pcap_savefile(char *name, char *value_ptr)
+int cfg_key_pmacctd_frag_buffer_size(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+
+  for (; list; list = list->next, changes++) list->cfg.frag_bufsz = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pmacctd_frag_buffer_size'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_pmacctd_flow_buffer_size(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+
+  for (; list; list = list->next, changes++) list->cfg.flow_bufsz = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pmacctd_flow_buffer_size'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_pmacctd_flow_lifetime(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+
+  for (; list; list = list->next, changes++) list->cfg.flow_lifetime = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pmacctd_flow_lifetime'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_pcap_savefile(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int changes = 0;
 
   for (; list; list = list->next, changes++) list->cfg.pcap_savefile = value_ptr;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'pcap_savefile'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'pcap_savefile'. Globalized.\n", filename);
 
   return changes;
 }
 
-int cfg_key_nfacctd_as_new(char *name, char *value_ptr)
+int cfg_key_nfacctd_as_new(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
   int value, changes = 0;
@@ -1100,12 +1275,12 @@ int cfg_key_nfacctd_as_new(char *name, char *value_ptr)
   if (value < 0) return ERR;
 
   for (; list; list = list->next, changes++) list->cfg.nfacctd_as = NF_AS_NEW;
-  if (name) Log(LOG_WARNING, "WARN: plugin name not supported for key 'nfacctd_as_new'. Globalized.\n");
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'nfacctd_as_new'. Globalized.\n", filename);
 
   return changes;
 }
 
-void parse_time(char *value, int *mu, int *howmany)
+void parse_time(char *filename, char *value, int *mu, int *howmany)
 {
   int k, j, len;
 
@@ -1118,7 +1293,7 @@ void parse_time(char *value, int *mu, int *howmany)
       else if (value[j] == 'w') *mu = COUNT_WEEKLY;
       else if (value[j] == 'M') *mu = COUNT_MONTHLY;
       else {
-        Log(LOG_WARNING, "WARN: Ignoring unknown time measuring unit: '%c'.\n", value[j]);
+        Log(LOG_WARNING, "WARN ( %s ): Ignoring unknown time measuring unit: '%c'.\n", filename, value[j]);
         *mu = 0;
         *howmany = 0;
         return;
@@ -1132,7 +1307,7 @@ void parse_time(char *value, int *mu, int *howmany)
   k = atoi(value);
   if (k > 0) *howmany = k;
   else {
-    Log(LOG_WARNING, "WARN: ignoring invalid time value: %d\n", k);
+    Log(LOG_WARNING, "WARN ( %s ): ignoring invalid time value: %d\n", filename, k);
     *mu = 0;
     *howmany = 0;
   }

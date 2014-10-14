@@ -27,13 +27,13 @@ DESC:		daemonizes the process (default: false).
 
 KEY:		aggregate (-c)
 VALUES:		[src_mac,dst_mac,vlan,src_host,dst_host,src_net,dst_net,src_as,dst_as,src_port,
-		 dst_port,tos,proto,none,sum_host,sum_net,sum_as,sum_port,tag]
+		 dst_port,tos,proto,none,sum_mac,sum_host,sum_net,sum_as,sum_port,flows,tag]
 PREAMBLE:	individual packets are identified by their header fields (a rather large set of
 		primitives). Aggregates are identified by a reduced set of primitives instead.
 		Packets are framed into aggregates (a) by removing the primitives not included
 		in the reduced set, (b) by casting primitives into generic entities if requested
 		(like network prefixes or Autonomous Systems) and (c) by updating the aggregate
-		byte/packet counters.
+		bytes/flows/packets counters.
 DESC:		selects the reduced set of primitives by which aggregate packets. sum_<primitive>
 		are compound primitives which allow to join inbound and outbound traffic into a
 		single aggregate. The 'none' primitive allows to make an unique aggregate which
@@ -62,10 +62,17 @@ DESC:		when multiple plugins are active, each one should sport an 'aggregate' di
 		It could be used in conjunction with 'pre_tag_filter' directive. 'pmacctd' you may
 		need to force fragmentation handling when setting up a filter which has to match
 		TCP/UDP ports. Read more, referring to the 'pmacctd_force_frag_handling' directive.
+NOTES:          In order to get support for MPLS label hierarchies, the use of CVS versions >=
+		06-06-2005 of libpcap is adviceable: they include the support for expressions like
+		"mpls 100000 and mpls 1024" that will match packets/flows with an outer label of
+		100000 and an inner label of 1024.
 
 KEY:		pcap_filter (like tcpdump syntax) [GLOBAL, NO_NFACCTD]
 DESC:		this filter is global and applied to all incoming packets. It's passed to libpcap
 		and, indeed, expects libpcap filter syntax. 
+
+KEY:		snaplen (-L) [GLOBAL, NO_NFACCTD]
+DESC:		specifies the maximum number of bytes to capture for each packet.  
 
 KEY:		plugins (-P)
 VALUES:		[memory|print|mysql|pgsql]
@@ -181,10 +188,69 @@ KEY:		sql_db
 DESC:		defines the SQL database to use (default: pmacct).
 
 KEY:            sql_table
-DESC:           defines the SQL table to use (default: acct).
+DESC:           defines the SQL table to use. Dynamic tables are supported through the use of some
+		variables. Variables are computed when data is purged into the DB. The list of supported 
+		variables follows:
+
+		%d	The day of the month as a decimal number (range 01 to 31).
+
+		%H	The hour as a decimal number using a 24‐hour clock (range 00 to 23).
+
+		%m	The month as a decimal number (range 01 to 12).
+
+		%M	The minute as a decimal number (range 00 to 59).
+
+		%w	The day of the week as a decimal, range 0 to 6, Sunday being 0.
+
+		%W	The week number of the current year as a decimal number, range
+			00 to 53,  starting  with the first Monday as the first day of
+			week 01.
+
+		%Y	The year as a decimal number including the century.
+
+		Time-related variables REQUIRE both 'sql_history' and 'sql_history_roundoff' to be
+		enabled in order to work correctly (refer also to their entry in this document for
+		further informations). Moreover, whether the 'sql_table_schema' directive is not
+		specified, the tables must already exist. 
+		Let's proceed with an example; we wish to split among multiple tables the accounted
+		data basing on the day of the week:
+
+			sql_history: 1h
+			sql_history_roundoff: h
+			sql_table: acct_v4_%w
+
+		The above directives will account data on a hourly basis. Moreover, Sunday data will
+		be pushed into the 'acct_v4_0' table, Monday into the 'acct_v4_1' table, and so on. The
+		switch between the tables will happen each day at midnight: this behaviour is ensured by
+		the use of the 'sql_history_roundoff' directive. 
+
+		The maximum table name length is 64 characters. The maximum number of variables it may
+		contain is 8. The tables must already exists unless the 'sql_table_schema' directive is
+		specified. In the end, it's useful to notice that selecting a 'sql_history' value which
+		is divisible by 'sql_refresh_time' helps in a more precise split of the entries among
+		the tables. 
+
+KEY:		sql_table_schema
+DESC:		full pathname to a file containing a SQL table schema. It allows to create the SQL table
+		if it does not exist; this directive is checked whether a dynamic 'sql_table' is in use.  
+		A configuration example where this directive could be useful follows:
+
+			sql_history: 5m
+			sql_history_roundoff: h
+			sql_table: acct_v4_%Y%m%d_%H%M 
+			sql_table_schema: /usr/local/pmacct/acct_v4.schema
+
+		In this configuration, the content of the file pointed by 'sql_table_schema' should be:
+
+			CREATE TABLE acct_v4_%Y%m%d_%H%M (
+				[ ... PostgreSQL/MySQL specific schema ... ]
+			);
+
+		This setup, along with this directive, are mostly useful when the dynamic tables are not
+		closed in a 'ring' fashion (e.g., the days of the week) but 'open' (e.g., current date).  
 
 KEY:		sql_table_version (-v)
-VALUES		[1|2|3]
+VALUES		[1|2|3|4]
 DESC:		defines the version of the SQL table. If not stated explicitely, for example using the
 		'sql_optimize_clauses' directive, the SQL plugins expect the SQL table to endorse a
 		known schema. Few default schemas have been introduced over the time, each identified
@@ -231,14 +297,13 @@ KEY:		sql_history
 VALUES:		#[m|h|d|w|M]
 DESC:		enables the historical breakdown of aggregates (historical accounting), giving value
 		to 'stamp_inserted' and 'stamp_updated' fields. The supplied value tells how much time
-		byte/packet counters of each entry have to be accumulated before creating a new entry,
-                thus setting the history's granularity (example of valid values are: '5m', '1h', '4h',
-		'1d', '1w', '1M'; let's give a practical example: suppose '1h' is selected, we are in
-		the middle of a purging event and it's 10.59am: all aggregates being written will join 
-		counters of 10am; suppose we have 'sql_refresh_time: 60' (seconds); one minute later
-		we have a new purging event and it's 11am: each aggregate being written will create a
-		new entry into the SQL table. Their counters will be joined by the subsequent hour
-		aggregates).
+		bytes/packets/flows counters of each entry have to be accumulated before creating a new
+		entry, thus setting the history's granularity (example of valid values are: '5m', '1h',
+		'4h', '1d', '1w', '1M'; let's give a practical example: suppose '1h' is selected, and a
+		purging event occurs at 10.59am: all aggregates being written to the DB will accumulate
+		counters of 10am; suppose we have a 'sql_refresh_time: 60' (seconds); one minute later,
+		11am, we have a new purging event: counters of 11am will be created and will be updated
+		until 11.59am. And so on).
 
 KEY:		sql_history_roundoff
 VALUES		[m,h,d,w,M]
@@ -286,23 +351,31 @@ DESC:		instructs the plugin to build SQL queries skipping directly to the INSERT
 		care at timing constraints otherwise it may lead to duplicate entries and, potentially, to
 		loss of data (default: false).
 
+KEY:		sql_multi_values
+DESC:		enables the use of multi-values INSERT statements. The value of the directive is intended
+		to be the size (in bytes) of the multi-values buffer. The directive applies only to MySQL;
+		it's just ignored by PostgreSQL instead. Inserting many rows at the same time is much faster
+		(many times faster in some cases) than using separate single-row INSERT statements. Out of
+		the box, MySQL supports values up to 1024000 (1Mb). Bigger values will need to push up
+		accordingly (and globally) the 'max_allowed_packet' MySQL server variable. 
+
 KEY:		sql_trigger_exec
 DESC:		defines the executable to be launched at fixed time intervals to post-process aggregates;
 		intervals are specified by the 'sql_trigger_time' directive; if no interval is supplied,
-		'sql_refresh_time' value is used instead: this will result in a trigger being fired each 
-		purging event. A number of environment variables are set to allow the trigger take actions;
-		take a look to TRIGGER_VARS to check them out.
+		'sql_refresh_time' value is used instead: this will result in a trigger being fired at each 
+		purging event. A number of environment variables are set in order to allow the trigger to
+		take actions; take a look to TRIGGER_VARS to check them out.
 
 KEY:		sql_trigger_time
 VALUES:		#[m|h|d|w|M]
 DESC:		specifies time interval at which the executable specified by 'sql_trigger_exec' has to
-		be launched; if no executable is specified, this key is simply ignored. Values are intended
-		like 'sql_history' directive syntax (for example, valid values are '5m', '1h', '4h', '1d',
+		be launched; if no executables are specified, this key is simply ignored. Values need to be 
+		in the 'sql_history' directive syntax (for example, valid values are '5m', '1h', '4h', '1d',
 		'1w', '1M'; if '1h' is selected, the executable will be fired each hour).
 
 KEY:		sql_preprocess
-DESC:		allows to process (via conditionals and subsequent checks) aggregates on queue during a
-		cache-to-DB purging event thus resulting in a powerful sampling tier; aggregates filtered
+DESC:		allows to process aggregates (via a comma-separated list of conditionals and checks) during 
+		a cache-to-DB purging event thus resulting in a powerful selection tier; aggregates filtered
 		out may be just discarded or saved through the recovery mechanism (if enabled). The set of
 		available preprocessing directives follows:
 		
@@ -313,6 +386,10 @@ DESC:		allows to process (via conditionals and subsequent checks) aggregates on 
 		KEY: minp
 		DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
 		      only if the number of packets is '>=' minp value. 
+
+                KEY: minf
+                DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
+                      only if the number of flows is '>=' minf value.
 
 		KEY: minb
                 DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
@@ -327,9 +404,42 @@ DESC:		allows to process (via conditionals and subsequent checks) aggregates on 
 		      Given a 8Mbit link, all aggregates which have accounted for at least 60Kb of traffic
 		      in the last 60 seconds, will be written to the DB. 
 
+                KEY: maxp
+                DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
+                      only if the number of packets is '<' maxp value.
+
+                KEY: maxf
+                DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
+                      only if the number of flows is '<' maxf value.
+
+                KEY: maxb
+                DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
+                      only if the bytes counter is '<' maxb value. 
+
+                KEY: maxbpp
+                DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
+                      only if the number of bytes per packet is '<' maxbpp value.
+
+                KEY: maxppf
+                DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
+                      only if the number of packets per flow is '<' maxppf value.
+
+                KEY: minbpp
+                DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
+                      only if the number of bytes per packet is '>=' minbpp value.
+
+                KEY: minppf
+                DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
+                      only if the number of packets per flow is '>=' minppf value.
+
 		KEY: recover
 		DESC: action. If previously evaluated checks have marked the aggregate as invalid, a positive
 		      'recover' value makes the packet to be handled through the recovery mechanism (if enabled).  
+
+KEY:		sql_preprocess_type
+VALUES:		[any|all]
+DESC:		When more checks are to be evaluated, this directive tells whether aggregates on the queue
+		are valid if they just match one of the checks (any) or all of them (all) (default: any).
 		
 KEY:		print_markers
 VALUES:		[true|false]
@@ -376,6 +486,9 @@ DESC:		full pathname to a file containing ID mappings. In 'nfacctd' this map all
 		and (b) to match a filter expression (in libpcap syntax) into an ID (a small number in the range
 		1-65535). In 'pmacctd' it allows just the (b). Take also a look to the 'examples' tree for some
 		practical examples. Pre Tagging is enforced shortly after the packet collection from the network. 
+NOTES:		In order to get support for MPLS label hierarchies, the use of CVS versions >= 06-06-2005 of
+		libpcap is adviceable: they include the support for expressions like "mpls 100000 and mpls 1024"
+		that will match packets/flows with an outer label of 100000 and an inner label of 1024.
 
 KEY:            pre_tag_filter [NO_GLOBAL]
 VALUES:         [0-65535]
@@ -401,11 +514,21 @@ DESC:		enables packet sampling. It expects a number which is the ratio of packet
 		SQL plugin, look also at the more powerful 'sql_preprocess' directive which allows to deal with
 		more advanced sampling scenarios.
 
-KEY:		pmacctd_force_frag_handling [GLOBAL]
+KEY:		pmacctd_force_frag_handling [GLOBAL, NO_NFACCTD]
 VALUES:		[true|false]
 DESC:		forces 'pmacctd' to join IPv4/IPv6 fragments: 'pmacctd' does this only whether one or more port 
 		primitives are selected (src_port, dst_port, sum_port); in fact, when not dealing with any upper
 		layer primitive, fragments are just handled as normal packets. However, available filtering rules
 		('aggregate_filter', Pre-Tag filter rules) will need such functionality enabled whether they need
 		to match TCP/UDP ports. So, this directive aims to support such scenarios. 
+
+KEY:		pmacctd_frag_buffer_size [GLOBAL, NO_NFACCTD]
+DESC:		defines the maximum size of the fragment buffer size. The value is expeced in bytes (default: 4 Mb). 
+
+KEY:            pmacctd_flow_buffer_size [GLOBAL, NO_NFACCTD]
+DESC:           defines the maximum size of the flow buffer size. The value is expected in bytes (default: 16 Mb).
+
+KEY:            pmacctd_flow_lifetime [GLOBAL, NO_NFACCTD]
+DESC:           defines how long a flow could remain inactive (ie. no packets belonging to such flow are received)
+		before considering it expired. The value is expected in seconds. (default: 60 secs) 
 

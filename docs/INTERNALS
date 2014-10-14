@@ -10,6 +10,7 @@ V.	Communications between core process and plugins
 VI.	Memory table plugin
 VII.	SQL issues and *SQL plugins
 VIII.	Recovery modes
+IX.	pmacctd flows counter implementation
 
 
 I. Introduction
@@ -339,4 +340,24 @@ effects but if new fields are added over the time, old players will not be able 
 While playing entire logfile or even a part of it, further DB failures are detected and signalled. A
 final statistics screen summarizes what has been successfully written into the DB; this aims to help
 reprocess the logfile at a later stage if something goes wrong once again. 
+
+
+IX. pmacctd flows counter implementation
+Let's take the definition of IP flows from RFC3954, titled 'Cisco Systems NetFlow Services Export
+Version 9': an IP flow is defined as a set of IP packets passing an observation point in the network
+during a certain time interval. All packets that belong to a particular flow have a set of common
+properties derived both from the data contained in the packet and from the packet treatment at the
+observation point. Packets belonging to a specific flow also sport a very high temporal locality.
+While the handmade IP flows implementation in pmacctd mantains the fore-mentioned properties, it
+behaves quite differently when compared with NetFlow. In fact, the typical NetFlow implementation
+accumulates packets belonging to the same flow into a single memory object; when it comes to expire
+(because either the flow hits a timeout or an intercepted quit message - ie. TCP FIN/RST -) it is
+released and pushed into a NetFlow packet which is in turn sent to the collector. On the contrary,
+pmacctd does not accumulate; each packet is looked up against the flow buffer - a memory structure
+for active flows bookeping -: if it belongs to an already active flows its 'new flow' flag is
+deactivated (0); otherwise it's activated (1).
+While the above method is savy in terms of resource consumption, it could have some side-effects:
+for example it causes an entry to have a flow value '0' after either a reset of the backend memory
+structure (ie. pmacct -e, pmacct ... -r, etc.) or the beginning of a new timeframe when historical
+accounting is enabled (ie. print plugin, 'sql_history', etc.).
 

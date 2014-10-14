@@ -58,7 +58,7 @@ void load_ports(char *filename, struct ports_table *pt)
 	  if (!strlen(buf) || (buf[0] == '!')) continue;
 	  ret = atoi(buf); 
 	  if ((ret > 0) && (ret < PORTS_TABLE_ENTRIES)) pt->table[ret] = TRUE;
-	  else Log(LOG_WARNING, "WARN: invalid port at %s:%d\n", filename, rows); 
+	  else Log(LOG_WARNING, "WARN ( %s ): invalid port %d\n", filename, rows); 
 	}
       }
     }

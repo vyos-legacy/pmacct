@@ -1,12 +1,13 @@
 dnl Process this file with autoconf to produce a configure script.
-AC_INIT([pmacctd.c], [0.8.4], [paolo.lucente@ic.cnr.it])
-AM_INIT_AUTOMAKE([pmacctd], [0.8.4])
+AC_INIT([pmacctd.c], [0.8.8], [paolo.lucente@ic.cnr.it])
+AM_INIT_AUTOMAKE([pmacctd], [0.8.8])
 AC_PREFIX_DEFAULT([/usr/local])
 
 dnl Checks for programs.
 AC_PROG_CC
 host_os=`uname`
 host_cpu=`uname -m`
+host_os1=`uname -rs`
 
 AC_MSG_CHECKING(OS)
 AC_MSG_RESULT($host_os)
@@ -62,6 +63,20 @@ case "$host_os" in
   IRIX*)
     AC_DEFINE(IRIX, 1)
     ;;
+esac
+
+dnl os-version specific flags
+case "$host_os1" in
+  "FreeBSD 4"*)
+  AC_DEFINE(FBSD4, 1)
+  ;;
+esac
+
+dnl cpu specific flags
+case "$host_cpu" in
+  sun*)
+  AC_DEFINE(CPU_sparc, 1)
+  ;;
 esac
 
 AC_CHECK_PROG(MAKE, gmake, gmake)
@@ -183,6 +198,20 @@ AC_ARG_ENABLE(mmap,
 	AC_CHECK_FUNCS(mmap)
 )
 
+AC_MSG_CHECKING([whether to disable L2 features])
+AC_ARG_ENABLE(l2,
+        [  --disable-l2                     disable Layer-2 features and support],
+        if test x$enableval = x"yes" ; then
+          AC_MSG_RESULT(no)
+	  AC_DEFINE(HAVE_L2, 1) 
+        else
+          AC_MSG_RESULT(yes)
+        fi
+        ,
+        AC_MSG_RESULT(no)
+	AC_DEFINE(HAVE_L2, 1) 
+)
+
 AC_MSG_CHECKING([whether to enable IPv6 code])
 AC_ARG_ENABLE(ipv6,
         [  --enable-ipv6                    enable IPv6 code],
@@ -199,13 +228,39 @@ AC_ARG_ENABLE(ipv6,
         fi
 
 	AC_DEFINE(ENABLE_IPV6, 1)
+	ipv6support="yes"
 	case "$host_os" in
 	IRIX*)
 	  AC_DEFINE(INET6, 1)
 	  ;;
 	esac ],
         AC_MSG_RESULT(no)
+	ipv6support="no"
 )
+
+if test $ipv6support = "yes"; then 
+AC_MSG_CHECKING([whether to enable IPv4-mapped IPv6 sockets ])
+AC_ARG_ENABLE(v4-mapped,		    
+	[  --enable-v4-mapped               allow IPv6 sockets to handle IPv4 connections],
+	[ 
+	if test x$enableval = x"yes" ; then
+	  AC_DEFINE(V4_MAPPED, 1)
+	  AC_MSG_RESULT(yes)
+	else
+	  AC_MSG_RESULT(no)
+	fi ],
+	[
+	case $host_os in
+	*FreeBSD*|*NetBSD*|*OpenBSD*)
+          AC_MSG_RESULT(no)
+        ;;
+	*)
+	  AC_DEFINE(V4_MAPPED, 1)
+          AC_MSG_RESULT(yes)
+        ;;
+	esac ]
+)
+fi
 
 AC_ARG_WITH(pcap-includes,
   [  --with-pcap-includes=DIR         Search the specified directories for header files],
@@ -562,10 +617,11 @@ CFLAGS ....... : ${CFLAGS}
 LIBS ......... : ${LIBS}
 LDFLAGS ...... : ${LDFLAGS}
 
-Ok. I have done with all.
-Type 'make' to compile.
+Now type 'make' to compile the source code.
 
-Upgrading from previous pmacct releases ? Check out the 'UPGRADE' document to ensure a smooth transition !
+Are you willing to get in touch with other pmacct users ?
+Join the pmacct mailing-list by sending a message to pmacct-discussion-subscribe@area.ba.cnr.it
+
 "
 AC_SUBST([PLUGINS])
 AC_SUBST([EXTRABIN])

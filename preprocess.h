@@ -22,8 +22,17 @@
 struct preprocess {
   u_int32_t qnum;
   u_int16_t minp;
+  u_int16_t minf;
   u_int32_t minb;
+  u_int16_t maxp;
+  u_int16_t maxf;
+  u_int32_t maxb;
+  u_int16_t maxbpp;
+  u_int16_t maxppf;
+  u_int16_t minbpp;
+  u_int16_t minppf;
   u_int8_t recover;
+  u_int8_t num;
 };
 
 #if (!defined __PREPROCESS_C)
@@ -35,7 +44,18 @@ EXT void set_preprocess_funcs(char *, struct preprocess *);
 EXT int cond_qnum(struct db_cache *[], int *);
 EXT int check_minp(struct db_cache *[], int *);
 EXT int check_minb(struct db_cache *[], int *);
+EXT int check_minf(struct db_cache *[], int *);
+EXT int check_maxp(struct db_cache *[], int *);
+EXT int check_maxb(struct db_cache *[], int *);
+EXT int check_maxf(struct db_cache *[], int *);
+EXT int check_maxbpp(struct db_cache *[], int *);
+EXT int check_maxppf(struct db_cache *[], int *);
+EXT int check_minbpp(struct db_cache *[], int *);
+EXT int check_minppf(struct db_cache *[], int *);
 
-EXT preprocess_func preprocess_funcs[N_FUNCS];
+EXT int mandatory_invalidate(struct db_cache *[], int *);
+EXT int mandatory_validate(struct db_cache *[], int *);
+
+EXT preprocess_func preprocess_funcs[2*N_FUNCS]; /* 20 */
 EXT struct preprocess prep;
 #undef EXT

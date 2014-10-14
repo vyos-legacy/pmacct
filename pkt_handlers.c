@@ -36,13 +36,14 @@ void evaluate_packet_handlers()
     primitives = 0;
     memset(&channels_list[index].phandler, 0, N_PRIMITIVES);
 
-    if (channels_list[index].aggregation & COUNT_SRC_MAC) {
+#if defined (HAVE_L2)
+    if (channels_list[index].aggregation & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = src_mac_handler;
       else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_src_mac_handler;
       primitives++;
     }
 
-    if (channels_list[index].aggregation & COUNT_DST_MAC) {
+    if (channels_list[index].aggregation & (COUNT_DST_MAC|COUNT_SUM_MAC)) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = dst_mac_handler;
       else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_dst_mac_handler;
       primitives++;
@@ -53,6 +54,7 @@ void evaluate_packet_handlers()
       else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_vlan_handler;
       primitives++;
     }
+#endif
 
     if (channels_list[index].aggregation & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SRC_AS)) {
       if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = src_host_handler;
@@ -122,6 +124,11 @@ void evaluate_packet_handlers()
       else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_ip_proto_handler;
       primitives++;
     }
+    if (channels_list[index].aggregation & COUNT_FLOWS) {
+      if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = flows_handler;
+      else if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_flows_handler;
+      primitives++;
+    }
 
     if (config.acct_type == ACCT_PM) channels_list[index].phandler[primitives] = counters_handler;
     else if (config.acct_type == ACCT_NF) {
@@ -162,6 +169,7 @@ void evaluate_packet_handlers()
   }
 }
 
+#if defined (HAVE_L2)
 void src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
   if (pptrs->mac_ptr) memcpy(pdata->primitives.eth_shost, (pptrs->mac_ptr+ETH_ADDR_LEN), ETH_ADDR_LEN); 
@@ -180,8 +188,8 @@ void vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, 
     vlan_ptr = (u_int16_t *)pptrs->vlan_ptr;
     pdata->primitives.vlan_id = ntohs(*vlan_ptr);
   }
-  else pdata->primitives.vlan_id = 0;
 }
+#endif
 
 void src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
@@ -266,6 +274,12 @@ void id_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, st
   pdata->primitives.id = chptr->id;
 }
 
+void flows_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+{
+  if (pptrs->new_flow) pdata->flo_num = NBO_One;
+}
+
+#if defined (HAVE_L2)
 void NF_src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
@@ -302,11 +316,13 @@ void NF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
   switch(hdr->version) {
   case 9:
     memcpy(&pdata->primitives.vlan_id, pptrs->f_data+tpl->tpl[NF9_SRC_VLAN].off, tpl->tpl[NF9_SRC_VLAN].len);
+    pdata->primitives.vlan_id = ntohs(pdata->primitives.vlan_id);
     break;
   default:
     break;
   }
 }
+#endif
 
 void NF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
@@ -732,13 +748,15 @@ void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_
 {
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  time_t fstime;
 
   switch(hdr->version) {
   case 9:
     memcpy(&pdata->pkt_len, pptrs->f_data+tpl->tpl[NF9_IN_BYTES].off, tpl->tpl[NF9_IN_BYTES].len);
     memcpy(&pdata->pkt_num, pptrs->f_data+tpl->tpl[NF9_IN_PACKETS].off, tpl->tpl[NF9_IN_PACKETS].len);
-    memcpy(&pdata->pkt_time, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
-    pdata->pkt_time = pdata->pkt_time/1000;
+    memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
+    pdata->pkt_time = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime))/1000);
     break;
   case 8:
     switch(hdr->aggregation) {
@@ -782,12 +800,15 @@ void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_p
 {
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  time_t fstime;
   
   switch(hdr->version) {
   case 9:
     memcpy(&pdata->pkt_len, pptrs->f_data+tpl->tpl[NF9_IN_BYTES].off, tpl->tpl[NF9_IN_BYTES].len);
     memcpy(&pdata->pkt_num, pptrs->f_data+tpl->tpl[NF9_IN_PACKETS].off, tpl->tpl[NF9_IN_PACKETS].len);
-    memcpy(&pdata->pkt_time, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
+    memcpy(&fstime, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
+    pdata->pkt_time = ntohl(((struct struct_header_v9 *) pptrs->f_header)->unix_secs)-
+      (ntohl(((struct struct_header_v9 *) pptrs->f_header)->SysUptime)-ntohl(fstime));
     break;
   case 8:
     switch(hdr->aggregation) {
@@ -870,4 +891,31 @@ void NF_counters_new_handler(struct channels_list_entry *chptr, struct packet_pt
 void ptag_id_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
   pdata->primitives.id = pptrs->tag;
+}
+
+void NF_flows_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
+{
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch(hdr->version) {
+  case 9:
+    memcpy(&pdata->flo_num, pptrs->f_data+tpl->tpl[NF9_FLOWS].off, tpl->tpl[NF9_FLOWS].len);
+    if (!pdata->flo_num) pdata->flo_num = NBO_One;
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 6:
+    case 7:
+    case 8:
+      break;
+    default:
+      pdata->flo_num = ((struct struct_export_v8_1 *) pptrs->f_data)->dFlows;
+      break;
+    }
+    break;
+  default:
+    pdata->flo_num = NBO_One;
+    break;
+  }
 }

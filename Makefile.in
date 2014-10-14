@@ -72,7 +72,7 @@ pmacctd_PLUGINS = @PLUGINS@
 pmacctd_SOURCES = pmacctd.c signals.c util.c strlcpy.c plugin_hooks.c \
 	server.c acct.c memory.c ll.c cfg.c imt_plugin.c log.c pkt_handlers.c \
 	cfg_handlers.c net_aggr.c bpf_filter.c print_plugin.c ip_frag.c \
-	ports_aggr.c addr.c pretag.c pretag_handlers.c 
+	ports_aggr.c addr.c pretag.c pretag_handlers.c ip_flow.c 
 
 pmacctd_LDFLAGS = $(DEFS) 
 pmacctd_LDADD = $(pmacctd_PLUGINS)
@@ -113,7 +113,7 @@ pmacct_LDFLAGS =
 pmacctd_OBJECTS =  pmacctd.o signals.o util.o strlcpy.o plugin_hooks.o \
 server.o acct.o memory.o ll.o cfg.o imt_plugin.o log.o pkt_handlers.o \
 cfg_handlers.o net_aggr.o bpf_filter.o print_plugin.o ip_frag.o \
-ports_aggr.o addr.o pretag.o pretag_handlers.o
+ports_aggr.o addr.o pretag.o pretag_handlers.o ip_flow.o
 pmacctd_DEPENDENCIES = 
 nfacctd_OBJECTS =  nfacctd.o signals.o util.o strlcpy.o plugin_hooks.o \
 server.o acct.o memory.o cfg.o imt_plugin.o log.o pkt_handlers.o \

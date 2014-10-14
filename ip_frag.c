@@ -29,13 +29,15 @@
 #include "jhash.h"
 #include "util.h"
 
-u_int16_t ipft_total_nodes;  
-u_int32_t prune_deadline;
+u_int32_t ipft_total_nodes;  
+time_t prune_deadline;
+time_t emergency_prune;
 u_int32_t trivial_hash_rnd = 140281; /* ummmh */
 
 #if defined ENABLE_IPV6
-u_int16_t ipft6_total_nodes;
-u_int32_t prune_deadline6;
+u_int32_t ipft6_total_nodes;
+time_t prune_deadline6;
+time_t emergency_prune6;
 #endif
 
 void init_ip_fragment_handler()
@@ -48,13 +50,15 @@ void init_ip_fragment_handler()
 
 void init_ip4_fragment_handler()
 {
-  ipft_total_nodes = 0;
+  if (config.frag_bufsz) ipft_total_nodes = config.frag_bufsz / sizeof(struct ip_fragment);
+  else ipft_total_nodes = DEFAULT_FRAG_BUFFER_SIZE / sizeof(struct ip_fragment); 
 
   memset(ipft, 0, sizeof(ipft));
   lru_list.root = (struct ip_fragment *) malloc(sizeof(struct ip_fragment)); 
   lru_list.last = lru_list.root;
   memset(lru_list.root, 0, sizeof(struct ip_fragment));
   prune_deadline = time(NULL)+PRUNE_INTERVAL;
+  emergency_prune = 0;
 }
 
 int ip_fragment_handler(struct packet_ptrs *pptrs)
@@ -107,10 +111,14 @@ int find_fragment(u_int32_t now, struct packet_ptrs *pptrs)
       } 
       else {
 	candidate = fp;
+	if (!candidate->got_first) notify_orphan_fragment(candidate);
 	goto create;
       }
     }
-    if ((fp->deadline < now) && !candidate) candidate = fp; 
+    if ((fp->deadline < now) && !candidate) {
+      candidate = fp; 
+      if (!candidate->got_first) notify_orphan_fragment(candidate);
+    }
     last_seen = fp;
   } 
 
@@ -124,17 +132,29 @@ int create_fragment(u_int32_t now, struct ip_fragment *fp, u_int8_t is_candidate
   struct my_iphdr *iphp = (struct my_iphdr *)pptrs->iph_ptr;
   struct ip_fragment *newf;
 
+  if (!ipft_total_nodes) {
+    if (now > emergency_prune+EMER_PRUNE_INTERVAL) {
+      Log(LOG_INFO, "INFO ( default/core ): Fragment/4 buffer full. Skipping fragments.\n");
+      emergency_prune = now;
+      prune_old_fragments(now, 0);
+    }
+    return FALSE; 
+  }
+
   if (fp) {
     /* a 'not candidate' is simply the tail (last node) of the
        list. We need to allocate a new node */
     if (!is_candidate) { 
       newf = (struct ip_fragment *) malloc(sizeof(struct ip_fragment));
       if (!newf) { 
-	prune_old_fragments(now, 0);
-	newf = (struct ip_fragment *) malloc(sizeof(struct ip_fragment));
-	if (!newf) return FALSE;
+	if (now > emergency_prune+EMER_PRUNE_INTERVAL) {
+	  Log(LOG_INFO, "INFO ( default/core ): Fragment/4 buffer full. Skipping fragments.\n");
+	  emergency_prune = now;
+	  prune_old_fragments(now, 0);
+	}
+	return FALSE;
       }
-      else ipft_total_nodes++;
+      else ipft_total_nodes--;
       memset(newf, 0, sizeof(struct ip_fragment));
       fp->next = newf;
       newf->prev = fp;  
@@ -159,11 +179,14 @@ int create_fragment(u_int32_t now, struct ip_fragment *fp, u_int8_t is_candidate
        bucket doesn't contain any node; we'll allocate first one */ 
     fp = (struct ip_fragment *) malloc(sizeof(struct ip_fragment));  
     if (!fp) {
-      prune_old_fragments(now, 0);
-      fp = (struct ip_fragment *) malloc(sizeof(struct ip_fragment));
-      if (!fp) return FALSE;
+      if (now > emergency_prune+EMER_PRUNE_INTERVAL) {
+        Log(LOG_INFO, "INFO ( default/core ): Fragment/4 buffer full. Skipping fragments.\n");
+        emergency_prune = now;
+        prune_old_fragments(now, 0);
+      }
+      return FALSE;
     }
-    else ipft_total_nodes++;
+    else ipft_total_nodes--;
     memset(fp, 0, sizeof(struct ip_fragment));
     ipft[bucket] = fp;
     lru_list.last->lru_next = fp; /* placing new node as LRU tail */ 
@@ -171,7 +194,7 @@ int create_fragment(u_int32_t now, struct ip_fragment *fp, u_int8_t is_candidate
     lru_list.last = fp;
   }
 
-  fp->deadline = time(NULL)+IPF_TIMEOUT;
+  fp->deadline = now+IPF_TIMEOUT;
   fp->ip_id = iphp->ip_id;
   fp->ip_p = iphp->ip_p;
   fp->ip_src = iphp->ip_src.s_addr;
@@ -217,7 +240,7 @@ void prune_old_fragments(u_int32_t now, u_int32_t off)
       else ipft[fp->bucket] = NULL;
 
       free(fp);
-      ipft_total_nodes--;
+      ipft_total_nodes++;
 
       if (temp) fp = temp;
       else fp = NULL;
@@ -230,9 +253,6 @@ void prune_old_fragments(u_int32_t now, u_int32_t off)
     lru_list.root->lru_next = fp;
   }
   else lru_list.last = lru_list.root;
-
-  // printf("PRUNE -- nodes: %d\n", ipft_total_nodes);
-  // count = 0;
 }
 
 /* hash_fragment() is taken (it has another name there) from Linux kernel 2.4;
@@ -242,16 +262,34 @@ unsigned int hash_fragment(u_int16_t id, u_int32_t src, u_int32_t dst, u_int8_t 
   return jhash_3words((u_int32_t)id << 16 | proto, src, dst, trivial_hash_rnd) & (IPFT_HASHSZ-1);
 }
 
+void notify_orphan_fragment(struct ip_fragment *frag)
+{
+  struct host_addr a;
+  u_char src_host[INET_ADDRSTRLEN], dst_host[INET_ADDRSTRLEN];
+  u_int16_t id;
+
+  a.family = AF_INET;
+  memcpy(&a.address.ipv4, &frag->ip_src, 4);
+  addr_to_str(src_host, &a);
+  memcpy(&a.address.ipv4, &frag->ip_dst, 4);
+  addr_to_str(dst_host, &a);
+  id = ntohs(frag->ip_id);
+  Log(LOG_INFO, "Expiring orphan fragment: ip_src=%s ip_dst=%s proto=%u id=%u\n",
+		  src_host, dst_host, frag->ip_p, id);
+}
+
 #if defined ENABLE_IPV6
 void init_ip6_fragment_handler()
 {
-  ipft6_total_nodes = 0;
+  if (config.frag_bufsz) ipft6_total_nodes = config.frag_bufsz / sizeof(struct ip6_fragment);
+  else ipft6_total_nodes = DEFAULT_FRAG_BUFFER_SIZE / sizeof(struct ip6_fragment);
 
   memset(ipft6, 0, sizeof(ipft6));
   lru_list6.root = (struct ip6_fragment *) malloc(sizeof(struct ip6_fragment));
   lru_list6.last = lru_list6.root;
   memset(lru_list6.root, 0, sizeof(struct ip6_fragment));
   prune_deadline6 = time(NULL)+PRUNE_INTERVAL;
+  emergency_prune6 = 0;
 }
 
 int ip6_fragment_handler(struct packet_ptrs *pptrs, struct ip6_frag *fhdr)
@@ -330,10 +368,14 @@ int find_fragment6(u_int32_t now, struct packet_ptrs *pptrs, struct ip6_frag *fh
       }
       else {
         candidate = fp;
+	if (!candidate->got_first) notify_orphan_fragment6(candidate);
         goto create;
       }
     }
-    if ((fp->deadline < now) && !candidate) candidate = fp;
+    if ((fp->deadline < now) && !candidate) {
+      candidate = fp;
+      if (!candidate->got_first) notify_orphan_fragment6(candidate);
+    }
     last_seen = fp;
   }
 
@@ -348,17 +390,29 @@ int create_fragment6(u_int32_t now, struct ip6_fragment *fp, u_int8_t is_candida
   struct ip6_hdr *iphp = (struct ip6_hdr *)pptrs->iph_ptr;
   struct ip6_fragment *newf;
 
+  if (!ipft6_total_nodes) { 
+    if (now > emergency_prune6+EMER_PRUNE_INTERVAL) {
+      Log(LOG_INFO, "INFO ( default/core ): Fragment/6 buffer full. Skipping fragments.\n");
+      emergency_prune6 = now;
+      prune_old_fragments6(now, 0);
+    }
+    return FALSE;
+  }
+
   if (fp) {
     /* a 'not candidate' is simply the tail (last node) of the
        list. We need to allocate a new node */
     if (!is_candidate) {
       newf = (struct ip6_fragment *) malloc(sizeof(struct ip6_fragment));
       if (!newf) {
-        prune_old_fragments6(now, 0);
-        newf = (struct ip6_fragment *) malloc(sizeof(struct ip6_fragment));
-        if (!newf) return FALSE;
+	if (now > emergency_prune6+EMER_PRUNE_INTERVAL) {
+	  Log(LOG_INFO, "INFO ( default/core ): Fragment/6 buffer full. Skipping fragments.\n");
+	  emergency_prune6 = now;
+	  prune_old_fragments6(now, 0);
+	}
+	return FALSE;
       }
-      else ipft6_total_nodes++;
+      else ipft6_total_nodes--;
       memset(newf, 0, sizeof(struct ip6_fragment));
       fp->next = newf;
       newf->prev = fp;
@@ -383,11 +437,14 @@ int create_fragment6(u_int32_t now, struct ip6_fragment *fp, u_int8_t is_candida
        bucket doesn't contain any node; we'll allocate first one */
     fp = (struct ip6_fragment *) malloc(sizeof(struct ip6_fragment));
     if (!fp) {
-      prune_old_fragments6(now, 0);
-      fp = (struct ip6_fragment *) malloc(sizeof(struct ip6_fragment));
-      if (!fp) return FALSE;
+      if (now > emergency_prune6+EMER_PRUNE_INTERVAL) {
+        Log(LOG_INFO, "INFO ( default/core ): Fragment/6 buffer full. Skipping fragments.\n");
+        emergency_prune6 = now;
+        prune_old_fragments6(now, 0);
+      }
+      return FALSE;
     }
-    else ipft6_total_nodes++;
+    else ipft6_total_nodes--;
     memset(fp, 0, sizeof(struct ip6_fragment));
     ipft6[bucket] = fp;
     lru_list6.last->lru_next = fp; /* placing new node as LRU tail */
@@ -395,7 +452,7 @@ int create_fragment6(u_int32_t now, struct ip6_fragment *fp, u_int8_t is_candida
     lru_list6.last = fp;
   }
 
-  fp->deadline = time(NULL)+IPF_TIMEOUT;
+  fp->deadline = now+IPF_TIMEOUT;
   fp->id = fhdr->ip6f_ident;
   ip6_addr_cpy(&fp->src, &iphp->ip6_src);
   ip6_addr_cpy(&fp->dst, &iphp->ip6_dst);
@@ -440,7 +497,7 @@ void prune_old_fragments6(u_int32_t now, u_int32_t off)
       else ipft6[fp->bucket] = NULL;
 
       free(fp);
-      ipft6_total_nodes--;
+      ipft6_total_nodes++;
 
       if (temp) fp = temp;
       else fp = NULL;
@@ -453,8 +510,20 @@ void prune_old_fragments6(u_int32_t now, u_int32_t off)
     lru_list6.root->lru_next = fp;
   }
   else lru_list6.last = lru_list6.root;
+}
 
-  // printf("PRUNE -- nodes: %d\n", ipft6_total_nodes);
-  // count = 0;
+void notify_orphan_fragment6(struct ip6_fragment *frag)
+{
+  struct host_addr a;
+  u_char src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
+  u_int32_t id;
+
+  a.family = AF_INET6;
+  ip6_addr_cpy(&a.address.ipv6, &frag->src);
+  addr_to_str(src_host, &a);
+  ip6_addr_cpy(&a.address.ipv6, &frag->dst);
+  addr_to_str(dst_host, &a);
+  id = ntohl(frag->id);
+  Log(LOG_INFO, "Expiring orphan fragment: ip_src=%s ip_dst=%s id=%u\n", src_host, dst_host, id);
 }
 #endif

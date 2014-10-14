@@ -26,13 +26,13 @@
 #include "pretag_handlers.h"
 #include "pretag-data.h"
 
-int PT_map_id_handler(struct id_entry *e, char *value)
+int PT_map_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
 {
   int j;
 
   j = atoi(value);
   if (!j || j > 65535) {
-    Log(LOG_ERR, "ERROR: Agent ID '%d' is invalid (range: 0 > ID > 65535). ", j);
+    Log(LOG_ERR, "ERROR ( %s ): Agent ID '%d' is invalid (range: 0 > ID > 65535). ", filename, j);
     return TRUE;
   } 
   e->id = j; 
@@ -40,23 +40,23 @@ int PT_map_id_handler(struct id_entry *e, char *value)
   return FALSE;
 }
 
-int PT_map_ip_handler(struct id_entry *e, char *value)
+int PT_map_ip_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
 {
   if (!str_to_addr(value, &e->agent_ip)) {
-    Log(LOG_ERR, "ERROR: Bad IP address '%s'. ", value);
+    Log(LOG_ERR, "ERROR ( %s ): Bad IP address '%s'. ", filename, value);
     return TRUE;
   }
 
   return FALSE;
 }
 
-int PT_map_input_handler(struct id_entry *e, char *value)
+int PT_map_input_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
 {
   int x = 0, len = strlen(value);
 
   while (x < len) {
     if (!isdigit(value[x])) {
-      Log(LOG_ERR, "ERROR: bad 'in' value: '%s'. ", value);
+      Log(LOG_ERR, "ERROR ( %s ): bad 'in' value: '%s'. ", filename, value);
       return TRUE;
     }
     x++;
@@ -68,13 +68,13 @@ int PT_map_input_handler(struct id_entry *e, char *value)
   return FALSE;
 }
 
-int PT_map_output_handler(struct id_entry *e, char *value)
+int PT_map_output_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
 {
   int x = 0, len = strlen(value);
 
   while (x < len) {
     if (!isdigit(value[x])) {
-      Log(LOG_ERR, "ERROR: bad 'out' value: '%s'. ", value);
+      Log(LOG_ERR, "ERROR ( %s ): bad 'out' value: '%s'. ", filename, value);
       return TRUE;
     }
     x++;
@@ -86,12 +86,12 @@ int PT_map_output_handler(struct id_entry *e, char *value)
   return FALSE;
 }
 
-int PT_map_nexthop_handler(struct id_entry *e, char *value)
+int PT_map_nexthop_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
 {
   int x = 0;
 
   if (!str_to_addr(value, &e->nexthop)) {
-    Log(LOG_ERR, "ERROR: Bad nexthop address '%s'. ", value);
+    Log(LOG_ERR, "ERROR ( %s ): Bad nexthop address '%s'. ", filename, value);
     return TRUE;
   }
 
@@ -100,12 +100,12 @@ int PT_map_nexthop_handler(struct id_entry *e, char *value)
   return FALSE;
 }
 
-int PT_map_bgp_nexthop_handler(struct id_entry *e, char *value)
+int PT_map_bgp_nexthop_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
 {
   int x = 0;
 
   if (!str_to_addr(value, &e->bgp_nexthop)) {
-    Log(LOG_ERR, "ERROR: Bad BGP nexthop address '%s'. ", value);
+    Log(LOG_ERR, "ERROR ( %s ): Bad BGP nexthop address '%s'. ", filename, value);
     return TRUE;
   }
 
@@ -114,13 +114,13 @@ int PT_map_bgp_nexthop_handler(struct id_entry *e, char *value)
   return FALSE;
 }
 
-int PT_map_engine_type_handler(struct id_entry *e, char *value)
+int PT_map_engine_type_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
 {
   int x = 0, j, len = strlen(value);
 
   while (x < len) {
     if (!isdigit(value[x])) {
-      Log(LOG_ERR, "ERROR: bad 'engine_type' value: '%s'. ", value);
+      Log(LOG_ERR, "ERROR ( %s ): bad 'engine_type' value: '%s'. ", filename, value);
       return TRUE;
     }
     x++;
@@ -128,7 +128,7 @@ int PT_map_engine_type_handler(struct id_entry *e, char *value)
 
   j = atoi(value);
   if (j > 255) {
-    Log(LOG_ERR, "ERROR: bad 'engine_type' value (range: 0 >= value > 256). ");
+    Log(LOG_ERR, "ERROR ( %s ): bad 'engine_type' value (range: 0 >= value > 256). ", filename);
     return TRUE;
   }
   e->engine_type = j; 
@@ -137,13 +137,13 @@ int PT_map_engine_type_handler(struct id_entry *e, char *value)
   return FALSE;
 }
 
-int PT_map_engine_id_handler(struct id_entry *e, char *value)
+int PT_map_engine_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
 {
   int x = 0, j, len = strlen(value);
 
   while (x < len) {
     if (!isdigit(value[x])) {
-      Log(LOG_ERR, "ERROR: bad 'engine_id' value: '%s'. ", value);
+      Log(LOG_ERR, "ERROR ( %s ): bad 'engine_id' value: '%s'. ", filename, value);
       return TRUE;
     }
     x++;
@@ -151,7 +151,7 @@ int PT_map_engine_id_handler(struct id_entry *e, char *value)
 
   j = atoi(value);
   if (j > 255) {
-    Log(LOG_ERR, "ERROR: bad 'engine_id' value (range: 0 >= value > 256). ");
+    Log(LOG_ERR, "ERROR ( %s ): bad 'engine_id' value (range: 0 >= value > 256). ", filename);
     return TRUE;
   }
   e->engine_id = j;
@@ -160,7 +160,7 @@ int PT_map_engine_id_handler(struct id_entry *e, char *value)
   return FALSE;
 }
 
-int PT_map_filter_handler(struct id_entry *e, char *value)
+int PT_map_filter_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
 {
   struct pcap_device device;
   bpf_u_int32 localnet, netmask;  /* pcap library stuff */
@@ -172,24 +172,26 @@ int PT_map_filter_handler(struct id_entry *e, char *value)
 
   pcap_lookupnet(config.dev, &localnet, &netmask, errbuf);
   if (pcap_compile(device.dev_desc, &e->filter, value, 0, netmask) < 0) {
-    Log(LOG_ERR, "ERROR: malformed filter: %s\n", pcap_geterr(device.dev_desc));
+    Log(LOG_ERR, "ERROR ( %s ): malformed filter: %s\n", filename, pcap_geterr(device.dev_desc));
     return TRUE;
   }
+  // bpf_dump(&e->filter, TRUE); 
 
   pcap_close(device.dev_desc);
   for (x = 0; e->func[x]; x++);
   e->func[x] = pretag_filter_handler;
+  req->bpf_filter = TRUE;
   return FALSE;
 }
 
-int PT_map_v8agg_handler(struct id_entry *e, char *value)
+int PT_map_v8agg_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req)
 {
   int tmp; 
   int x = 0, len = strlen(value);
 
   while (x < len) {
     if (!isdigit(value[x])) {
-      Log(LOG_ERR, "ERROR: bad 'v8agg' value: '%s'. ", value);
+      Log(LOG_ERR, "ERROR ( %s ): bad 'v8agg' value: '%s'. ", filename, value);
       return TRUE;
     }
     x++;
@@ -197,7 +199,7 @@ int PT_map_v8agg_handler(struct id_entry *e, char *value)
 
   tmp = atoi(value);
   if (tmp < 1 || tmp > 14) {
-    Log(LOG_ERR, "ERROR: 'v8agg' need to be in the following range: 0 > value > 15. ");
+    Log(LOG_ERR, "ERROR ( %s ): 'v8agg' need to be in the following range: 0 > value > 15. ", filename);
     return TRUE;
   }
   e->v8agg = tmp; 

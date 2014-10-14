@@ -26,13 +26,14 @@
 struct DBdesc {
   PGconn *desc;
   char *conn_string;
+  short int type;
   short int connected;
   short int fail;
 };
 
 /* prototypes */
 void pgsql_plugin(int, struct configuration *, void *);
-int PG_cache_dbop(PGconn *, const struct db_cache *, struct insert_data *);
+int PG_cache_dbop(PGconn *, struct db_cache *, struct insert_data *);
 void PG_cache_purge(struct db_cache *[], int, struct insert_data *);
 int PG_evaluate_history(int);
 int PG_compose_static_queries();
@@ -42,14 +43,23 @@ void PG_cache_insert(struct pkt_data *, struct insert_data *);
 int PG_cache_flush(struct db_cache *[], int);
 int PG_evaluate_primitives(int);
 void PG_exit_gracefully(int);
-int PG_Query(struct DBdesc *, struct DBdesc *, struct logfile *, const struct db_cache *, struct insert_data *);
+void PG_Lock(struct DBdesc *);
+int PG_Query(struct DBdesc *, struct DBdesc *, struct logfile *, struct db_cache *, struct insert_data *);
 FILE *PG_file_open(const char *, const char *, const struct insert_data *);
 void PG_file_close(struct logfile *);
-int PG_DB_Connect(struct DBdesc *);
+void PG_DB_Connect(struct DBdesc *);
+void PG_DB_Close(struct DBdesc *, struct DBdesc *);
+void PG_DB_ok(struct DBdesc *);
+void PG_DB_fail(struct DBdesc *);
+void PG_DB_errmsg(struct DBdesc *);
+void PG_create_dyn_table(struct DBdesc *, struct insert_data *); 
 static int PG_affected_rows(PGresult *);
 int PG_Exec(char *);
 void PG_sum_host_insert(struct pkt_data *, struct insert_data *);
 void PG_sum_port_insert(struct pkt_data *, struct insert_data *);
+#if defined (HAVE_L2)
+void PG_sum_mac_insert(struct pkt_data *, struct insert_data *);
+#endif
 
 
 /* global vars */

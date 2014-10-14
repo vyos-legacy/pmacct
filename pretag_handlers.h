@@ -26,16 +26,16 @@
 #define EXT
 #endif
 
-EXT int PT_map_id_handler(struct id_entry *, char *);
-EXT int PT_map_ip_handler(struct id_entry *, char *);
-EXT int PT_map_input_handler(struct id_entry *, char *);
-EXT int PT_map_output_handler(struct id_entry *, char *);
-EXT int PT_map_nexthop_handler(struct id_entry *, char *);
-EXT int PT_map_bgp_nexthop_handler(struct id_entry *, char *);
-EXT int PT_map_engine_type_handler(struct id_entry *, char *);
-EXT int PT_map_engine_id_handler(struct id_entry *, char *);
-EXT int PT_map_filter_handler(struct id_entry *, char *);
-EXT int PT_map_v8agg_handler(struct id_entry *, char *);
+EXT int PT_map_id_handler(char *, struct id_entry *, char *, struct plugin_requests *);
+EXT int PT_map_ip_handler(char *, struct id_entry *, char *, struct plugin_requests *);
+EXT int PT_map_input_handler(char *, struct id_entry *, char *, struct plugin_requests *);
+EXT int PT_map_output_handler(char *, struct id_entry *, char *, struct plugin_requests *);
+EXT int PT_map_nexthop_handler(char *, struct id_entry *, char *, struct plugin_requests *);
+EXT int PT_map_bgp_nexthop_handler(char *, struct id_entry *, char *, struct plugin_requests *);
+EXT int PT_map_engine_type_handler(char *, struct id_entry *, char *, struct plugin_requests *);
+EXT int PT_map_engine_id_handler(char *, struct id_entry *, char *, struct plugin_requests *);
+EXT int PT_map_filter_handler(char *, struct id_entry *, char *, struct plugin_requests *);
+EXT int PT_map_v8agg_handler(char *, struct id_entry *, char *, struct plugin_requests *);
 EXT int pretag_input_handler(struct packet_ptrs *, void *, void *);
 EXT int pretag_id_handler(struct packet_ptrs *, void *, void *);
 EXT int pretag_output_handler(struct packet_ptrs *, void *, void *);

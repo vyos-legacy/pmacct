@@ -30,7 +30,7 @@
 
 #define ARGS "df:o:n:thiP:T:U:D:H:"
 
-MYSQL db_desc;
+struct DBdesc db;
 struct logfile_header lh;
 int re = 0, we = 0;
 int debug = 0;
@@ -62,9 +62,11 @@ void print_header()
 {
   printf("NUM       ");
   printf("ID     ");
+#if defined (HAVE_L2)
   printf("SRC MAC            ");
   printf("DST MAC            ");
   printf("VLAN   ");
+#endif
 #if defined ENABLE_IPV6
   printf("SRC IP                                         ");
   printf("DST IP                                         ");
@@ -77,6 +79,7 @@ void print_header()
   printf("PROTOCOL    ");
   printf("TOS    ");
   printf("PACKETS     ");
+  printf("FLOWS       ");
   printf("BYTES       ");
   printf("BASETIME\n");
 }
@@ -84,15 +87,17 @@ void print_header()
 void print_data(struct db_cache *data, u_int32_t wtc, int num)
 {
   struct tm *lt;
-  char *src_mac, *dst_mac, src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
+  char src_mac[17], dst_mac[17], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
 
   printf("%-8d  ", num);
   printf("%-5d  ", data->id);
-  src_mac = (char *) ether_ntoa(data->eth_shost);
+#if defined (HAVE_L2)
+  etheraddr_string(data->eth_shost, src_mac);
   printf("%-17s  ", src_mac);
-  dst_mac = (char *) ether_ntoa(data->eth_dhost);
+  etheraddr_string(data->eth_dhost, dst_mac);
   printf("%-17s  ", dst_mac);
   printf("%-5d  ", data->vlan_id);
+#endif
 #if defined ENABLE_IPV6
   if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-45d  ", ntohl(data->src_ip.address.ipv4.s_addr));
   else {
@@ -121,6 +126,7 @@ void print_data(struct db_cache *data, u_int32_t wtc, int num)
   printf("%-10s  ", _protocols[data->proto].name);
   printf("%-3d    ", data->tos);
   printf("%-10u  ", data->packet_counter);
+  printf("%-10u  ", data->flows_counter);
   printf("%-10u  ", data->bytes_counter);
   if (lh.sql_history) {
     lt = localtime(&data->basetime); 
@@ -321,9 +327,9 @@ int main(int argc, char **argv)
   TPL_check_sizes(&th, &data, te); 
 
   if (!do_nothing) {
-    mysql_init(&db_desc); 
-    if (mysql_real_connect(&db_desc, sql_host, sql_user, sql_pwd, sql_db, 0, NULL, 0) == NULL) {
-      printf("%s\n", mysql_error(&db_desc));
+    mysql_init(&db.desc); 
+    if (mysql_real_connect(&db.desc, sql_host, sql_user, sql_pwd, sql_db, 0, NULL, 0) == NULL) {
+      printf("%s\n", mysql_error(&db.desc));
       exit(1);
     }
   }
@@ -337,12 +343,13 @@ int main(int argc, char **argv)
   /* composing the proper (filled with primitives used during
      the current execution) SQL strings */
   idata.num_primitives = MY_compose_static_queries();
+  idata.now = time(NULL);
 
   /* handling offset */ 
   if (position) n = fseek(f, (th.sz*position), SEEK_CUR);
 
   /* handling single or iterative request */
-  if (!do_nothing) mysql_query(&db_desc, lock_clause);
+  if (!do_nothing) mysql_query(&db.desc, lock_clause);
   while(!feof(f)) {
     if (!howmany) break;
     else if (howmany > 0) howmany--;
@@ -353,7 +360,7 @@ int main(int argc, char **argv)
       re++;
       TPL_pop(fbuf, &data, &th, te);
 
-      if (!do_nothing) result = MY_cache_dbop(&db_desc, &data, &idata);
+      if (!do_nothing) result = MY_cache_dbop(&db, &data, &idata);
       else {
 	if (debug) print_data(&data, lh.what_to_count, (position+re));
       }
@@ -364,43 +371,46 @@ int main(int argc, char **argv)
   }
 
   if (!do_nothing) {
-    mysql_query(&db_desc, unlock_clause);
+    mysql_query(&db.desc, unlock_clause);
     printf("\nOK: written [%u/%u] elements.\n", we, re);
   }
   else printf("OK: read [%u] elements.\n", re);
-  mysql_close(&db_desc);
+  mysql_close(&db.desc);
   fclose(f);
 
   return 0;
 }
 
-int MY_cache_dbop(MYSQL *db_desc, const struct db_cache *cache_elem, struct insert_data *idata)
+int MY_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_data *idata)
 {
   char *ptr_values, *ptr_where;
-  int num=0, ret=0;
+  int num=0, ret=0, have_flows=0;
 
+  if (lh.what_to_count & COUNT_FLOWS) have_flows = TRUE;
+
+  /* constructing sql query */
   ptr_where = where_clause;
   ptr_values = values_clause; 
   while (num < idata->num_primitives) {
-    (*where[num].handler)(cache_elem, num, &ptr_values, &ptr_where);
+    (*where[num].handler)(cache_elem, idata, num, &ptr_values, &ptr_where);
     num++;
   }
   
-  /* constructing sql query */
-  
-  snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter);
+  if (have_flows) snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
+  else snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter);
   strncat(sql_data, where_clause, SPACELEFT(sql_data));
   if (!sql_dont_try_update) {
-    ret = mysql_query(db_desc, sql_data);
+    ret = mysql_query(&db->desc, sql_data);
     if (ret) return ret; 
   }
 
-  if (sql_dont_try_update || (mysql_affected_rows(db_desc) == 0)) {
+  if (sql_dont_try_update || (mysql_affected_rows(&db->desc) == 0)) {
     /* UPDATE failed, trying with an INSERT query */ 
     strncpy(sql_data, insert_clause, sizeof(sql_data));
-    snprintf(ptr_values, SPACELEFT(values_clause), ", %u, %u)", cache_elem->packet_counter, cache_elem->bytes_counter);
+    if (have_flows) snprintf(ptr_values, SPACELEFT(values_clause), ", %u, %lu, %u)", cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
+    else snprintf(ptr_values, SPACELEFT(values_clause), ", %u, %u)", cache_elem->packet_counter, cache_elem->bytes_counter);
     strncat(sql_data, values_clause, SPACELEFT(sql_data));
-    ret = mysql_query(db_desc, sql_data);
+    ret = mysql_query(&db->desc, sql_data);
     if (ret) return ret;
   }
 
@@ -424,7 +434,7 @@ int MY_evaluate_history(int primitive)
     strncat(where[primitive].string, "stamp_inserted", SPACELEFT(where[primitive].string));
 
     strncat(insert_clause, "stamp_updated, stamp_inserted", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "now(), FROM_UNIXTIME(%u)", SPACELEFT(values[primitive].string));
+    strncat(values[primitive].string, "FROM_UNIXTIME(%u), FROM_UNIXTIME(%u)", SPACELEFT(values[primitive].string));
 
     where[primitive].type = values[primitive].type = TIMESTAMP;
     values[primitive].handler = where[primitive].handler = count_timestamp_handler;
@@ -464,12 +474,14 @@ int MY_evaluate_primitives(int primitive)
     what_to_count |= COUNT_ID;
     what_to_count |= COUNT_VLAN;
     if (lh.what_to_count & COUNT_SUM_PORT) what_to_count |= COUNT_SUM_PORT; 
+    if (lh.what_to_count & COUNT_SUM_MAC) what_to_count |= COUNT_SUM_MAC; 
   }
 
   /* 1st part: arranging pointers to an opaque structure and 
      composing the static selection (WHERE) string */
 
-  if (what_to_count & COUNT_SRC_MAC) {
+#if defined (HAVE_L2)
+  if (what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
@@ -523,6 +535,7 @@ int MY_evaluate_primitives(int primitive)
       primitive++;
     }
   }
+#endif
 
   if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SUM_HOST|COUNT_SUM_NET)) {
     if (primitive) {
@@ -681,7 +694,17 @@ int MY_evaluate_primitives(int primitive)
 
 int MY_compose_static_queries()
 {
-  int primitives=0;
+  int primitives=0, have_flows=0;
+
+  if (lh.what_to_count & COUNT_FLOWS || (lh.sql_table_version >= 4 && !lh.sql_optimize_clauses)) {
+    lh.what_to_count |= COUNT_FLOWS;
+    have_flows = TRUE;
+
+    if (lh.sql_table_version < 4 && !lh.sql_optimize_clauses) {
+      printf("ERROR: The accounting of flows requires SQL table v4. Exiting.\n");
+      exit(1);
+    }
+  }
 
   /* "INSERT INTO ... VALUES ... " and "... WHERE ..." stuff */
   strncpy(where[primitives].string, " WHERE ", sizeof(where[primitives].string));
@@ -689,7 +712,9 @@ int MY_compose_static_queries()
   strncpy(values[primitives].string, " VALUES (", sizeof(values[primitives].string));
   primitives = MY_evaluate_history(primitives);
   primitives = MY_evaluate_primitives(primitives);
-  strncat(insert_clause, ", packets, bytes)", SPACELEFT(insert_clause));
+  strncat(insert_clause, ", packets, bytes", SPACELEFT(insert_clause));
+  if (have_flows) strncat(insert_clause, ", flows", SPACELEFT(insert_clause));
+  strncat(insert_clause, ")", SPACELEFT(insert_clause));
 
   /* "LOCK ..." stuff */
   snprintf(lock_clause, sizeof(lock_clause), "LOCK TABLES %s WRITE", sql_table);
@@ -698,6 +723,7 @@ int MY_compose_static_queries()
   /* "UPDATE ... SET ..." stuff */
   snprintf(update_clause, sizeof(update_clause), "UPDATE %s ", sql_table);
   strncat(update_clause, "SET packets=packets+%u, bytes=bytes+%u", SPACELEFT(update_clause));
+  if (have_flows) strncat(update_clause, ", flows=flows+%u", SPACELEFT(update_clause));
   if (lh.sql_history) strncat(update_clause, ", stamp_updated=now()", SPACELEFT(update_clause));
 
   return primitives;

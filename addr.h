@@ -13,5 +13,7 @@ EXT void *pm_htonl6(void *);
 EXT void *pm_ntohl6(void *);
 EXT unsigned int ip6_addr_cmp(void *, void *);
 EXT void ip6_addr_cpy(void *, void *);
+EXT void etheraddr_string(const u_char *, char *);
+EXT int string_etheraddr(const u_char *, char *);
 
 #undef EXT

@@ -19,6 +19,12 @@ DESC:		The DB name currently in use by the plugin.
 VAR:		$SQL_TABLE
 DESC:		The SQL table name currently in use by the plugin.
 
+VAR:		$EFFECTIVE_SQL_TABLE
+DESC:		The SQL table name currently in use by the plugin. It is
+		defined only whether the 'sql_table' value contains any
+		variable. Variable values are substitute here by their
+		actual values.
+
 VAR:		$SQL_HOST
 DESC:		Hostname (if any) to which the plugin is connecting to
 		contact the SQL server.

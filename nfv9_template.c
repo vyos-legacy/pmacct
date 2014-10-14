@@ -70,7 +70,7 @@ struct template_cache_entry *insert_template_v9(struct template_hdr_v9 *hdr, str
 
   ptr = malloc(sizeof(struct template_cache_entry));
   if (!ptr) {
-    Log(LOG_ERR, "ERROR: Unable to allocate enough memory for a new Template Cache Entry.\n");
+    Log(LOG_ERR, "ERROR ( default/core ): Unable to allocate enough memory for a new Template Cache Entry.\n");
     return NULL;
   }
 

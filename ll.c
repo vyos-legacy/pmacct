@@ -31,11 +31,9 @@
    protocol header and fills a pointer structure */ 
 void eth_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs) 
 {
-  u_int16_t *e8021Q;
-  u_int16_t *ppp;
+  u_int16_t *e8021Q, *ppp;
   struct eth_header *eth_pk;
-  register u_short etype;
-  register u_int16_t caplen = h->caplen;
+  u_int16_t etype, caplen = h->caplen, nl;
 
   if (caplen < ETHER_HDRLEN) {
     pptrs->iph_ptr = NULL;
@@ -46,74 +44,142 @@ void eth_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs
   etype = ntohs(eth_pk->ether_type);
   pptrs->mac_ptr = (u_char *) eth_pk->ether_dhost; 
   pptrs->vlan_ptr = NULL; /* avoid stale vlan pointers */
+  pptrs->mpls_ptr = NULL; /* avoid stale MPLS pointers */
+  nl = ETHER_HDRLEN;
+  caplen -= ETHER_HDRLEN;
 
+  recurse:
   if (etype == ETHERTYPE_IP) {
     pptrs->l3_proto = ETHERTYPE_IP; 
     pptrs->l3_handler = ip_handler;
-    pptrs->iph_ptr = pptrs->packet_ptr + ETHER_HDRLEN;
+    pptrs->iph_ptr = pptrs->packet_ptr + nl;
     return;
   }
 #if defined ENABLE_IPV6
   if (etype == ETHERTYPE_IPV6) {
     pptrs->l3_proto = ETHERTYPE_IPV6;
     pptrs->l3_handler = ip6_handler;
-    pptrs->iph_ptr = pptrs->packet_ptr + ETHER_HDRLEN;
+    pptrs->iph_ptr = pptrs->packet_ptr + nl;
     return;
   }
 #endif
 
   /* originally contributed by Rich Gade */
   if (etype == ETHERTYPE_8021Q) {
-    if (caplen < ETHER_HDRLEN+IEEE8021Q_TAGLEN) {
+    if (caplen < IEEE8021Q_TAGLEN) {
       pptrs->iph_ptr = NULL;
       return;
     }
-    e8021Q = (u_int16_t *)(pptrs->packet_ptr + sizeof(struct eth_header) + 2);
-    pptrs->vlan_ptr = pptrs->packet_ptr + ETHER_HDRLEN; 
+    e8021Q = (u_int16_t *)(pptrs->packet_ptr + nl + 2);
+    pptrs->vlan_ptr = pptrs->packet_ptr + nl; 
     etype = ntohs(*e8021Q);
-    if (etype == ETHERTYPE_IP) { 
-      pptrs->l3_proto = ETHERTYPE_IP;
-      pptrs->l3_handler = ip_handler;
-      pptrs->iph_ptr = pptrs->packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN; 
-      return;
-    }
-#if defined ENABLE_IPV6
-    if (etype == ETHERTYPE_IPV6) {
-      pptrs->l3_proto = ETHERTYPE_IPV6;
-      pptrs->l3_handler = ip6_handler;
-      pptrs->iph_ptr = pptrs->packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN; 
-      return;
-    }
-#endif 
+    nl += IEEE8021Q_TAGLEN;
+    caplen -= IEEE8021Q_TAGLEN;
+    goto recurse;
   }
 
   /* originally contributed by Vasiliy Ponomarev */
   if (etype == ETHERTYPE_PPPOE) {
-    if (caplen < ETHER_HDRLEN+PPPOE_HDRLEN+PPP_TAGLEN) {
+    if (caplen < PPPOE_HDRLEN+PPP_TAGLEN) {
       pptrs->iph_ptr = NULL;
       return;
     }
-    ppp = (u_int16_t *)(pptrs->packet_ptr + sizeof(struct eth_header) + PPPOE_HDRLEN);
+    ppp = (u_int16_t *)(pptrs->packet_ptr + nl + PPPOE_HDRLEN);
     etype = ntohs(*ppp);
-    if (etype == PPP_IP) {
-      pptrs->l3_proto = ETHERTYPE_IP; 
-      pptrs->l3_handler = ip_handler;
-      pptrs->iph_ptr = pptrs->packet_ptr + ETHER_HDRLEN + PPPOE_HDRLEN + PPP_TAGLEN;
-      return;
-    }
+    if (etype == PPP_IP) etype = ETHERTYPE_IP; 
 #if defined ENABLE_IPV6
-    if (etype == PPP_IPV6) {
-      pptrs->l3_proto = ETHERTYPE_IPV6;
-      pptrs->l3_handler = ip6_handler;
-      pptrs->iph_ptr = pptrs->packet_ptr + ETHER_HDRLEN + PPPOE_HDRLEN + PPP_TAGLEN;
-      return;
-    }
-#endif
+    if (etype == PPP_IPV6) etype = ETHERTYPE_IPV6;
+#endif 
+    nl += PPPOE_HDRLEN+PPP_TAGLEN;
+    caplen -= PPPOE_HDRLEN+PPP_TAGLEN;
+    goto recurse;
+  }
+
+  if (etype == ETHERTYPE_MPLS || etype == ETHERTYPE_MPLS_MULTI) {
+    etype = mpls_handler(pptrs->packet_ptr + nl, &caplen, &nl, pptrs);
+    goto recurse;
   }
 
   pptrs->l3_proto = 0;
   pptrs->l3_handler = NULL;
   pptrs->iph_ptr = NULL;
+}
+
+u_int16_t mpls_handler(u_char *bp, u_int16_t *caplen, u_int16_t *nl, register struct packet_ptrs *pptrs)
+{
+  u_char *p = bp;
+  u_int32_t label=0;
+
+  pptrs->mpls_ptr = bp;
+
+  if (*caplen < 4) {
+    pptrs->iph_ptr = NULL;
+    return;
+  }
+
+  do {
+    label = ntohl(*p);
+    p += 4; *nl += 4; *caplen -= 4;
+  } while (!MPLS_STACK(label) && *caplen > 0);
+
+  switch (MPLS_LABEL(label)) {
+  case 0: /* IPv4 explicit NULL label */
+  case 3: /* IPv4 implicit NULL label */
+    return ETHERTYPE_IP;
+#if defined ENABLE_IPV6
+  case 2: /* IPv6 explicit NULL label */
+    return ETHERTYPE_IPV6;
+#endif
+  default:
+    /* 
+       support for what is sometimes referred as null-encapsulation:
+       by looking at the first payload byte (but only if the Bottom
+       of Stack bit is set) we try to determine the network layer
+       protocol: 
+       0x45-0x4f is IPv4
+       0x60-0x6f is IPv6
+    */
+    if (MPLS_STACK(label)) { 
+      switch (*p) {
+      case 0x45:
+      case 0x46:
+      case 0x47:
+      case 0x48:
+      case 0x49:
+      case 0x4a:
+      case 0x4b:
+      case 0x4c:
+      case 0x4d:
+      case 0x4e:
+      case 0x4f:
+	return ETHERTYPE_IP;
+#if defined ENABLE_IPV6 
+      case 0x60:
+      case 0x61:
+      case 0x62:
+      case 0x63:
+      case 0x64:
+      case 0x65:
+      case 0x66:
+      case 0x67:
+      case 0x68:
+      case 0x69:
+      case 0x6a:
+      case 0x6b:
+      case 0x6c:
+      case 0x6d:
+      case 0x6e:
+      case 0x6f:
+	return ETHERTYPE_IPV6;
+#endif
+      default:
+        break;
+      }
+    }
+    break;
+  }
+
+  return FALSE;
 }
 
 void fddi_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs) 
@@ -147,19 +213,18 @@ void fddi_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptr
 void ppp_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs)
 {
   u_char *p = pptrs->packet_ptr;
-  register u_int16_t len = h->len;
-  register u_int16_t caplen = h->caplen;
-  register unsigned int proto = 0;
+  u_int16_t caplen = h->caplen, nl = 0;
+  unsigned int proto = 0;
 
-  if ((caplen < PPP_HDRLEN) || (len < 2)) {
+  if (caplen < PPP_HDRLEN) {
     pptrs->iph_ptr = NULL;
     return;
   }
 
   if (*p == PPP_ADDRESS && *(p + 1) == PPP_CONTROL) {
     p += 2;
-    len -= 2;
-    if (len < 2) {
+    caplen -= 2;
+    if (caplen < 2) {
       pptrs->iph_ptr = NULL;
       return;
     }
@@ -174,6 +239,7 @@ void ppp_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs
     p += 2;
   }
 
+  recurse:
   if ((proto == PPP_IP) || (proto == ETHERTYPE_IP)) { 
     pptrs->l3_proto = ETHERTYPE_IP; 
     pptrs->l3_handler = ip_handler;
@@ -188,6 +254,11 @@ void ppp_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs
     return;
   }
 #endif
+
+  if (proto == PPP_MPLS_UCAST || proto == PPP_MPLS_MCAST) {
+    proto = mpls_handler(p, &caplen, &nl, pptrs);
+    goto recurse;
+  }
 
   pptrs->l3_proto = 0;
   pptrs->l3_handler = NULL;
@@ -337,4 +408,46 @@ u_char *llc_handler(const struct pcap_pkthdr *h, u_int caplen, register u_char *
     else return 0; 
   }
   else return 0;
+}
+
+void chdlc_handler(const struct pcap_pkthdr *h, register struct packet_ptrs *pptrs)
+{
+  u_char *p = pptrs->packet_ptr;
+  u_int16_t caplen = h->caplen, nl = 0;
+  u_int16_t proto;
+
+  if (caplen < CHDLC_HDRLEN) {
+    pptrs->iph_ptr = NULL;
+    return; 
+  }
+
+  proto = EXTRACT_16BITS(&p[2]);
+  caplen -= CHDLC_HDRLEN;
+  p += CHDLC_HDRLEN;
+
+  recurse:
+  switch (proto) {
+  case ETHERTYPE_IP:
+    pptrs->l3_proto = ETHERTYPE_IP;
+    pptrs->l3_handler = ip_handler;
+    pptrs->iph_ptr = p;
+    return;
+#if defined ENABLE_IPV6 
+  case ETHERTYPE_IPV6:
+    pptrs->l3_proto = ETHERTYPE_IPV6;
+    pptrs->l3_handler = ip6_handler;
+    pptrs->iph_ptr = p;
+    return;
+#endif
+  case ETHERTYPE_MPLS:
+  case ETHERTYPE_MPLS_MULTI:
+    proto = mpls_handler(p, &caplen, &nl, pptrs);
+    goto recurse;
+  default:
+    break;
+  }
+
+  pptrs->l3_proto = 0;
+  pptrs->l3_handler = NULL;
+  pptrs->iph_ptr = NULL;
 }

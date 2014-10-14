@@ -24,6 +24,8 @@
 #include "pmacct.h"
 #include "addr.h"
 
+static char hex[] = "0123456789abcdef";
+
 /*
  * str_to_addr() converts a string into a supported family address
  */
@@ -219,3 +221,68 @@ void ip6_addr_cpy(void *dst, void *src)
     ptrd[chunk] = ptrs[chunk];
 }
 
+void etheraddr_string(const u_char *ep, char *buf)
+{
+  u_int i, j;
+  char *cp;
+
+  cp = buf;
+  if ((j = *ep >> 4) != 0)
+    *cp++ = hex[j];
+  else
+    *cp++ = '0';
+
+  *cp++ = hex[*ep++ & 0xf];
+
+  for (i = 5; (int)--i >= 0;) {
+    *cp++ = ':';
+    if ((j = *ep >> 4) != 0)
+      *cp++ = hex[j];
+    else
+      *cp++ = '0';
+
+    *cp++ = hex[*ep++ & 0xf];
+  }
+
+  *cp = '\0';
+}
+
+/*
+ * string_etheraddr() writes the content of *asc in *addr (which has
+ * to be ETH_ADDR_LEN long). TRUE is returned if any failure occurs;
+ * TRUE if the routine completes the job successfully 
+ */
+int string_etheraddr(const u_char *asc, char *addr)
+{
+  int cnt;
+
+  for (cnt = 0; cnt < 6; ++cnt) {
+    unsigned int number;
+    char ch;
+
+    ch = tolower (*asc++);
+    if ((ch < '0' || ch > '9') && (ch < 'a' || ch > 'f'))
+      return 1;
+    number = isdigit (ch) ? (ch - '0') : (ch - 'a' + 10);
+
+    ch = tolower(*asc);
+    if ((cnt < 5 && ch != ':') || (cnt == 5 && ch != '\0' && !isspace (ch))) {
+      ++asc;
+      if ((ch < '0' || ch > '9') && (ch < 'a' || ch > 'f'))
+        return 1;
+      number <<= 4;
+      number += isdigit (ch) ? (ch - '0') : (ch - 'a' + 10);
+      ch = *asc;
+      if (cnt < 5 && ch != ':')
+        return 1;
+    }
+
+    /* Store result.  */
+    addr[cnt] = (unsigned char) number;
+
+    /* Skip ':'.  */
+    ++asc;
+  }
+
+  return FALSE;
+}

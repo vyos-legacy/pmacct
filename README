@@ -1,37 +1,37 @@
 NAME:
-  pmacct (Promiscuous mode IP Accounting package) v0.8.4
+  pmacct (Promiscuous mode IP Accounting package) v0.8.8
   pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 
 
 DESCRIPTION:
-  pmacct is a small set of tools to account and aggregate IPv4 and IPv6 traffic;
-  aggregation revolves around the key concept of primitives (VLAN id, source and
-  destination MAC addresses, hosts, networks, AS numbers, ports, IP protocol and
-  ToS/DSCP field are supported) which may be employed alone or arbitrarily combined
-  with others to form complex aggregation methods; support for custom historical
-  breakdown, packet tagging, filtering and sampling. Aggregates can be stored into
-  memory tables, SQL databases (MySQL or PostgreSQL) or simply pushed to stdout.
-  Data is collected either using libpcap (and optionally promiscuous mode of the
-  listening interface) or reading Netflow v1/v5/v7/v8/v9 packets coming from the
-  network.
+  pmacct is a small set of passive network monitoring tools to measure, account and
+  aggregate IPv4 and IPv6 traffic; aggregation revolves around the key concept of
+  primitives (VLAN id, source and destination MAC addresses, hosts, networks, ports,
+  AS numbers, IP protocol and ToS/DSCP field are supported) which may be arbitrarily 
+  combined to build custom aggregation methods; support for historical data breakdown,
+  triggers and packet tagging, filtering, sampling. Aggregates can be stored into
+  memory tables, SQL databases (MySQL or PostgreSQL) or simply pushed to stdout. Data
+  is collected either using libpcap (and optionally promiscuous mode of the listening
+  interface) or reading Netflow v1/v5/v7/v8/v9 packets coming from the network.
 
-  IP accounting is the key for a range of operations like billing, pricing
-  models application, live or historical traffic analysis; it is also a valuable
-  way to go for handling network thresholds or bandwidth management. Taking SNMP
-  data from physical or virtual interfaces of network equipments sometimes
-  is not too useful because of coarse granularity of counters.
+  IP accounting is the key for a range of operations like billing, pricing models
+  application, live or historical traffic analysis; it is also a valuable way to go
+  for putting thresholds and firing triggers while measuring the underlying network.
+  Taking SNMP data from physical or virtual interfaces of network equipments
+  sometimes is not too useful because of coarse granularity of counters.
   Finer granularities are reached if counters match useful logical entities
   (such as Autonomous Systems, departmental networks, specific traffic flows,
   etc.).
 
   Many network equipments already support redirection of network traffic to a
-  replication port; here, non-blocking architectures help in not negatively
-  affect global performances and usual routing or forwarding operations when
-  mirroring data. Alternatively, some equipments support export protocols (like
-  Cisco's Netflow) to describe traffic flows.
-  Both approaches, traffic mirroring and export protocols, leave new chances
-  to do IP accounting online (but not inline), off critical paths. New opportunities
-  arise for advanced data manipulation or post-processing activities.
+  replication port; non-blocking architectures help in not negatively affect the
+  global performances and routing/forwarding operations when mirroring data. 
+  Alternatively, some equipments support export protocols (like Cisco's Netflow)
+  to monitor the network at a traffic flows level.
+  Both approaches, traffic mirroring and export protocols, leave new chances to
+  monitor the network online (but not inline), off critical paths. This translates
+  in new opportunities arising for advanced data manipulation or post-processing
+  activities.
 
   Please refer to the TODO file to read about some immediate future projects  
   about development of this tool.
@@ -49,9 +49,9 @@ PLATFORMS:
   Slackware Linux 8.x/9.x
   Gentoo Linux 1.4.x/1.6.x
   SuSE Linux 9.x
-  Debian 3.0
-  Solaris 8/9/10
-  FreeBSD 4.x/5.x i386
+  Debian 3.x
+  Solaris 8/9/10 x86/sparc
+  FreeBSD 4.x/5.x x86 
   LEAF Bering-uClibc
   Tru64 5.x
 

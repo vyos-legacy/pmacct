@@ -60,5 +60,7 @@ EXT void TPL_push_proto(u_char **, const struct db_cache *);
 EXT void TPL_push_id(u_char **, const struct db_cache *);
 EXT void TPL_push_bytes_counter(u_char **, const struct db_cache *);
 EXT void TPL_push_packet_counter(u_char **, const struct db_cache *);
+EXT void TPL_push_flows_counter(u_char **, const struct db_cache *);
 EXT void TPL_push_timestamp(u_char **, const struct db_cache *);
+EXT void TPL_push_nol2(u_char **, const struct db_cache *);
 #undef EXT

@@ -64,6 +64,9 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS))
     insert_func = P_sum_host_insert;
   else if (config.what_to_count & COUNT_SUM_PORT) insert_func = P_sum_port_insert;
+#if defined (HAVE_L2)
+  else if (config.what_to_count & COUNT_SUM_MAC) insert_func = P_sum_mac_insert;
+#endif
   else insert_func = P_cache_insert;
 
   load_networks(config.networks_file, &nt, &nc);
@@ -155,7 +158,7 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       if (((struct ch_buf_hdr *)pipebuf)->seq != seq) {
         rg_err_count++;
         if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-          Log(LOG_ERR, "ERROR: We are missing data.\n");
+          Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
           Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
           Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%d'.\n", config.pipe_size);
           Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%d'.\n", config.buffer_size);
@@ -227,7 +230,8 @@ void P_cache_insert(struct pkt_data *data)
       else {
 	cache_ptr = P_cache_attach_new_node(cache_ptr); 
 	if (!cache_ptr) {
-	  Log(LOG_WARNING, "WARN: Unable to write data: try with a larger 'print_cache_entries' value.\n");
+	  Log(LOG_WARNING, "WARN ( %s/%s ): Unable to write data: try with a larger 'print_cache_entries' value.\n", 
+			  config.name, config.type);
 	  return; 
 	}
 	else {
@@ -244,6 +248,7 @@ void P_cache_insert(struct pkt_data *data)
     /* we add the new entry in the cache */
     memcpy(cache_ptr, srcdst, sizeof(struct pkt_primitives));
     cache_ptr->packet_counter = ntohl(data->pkt_num);
+    cache_ptr->flow_counter = ntohl(data->flo_num);
     cache_ptr->bytes_counter = ntohl(data->pkt_len);
     cache_ptr->valid = TRUE;
   }
@@ -257,11 +262,13 @@ void P_cache_insert(struct pkt_data *data)
 
       /* everything is ok; summing counters */
       cache_ptr->packet_counter += ntohl(data->pkt_num);
+      cache_ptr->flow_counter += ntohl(data->flo_num);
       cache_ptr->bytes_counter += ntohl(data->pkt_len);
     }
     else {
       /* entry invalidated; restarting counters */
       cache_ptr->packet_counter = ntohl(data->pkt_num);
+      cache_ptr->flow_counter = ntohl(data->flo_num);
       cache_ptr->bytes_counter = ntohl(data->pkt_len);
       cache_ptr->valid = TRUE;
       queries_queue[qq_ptr] = cache_ptr;
@@ -295,7 +302,7 @@ struct chained_cache *P_cache_attach_new_node(struct chained_cache *elem)
 
 void P_cache_purge(struct chained_cache *queue[], int index)
 {
-  char *src_mac, *dst_mac, src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
+  char src_mac[17], dst_mac[17], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
   int j;
 
   if (config.print_markers) printf("--START (%u+%u)--\n", refresh_deadline-config.print_refresh_time,
@@ -303,11 +310,13 @@ void P_cache_purge(struct chained_cache *queue[], int index)
 
   for (j = 0; j < index; j++) {
     printf("%-5d  ", queue[j]->id);
-    src_mac = (char *) ether_ntoa(queue[j]->eth_shost);
+#if defined (HAVE_L2)
+    etheraddr_string(queue[j]->eth_shost, src_mac);
     printf("%-17s  ", src_mac);
-    dst_mac = (char *) ether_ntoa(queue[j]->eth_dhost);
+    etheraddr_string(queue[j]->eth_dhost, dst_mac);
     printf("%-17s  ", dst_mac);
     printf("%-5d  ", queue[j]->vlan_id); 
+#endif
 #if defined ENABLE_IPV6
     if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-45d  ", ntohl(queue[j]->src_ip.address.ipv4.s_addr));
 #else
@@ -339,6 +348,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
     printf("%-10s  ", _protocols[queue[j]->proto].name);
     printf("%-3d    ", queue[j]->tos);
     printf("%-10u  ", queue[j]->packet_counter);
+    printf("%-10u  ", queue[j]->flow_counter);
     printf("%u\n", queue[j]->bytes_counter);
   }
 
@@ -348,9 +358,11 @@ void P_cache_purge(struct chained_cache *queue[], int index)
 void P_write_stats_header()
 {
   printf("ID     ");
+#if defined (HAVE_L2)
   printf("SRC MAC            ");
   printf("DST MAC            ");
   printf("VLAN   ");
+#endif
 #if defined ENABLE_IPV6
   printf("SRC IP                                         ");
   printf("DST IP                                         ");
@@ -363,6 +375,7 @@ void P_write_stats_header()
   printf("PROTOCOL    ");
   printf("TOS    ");
   printf("PACKETS     ");
+  printf("FLOWS       ");
   printf("BYTES\n");
 }
 
@@ -375,7 +388,8 @@ void *Malloc(unsigned int size)
     sbrk(size); 
     obj = (unsigned char *) malloc(size);
     if (!obj) {
-      Log(LOG_ERR, "ERROR: Unable to grab enough memory (requested: %u bytes). Exiting ...\n", size);
+      Log(LOG_ERR, "ERROR ( %s/%s ): Unable to grab enough memory (requested: %u bytes). Exiting ...\n", 
+		      config.name, config.type, size);
       exit(1);
     }
   }
@@ -421,3 +435,16 @@ void P_sum_port_insert(struct pkt_data *data)
   data->primitives.src_port = port;
   P_cache_insert(data);
 }
+
+#if defined (HAVE_L2)
+void P_sum_mac_insert(struct pkt_data *data)
+{
+  u_char macaddr[ETH_ADDR_LEN];
+
+  memcpy(macaddr, &data->primitives.eth_dhost, ETH_ADDR_LEN);
+  memset(data->primitives.eth_dhost, 0, ETH_ADDR_LEN);
+  P_cache_insert(data);
+  memcpy(&data->primitives.eth_shost, macaddr, ETH_ADDR_LEN);
+  P_cache_insert(data);
+}
+#endif

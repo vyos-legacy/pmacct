@@ -2,7 +2,9 @@
 #define IPFT_HASHSZ 256 
 #define IPF_TIMEOUT 60 
 #define PRUNE_INTERVAL 7200
+#define EMER_PRUNE_INTERVAL 60
 #define PRUNE_OFFSET 1800 
+#define DEFAULT_FRAG_BUFFER_SIZE 4096000 /* 4 Mb */
 
 /* structures */
 struct ip_fragment {
@@ -10,7 +12,7 @@ struct ip_fragment {
   u_int8_t got_first;		/* got first packet ? */
   u_int16_t a;			/* bytes accumulator */
   u_int16_t pa;			/* packets accumulator */
-  u_int32_t deadline;		/* timeout timestamp */
+  time_t deadline;		/* timeout timestamp */
   u_int16_t ip_id;
   u_int8_t ip_p;
   u_int32_t ip_src;
@@ -33,7 +35,7 @@ struct ip6_fragment {
   u_int8_t got_first;           /* got first packet ? */
   u_int16_t a;                  /* bytes accumulator */
   u_int16_t pa;			/* packets accumulator */
-  u_int32_t deadline;           /* timeout timestamp */
+  time_t deadline;		/* timeout timestamp */
   u_int32_t id;
   u_int32_t src[4];
   u_int32_t dst[4];
@@ -72,6 +74,7 @@ EXT int find_fragment(u_int32_t, struct packet_ptrs *);
 EXT int create_fragment(u_int32_t, struct ip_fragment *, u_int8_t, unsigned int, struct packet_ptrs *); 
 EXT unsigned int hash_fragment(u_int16_t, u_int32_t, u_int32_t, u_int8_t);
 EXT void prune_old_fragments(u_int32_t, u_int32_t); 
+EXT void notify_orphan_fragment(struct ip_fragment *);
 
 #if defined ENABLE_IPV6
 EXT void init_ip6_fragment_handler();
@@ -80,5 +83,6 @@ EXT unsigned int hash_fragment6(u_int32_t, struct in6_addr *, struct in6_addr *)
 EXT int find_fragment6(u_int32_t, struct packet_ptrs *, struct ip6_frag *);
 EXT int create_fragment6(u_int32_t, struct ip6_fragment *, u_int8_t, unsigned int, struct packet_ptrs *, struct ip6_frag *);
 EXT void prune_old_fragments6(u_int32_t, u_int32_t); 
+EXT void notify_orphan_fragment6(struct ip6_fragment *);
 #endif
 #undef EXT

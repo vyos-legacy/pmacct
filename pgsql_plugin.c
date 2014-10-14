@@ -47,12 +47,15 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   char pgsql_table[] = "acct";
   char pgsql_table_v2[] = "acct_v2";
   char pgsql_table_v3[] = "acct_v3";
+  char pgsql_table_v4[] = "acct_v4";
   char pgsql_table_uni[] = "acct_uni";
   char pgsql_table_uni_v2[] = "acct_uni_v2";
   char pgsql_table_uni_v3[] = "acct_uni_v3";
+  char pgsql_table_uni_v4[] = "acct_uni_v4";
   char pgsql_table_as[] = "acct_as";
   char pgsql_table_as_v2[] = "acct_as_v2";
   char pgsql_table_as_v3[] = "acct_as_v3";
+  char pgsql_table_as_v4[] = "acct_as_v4";
   struct pollfd pfd;
   struct insert_data idata;
   time_t t, refresh_deadline;
@@ -74,7 +77,11 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   /* signal handling */
   signal(SIGINT, PG_exit_gracefully);
   signal(SIGHUP, reload); /* handles reopening of syslog channel */
+#if !defined FBSD4
   signal(SIGCHLD, SIG_IGN); 
+#else
+  signal(SIGCHLD, ignore_falling_child); 
+#endif
 
   if (!config.sql_refresh_time)
     config.sql_refresh_time = DEFAULT_DB_REFRESH_TIME;
@@ -87,6 +94,9 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS))
     insert_func = PG_sum_host_insert;
   else if (config.what_to_count & COUNT_SUM_PORT) insert_func = PG_sum_port_insert;
+#if defined (HAVE_L2)
+  else if (config.what_to_count & COUNT_SUM_MAC) insert_func = PG_sum_mac_insert;
+#endif
   else insert_func = PG_cache_insert;
 
   load_networks(config.networks_file, &nt, &nc);
@@ -94,6 +104,7 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   if (config.ports_file) load_ports(config.ports_file, &pt);
   
+  memset(&idata, 0, sizeof(idata));
   memset(sql_data, 0, sizeof(sql_data));
   memset(update_clause, 0, sizeof(update_clause));
   memset(insert_clause, 0, sizeof(insert_clause));
@@ -126,19 +137,24 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     if (!config.sql_data || (config.sql_data && !strcmp(config.sql_data, "typed"))) { 
       if ((config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS)) && (config.what_to_count & 
 	  (COUNT_SRC_HOST|COUNT_DST_HOST|COUNT_SRC_NET|COUNT_DST_NET))) {
-        Log(LOG_ERR, "ERROR: 'typed' PostgreSQL table in use: unable to mix HOST/NET and AS aggregations.\n"); 
+        Log(LOG_ERR, "ERROR ( %s/%s ): 'typed' PostgreSQL table in use: unable to mix HOST/NET and AS aggregations.\n",
+			config.name, config.type); 
         exit(1);
       }
       else typed = TRUE; 
     }
     else if (config.sql_data && !strcmp(config.sql_data, "unified")) typed = FALSE;
     else {
-      Log(LOG_ERR, "ERROR: Ignoring unknown 'sql_data' value '%s'.\n", config.sql_data);
+      Log(LOG_ERR, "ERROR ( %s/%s ): Ignoring unknown 'sql_data' value '%s'.\n", config.name, config.type, config.sql_data);
       exit(1);
     }
 
     if (typed) {  
-      if (config.sql_table_version == 3) {
+      if (config.sql_table_version == 4) {
+        if (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) config.sql_table = pgsql_table_as_v4;
+	else config.sql_table = pgsql_table_v4;
+      }
+      else if (config.sql_table_version == 3) {
 	if (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) config.sql_table = pgsql_table_as_v3;
 	else config.sql_table = pgsql_table_v3;
       }
@@ -157,6 +173,8 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       else config.sql_table = pgsql_table_uni;
     }
   }
+  if (strchr(config.sql_table, '%')) idata.dyn_table = TRUE;
+  glob_dyn_table = idata.dyn_table;
 
   now = time(NULL);
 
@@ -184,6 +202,9 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         idata.timeslot = calc_monthly_timeslot(t, config.sql_history_howmany, ADD);
     }
     idata.basetime = t;
+    glob_basetime = idata.basetime;
+    idata.new_basetime = TRUE;
+    glob_new_basetime = TRUE;
   }
   
   /* sql triggers time init: deadline; if a trigger exec is specified but no
@@ -231,7 +252,9 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   /* building up static SQL clauses */
   idata.num_primitives = PG_compose_static_queries();
-  num_primitives = idata.num_primitives; 
+  glob_num_primitives = idata.num_primitives; 
+
+  if (config.sql_backup_host || config.sql_recovery_logfile) idata.recover = TRUE;
 
   /* handling logfile template stuff */
   te = build_template(&th);
@@ -247,6 +270,10 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   /* setting up environment variables */
   SQL_SetENV();
+
+  /* setting backend types */
+  p.type = BE_TYPE_PRIMARY;
+  b.type = BE_TYPE_BACKUP;
 
   /* plugin main loop */
   for(;;) {
@@ -276,11 +303,9 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	  PG_compose_conn_string(&p, config.sql_host);
 	  if (config.sql_backup_host) PG_compose_conn_string(&b, config.sql_backup_host);
 
-	  if (!PG_DB_Connect(&p)) Log(LOG_ALERT, "ALERT: PG_DB_Connect(): PGSQL daemon failed.\n");
-	  
+	  PG_DB_Connect(&p);
           PG_cache_purge(queries_queue, qq_ptr, &idata); 
-	  if (!p.fail) PQfinish(p.desc);
-	  else if (b.connected) PQfinish(b.desc);
+	  PG_DB_Close(&p, &b);
 	}
 
 	if (config.sql_trigger_exec) {
@@ -296,6 +321,8 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	  if (config.sql_trigger_time == COUNT_MONTHLY)
 	    idata.t_timeslot = calc_monthly_timeslot(idata.triggertime, config.sql_trigger_time_howmany, ADD);
 	}
+	idata.new_basetime = FALSE;
+	glob_new_basetime = FALSE;
         break;
       }
       break;
@@ -327,7 +354,7 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         else {
           rg_err_count++;
           if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-            Log(LOG_ERR, "ERROR: We are missing data.\n");
+            Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
             Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
             Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
             Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
@@ -359,11 +386,9 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
             PG_compose_conn_string(&p, config.sql_host);
             if (config.sql_backup_host) PG_compose_conn_string(&b, config.sql_backup_host);
 
-            if (!PG_DB_Connect(&p)) Log(LOG_ALERT, "ALERT: PG_DB_Connect(): PGSQL daemon failed.\n");
+            PG_DB_Connect(&p); 
             PG_cache_purge(queries_queue, qq_ptr, &idata);
-
-	    if (!p.fail) PQfinish(p.desc);
-	    else if (b.connected) PQfinish(b.desc);
+	    PG_DB_Close(&p, &b);
 	  }
 
 	  if (config.sql_trigger_exec) {
@@ -379,6 +404,8 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
             if (config.sql_trigger_time == COUNT_MONTHLY)
               idata.t_timeslot = calc_monthly_timeslot(idata.triggertime, config.sql_trigger_time_howmany, ADD);
           }
+	  idata.new_basetime = FALSE;
+	  glob_new_basetime = FALSE;
           break;
         }
       } 
@@ -398,6 +425,9 @@ void pgsql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	idata.basetime += idata.timeslot;
 	if (config.sql_history == COUNT_MONTHLY)
 	  idata.timeslot = calc_monthly_timeslot(idata.basetime, config.sql_history_howmany, ADD);
+	glob_basetime = idata.basetime;
+	idata.new_basetime = TRUE;
+	glob_new_basetime = TRUE;
       }
 
       while (((struct ch_buf_hdr *)pipebuf)->num) {
@@ -427,11 +457,13 @@ void PG_cache_modulo(struct pkt_primitives *srcdst, struct insert_data *idata)
   idata->modulo = idata->hash % config.sql_cache_entries;
 }
 
-int PG_cache_dbop(PGconn *db_desc, const struct db_cache *cache_elem, struct insert_data *idata)
+int PG_cache_dbop(PGconn *db_desc, struct db_cache *cache_elem, struct insert_data *idata)
 {
   PGresult *ret;
   char *ptr_values, *ptr_where, *err_string;
-  int num=0;
+  int num=0, have_flows=0;
+
+  if (config.what_to_count & COUNT_FLOWS) have_flows = TRUE;
 
   /* constructing SQL query */
   ptr_where = where_clause;
@@ -439,21 +471,23 @@ int PG_cache_dbop(PGconn *db_desc, const struct db_cache *cache_elem, struct ins
   memset(where_clause, 0, sizeof(where_clause));
   memset(values_clause, 0, sizeof(values_clause));
   while (num < idata->num_primitives) {
-    (*where[num].handler)(cache_elem, num, &ptr_values, &ptr_where);
+    (*where[num].handler)(cache_elem, idata, num, &ptr_values, &ptr_where);
     num++;
   }
-  /* XXX: optimize time() usage */
-  snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter, now);
-  strncat(sql_data, where_clause, SPACELEFT(sql_data));
 
   /* sending UPDATE query */
   if (!config.sql_dont_try_update) {
+    /* XXX: optimize time() usage */
+    if (have_flows) snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter, now);
+    else snprintf(sql_data, sizeof(sql_data), update_clause, cache_elem->packet_counter, cache_elem->bytes_counter, now);
+    strncat(sql_data, where_clause, SPACELEFT(sql_data));
+
     ret = PQexec(db_desc, sql_data);
     if (PQresultStatus(ret) != PGRES_COMMAND_OK) {
       err_string = PQresultErrorMessage(ret);
       PQclear(ret);
       Log(LOG_DEBUG, "FAILED query follows:\n%s\n", sql_data);
-      Log(LOG_ERR, "%s\n", err_string);
+      Log(LOG_ERR, "( %s/%s ): %s\n", config.name, config.type, err_string);
       return TRUE;
     }
     PQclear(ret);
@@ -462,7 +496,8 @@ int PG_cache_dbop(PGconn *db_desc, const struct db_cache *cache_elem, struct ins
   if (config.sql_dont_try_update || (!PG_affected_rows(ret))) {
     /* UPDATE failed, trying with an INSERT query */ 
     strncpy(sql_data, insert_clause, sizeof(sql_data));
-    snprintf(ptr_values, SPACELEFT(values_clause), ", %u, %u)", cache_elem->packet_counter, cache_elem->bytes_counter);
+    if (have_flows) snprintf(ptr_values, SPACELEFT(values_clause), ", %u, %lu, %u)", cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
+    else snprintf(ptr_values, SPACELEFT(values_clause), ", %u, %lu)", cache_elem->packet_counter, cache_elem->bytes_counter);
     strncat(sql_data, values_clause, SPACELEFT(sql_data));
 
     ret = PQexec(db_desc, sql_data);
@@ -470,7 +505,7 @@ int PG_cache_dbop(PGconn *db_desc, const struct db_cache *cache_elem, struct ins
       err_string = PQresultErrorMessage(ret);
       PQclear(ret);
       Log(LOG_DEBUG, "FAILED query follows:\n%s\n", sql_data);
-      Log(LOG_ERR, "%s\n", err_string);
+      Log(LOG_ERR, "( %s/%s ): %s\n", config.name, config.type, err_string);
 
       return TRUE;
     }
@@ -478,8 +513,9 @@ int PG_cache_dbop(PGconn *db_desc, const struct db_cache *cache_elem, struct ins
     idata->iqn++;
   }
   else idata->uqn++;
+  idata->een++;
 
-  if (config.debug) Log(LOG_DEBUG, "%s\n\n", sql_data);
+  Log(LOG_DEBUG, "( %s/%s ): %s\n\n", config.name, config.type, sql_data);
 
   return FALSE;
 }
@@ -556,7 +592,7 @@ void PG_cache_insert(struct pkt_data *data, struct insert_data *idata)
           goto follow_chain;
         }
         /* additional check: counters overflow */
-        else if ((Cursor->packet_counter > UINT32TMAX) || (Cursor->bytes_counter > UINT32TMAX)) {
+        else if (Cursor->bytes_counter > UINT32TMAX) {
 	  if (!staleElem && Cursor->chained) staleElem = Cursor;
           goto follow_chain;
         }
@@ -577,6 +613,7 @@ void PG_cache_insert(struct pkt_data *data, struct insert_data *idata)
   /* we add the new entry in the cache */
   memcpy(Cursor, srcdst, sizeof(struct pkt_primitives));
   Cursor->packet_counter = ntohl(data->pkt_num);
+  Cursor->flows_counter = ntohl(data->flo_num);
   Cursor->bytes_counter = ntohl(data->pkt_len);
   Cursor->valid = TRUE;
   Cursor->basetime = basetime;
@@ -589,11 +626,12 @@ void PG_cache_insert(struct pkt_data *data, struct insert_data *idata)
 
   update:
   Cursor->packet_counter += ntohl(data->pkt_num);
+  Cursor->flows_counter += ntohl(data->flo_num);
   Cursor->bytes_counter += ntohl(data->pkt_len);
   return;
 
   safe_action:
-  Log(LOG_DEBUG, "DEBUG: purging process (CAUSE: safe action)\n");
+  Log(LOG_DEBUG, "DEBUG ( %s/%s ): purging process (CAUSE: safe action)\n", config.name, config.type);
 
   switch (fork()) {
   case 0: /* Child */
@@ -604,11 +642,9 @@ void PG_cache_insert(struct pkt_data *data, struct insert_data *idata)
 
     PG_compose_conn_string(&p, config.sql_host);
     if (config.sql_backup_host) PG_compose_conn_string(&b, config.sql_backup_host);
-    if (!PG_DB_Connect(&p)) Log(LOG_ALERT, "ALERT: PG_DB_Connect(): PGSQL daemon failed.\n");
-
+    PG_DB_Connect(&p);
     PG_cache_purge(queries_queue, qq_ptr, idata);
-    if (!p.fail) PQfinish(p.desc);
-    else if (b.connected) PQfinish(b.desc);
+    PG_DB_Close(&p, &b);
     exit(0);
   default: /* Parent */
     qq_ptr = PG_cache_flush(queries_queue, qq_ptr);
@@ -638,12 +674,24 @@ void PG_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
   idata->ten = index;
 
   if (config.debug) {
-    Log(LOG_DEBUG, "*** Purging cache - START ***\n");
+    Log(LOG_DEBUG, "( %s/%s ) *** Purging cache - START ***\n", config.name, config.type);
     start = time(NULL);
   }
 
+  /* We check for variable substitution in SQL table */
+  if (idata->dyn_table) {
+    char tmpbuf[LONGLONGSRVBUFLEN];
+
+    strftime_same(insert_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
+    strftime_same(update_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
+    strftime_same(lock_clause, LONGSRVBUFLEN, tmpbuf, &idata->basetime);
+
+    if (config.sql_table_schema && idata->new_basetime) PG_create_dyn_table(&p, idata); 
+  }
+  strncat(update_clause, set_clause, SPACELEFT(update_clause));
+
   /* beginning DB transaction */
-  ret = PQexec(p.desc, lock_clause);
+  PG_Lock(&p);
 
   /* for each element of the queue to be processed we execute PG_Query(); the function
      returns a non-zero value if DB has failed; then, first failed element is saved to
@@ -653,52 +701,56 @@ void PG_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
   for (j = 0; j < index; j++) {
     if (queue[j]->valid) r = PG_Query(&p, &b, &lf, queue[j], idata);
     else r = FALSE; /* not valid elements are marked as not to be reprocessed */ 
-    if (r) {
+    if (r && !reprocess) {
       idata->uqn = 0;
       idata->iqn = 0;
       reprocess = j+1; /* avoding reprocess to be 0 when element j = 0 fails */
     }
   }
 
-  /* Finishing DB transaction */
+  /* Finalizing DB transaction */
   if (!p.fail) {
     ret = PQexec(p.desc, "COMMIT");
     if (PQresultStatus(ret) != PGRES_COMMAND_OK) {
-      p.fail = TRUE;
-      p.connected = FALSE;
-      idata->uqn = 0;
-      idata->iqn = 0;
-      reprocess = j+1;
+      if (!reprocess) {
+	PG_DB_fail(&p);
+        idata->uqn = 0;
+        idata->iqn = 0;
+        reprocess = j+1;
+      }
     }
     PQclear(ret);
   }
 
   if (p.fail) {
     reprocess--;
-    if (reprocess)
+    if (reprocess) {
       for (j = 0; j <= reprocess; j++) {
 	/* we avoid not valid elements (valid == 0) and already recovered 
 	   elements (valid == -1) to be reprocessed */  
         if (queue[j]->valid > 0) PG_Query(&p, &b, &lf, queue[j], idata);
       }
+    }
   }
+
+  if (b.connected) {
+    ret = PQexec(b.desc, "COMMIT");
+    if (PQresultStatus(ret) != PGRES_COMMAND_OK) PG_DB_fail(&b);
+    PQclear(ret);
+  }
+
 
   /* rewinding stuff */
   if (lf.file) PG_file_close(&lf);
-  if ((lf.fail) || (b.fail)) Log(LOG_ALERT, "ALERT: recovery for PgSQL operation failed.\n");
+  if (lf.fail || b.fail) Log(LOG_ALERT, "ALERT ( %s/%s ): recovery for PgSQL operation failed.\n", config.name, config.type);
+
   if (config.debug) {
     idata->elap_time = time(NULL)-start;
-    Log(LOG_DEBUG, "*** Purging cache - END (QN: %u, ET: %u) ***\n", index, idata->elap_time);
+    Log(LOG_DEBUG, "( %s/%s ) *** Purging cache - END (QN: %u, ET: %u) ***\n", config.name, config.type, index, idata->elap_time);
   }
 
   if (config.sql_trigger_exec) {
     if (!config.debug) idata->elap_time = time(NULL)-start;
-
-    if (preprocess_funcs[0]) {
-      for (j = 0; j < index; j++) {
-        if (queue[j]->valid > 0) idata->een++;
-      }
-    }
     SQL_SetENV_child(idata);
   }
 }
@@ -725,7 +777,7 @@ int PG_evaluate_history(int primitive)
     strncat(where[primitive].string, "stamp_inserted", SPACELEFT(where[primitive].string));
 
     strncat(insert_clause, "stamp_updated, stamp_inserted", SPACELEFT(insert_clause));
-    strncat(values[primitive].string, "CURRENT_TIMESTAMP(0), ABSTIME(%u)::Timestamp", SPACELEFT(values[primitive].string));
+    strncat(values[primitive].string, "ABSTIME(%u)::Timestamp, ABSTIME(%u)::Timestamp", SPACELEFT(values[primitive].string));
 
     where[primitive].type = values[primitive].type = TIMESTAMP;
     values[primitive].handler = where[primitive].handler = count_timestamp_handler;
@@ -749,6 +801,7 @@ int PG_evaluate_primitives(int primitive)
     /* we are requested to avoid optimization; then we'll construct an
        all-true "what to count" bitmap. */ 
     if (config.what_to_count & COUNT_SRC_MAC) what_to_count |= COUNT_SRC_MAC;
+    else if (config.what_to_count & COUNT_SUM_MAC) what_to_count |= COUNT_SUM_MAC;
     else fakes |= FAKE_SRC_MAC;
     if (config.what_to_count & COUNT_DST_MAC) what_to_count |= COUNT_DST_MAC;
     else fakes |= FAKE_DST_MAC;
@@ -778,7 +831,8 @@ int PG_evaluate_primitives(int primitive)
   /* 1st part: arranging pointers to an opaque structure and 
      composing the static selection (WHERE) string */
 
-  if (what_to_count & COUNT_SRC_MAC) {
+#if defined (HAVE_L2)
+  if (what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
@@ -811,7 +865,7 @@ int PG_evaluate_primitives(int primitive)
 
     if ((config.sql_table_version < 2) && !assume_custom_table) {
       if (config.what_to_count & COUNT_VLAN) {
-        Log(LOG_ERR, "ERROR: The use of VLAN accounting requires SQL table v2. Exiting.\n");
+        Log(LOG_ERR, "ERROR ( %s/%s ): The use of VLAN accounting requires SQL table v2. Exiting.\n", config.name, config.type);
         exit(1);
       }
       else what_to_count ^= COUNT_VLAN;
@@ -832,6 +886,7 @@ int PG_evaluate_primitives(int primitive)
       primitive++;
     }
   }
+#endif
 
   if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SUM_HOST|COUNT_SUM_NET)) {
     if (primitive) {
@@ -922,7 +977,7 @@ int PG_evaluate_primitives(int primitive)
 
     if ((config.sql_table_version < 3) && !assume_custom_table) {
       if (config.what_to_count & COUNT_IP_TOS) {
-	Log(LOG_ERR, "ERROR: The use of ToS/DSCP accounting requires SQL table v3. Exiting.\n");
+	Log(LOG_ERR, "ERROR ( %s/%s ): The use of ToS/DSCP accounting requires SQL table v3. Exiting.\n", config.name, config.type);
 	exit(1);
       }
       else what_to_count ^= COUNT_IP_TOS;
@@ -963,7 +1018,7 @@ int PG_evaluate_primitives(int primitive)
 
     if ((config.sql_table_version < 2) && !assume_custom_table) {
       if (config.what_to_count & COUNT_ID) {
-        Log(LOG_ERR, "ERROR: The use of IDs requires SQL table v2. Exiting.\n");
+        Log(LOG_ERR, "ERROR ( %s/%s ): The use of IDs requires SQL table v2. Exiting.\n", config.name, config.type);
         exit(1);
       }
       else what_to_count ^= COUNT_ID;
@@ -985,6 +1040,7 @@ int PG_evaluate_primitives(int primitive)
     }
   }
 
+#if defined (HAVE_L2)
   if (fakes & FAKE_SRC_MAC) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
@@ -1012,6 +1068,7 @@ int PG_evaluate_primitives(int primitive)
     values[primitive].handler = where[primitive].handler = fake_mac_handler;
     primitive++;
   }
+#endif
 
   if (fakes & FAKE_SRC_HOST) {
     if (primitive) {
@@ -1046,7 +1103,17 @@ int PG_evaluate_primitives(int primitive)
 
 int PG_compose_static_queries()
 {
-  int primitives=0;
+  int primitives=0, have_flows=0;
+
+  if (config.what_to_count & COUNT_FLOWS || (config.sql_table_version >= 4 && !config.sql_optimize_clauses)) {
+    config.what_to_count |= COUNT_FLOWS;
+    have_flows = TRUE;
+
+    if (config.sql_table_version < 4 && !config.sql_optimize_clauses) {
+      Log(LOG_ERR, "ERROR ( %s/%s ): The accounting of flows requires SQL table v4. Exiting.\n", config.name, config.type);
+      exit(1);
+    }
+  }
 
   /* "INSERT INTO ... VALUES ... " and "... WHERE ..." stuff */
   strncpy(where[primitives].string, " WHERE ", sizeof(where[primitives].string));
@@ -1054,15 +1121,18 @@ int PG_compose_static_queries()
   strncpy(values[primitives].string, " VALUES (", sizeof(values[primitives].string));
   primitives = PG_evaluate_history(primitives);
   primitives = PG_evaluate_primitives(primitives);
-  strncat(insert_clause, ", packets, bytes)", SPACELEFT(insert_clause));
+  strncat(insert_clause, ", packets, bytes", SPACELEFT(insert_clause));
+  if (have_flows) strncat(insert_clause, ", flows", SPACELEFT(insert_clause));
+  strncat(insert_clause, ")", SPACELEFT(insert_clause));
 
   /* "LOCK ..." stuff */
   snprintf(lock_clause, sizeof(lock_clause), "BEGIN; LOCK %s IN EXCLUSIVE MODE;", config.sql_table);
 
   /* "UPDATE ... SET ..." stuff */
   snprintf(update_clause, sizeof(update_clause), "UPDATE %s ", config.sql_table);
-  strncat(update_clause, "SET packets=packets+%u, bytes=bytes+%u", SPACELEFT(update_clause));
-  if (config.sql_history) strncat(update_clause, ", stamp_updated=CURRENT_TIMESTAMP(0)", SPACELEFT(update_clause)); 
+  strncpy(set_clause, "SET packets=packets+%u, bytes=bytes+%lu", SPACELEFT(set_clause));
+  if (have_flows) strncat(set_clause, ", flows=flows+%u", SPACELEFT(set_clause));
+  if (config.sql_history) strncat(set_clause, ", stamp_updated=CURRENT_TIMESTAMP(0)", SPACELEFT(set_clause)); 
 
   return primitives;
 }
@@ -1091,30 +1161,44 @@ void PG_exit_gracefully(int signum)
   signal(SIGINT, SIG_IGN);
   signal(SIGHUP, SIG_IGN);
 
-  if (config.debug) Log(LOG_DEBUG, "*** Purging PGSQL queries queue ***\n");
+  Log(LOG_DEBUG, "( %s/%s ) *** Purging PGSQL queries queue ***\n", config.name, config.type);
   if (config.syslog) closelog();
 
   memset(&p, 0, sizeof(p));
   memset(&b, 0, sizeof(b));
 
   memset(&idata, 0, sizeof(idata));
-  idata.num_primitives = num_primitives;
+  idata.num_primitives = glob_num_primitives;
+  idata.now = time(NULL);
+  idata.basetime = glob_basetime;
+  idata.dyn_table = glob_dyn_table;
+  idata.new_basetime = glob_new_basetime;
+  if (config.sql_backup_host || config.sql_recovery_logfile) idata.recover = TRUE;
 
   PG_compose_conn_string(&p, config.sql_host);
   if (config.sql_backup_host) PG_compose_conn_string(&b, config.sql_backup_host);
-
-  if (!PG_DB_Connect(&p)) Log(LOG_ALERT, "ALERT: PG_DB_Connect(): PGSQL daemon failed.\n");
+  PG_DB_Connect(&p); 
   PG_cache_purge(queries_queue, qq_ptr, &idata);
-
-  if (!p.fail) PQfinish(p.desc);
-  else if (b.connected) PQfinish(b.desc);
+  PG_DB_Close(&p, &b);
   exit(0); 
 }
 
-int PG_Query(struct DBdesc *p, struct DBdesc *b, struct logfile *lf, const struct db_cache *elem, struct insert_data *idata)
+void PG_Lock(struct DBdesc *db)
 {
-  PGresult *ret;
+  PGresult *PGret;
 
+  if (!db->fail) {
+    PGret = PQexec(db->desc, lock_clause);
+    if (PQresultStatus(PGret) != PGRES_COMMAND_OK) {
+      PG_DB_errmsg(db);
+      PG_DB_fail(db);
+    }
+    PQclear(PGret);
+  }
+}
+
+int PG_Query(struct DBdesc *p, struct DBdesc *b, struct logfile *lf, struct db_cache *elem, struct insert_data *idata)
+{
   if ((!p->fail) && (elem->valid > 0)) {
     if (PG_cache_dbop(p->desc, elem, idata)) goto recovery; 
     else return FALSE;
@@ -1122,22 +1206,19 @@ int PG_Query(struct DBdesc *p, struct DBdesc *b, struct logfile *lf, const struc
   else goto take_action;
 
   recovery:
-  Log(LOG_ALERT, "ALERT: PG_cache_dbop(): PGSQL daemon failed.\n");
-  if (config.sql_backup_host || config.sql_recovery_logfile) {
-    p->fail = TRUE;
-    p->connected = FALSE;
-  }
+  PG_DB_errmsg(p);
+  PG_DB_fail(p);
 
   take_action:
   if (config.sql_backup_host) {
     if (!b->fail) {
       if (!b->connected) {
-        if (!PG_DB_Connect(b)) b->fail = TRUE;
-        else b->connected = TRUE;
+        PG_DB_Connect(b);
+	if (config.sql_table_schema && idata->new_basetime) PG_create_dyn_table(b, idata);
+        PG_Lock(b);
       }
-      if (PG_cache_dbop(b->desc, elem, idata)) {
-	b->fail = TRUE; 
-	b->connected = FALSE;
+      if (!b->fail) {
+        if (PG_cache_dbop(b->desc, elem, idata)) PG_DB_fail(b);
       }
     }
   }
@@ -1147,16 +1228,19 @@ int PG_Query(struct DBdesc *p, struct DBdesc *b, struct logfile *lf, const struc
     if (!lf->fail) {
       if (!lf->open) {
         lf->file = PG_file_open(config.sql_recovery_logfile, "a", idata);
-        if (!lf->file) lf->fail = TRUE;
-        else lf->open = TRUE;
+        if (lf->file) lf->open = TRUE;
+        else {
+	  lf->open = FALSE;
+	  lf->fail = TRUE;
+	}
       }
       if (!lf->fail) {
         sz = TPL_push(logbuf.ptr, elem);
-        if ((logbuf.ptr+sz) > logbuf.end) {
+        logbuf.ptr += sz;
+        if ((logbuf.ptr+sz) > logbuf.end) { /* we test whether the next element will fit into the buffer */
           fwrite(logbuf.base, (logbuf.ptr-logbuf.base), 1, lf->file);
           logbuf.ptr = logbuf.base;
         }
-        else logbuf.ptr += sz;
       }
     }
   }
@@ -1180,14 +1264,13 @@ FILE *PG_file_open(const char *path, const char *mode, const struct insert_data 
   struct logfile_header lh;
   struct template_header tth;
   FILE *f;
-  u_char *teptr;
   int ret;
 
   file_open:
   f = fopen(path, "a+");
   if (f) {
     if (file_lock(fileno(f))) {
-      Log(LOG_ALERT, "ALERT: Unable to obtain lock of '%s'.\n", path);
+      Log(LOG_ALERT, "ALERT ( %s/%s ): Unable to obtain lock of '%s'.\n", config.name, config.type, path);
       goto close;
     }
 
@@ -1195,7 +1278,13 @@ FILE *PG_file_open(const char *path, const char *mode, const struct insert_data 
     if (!st.st_size) { 
       memset(&lh, 0, sizeof(struct logfile_header));
       strlcpy(lh.sql_db, config.sql_db, DEF_HDR_FIELD_LEN);
-      strlcpy(lh.sql_table, config.sql_table, DEF_HDR_FIELD_LEN);
+      if (!idata->dyn_table) strlcpy(lh.sql_table, config.sql_table, DEF_HDR_FIELD_LEN);
+      else {
+        struct tm *nowtm;
+
+        nowtm = localtime(&idata->basetime);
+        strftime(lh.sql_table, DEF_HDR_FIELD_LEN, config.sql_table, nowtm);
+      }
       strlcpy(lh.sql_user, config.sql_user, DEF_HDR_FIELD_LEN);
       if (config.sql_host) strlcpy(lh.sql_host, config.sql_host, DEF_HDR_FIELD_LEN);
       else lh.sql_host[0] = '\0';
@@ -1216,16 +1305,16 @@ FILE *PG_file_open(const char *path, const char *mode, const struct insert_data 
       rewind(f);
       fread(&lh, sizeof(lh), 1, f);
       if (ntohl(lh.magic) != MAGIC) {
-	Log(LOG_ALERT, "ALERT: Invalid magic number: '%s'.\n", path);
+	Log(LOG_ALERT, "ALERT ( %s/%s ): Invalid magic number: '%s'.\n", config.name, config.type, path);
 	goto close;
       }
       fread(&tth, sizeof(tth), 1, f);
       if ((tth.num != th.num) || (tth.sz != th.sz)) {
-	Log(LOG_ALERT, "ALERT: Invalid template in: '%s'.\n", path);
+	Log(LOG_ALERT, "ALERT ( %s/%s ): Invalid template in: '%s'.\n", config.name, config.type, path);
 	goto close;
       }
       if ((st.st_size+(idata->ten*sizeof(struct pkt_data))) >= MAX_LOGFILE_SIZE) {
-        Log(LOG_INFO, "INFO: No more space in '%s'.\n", path);
+        Log(LOG_INFO, "INFO ( %s/%s ): No more space in '%s'.\n", config.name, config.type, path);
 
 	/* We reached the maximum logfile length; we test if any previous process
 	   has already rotated the logfile. If not, we will rotate it. */
@@ -1250,19 +1339,59 @@ FILE *PG_file_open(const char *path, const char *mode, const struct insert_data 
   return NULL;
 }
 
-int PG_DB_Connect(struct DBdesc *db)
+void PG_DB_Connect(struct DBdesc *db)
 {
   db->desc = PQconnectdb(db->conn_string);
   if (PQstatus(db->desc) == CONNECTION_BAD) {
-    if (config.sql_backup_host || config.sql_recovery_logfile) db->fail = TRUE;
-    db->connected = FALSE;
+    PG_DB_fail(db);
+    PG_DB_errmsg(db);
   }
-  else {
-    db->fail = FALSE;
-    db->connected = TRUE; 
-  }
+  else PG_DB_ok(db);
+}
 
-  return db->connected;
+void PG_DB_Close(struct DBdesc *p, struct DBdesc *b)
+{
+  if (p->connected) PQfinish(p->desc);
+  if (b->connected) PQfinish(b->desc);
+}
+
+void PG_DB_ok(struct DBdesc *db)
+{
+  db->fail = FALSE;
+  db->connected = TRUE;
+}
+
+void PG_DB_fail(struct DBdesc *db)
+{
+  db->fail = TRUE;
+  db->connected = FALSE;
+}
+
+void PG_DB_errmsg(struct DBdesc *db)
+{
+  if (db->type == BE_TYPE_PRIMARY) Log(LOG_ALERT, "ALERT ( %s/%s ): primary PostgreSQL server failed.\n", config.name, config.type);
+  else if (db->type == BE_TYPE_BACKUP) Log(LOG_ALERT, "ALERT ( %s/%s ): backup PostgreSQL server failed.\n", config.name, config.type);
+}
+
+void PG_create_dyn_table(struct DBdesc *db, struct insert_data *idata)
+{
+  struct tm *nowtm;
+  char buf[LONGLONGSRVBUFLEN], tmpbuf[LONGLONGSRVBUFLEN], *err_string;
+  PGresult *PGret;
+  int ret;
+
+  ret = read_SQLquery_from_file(config.sql_table_schema, tmpbuf, LONGLONGSRVBUFLEN);
+  if (ret) {
+    nowtm = localtime(&idata->basetime);
+    strftime(buf, LONGLONGSRVBUFLEN, tmpbuf, nowtm);
+    PGret = PQexec(db->desc, buf);
+    if (PQresultStatus(PGret) != PGRES_COMMAND_OK) {
+      err_string = PQresultErrorMessage(PGret);
+      Log(LOG_DEBUG, "FAILED query follows:\n%s\n", buf);
+      Log(LOG_ERR, "( %s/%s ): %s\n", config.name, config.type, err_string);
+    }
+    PQclear(PGret);
+  }
 }
 
 static int PG_affected_rows(PGresult *result)
@@ -1326,3 +1455,16 @@ void PG_sum_port_insert(struct pkt_data *data, struct insert_data *idata)
   data->primitives.src_port = port;
   PG_cache_insert(data, idata);
 }
+
+#if defined (HAVE_L2)
+void PG_sum_mac_insert(struct pkt_data *data, struct insert_data *idata)
+{
+  u_char macaddr[ETH_ADDR_LEN];
+
+  memcpy(macaddr, &data->primitives.eth_dhost, ETH_ADDR_LEN);
+  memset(data->primitives.eth_dhost, 0, ETH_ADDR_LEN);
+  PG_cache_insert(data, idata);
+  memcpy(&data->primitives.eth_shost, macaddr, ETH_ADDR_LEN);
+  PG_cache_insert(data, idata);
+}
+#endif

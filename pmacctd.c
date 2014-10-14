@@ -30,6 +30,7 @@
 #include "plugin_hooks.h"
 #include "pkt_handlers.h"
 #include "ip_frag.h"
+#include "ip_flow.h"
 
 /* variables to be exported away */
 int debug;
@@ -38,6 +39,7 @@ struct plugins_list_entry *plugins_list = NULL; /* linked list of each plugin co
 struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
 int have_num_memory_pools; /* global getopt() stuff */
 pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
+u_char dummy_tlhdr[16];
 
 /* Functions */
 void usage_daemon(char *prog_name)
@@ -49,7 +51,7 @@ void usage_daemon(char *prog_name)
   printf("\nGeneral options:\n");
   printf("  -h  \tshow this page\n");
   printf("  -f  \tconfiguration file (see also CONFIG-KEYS)\n");
-  printf("  -c  \t[src_mac|dst_mac|vlan|src_host|dst_host|src_net|dst_net|src_port|dst_port|proto|tos|src_as|dst_as, \n\t ,sum_host,sum_net,sum_as,sum_port,tag,none] \n\taggregation primitives (DEFAULT: src_host)\n");
+  printf("  -c  \t[src_mac|dst_mac|vlan|src_host|dst_host|src_net|dst_net|src_port|dst_port|proto|tos|src_as|dst_as, \n\t ,sum_mac,sum_host,sum_net,sum_as,sum_port,tag,flows,none] \n\taggregation primitives and flows (DEFAULT: src_host)\n");
   printf("  -D  \tdaemonize\n"); 
   printf("  -N  \tdisable promiscuous mode\n");
   printf("  -n  \tpath to a file containing network definitions\n");
@@ -68,7 +70,7 @@ void usage_daemon(char *prog_name)
   printf("  -s  \tmemory pool size\n");
   printf("\nPostgreSQL (-P pgsql)/MySQL (-P mysql) plugin options:\n");
   printf("  -r  \trefresh time (in seconds)\n");
-  printf("  -v  \t[1|2|3] \n\ttable version\n");
+  printf("  -v  \t[1|2|3|4] \n\ttable version\n");
   printf("\n");
   printf("Examples:\n");
   printf("  Daemonize the process; listen on eth0; write stats in a MySQL database\n"); 
@@ -114,6 +116,8 @@ int main(int argc,char **argv)
   memset(&device, 0, sizeof(struct pcap_device));
   memset(&config_file, 0, sizeof(config_file));
   memset(&failed_plugins, 0, sizeof(failed_plugins));
+  memset(&req, 0, sizeof(req));
+  memset(dummy_tlhdr, 0, sizeof(dummy_tlhdr));
   config.acct_type = ACCT_PM;
 
   rows = 0;
@@ -217,6 +221,11 @@ int main(int argc,char **argv)
       strcpy(cfg[rows], "interface_wait: true");
       rows++;
       break;
+    case 'L':
+      strcpy(cfg[rows], "snaplen: ");
+      strncat(cfg[rows], optarg, CFG_LINE_LEN(cfg[rows]));
+      rows++;
+      break;
     case 'h':
       usage_daemon(argv[0]);
       exit(0);
@@ -251,6 +260,8 @@ int main(int argc,char **argv)
   }
 
   /* Let's check whether we need superuser privileges */
+  if (config.snaplen) psize = config.snaplen;
+
   if (!config.pcap_savefile) {
     if (getuid() != 0) {
       printf("%s\n\n", PMACCTD_USAGE_HEADER);
@@ -275,10 +286,10 @@ int main(int argc,char **argv)
     logf = parse_log_facility(config.syslog);
     if (logf == ERR) {
       config.syslog = NULL;
-      Log(LOG_WARNING, "WARN: specified syslog facility is not supported; logging to console.\n");
+      Log(LOG_WARNING, "WARN ( default/core ): specified syslog facility is not supported; logging to console.\n");
     }
     else openlog(NULL, LOG_PID, logf);
-    Log(LOG_INFO, "INFO: Start logging ...\n");
+    Log(LOG_INFO, "INFO ( default/core ): Start logging ...\n");
   }
 
   if (config.pidfile) write_pid_file(config.pidfile);
@@ -287,22 +298,26 @@ int main(int argc,char **argv)
   list = plugins_list;
   while (list) {
     if (strcmp(list->type.string, "core")) {
-      evaluate_sums(&list->cfg.what_to_count);
+      evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
       if (list->cfg.what_to_count & (COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_SUM_PORT))
 	config.handle_fragments = TRUE;
+      if (list->cfg.what_to_count & COUNT_FLOWS) {
+	config.handle_fragments = TRUE;
+	config.handle_flows = TRUE;
+      }
       if (!list->cfg.what_to_count) {
-	Log(LOG_WARNING, "WARN: defaulting to SRC HOST aggregation in '%s-%s'.\n", list->name, list->type.string);
+	Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	list->cfg.what_to_count |= COUNT_SRC_HOST;
       }
       if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_NET|COUNT_SUM_AS)) {
 	if (!list->cfg.networks_file) {
-	  Log(LOG_ERR, "ERROR: NET/AS aggregation has been selected but NO networks file has been specified. Exiting...\n\n");
+	  Log(LOG_ERR, "ERROR ( %s/%s ): NET/AS aggregation has been selected but NO networks file has been specified. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
 	}
 	else {
 	  if (((list->cfg.what_to_count & COUNT_SRC_NET) && (list->cfg.what_to_count & COUNT_SRC_AS)) ||
 	     ((list->cfg.what_to_count & COUNT_DST_NET) && (list->cfg.what_to_count & COUNT_DST_AS))) {
-	    Log(LOG_ERR, "ERROR: NET/AS are mutually exclusive. Exiting...\n\n"); 
+	    Log(LOG_ERR, "ERROR ( %s/%s ): NET/AS are mutually exclusive. Exiting...\n\n", list->name, list->type.string); 
 	    exit(1);
 	  }
 	}
@@ -312,14 +327,15 @@ int main(int argc,char **argv)
   }
 
   if (config.handle_fragments) init_ip_fragment_handler();
+  if (config.handle_flows) init_ip_flow_handler();
 
   /* If any device/savefile have been specified, choose a suitable device
      where to listen for traffic */ 
   if (!config.dev && !config.pcap_savefile) {
-    Log(LOG_WARNING, "WARN: selecting a suitable device.\n");
+    Log(LOG_WARNING, "WARN ( default/core ): Selecting a suitable device.\n");
     config.dev = pcap_lookupdev(errbuf); 
     if (!config.dev) {
-      Log(LOG_WARNING, "WARN: unable to find a suitable device. Exiting ...\n");
+      Log(LOG_WARNING, "WARN ( default/core ): Unable to find a suitable device. Exiting.\n");
       exit(1);
     }
   }
@@ -328,7 +344,7 @@ int main(int argc,char **argv)
   if (!strlen(config_file)) config.clbuf = copy_argv(&argv[optind]);
 
   if (config.dev && config.pcap_savefile) {
-    Log(LOG_ERR, "ERROR: 'interface' (-i) and 'pcap_savefile' (-I) directives are mutually exclusive. Exiting ...\n");
+    Log(LOG_ERR, "ERROR ( default/core ): 'interface' (-i) and 'pcap_savefile' (-I) directives are mutually exclusive. Exiting.\n");
     exit(1); 
   }
 
@@ -336,7 +352,7 @@ int main(int argc,char **argv)
   if (config.dev) {
     if ((device.dev_desc = pcap_open_live(config.dev, psize, config.promisc, 1000, errbuf)) == NULL) {
       if (!config.if_wait) {
-        Log(LOG_ERR, "ERROR: pcap_open_live(): %s\n", errbuf);
+        Log(LOG_ERR, "ERROR ( default/core ): pcap_open_live(): %s\n", errbuf);
         exit(1);
       }
       else {
@@ -347,7 +363,7 @@ int main(int argc,char **argv)
   }
   else if (config.pcap_savefile) {
     if ((device.dev_desc = pcap_open_offline(config.pcap_savefile, errbuf)) == NULL) {
-      Log(LOG_ERR, "ERROR: pcap_open_offline(): %s\n", errbuf);
+      Log(LOG_ERR, "ERROR ( default/core ): pcap_open_offline(): %s\n", errbuf);
       exit(1);
     }
   }
@@ -360,7 +376,7 @@ int main(int argc,char **argv)
 #if defined (PCAP_TYPE_linux) || (PCAP_TYPE_snoop)
     Setsocksize(pcap_fileno(device.dev_desc), SOL_SOCKET, SO_RCVBUF, &config.pipe_size, slen);
     getsockopt(pcap_fileno(device.dev_desc), SOL_SOCKET, SO_RCVBUF, &x, &slen);
-    if (config.debug) Log(LOG_DEBUG, "DEBUG: PCAP buffer: obtained %d / %d bytes.\n", x, config.pipe_size);
+    Log(LOG_DEBUG, "DEBUG ( default/core ): PCAP buffer: obtained %d / %d bytes.\n", x, config.pipe_size);
 #endif
   }
 
@@ -372,16 +388,16 @@ int main(int argc,char **argv)
 
   /* we need to solve some link constraints */
   if (device.data == NULL) {
-    Log(LOG_ERR, "ERROR: data link not supported: %d\n", device.link_type); 
+    Log(LOG_ERR, "ERROR ( default/core ): data link not supported: %d\n", device.link_type); 
     exit(1);
   }
-  else Log(LOG_INFO, "OK: link type is: %d\n", device.link_type); 
+  else Log(LOG_INFO, "OK ( default/core ): link type is: %d\n", device.link_type); 
 
   if (device.link_type != DLT_EN10MB) {
     list = plugins_list;
     while (list) {
       if ((list->cfg.what_to_count & COUNT_SRC_MAC) || (list->cfg.what_to_count & COUNT_DST_MAC)) {
-        Log(LOG_ERR, "ERROR: MAC aggregation methods not available for this link type: %d\n", device.link_type);
+        Log(LOG_ERR, "ERROR ( default/core ): MAC aggregation not available for link type: %d\n", device.link_type);
         exit(1);
       }
       list = list->next;
@@ -394,14 +410,14 @@ int main(int argc,char **argv)
   if (pcap_lookupnet(config.dev, &localnet, &netmask, errbuf) < 0) {
     localnet = 0;
     netmask = 0;
-    Log(LOG_WARNING, "WARN: %s\n", errbuf);
+    Log(LOG_WARNING, "WARN ( default/core ): %s\n", errbuf);
   }
 
   if (pcap_compile(device.dev_desc, &filter, config.clbuf, 0, netmask) < 0)
-    Log(LOG_WARNING, "WARN: %s\nWARN: going on without a filter\n", pcap_geterr(device.dev_desc));
+    Log(LOG_WARNING, "WARN: %s\nWARN ( default/core ): going on without a filter\n", pcap_geterr(device.dev_desc));
   else {
     if (pcap_setfilter(device.dev_desc, &filter) < 0)
-      Log(LOG_WARNING, "WARN: %s\nWARN: going on without a filter\n", pcap_geterr(device.dev_desc));
+      Log(LOG_WARNING, "WARN: %s\nWARN ( default/core ): going on without a filter\n", pcap_geterr(device.dev_desc));
   }
 
   /* signal handling we want to inherit to plugins (when not re-defined elsewhere) */
@@ -411,7 +427,7 @@ int main(int argc,char **argv)
 
   /* loading pre-tagging map, if any */
   if (config.pre_tag_map) {
-    load_id_file(config.acct_type, config.pre_tag_map, &idt);
+    load_id_file(config.acct_type, config.pre_tag_map, &idt, &req);
     cb_data.idt = (u_char *) &idt;
   }
   else {
@@ -437,7 +453,7 @@ int main(int argc,char **argv)
      and reopening again our listening device */
   for(;;) {
     if (!device.active) {
-      Log(LOG_WARNING, "WARN: %s has become unavailable; throttling ...\n", config.dev);
+      Log(LOG_WARNING, "WARN ( default/core ): %s has become unavailable; throttling ...\n", config.dev);
       throttle_loop:
       sleep(5); /* XXX: user defined ? */
       if ((device.dev_desc = pcap_open_live(config.dev, psize, config.promisc, 1000, errbuf)) == NULL)
@@ -449,7 +465,7 @@ int main(int argc,char **argv)
     pcap_close(device.dev_desc);
 
     if (config.pcap_savefile) {
-      Log(LOG_INFO, "INFO: finished reading the specified savefile. Exiting in few seconds ...\n"); 
+      Log(LOG_INFO, "INFO ( default/core ): finished reading the specified savefile. Exiting in few seconds ...\n"); 
       sleep(5);
       stop_all_childs();
     }
@@ -468,7 +484,7 @@ void pcap_cb(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *buf)
   if (buf) {
     pptrs.pkthdr = (struct pcap_pkthdr *) pkthdr;
     pptrs.packet_ptr = (u_char *) buf;
-    pptrs.mac_ptr = 0; pptrs.vlan_ptr = 0;
+    pptrs.mac_ptr = 0; pptrs.vlan_ptr = 0; pptrs.mpls_ptr = 0;
     pptrs.pf = 0;
     pptrs.idtable = cb_data->idt;
     (*device->data->handler)(pkthdr, &pptrs);
@@ -487,6 +503,8 @@ int ip_handler(register struct packet_ptrs *pptrs)
   register u_int16_t caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
   register unsigned char *ptr;
   register u_int16_t off = pptrs->iph_ptr-pptrs->packet_ptr;
+  u_int8_t *tcp_flags;
+  int ret = TRUE;
 
   /* len: number of 32bit words forming the header */
   len = IP_HL(((struct my_iphdr *) pptrs->iph_ptr));
@@ -500,33 +518,57 @@ int ip_handler(register struct packet_ptrs *pptrs)
   
   /* check fragments if needed */
   if (config.handle_fragments) {
-    if ((pptrs->l4_proto == IPPROTO_TCP)||(pptrs->l4_proto == IPPROTO_UDP)) {
-      if (off+MyTLHdrSz > caplen) return FALSE;
+    if (pptrs->l4_proto == IPPROTO_TCP || pptrs->l4_proto == IPPROTO_UDP) {
+      if (off+MyTLHdrSz > caplen) {
+	Log(LOG_INFO, "INFO ( default/core ): short IPv4 packet read (%u/%u/frags). Snaplen issue ?\n", caplen, off+MyTLHdrSz);
+	return FALSE; 
+      }
       pptrs->tlh_ptr = ptr; 
     
-      if (((struct my_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_MF|IP_OFFMASK))
-        return ip_fragment_handler(pptrs);
+      if (((struct my_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_MF|IP_OFFMASK)) {
+        ret = ip_fragment_handler(pptrs);
+	if (!ret) goto quit;
+      }
     }
-  } 
+    else pptrs->tlh_ptr = dummy_tlhdr;
 
-  return TRUE;
+    if (config.handle_flows) { 
+      pptrs->is_closing = FALSE;
+
+      if (pptrs->l4_proto == IPPROTO_TCP) {
+        if (off+TCPFlagOff+1 > caplen) {
+	  Log(LOG_INFO, "INFO ( default/core ): short IPv4 packet read (%u/%u/flows). Snaplen issue ?\n", caplen, off+TCPFlagOff+1); 
+	  return FALSE; 
+	}
+        tcp_flags = (u_int8_t *)pptrs->tlh_ptr+TCPFlagOff;
+	if (*tcp_flags & TH_FIN) pptrs->is_closing = FL_TCPFIN;
+	if (*tcp_flags & TH_RST) pptrs->is_closing = FL_TCPRST;
+      }
+
+      pptrs->new_flow = ip_flow_handler(pptrs);
+    }
+  }
+
+  quit:
+  return ret;
 }
 
 #if defined ENABLE_IPV6
 int ip6_handler(register struct packet_ptrs *pptrs)
 {
-  struct ip6_frag *fhdr;
+  struct ip6_frag *fhdr = NULL;
   register u_int16_t caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
   u_int16_t len = 0, plen = ntohs(((struct ip6_hdr *)pptrs->iph_ptr)->ip6_plen);
   u_int16_t off = pptrs->iph_ptr-pptrs->packet_ptr;
   u_int32_t advance;
-  u_int8_t nh, fragmented = 0; 
+  u_int8_t nh, fragmented = 0, *tcp_flags; 
   u_char *ptr = pptrs->iph_ptr;
+  int ret = TRUE;
 
   /* length checks */
   if (off+IP6HdrSz > caplen) return FALSE; /* IP packet truncated */
   if (plen == 0) { 
-    Log(LOG_INFO, "INFO: NULL IPv6 payload length. Jumbo packets not supported.\n");
+    Log(LOG_INFO, "INFO ( default/core ): NULL IPv6 payload length. Jumbo packets are currently not supported.\n");
     return FALSE;
   }
 
@@ -551,10 +593,7 @@ int ip6_handler(register struct packet_ptrs *pptrs)
       advance = sizeof(struct ah)+(((struct ah *)ptr)->ah_len << 2); /* hdr + sumlen */
       break;
     case IPPROTO_FRAGMENT:
-      if (config.handle_fragments) {
-        fhdr = (struct ip6_frag *) ptr;
-        fragmented = TRUE; 
-      }
+      fhdr = (struct ip6_frag *) ptr;
       nh = ((struct ip6_ext *)ptr)->ip6e_nxt;
       advance = sizeof(struct ip6_frag);
       break;
@@ -569,14 +608,38 @@ int ip6_handler(register struct packet_ptrs *pptrs)
 
   end:
 
-  if (fragmented) { 
-    if ((pptrs->l4_proto == IPPROTO_TCP)||(pptrs->l4_proto == IPPROTO_UDP)) {
-      if (off+MyTLHdrSz > caplen) return FALSE;
-      if (fhdr->ip6f_offlg & htons(IP6F_MORE_FRAG|IP6F_OFF_MASK))
-        return ip6_fragment_handler(pptrs, fhdr);
+  if (config.handle_fragments) { 
+    if (pptrs->l4_proto == IPPROTO_TCP || pptrs->l4_proto == IPPROTO_UDP) {
+      if (off+MyTLHdrSz > caplen) {
+	Log(LOG_INFO, "INFO ( default/core ): short IPv6 packet read (%u/%u/frags). Snaplen issue ?\n", caplen, off+MyTLHdrSz);
+	return FALSE;
+      }
+
+      if (fhdr && (fhdr->ip6f_offlg & htons(IP6F_MORE_FRAG|IP6F_OFF_MASK))) {
+        ret = ip6_fragment_handler(pptrs, fhdr);
+	if (!ret) goto quit;
+      }
+    }
+    else pptrs->tlh_ptr = dummy_tlhdr;
+
+    if (config.handle_flows) {
+      pptrs->is_closing = FALSE;
+
+      if (pptrs->l4_proto == IPPROTO_TCP) {
+	if (off+TCPFlagOff+1 > caplen) {
+	  Log(LOG_INFO, "INFO ( default/core ): short IPv6 packet read (%u/%u/flows). Snaplen issue ?\n", caplen, off+TCPFlagOff+1);
+	  return FALSE;
+	}
+	tcp_flags = (u_int8_t *)pptrs->tlh_ptr+TCPFlagOff;
+	if (*tcp_flags & TH_FIN) pptrs->is_closing = FL_TCPFIN;
+	if (*tcp_flags & TH_RST) pptrs->is_closing = FL_TCPRST;
+      }
+
+      pptrs->new_flow = ip_flow6_handler(pptrs);
     }
   }
 
+  quit:
   return TRUE;
 }
 #endif
@@ -603,6 +666,7 @@ void compute_once()
   CharPtrSz = sizeof(char *);
   IP4HdrSz = sizeof(struct my_iphdr);
   MyTLHdrSz = sizeof(struct my_tlhdr);
+  TCPFlagOff = 13;
 #if defined ENABLE_IPV6
   IP6HdrSz = sizeof(struct ip6_hdr);
   IP6AddrSz = sizeof(struct in6_addr);

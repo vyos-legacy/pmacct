@@ -38,9 +38,11 @@ struct scratch_area {
 };
 
 struct chained_cache {
+#if defined HAVE_L2
   u_int8_t eth_dhost[ETH_ADDR_LEN];
   u_int8_t eth_shost[ETH_ADDR_LEN];
   u_int16_t vlan_id;
+#endif
   struct host_addr src_ip;
   struct host_addr dst_ip;
   u_int16_t src_port;
@@ -48,8 +50,9 @@ struct chained_cache {
   u_int8_t tos;
   u_int8_t proto;
   u_int16_t id;
-  u_int32_t packet_counter;
   u_int32_t bytes_counter;
+  u_int32_t packet_counter;
+  u_int32_t flow_counter;
   int valid;
   struct chained_cache *next;
 };
@@ -60,6 +63,9 @@ struct chained_cache *P_cache_attach_new_node(struct chained_cache *);
 unsigned int P_cache_modulo(struct pkt_primitives *);
 void P_sum_host_insert(struct pkt_data *);
 void P_sum_port_insert(struct pkt_data *);
+#if defined (HAVE_L2)
+void P_sum_mac_insert(struct pkt_data *);
+#endif
 void P_cache_insert(struct pkt_data *);
 void P_cache_flush(struct chained_cache *[], int);
 void P_cache_purge(struct chained_cache *[], int);

@@ -53,7 +53,7 @@ struct struct_header_v8 {
 struct struct_header_v9 {
   u_int16_t version;		/* version = 9 */
   u_int16_t count;		/* The number of records in PDU. */
-  u_int32_t sysUptime;		/* Current time in msecs since router booted */
+  u_int32_t SysUptime;		/* Current time in msecs since router booted */
   u_int32_t unix_secs;		/* Current seconds since 0000 UTC 1970 */
   u_int32_t flow_sequence;	/* Sequence number of total flows seen */
   u_int32_t source_id;		/* Source id */
@@ -357,6 +357,19 @@ struct data_hdr_v9 {
   u_int16_t flow_len;
 };
 
+struct packet_ptrs_vector {
+  struct packet_ptrs v4;
+  struct packet_ptrs vlan4;
+  struct packet_ptrs mpls4;
+  struct packet_ptrs vlanmpls4;
+#if defined ENABLE_IPV6
+  struct packet_ptrs v6;
+  struct packet_ptrs vlan6;
+  struct packet_ptrs mpls6;
+  struct packet_ptrs vlanmpls6;
+#endif
+};
+
 /* defines */
 #define DEFAULT_NFACCTD_PORT 2100
 #define NETFLOW_MSG_SIZE 1550
@@ -434,6 +447,29 @@ struct data_hdr_v9 {
 #define NF9_DIRECTION                   61
 #define NF9_IPV6_NEXT_HOP		62
 #define NF9_BGP_IPV6_NEXT_HOP		63
+/* ... */
+#define NF9_MPLS_LABEL_1		70
+#define NF9_MPLS_LABEL_2		71
+#define NF9_MPLS_LABEL_3		72
+#define NF9_MPLS_LABEL_4		73
+#define NF9_MPLS_LABEL_5		74
+#define NF9_MPLS_LABEL_6		75
+#define NF9_MPLS_LABEL_7		76
+#define NF9_MPLS_LABEL_8		77
+#define NF9_MPLS_LABEL_9		78
+#define NF9_MPLS_LABEL_10		79
+
+#define NF9_FTYPE_IPV4			0
+#define NF9_FTYPE_IPV6			1
+#define NF9_FTYPE_VLAN			5
+#define NF9_FTYPE_VLAN_IPV4		5
+#define NF9_FTYPE_VLAN_IPV6		6
+#define NF9_FTYPE_MPLS			10
+#define NF9_FTYPE_MPLS_IPV4		10
+#define NF9_FTYPE_MPLS_IPV6		11
+#define NF9_FTYPE_VLAN_MPLS		15	
+#define NF9_FTYPE_VLAN_MPLS_IPV4	15
+#define NF9_FTYPE_VLAN_MPLS_IPV6	16
 
 struct hosts_table {
   unsigned short int num;
@@ -478,10 +514,16 @@ EXT void process_v1_packet(unsigned char *, u_int16_t, struct packet_ptrs *, str
 EXT void process_v5_packet(unsigned char *, u_int16_t, struct packet_ptrs *, struct plugin_requests *);
 EXT void process_v7_packet(unsigned char *, u_int16_t, struct packet_ptrs *, struct plugin_requests *);
 EXT void process_v8_packet(unsigned char *, u_int16_t, struct packet_ptrs *, struct plugin_requests *);
-EXT void process_v9_packet(unsigned char *, u_int16_t, struct packet_ptrs *, struct packet_ptrs *, struct plugin_requests *);
+EXT void process_v9_packet(unsigned char *, u_int16_t, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT void load_allow_file(char *, struct hosts_table *);
 EXT int check_allow(struct hosts_table *, struct sockaddr *);
 EXT int NF_find_id(struct packet_ptrs *);
+EXT u_int16_t evaluate_flow_type(struct template_cache_entry *, struct packet_ptrs *);
+EXT void reset_mac(struct packet_ptrs *);
+EXT void reset_mac_vlan(struct packet_ptrs *);
+EXT void reset_ip4(struct packet_ptrs *);
+EXT void reset_ip6(struct packet_ptrs *);
+EXT void notify_malf_packet(short int, char *, struct sockaddr *);
 
 EXT struct template_cache tpl_cache;
 EXT struct v8_handler_entry v8_handlers[15];

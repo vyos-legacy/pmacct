@@ -73,6 +73,9 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS))
     insert_func = sum_host_insert;
   else if (config.what_to_count & COUNT_SUM_PORT) insert_func = sum_port_insert;
+#if defined (HAVE_L2)
+  else if (config.what_to_count & COUNT_SUM_MAC) insert_func = sum_mac_insert;
+#endif
   else insert_func = insert_accounting_structure;
 
   load_networks(config.networks_file, &nt, &nc);
@@ -86,7 +89,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (!config.memory_pool_size) config.memory_pool_size = MEMORY_POOL_SIZE;  
   else {
     if (config.memory_pool_size < sizeof(struct acc)) {
-      Log(LOG_ERR, "ERROR: minimum size for memory pools is: %d bytes\n", sizeof(struct acc));
+      Log(LOG_ERR, "ERROR ( %s/%s ): minimum size for memory pools is: %d bytes\n", config.name, config.type, sizeof(struct acc));
       exit(1);
     }
   }
@@ -96,33 +99,37 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   init_memory_pool_table(config);
   if (mpd == NULL) {
-    Log(LOG_ERR, "ERROR: unable to allocate memory pools table\n");
+    Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate memory pools table\n", config.name, config.type);
     exit(1);
   }
 
   current_pool = request_memory_pool(config.buckets*sizeof(struct acc));
   if (current_pool == NULL) {
-    Log(LOG_ERR, "ERROR: unable to allocate first memory pool, try with larger value.\n");
+    Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate first memory pool, try with larger value.\n", config.name, config.type);
     exit(1);
   }
   a = current_pool->base_ptr;
 
   lru_elem_ptr = malloc(config.buckets*sizeof(struct acc *));
   if (lru_elem_ptr == NULL) {
-    Log(LOG_ERR, "ERROR: unable to allocate LRU element pointers.\n");
+    Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate LRU element pointers.\n", config.name, config.type);
     exit(1);
   }
   else memset(lru_elem_ptr, 0, config.buckets*sizeof(struct acc *));
 
   current_pool = request_memory_pool(config.memory_pool_size);
   if (current_pool == NULL) {
-    Log(LOG_ERR, "ERROR: unable to allocate more memory pools, try with larger value.\n");
+    Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate more memory pools, try with larger value.\n", config.name, config.type);
     exit(1);
   }
 
   signal(SIGHUP, reload); /* handles reopening of syslog channel */
   signal(SIGINT, exit_now); /* exit lane */
+#if !defined FBSD4 
   signal(SIGCHLD, SIG_IGN); 
+#else
+  signal(SIGCHLD, ignore_falling_child); 
+#endif
 
   /* building a server for interrogations by clients */
   sd = build_query_server(config.imt_plugin_path);
@@ -163,7 +170,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       recv_again:
       ret = poll(&pfd, 1, 1000);
       if (ret == 0) {
-        Log(LOG_WARNING, "WARN: Timed out while processing fragmented query.\n"); 
+        Log(LOG_WARNING, "WARN ( %s/%s ): Timed out while processing fragmented query.\n", config.name, config.type); 
         close(sd2);
 	goto select_again;
       }
@@ -179,7 +186,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       num = num+(maxqsize-sz);
 
       if (qh->num > MAX_QUERIES) {
-	if (config.debug) Log(LOG_DEBUG, "DEBUG: request discarded. Too much queries.\n");
+	Log(LOG_DEBUG, "DEBUG ( %s/%s ): request discarded. Too much queries.\n", config.name, config.type);
 	close(sd2);
 	continue;
       }
@@ -197,24 +204,24 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	request ^= WANT_ERASE;
 	if (request) {
 	  if (num > 0) process_query_data(sd2, srvbuf, num, FALSE);
-	  else if (config.debug) Log(LOG_DEBUG, "DEBUG: %d incoming bytes. ERRNO: %d\n", num, errno);
+	  else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. Errno: %d\n", config.name, config.type, num, errno);
 	}
-	if (config.debug) Log(LOG_DEBUG, "DEBUG: Closing connection with client ...\n");
+	Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
 	go_to_clear = TRUE;  
       }
       else if (((request == WANT_COUNTER) || (request == WANT_MATCH)) &&
 	(qh->num == 1) && (qh->what_to_count == config.what_to_count)) {
 	if (num > 0) process_query_data(sd2, srvbuf, num, FALSE);
-        else if (config.debug) Log(LOG_DEBUG, "DEBUG: %d incoming bytes. ERRNO: %d\n", num, errno);
-        if (config.debug) Log(LOG_DEBUG, "DEBUG: Closing connection with client ...\n");
+        else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. ERRNO: %d\n", config.name, config.type, num, errno);
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
       } 
       else {
         switch (fork()) {
         case 0: /* Child */
           close(sd);
           if (num > 0) process_query_data(sd2, srvbuf, num, TRUE);
-	  else if (config.debug) Log(LOG_DEBUG, "DEBUG: %d incoming bytes. ERRNO: %d\n", num, errno);
-          if (config.debug) Log(LOG_DEBUG, "DEBUG: Closing connection with client ...\n");
+	  else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. Errno: %d\n", config.name, config.type, num, errno);
+          Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
           close(sd2);
           exit(0);
         default: /* Parent */
@@ -229,14 +236,14 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       clear_memory_pool_table();
       current_pool = request_memory_pool(config.buckets*sizeof(struct acc));
       if (current_pool == NULL) {
-        Log(LOG_ERR, "ERROR: Cannot allocate my first memory pool, try with larger value.\n");
+        Log(LOG_ERR, "ERROR ( %s/%s ): Cannot allocate my first memory pool, try with larger value.\n", config.name, config.type);
         exit(1);
       }
       a = current_pool->base_ptr;
 
       current_pool = request_memory_pool(config.memory_pool_size);
       if (current_pool == NULL) {
-        Log(LOG_ERR, "ERROR: Cannot allocate more memory pools, try with larger value.\n");
+        Log(LOG_ERR, "ERROR ( %s/%s ): Cannot allocate more memory pools, try with larger value.\n", config.name, config.type);
         exit(1);
       }
       go_to_clear = FALSE;
@@ -268,7 +275,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       if (((struct ch_buf_hdr *)pipebuf)->seq != seq) {
         rg_err_count++;
         if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-          Log(LOG_ERR, "ERROR: We are missing data.\n");
+          Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
           Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
           Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%d'.\n", config.pipe_size);
           Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%d'.\n", config.buffer_size);
@@ -344,3 +351,16 @@ void sum_port_insert(struct pkt_data *data)
   data->primitives.src_port = port;
   insert_accounting_structure(data);
 }
+
+#if defined (HAVE_L2)
+void sum_mac_insert(struct pkt_data *data)
+{
+  u_char macaddr[ETH_ADDR_LEN];
+
+  memcpy(macaddr, &data->primitives.eth_dhost, ETH_ADDR_LEN);
+  memset(data->primitives.eth_dhost, 0, ETH_ADDR_LEN);
+  insert_accounting_structure(data);
+  memcpy(&data->primitives.eth_shost, macaddr, ETH_ADDR_LEN);
+  insert_accounting_structure(data);
+}
+#endif

@@ -390,11 +390,11 @@ int file_unlock(int fd)
 #endif
 }
 
-int sanitize_buf_net(char *buf, int rows)
+int sanitize_buf_net(char *filename, char *buf, int rows)
 {
   if (!sanitize_buf(buf)) {
     if (!strchr(buf, '/')) {
-      Log(LOG_ERR, "ERROR: Missing '/' separator at line %d. Ignoring.\n", rows);
+      Log(LOG_ERR, "ERROR ( %s ): Missing '/' separator at line %d. Ignoring.\n", filename, rows);
       return TRUE;
     }
   }
@@ -418,12 +418,12 @@ int sanitize_buf(char *buf)
   return FALSE;
 }
 
-int check_not_valid_char(char *buf, int c)
+int check_not_valid_char(char *filename, char *buf, int c)
 {
   if (!buf) return FALSE;
   
   if (strchr(buf, c)) {
-    Log(LOG_ERR, "ERROR: Invalid symbol '%c' detected. ", c);
+    Log(LOG_ERR, "ERROR ( %s ): Invalid symbol '%c' detected. ", filename, c);
     return TRUE; 
   }
   else return FALSE;
@@ -504,41 +504,55 @@ void lower_string(char *string)
   }
 }
 
-void evaluate_sums(u_int32_t *wtc)
+void evaluate_sums(u_int32_t *wtc, char *name, char *type)
 {
   int tag = FALSE;
+  int flows = FALSE;
 
   if (*wtc & COUNT_ID) {
     *wtc ^= COUNT_ID;
     tag = TRUE;
   }
 
+  if (*wtc & COUNT_FLOWS) {
+    *wtc ^= COUNT_FLOWS;
+    flows = TRUE;
+  }
+
+  if (*wtc & COUNT_SUM_MAC) {
+    if (*wtc != COUNT_SUM_MAC) {
+      *wtc = COUNT_SUM_MAC;
+      Log(LOG_WARNING, "WARN ( %s/%s ): SUM aggregation is to be used alone. Resetting other aggregation methods.\n", name, type);
+    }
+  }
+
   if (*wtc & COUNT_SUM_HOST) {
     if (*wtc != COUNT_SUM_HOST) {
       *wtc = COUNT_SUM_HOST;
-      Log(LOG_WARNING, "WARN: SUM aggregation is to be used alone. Resetting other aggregation methods.\n");
+      Log(LOG_WARNING, "WARN ( %s/%s ): SUM aggregation is to be used alone. Resetting other aggregation methods.\n", name, type);
     }
   }
   else if (*wtc & COUNT_SUM_NET) {
     if (*wtc != COUNT_SUM_NET) {
       *wtc = COUNT_SUM_NET;
-      Log(LOG_WARNING, "WARN: SUM aggregation is to be used alone. Resetting other aggregation methods.\n");
+      Log(LOG_WARNING, "WARN ( %s/%s ): SUM aggregation is to be used alone. Resetting other aggregation methods.\n", name, type);
     }
   }
   else if (*wtc & COUNT_SUM_AS) {
     if (*wtc != COUNT_SUM_AS) {
       *wtc = COUNT_SUM_AS;
-      Log(LOG_WARNING, "WARN: SUM aggregation is to be used alone. Resetting other aggregation methods.\n");
+      Log(LOG_WARNING, "WARN ( %s/%s ): SUM aggregation is to be used alone. Resetting other aggregation methods.\n", name, type);
     }
   }
   else if (*wtc & COUNT_SUM_PORT) {
     if (*wtc != COUNT_SUM_PORT) {
       *wtc = COUNT_SUM_PORT;
-      Log(LOG_WARNING, "WARN: SUM aggregation is to be used alone. Resetting other aggregation methods.\n");
+      Log(LOG_WARNING, "WARN ( %s/%s ): SUM aggregation is to be used alone. Resetting other aggregation methods.\n", name, type);
     }
   }
 
   if (tag) *wtc |= COUNT_ID;
+  if (flows) *wtc |= COUNT_FLOWS;
 }
 
 int file_archive(const char *path, int rotations)
@@ -559,7 +573,7 @@ int file_archive(const char *path, int rotations)
   }
 
   /* we should never reach this point */
-  Log(LOG_ALERT, "ALERT: No more logfile rotations allowed. Data is getting lost.\n");  
+  Log(LOG_ALERT, "ALERT: No more logfile ( %s ) rotations allowed. Data is getting lost.\n", path);  
   return -1;
 }
 
@@ -567,3 +581,33 @@ void stop_all_childs()
 {
   my_sigint_handler(0); /* it does same thing */
 }
+
+void strftime_same(char *s, int max, char *tmp, const time_t *now)
+{
+  struct tm *nowtm;
+
+  nowtm = localtime(now);
+  strftime(tmp, max, s, nowtm);
+  strlcpy(s, tmp, max);
+}
+
+int read_SQLquery_from_file(char *path, char *buf, int size)
+{
+  FILE *f;
+  char *ptr;
+
+  memset(buf, 0, size);
+  f = fopen(path, "r");
+  if (!f) {
+    Log(LOG_ERR, "ERROR: %s does not exist.\n", path);
+    return(0);
+  }
+  
+  fread(buf, size, 1, f);
+  ptr = strchr(buf, ';');
+  if (!ptr) {
+    Log(LOG_ERR, "ERROR: missing trailing ';' in SQL query read from %s.\n", path);
+    return(0); 
+  } 
+  else *ptr = '\0';
+} 

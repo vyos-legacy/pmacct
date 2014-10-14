@@ -27,6 +27,8 @@ void Log(short int level, char *msg, ...)
 {
   va_list ap;
   char syslog_string[LOGSTRLEN];
+  
+  if ((level == LOG_DEBUG) && !config.debug) return;
 
   if (!config.syslog) {
     va_start(ap, msg);

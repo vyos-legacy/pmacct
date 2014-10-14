@@ -25,8 +25,8 @@
 /* structures */
 struct DBdesc {
   MYSQL desc;
+  short int type;
   short int connected;
-  short int locked;
   short int fail;
 };
 
@@ -38,7 +38,7 @@ struct BE_descs { /* Backend descriptors */
 
 /* prototypes */
 void mysql_plugin(int, struct configuration *, void *);
-int MY_cache_dbop(MYSQL *, const struct db_cache *, struct insert_data *);
+int MY_cache_dbop(struct DBdesc *, struct db_cache *, struct insert_data *);
 void MY_cache_purge(struct db_cache *[], int, struct insert_data *);
 int MY_evaluate_history(int);
 int MY_compose_static_queries();
@@ -47,14 +47,22 @@ void MY_cache_insert(struct pkt_data *, struct insert_data *);
 int MY_cache_flush(struct db_cache *[], int);
 int MY_evaluate_primitives(int);
 void MY_exit_gracefully(int);
-void MY_Lock(struct BE_descs *);
-void MY_Query(struct BE_descs *, const struct db_cache *, struct insert_data *);
+void MY_Lock(struct DBdesc *);
+void MY_Query(struct BE_descs *, struct db_cache *, struct insert_data *);
 void MY_Unlock(struct BE_descs *);
 FILE *MY_file_open(const char *, const struct insert_data *);
-int MY_DB_Connect(struct DBdesc *, char *);
+void MY_DB_Connect(struct DBdesc *, char *);
+void MY_DB_Close(struct BE_descs *); 
+void MY_DB_ok(struct DBdesc *);
+void MY_DB_fail(struct DBdesc *);
+void MY_DB_errmsg(struct DBdesc *);
+void MY_create_dyn_table(struct DBdesc *, struct insert_data *);
 int MY_Exec(char *);
 void MY_sum_host_insert(struct pkt_data *, struct insert_data *);
 void MY_sum_port_insert(struct pkt_data *, struct insert_data *);
+#if defined (HAVE_L2)
+void MY_sum_mac_insert(struct pkt_data *, struct insert_data *);
+#endif
 
 #if defined __PMACCT_PLAYER_C
 void print_header();

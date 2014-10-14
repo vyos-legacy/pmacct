@@ -51,7 +51,7 @@ struct id_table {
 
 struct _map_dictionary_line {
   char key[SRVBUFLEN];
-  int (*func)(struct id_entry *, char *);
+  int (*func)(char *, struct id_entry *, char *, struct plugin_requests *);
 };
 
 struct pretag_filter {
@@ -65,6 +65,6 @@ struct pretag_filter {
 #else
 #define EXT
 #endif
-EXT void load_id_file(int, char *, struct id_table *);
+EXT void load_id_file(int, char *, struct id_table *, struct plugin_requests *);
 
 #undef EXT

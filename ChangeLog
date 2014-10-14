@@ -1,5 +1,127 @@
-pmacct (Promiscuous mode IP Accounting package) v0.8.4
+pmacct (Promiscuous mode IP Accounting package) v0.8.8
 pmacct is Copyright (C) 2003-2005 by Paolo Lucente
+
+0.8.8 -- 27-Jun-2005
+  + Added IP flows support in pmacctd (release 0.8.5 has seen its introduction
+    in nfacctd) for both IPv4 and IPv6 handlers. To enable flows accounting,
+    the 'aggregate' directive now supports a new 'flows' keyword. The SQL table
+    v4 has to be used in order to support this feature in both SQL plugins.
+  + A new 'sum_mac' aggregation method has been added (this is in addition to
+    the already consolidated ones: 'sum_host', 'sum_net', 'sum_as', 'sum_port').
+    Sum is intended to be the total traffic (inbound traffic summed to outbound
+    one) produced by a specific MAC address.
+  + Two new configuration directives have been introduced in order to set an 
+    upper bound to the growth of the fragment (default: 4Mb) and flow (default:
+    16Mb) buffers: 'pmacctd_frag_buffer_size', 'pmacctd_flows_buffer_size'.
+  + A new configuration directive 'pmacctd_flow_lifetime' has been added and 
+    defines how long a flow could remain inactive (ie. no packets belonging to
+    such flow are received) before considering it expired (default: 60 secs).
+    This is part of the pmacctd IP flows support.
+  + Console/syslog feedbacks about either generic errors or malformed packets
+    have been greatly enhanced. Along with the cause of the message, now any
+    generated message contains either the plugin name/type or the configuration
+    file that is causing it. 
+  ! nfacctd: when IPv6 is enabled (on non-BSD systems) the daemon now listens
+    by default on a IPv6 socket getting rid of the v4-in-v6 mapping feature which
+    helps in receiving NetFlow datagrams from both IPv4 and IPv6 agents. A new
+    configure script switch --enable-v4-mapped is aimed to turn manually on/off
+    the feature.
+  ! Fixed an issue with the SIGCHLD handling routine on FreeBSD 4.x systems. It
+    was causing the sudden creation of zombie processes because of the not correct
+    retirement of exited childs. Many thanks for his bug report and strong support
+    go to John Von Essen.
+  ! Fixed an endianess issue regarding Solaris/x86 platforms caused by not proper
+    preprocessor tests. Many thanks to Imre Csatlos for his bug report. 
+  ! Fixed the default schema for the PostgreSQL table v4. The 'flows' field was
+    lacking of the 'DEFAULT 0' modifier; it was causing some troubles expecially
+    when such tables were used in conjunction with the 'sql_optimize_clauses'
+    directive. Many thanks for his bug report and strong support go to Anik Rahman. 
+
+0.8.7 -- 14-Jun-2005
+  + pmacctd: MPLS support has been introduced. MPLS (on ethernet and ppp links)
+    and MPLS-over-VLAN (ethernet only) packets are now supported and passed to
+    upper layer routines. Filtering and tagging (Pre-Tagging) packets basing on
+    MPLS labels is also supported. Recent libpcap is required (ie, CVS versions
+    >= 06-06-2005 are highly adviceable because of the support for MPLS label
+    hierarchies like "mpls 100000 and mpls 1024" that will match packets with 
+    an outer label of 100000 and an inner label of 1024).  
+  + nfacctd: VLAN and MAC addresses support for NetFlow v9 has been introduced.
+    Each of them is mapped to its respective primitive (vlan, src_mac, dst_mac);
+    filtering and tagging (Pre-Tagging) IPv4/IPv6 flows basing on them is also
+    supported.
+  + nfacctd: filtering and tagging (Pre-Tagging) IPv4/IPv6 flows basing on MPLS
+    labels has been introduced (read the above notes regarding libpcap version
+    requirements).
+  + A new packet capturing size option has been added to pmacctd ('snaplen'
+    configuration directive; '-L' commandline). It allows to change the default
+    portion of the packet captured by the daemon. It results useful to cope 
+    with not fixed protocol stacks (ie, the MPLS stack).
+  + pmacctd: CHDLC support has been introduced. IPv4, IPv6 and MPLS packets are
+    supported on this link layer protocol.
+  ! Cleanups have been added to the NetFlow packet processing cycle. They are
+    mainly aimed to ensure that no stale data is read from circular buffers 
+    when processing NetFlow v8/v9 packets. 
+  ! The NetFlow v9 VLAN handling routine was missing a ntohs() call, resulting
+    in an ncorrect VLAN id on little endian architectures.  
+  ! ether_aton()/ether_ntoa() routines were generating segmentation faults on
+    x86_64 architectures. They have been replaced by a new handmade couple:
+    etheraddr_string()/string_etheraddr(). Many thanks to Daniel Streicher for
+    the bug report.  
+
+0.8.6 -- 23-May-2005
+  + The support for dynamic SQL tables has been introduced through the use of
+    the following variables in the 'sql_table' directive: %d (the day of the
+    month), %H (hours using an 24 hours clock), %m (month number), %M (minutes),
+    %w (the day of the week as a decimal number), %W (week number in the current
+    year) and %Y (the current year). This enables, for example, substitutions
+    like the following ones:
+      'acct_v4_%Y%m%d_%H%M'	==> 	'acct_v4_20050519_1500'
+      'acct_v4_%w'		==> 	'acct_v4_05'
+  + A new 'sql_table_schema' configuration directive has been added in order
+    to allow the automatic creation of dynamic tables. It expects as value the
+    full pathname to a file containing the schema to be used for table creation.
+    An  example of the schema follows:
+      CREATE TABLE acct_v4_%Y%m%d_%H%M (
+        ... PostgreSQL/MySQL specific schema ...
+      );
+  + Support for MySQL multi-values INSERT clauses has been added. Inserting
+    many rows in a single shot has proven to be much faster (many times faster
+    in some cases) than using separate single INSERT statements. A new
+    'sql_multi_values' configuration directive has been added to enable this
+    feature. Its value is intended to be the size (in bytes) of the multi-values
+    buffer. Out of the box, MySQL >= 4.0.x supports values up to 1024000 (1Mb).
+    Because it does not require any changes on server side, people using MySQL
+    are strongly encouraged to give it a try.
+  + A new '--disable-l2' configure option has been added. It is aimed to compile 
+    pmacct without support for Layer-2 stuff: MAC addresses and VLANs. This
+    option - along with some more optimizations to memory structures done in this
+    same release - have produced memory savings up to 25% compared to previous
+    versions. 
+  ! Recovery code for PostgreSQL plugin has been slightly revised and fixed.
+
+0.8.5 -- 04-May-2005
+  + Added IP flows counter support in nfacctd, the NetFlow accounting daemon,
+    in addition to the packets and bytes ones. To enable flows accounting, the
+    'aggregate' directive now supports a new 'flows' keyword. A new SQL table
+    version, v4, has been also introduced to support this feature in both SQL
+    plugins. 
+  + 'sql_preprocess' directive have been strongly improved by the addition of
+    new keywords to handle thresholds. This preprocessing feature is aimed to 
+    process aggregates (via a comma-separated list of conditionals and checks)
+    before they are pulled to the DB, thus resulting in a powerful selection
+    tier; whether the check is meet, the aggregate goes on its way to the DB;
+    the new thresholds are: maxp (maximum number of packets), maxb (maximum bytes
+    transferred), minf/maxf (minimum/maximum number of flows), minbpp/maxbbp
+    (minimum/maximum bytes per packet average value), minppf/maxppf (minimum/
+    maximum packets per flow average value). 
+  + Added a new 'sql_preprocess_type' directive; the values allowed are 'any'
+    or 'all', with 'any' as default value. It is intended to be the connective
+    whether 'sql_preprocess' contains multiple checks. 'any' requires that an
+    aggregate has to match just one of the checks in order to be valid; 'all'
+    requires a match against all of the checks instead.
+  + Added the ability to instruct a BPF filter against the ToS field of a NetFlow
+    packet.  
+  ! Minor optimizations on the 'sql_preprocess' handler chain.
 
 0.8.4 -- 14-Apr-2005
   + Added support for NetFlow v7/v8. The Version 7 (v7) format is exclusively

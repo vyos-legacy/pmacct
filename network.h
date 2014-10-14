@@ -35,14 +35,21 @@ struct eth_header
 #define ETHERTYPE_IPV6          0x86dd		/* IPv6 */
 #define ETHERTYPE_PPPOE         0x8864          /* pppoe (session stage) */
 #define ETHERTYPE_8021Q		0x8100          /* 802.1Q */
+#define ETHERTYPE_MPLS          0x8847		/* MPLS */
+#define ETHERTYPE_MPLS_MULTI    0x8848		/* MPLS */
 
 /* PPP protocol definitions */
 #define PPP_HDRLEN      4       /* octets for standard ppp header */
 #define PPPOE_HDRLEN	6	/* octets for standard pppoe header  */
 #define PPP_IP          0x0021  /* Internet Protocol */
 #define PPP_IPV6	0x0057  /* IPv6 */
+#define PPP_MPLS_UCAST  0x0281  /* rfc 3032 */
+#define PPP_MPLS_MCAST  0x0283  /* rfc 3022 */
 #define PPP_ADDRESS     0xff    /* The address byte value */
 #define PPP_CONTROL     0x03    /* The control byte value */
+
+/* CHDLC protocol definitions */
+#define CHDLC_HDRLEN    4
 
 /* additional protocol definitions */
 #ifndef IPPROTO_HOPOPTS
@@ -75,6 +82,14 @@ struct eth_header
 #ifndef IPPROTO_MOBILITY
 #define IPPROTO_MOBILITY        135
 #endif
+
+/* TCP flags definition */
+#define TH_FIN        0x01
+#define TH_SYN        0x02
+#define TH_RST        0x04
+#define TH_PUSH       0x08
+#define TH_ACK        0x10
+#define TH_URG        0x20
 
 struct my_iphdr
 {
@@ -114,7 +129,10 @@ struct packet_ptrs {
   u_int16_t l4_proto; /* layer-4 protocol */
   u_int16_t tag; /* pre tag id */
   u_int16_t pf; /* pending fragments */
+  u_int8_t new_flow; /* pmacctd flows: part of a new flow ? */
+  u_int8_t is_closing; /* pmacctd flows: flow close flag */ 
   u_char *vlan_ptr; /* ptr to vlan id */
+  u_char *mpls_ptr; /* ptr to base MPLS label */
   u_char *iph_ptr; /* ptr to ip header */
   u_char *tlh_ptr; /* ptr to transport level protocol header */
 };
@@ -130,9 +148,11 @@ struct host_addr {
 };
 
 struct pkt_primitives {
+#if defined (HAVE_L2)
   u_int8_t eth_dhost[ETH_ADDR_LEN];
   u_int8_t eth_shost[ETH_ADDR_LEN];
   u_int16_t vlan_id;
+#endif
   struct host_addr src_ip;
   struct host_addr dst_ip;
   u_int16_t src_port;
@@ -146,5 +166,6 @@ struct pkt_data {
   struct pkt_primitives primitives;
   u_int32_t pkt_len;
   u_int32_t pkt_num;
+  u_int32_t flo_num;
   u_int32_t pkt_time;
 };

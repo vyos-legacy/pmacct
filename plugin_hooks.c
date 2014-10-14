@@ -40,10 +40,9 @@ void load_plugins(struct pcap_device *device, struct plugin_requests *req)
   int x, v, socklen;
   struct plugins_list_entry *list = plugins_list;
   int l = sizeof(list->cfg.pipe_size);
-  struct channels_list_entry *chptr;
+  struct channels_list_entry *chptr = NULL;
 
   init_pipe_channels();
-  memset(req, 0, sizeof(struct plugin_requests));
 
   while (list) {
     if ((*list->type.func)) {
@@ -71,7 +70,7 @@ void load_plugins(struct pcap_device *device, struct plugin_requests *req)
 
 #if !defined (HAVE_MMAP)
       if ((socklen < list->cfg.pipe_size) || (list->cfg.debug)) 
-	Log(LOG_INFO, "INFO: %s/%s: Pipe size obtained: %d / %d\n", 
+	Log(LOG_INFO, "INFO ( %s/%s ): Pipe size obtained: %d / %d.\n", 
 		list->name, list->type.string, socklen, list->cfg.pipe_size);
 #endif
 
@@ -89,9 +88,9 @@ void load_plugins(struct pcap_device *device, struct plugin_requests *req)
       if (!list->cfg.pipe_size) { 
         list->cfg.pipe_size = (socklen/sizeof(char *))*list->cfg.buffer_size;
 	if ((list->cfg.debug) || (list->cfg.pipe_size > WARNING_PIPE_SIZE))  {
-          Log(LOG_INFO, "INFO: %s/%s: %d bytes are available to address shared memory segment; buffer size is %d bytes\n",
+          Log(LOG_INFO, "INFO ( %s/%s ): %d bytes are available to address shared memory segment; buffer size is %d bytes.\n",
 			list->name, list->type.string, socklen, list->cfg.buffer_size);
-	  Log(LOG_INFO, "INFO: %s/%s: Trying to allocate a shared memory segment of %d bytes\n",
+	  Log(LOG_INFO, "INFO ( %s/%s ): Trying to allocate a shared memory segment of %d bytes.\n",
 			list->name, list->type.string, list->cfg.pipe_size);
 	}
       }
@@ -112,7 +111,7 @@ void load_plugins(struct pcap_device *device, struct plugin_requests *req)
         if (x > v) x = v;
 
         if ((x < socklen) || (list->cfg.debug))
-          Log(LOG_INFO, "INFO: %s/%s: Pipe size obtained: %d / %d\n", list->name, list->type.string, x, socklen);
+          Log(LOG_INFO, "INFO ( %s/%s ): Pipe size obtained: %d / %d.\n", list->name, list->type.string, x, socklen);
 	  // Log(LOG_INFO, "Pipe needs to be %d bytes to address a %d bytes shared segment size having %d bytes buffer size\n", 
 	  //		socklen, list->cfg.pipe_size, list->cfg.buffer_size);
       }
@@ -125,9 +124,12 @@ void load_plugins(struct pcap_device *device, struct plugin_requests *req)
 
 	pcap_lookupnet(config.dev, &localnet, &netmask, errbuf);
 	if (pcap_compile(device->dev_desc, &list->cfg.bpfp_a_filter, list->cfg.a_filter, 0, netmask) < 0)
-          Log(LOG_WARNING, "WARN: %s\nWARN: aggregation filter disabled.\n", pcap_geterr(device->dev_desc));
+          Log(LOG_WARNING, "WARN: %s\nWARN ( %s/%s ): aggregation filter disabled.\n", 
+			  pcap_geterr(device->dev_desc), config.name, config.type);
       }
 
+      list->cfg.name = list->name;
+      list->cfg.type = list->type.string;
       chptr = insert_pipe_channel(&list->cfg, list->pipe[1]);
       /* XXX: 'chptr == NULL' to be handled */
 
@@ -135,7 +137,7 @@ void load_plugins(struct pcap_device *device, struct plugin_requests *req)
       if (!memcmp(list->type.string, "memory", strlen(list->type.string)) || !memcmp(list->type.string, "print", strlen(list->type.string)))
 	chptr->request = TRUE; /* sets new value to be assigned to 'wakeup'; 'TRUE' disables on-request wakeup */ 
 #endif
-      
+
       switch (list->pid = fork()) {  
       case 0: /* Child */
 	/* SIGCHLD handling issue: SysV avoids zombies by ignoring SIGCHLD; to emulate
@@ -155,7 +157,7 @@ void load_plugins(struct pcap_device *device, struct plugin_requests *req)
       }
 
       /* some residual check */
-      if ((chptr) && (chptr->filter)) req->bpf_filter = TRUE;
+      if (chptr && list->cfg.a_filter) req->bpf_filter = TRUE;
     }
     list = list->next;
   }
@@ -185,6 +187,7 @@ void exec_plugins(struct packet_ptrs *pptrs)
       /* bufptr -> bptr -> pdata: avoids lvalue crap. Signalled by Andreas Jochens on AMD64/gcc4.0 */
       bptr = channels_list[index].rg.ptr+ChBufHdrSz+channels_list[index].bufptr; 
       pdata = (struct pkt_data *)bptr; 
+      memset(pdata, 0, PdataSz);
 #endif
       while (channels_list[index].phandler[num]) {
         (*channels_list[index].phandler[num])(&channels_list[index], pptrs, pdata);
@@ -252,7 +255,7 @@ struct channels_list_entry *insert_pipe_channel(struct configuration *cfg, int p
 #if !defined (HAVE_MMAP)
       chptr->buf = malloc(cfg->buffer_size);
       if (!chptr->buf) {
-        Log(LOG_ERR, "ERROR: unable to allocate channel buffer. Exiting ...\n");
+        Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate channel buffer. Exiting ...\n", cfg->name, cfg->type);
         exit(1);
       } 
       memset(chptr->buf, 0, cfg->buffer_size);
@@ -263,9 +266,12 @@ struct channels_list_entry *insert_pipe_channel(struct configuration *cfg, int p
       chptr->bufptr = chptr->buf;
       chptr->bufend = cfg->buffer_size-sizeof(struct ch_buf_hdr);
 
-      chptr->rg.base = map_shared(0, cfg->pipe_size, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+      /* +1550 (NETFLOW_MSG_SIZE) has been introduced as a margin as a
+         countermeasure against the reception of malicious NetFlow v9
+	 templates */
+      chptr->rg.base = map_shared(0, cfg->pipe_size+1550, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
       if (chptr->rg.base == MAP_FAILED) {
-        Log(LOG_ERR, "ERROR: unable to allocate pipe buffer. Exiting ...\n"); 
+        Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate pipe buffer. Exiting ...\n", cfg->name, cfg->type); 
 	exit(1);
       }
       memset(chptr->rg.base, 0, cfg->pipe_size);
@@ -274,7 +280,7 @@ struct channels_list_entry *insert_pipe_channel(struct configuration *cfg, int p
 
       chptr->status = map_shared(0, sizeof(struct ch_status), PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
       if (chptr->status == MAP_FAILED) {
-        Log(LOG_ERR, "ERROR: unable to allocate status buffer. Exiting ...\n");
+        Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate status buffer. Exiting ...\n", cfg->name, cfg->type);
         exit(1);
       }
       memset(chptr->status, 0, sizeof(struct ch_status));

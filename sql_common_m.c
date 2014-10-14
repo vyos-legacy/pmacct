@@ -257,6 +257,19 @@ Inline void SQL_SetENV_child(const struct insert_data *idata)
     count++;
   }
 
+  if (idata->dyn_table) {
+    u_char *tmpptr;
+    struct tm *nowtm;
+
+    nowtm = localtime(&idata->basetime);
+    strncat(envbuf.ptr, "EFFECTIVE_SQL_TABLE=", envbuf.end-envbuf.ptr);
+    tmpptr = envbuf.ptr + strlen(envbuf.ptr);
+    strftime(tmpptr, envbuf.end-tmpptr, config.sql_table, nowtm); 
+    ptrs[count] = envbuf.ptr;
+    envbuf.ptr += strlen(envbuf.ptr)+1;
+    count++;
+  }
+
   for (i = 0; i < count; i++)
     putenv(ptrs[i]);
 }

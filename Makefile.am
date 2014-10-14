@@ -5,7 +5,7 @@ pmacctd_PLUGINS = @PLUGINS@
 pmacctd_SOURCES = pmacctd.c signals.c util.c strlcpy.c plugin_hooks.c \
 	server.c acct.c memory.c ll.c cfg.c imt_plugin.c log.c pkt_handlers.c \
 	cfg_handlers.c net_aggr.c bpf_filter.c print_plugin.c ip_frag.c \
-	ports_aggr.c addr.c pretag.c pretag_handlers.c 
+	ports_aggr.c addr.c pretag.c pretag_handlers.c ip_flow.c 
 pmacctd_LDFLAGS = $(DEFS) 
 pmacctd_LDADD = $(pmacctd_PLUGINS)
 nfacctd_SOURCES = nfacctd.c signals.c util.c strlcpy.c plugin_hooks.c \
