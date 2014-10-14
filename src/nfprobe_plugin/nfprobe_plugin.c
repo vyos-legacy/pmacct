@@ -301,16 +301,17 @@ transport_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras
 static int
 l2_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *extras, int ndx)
 {
-#if defined HAVE_L2
   struct pkt_primitives *p = &data->primitives;
 
+#if defined HAVE_L2
   memcpy(&flow->mac[ndx][0], &p->eth_shost, 6);
   memcpy(&flow->mac[ndx ^ 1][0], &p->eth_dhost, 6);
   flow->vlan = p->vlan_id;
   flow->mpls_label[ndx] = extras->mpls_top_label;
 #endif
-  flow->ifindex[ndx] = extras->ifindex_in;
-  flow->ifindex[ndx ^ 1] = extras->ifindex_out;
+
+  flow->ifindex[ndx] = p->ifindex_in;
+  flow->ifindex[ndx ^ 1] = p->ifindex_out;
 
   return (0);
 }
@@ -339,6 +340,8 @@ ipv4_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *ext
   flow->af = af;
   flow->addr[ndx].v4 = p->src_ip.address.ipv4;
   flow->addr[ndx ^ 1].v4 = p->dst_ip.address.ipv4;
+  flow->mask[ndx] = p->src_nmask;
+  flow->mask[ndx ^ 1] = p->dst_nmask;
   flow->tos[ndx] = p->tos;
   flow->protocol = p->proto;
   flow->octets[ndx] = data->pkt_len;
@@ -374,6 +377,8 @@ ipv6_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *ext
   flow->ip6_flowlabel[ndx] = 0;
   flow->addr[ndx].v6 = p->src_ip.address.ipv6; 
   flow->addr[ndx ^ 1].v6 = p->dst_ip.address.ipv6; 
+  flow->mask[ndx] = p->src_nmask;
+  flow->mask[ndx ^ 1] = p->dst_nmask;
   flow->octets[ndx] = data->pkt_len;
   flow->packets[ndx] = data->pkt_num; 
   flow->flows[ndx] = data->flo_num;
@@ -1008,22 +1013,35 @@ print_timeouts(struct FLOWTRACK *ft)
 static int
 connsock(struct sockaddr_storage *addr, socklen_t len, int hoplimit)
 {
-	int s;
+	int s, ret = 0;
 	unsigned int h6;
 	unsigned char h4;
 	struct sockaddr_in *in4 = (struct sockaddr_in *)addr;
 	struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)addr;
+	struct host_addr source_ip;
+	struct sockaddr ssource_ip;
+
+	if (config.nfprobe_source_ip) {
+	  ret = str_to_addr(config.nfprobe_source_ip, &source_ip);
+	  addr_to_sa(&ssource_ip, &source_ip, 0);
+	}
 
 	if ((s = socket(addr->ss_family, SOCK_DGRAM, 0)) == -1) {
 		fprintf(stderr, "socket() error: %s\n", 
 		    strerror(errno));
 		exit_plugin(1);
 	}
-	if (connect(s, (struct sockaddr*)addr, len) == -1) {
-		fprintf(stderr, "connect() error: %s\n",
-		    strerror(errno));
-		exit_plugin(1);
+
+	if (ret && bind(s, (struct sockaddr *) &ssource_ip, sizeof(ssource_ip)) == -1) {
+	  fprintf(stderr, "bind() error: %s\n",
+		strerror(errno));
 	}
+
+        if (connect(s, (struct sockaddr*)addr, len) == -1) {
+                fprintf(stderr, "connect() error: %s\n",
+                    strerror(errno));
+                exit_plugin(1);
+        }
 
 	switch (addr->ss_family) {
 	case AF_INET:
@@ -1406,9 +1424,14 @@ read_data:
 
           for (num = 0; net_funcs[num]; num++) (*net_funcs[num])(&nt, &nc, &dummy.primitives);
 
-	  if (((config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) && config.nfacctd_as != NF_AS_KEEP) || config.acct_type == ACCT_PM) {
+	  if (config.nfacctd_as == NF_AS_NEW) {
 	    data->primitives.src_as = dummy.primitives.src_as;
 	    data->primitives.dst_as = dummy.primitives.dst_as;
+	  }
+
+	  if (config.nfacctd_net == NF_NET_NEW) {
+	    data->primitives.src_nmask = dummy.primitives.src_nmask;
+            data->primitives.dst_nmask = dummy.primitives.dst_nmask;
 	  }
 	}
 

@@ -50,6 +50,7 @@ void pcap_cb(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *buf)
     pptrs.pf = 0; pptrs.shadow = 0; pptrs.tag = 0; pptrs.tag2 = 0;
     pptrs.class = 0; pptrs.bpas = 0, pptrs.bta = 0; pptrs.blp = 0;
     pptrs.bmed = 0; pptrs.biss = 0;
+    pptrs.tun_layer = 0; pptrs.tun_stack = 0;
     pptrs.f_agent = cb_data->f_agent;
     pptrs.idtable = cb_data->idt;
     pptrs.bpas_table = cb_data->bpas_table;
@@ -102,7 +103,7 @@ int ip_handler(register struct packet_ptrs *pptrs)
   register u_int16_t caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
   register unsigned char *ptr;
   register u_int16_t off = pptrs->iph_ptr-pptrs->packet_ptr, off_l4;
-  int ret = TRUE;
+  int ret = TRUE, num, is_fragment = 0;
 
   /* len: number of 32bit words forming the header */
   len = IP_HL(((struct my_iphdr *) pptrs->iph_ptr));
@@ -126,6 +127,7 @@ int ip_handler(register struct packet_ptrs *pptrs)
       pptrs->tlh_ptr = ptr;
 
       if (((struct my_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_MF|IP_OFFMASK)) {
+	is_fragment = TRUE;
         ret = ip_fragment_handler(pptrs);
         if (!ret) {
           if (!config.ext_sampling_rate) goto quit;
@@ -179,6 +181,25 @@ int ip_handler(register struct packet_ptrs *pptrs)
     pptrs->tcp_flags = FALSE;
     if (pptrs->l4_proto == IPPROTO_TCP && off_l4+TCPFlagOff+1 <= caplen)
       pptrs->tcp_flags = ((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags;
+
+    /* tunnel handlers here */ 
+    if (config.tunnel0 && !pptrs->tun_stack) {
+      for (num = 0; pptrs->payload_ptr && !is_fragment && tunnel_registry[num][0].tf; num++) {
+        if (tunnel_registry[num][0].proto == pptrs->l4_proto) {
+	  if (!tunnel_registry[num][0].port || (pptrs->tlh_ptr && tunnel_registry[num][0].port == ntohs(((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port))) {
+	    pptrs->tun_stack = num;
+	    ret = (*tunnel_registry[num][0].tf)(pptrs);
+	  }
+        }
+      }
+    }
+    else if (pptrs->tun_stack) { 
+      if (tunnel_registry[pptrs->tun_stack][pptrs->tun_layer].proto == pptrs->l4_proto) {
+        if (!tunnel_registry[pptrs->tun_stack][pptrs->tun_layer].port || (pptrs->tlh_ptr && tunnel_registry[pptrs->tun_stack][pptrs->tun_layer].port == ntohs(((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port))) {
+          ret = (*tunnel_registry[pptrs->tun_stack][pptrs->tun_layer].tf)(pptrs);
+        }
+      }
+    }
   }
 
   quit:
@@ -372,4 +393,118 @@ void compute_once()
   IP6HdrSz = sizeof(struct ip6_hdr);
   IP6AddrSz = sizeof(struct in6_addr);
 #endif
+}
+
+void tunnel_registry_init()
+{
+  if (config.tunnel0) {
+    char *tun_string = config.tunnel0, *tun_entry = NULL, *tun_type = NULL;
+    int th_index = 0 /* tunnel handler index */, tr_index = 0 /* tunnel registry index */;
+    int ret;
+
+    while (tun_entry = extract_token(&tun_string, ';')) {
+      tun_type = extract_token(&tun_entry, ',');
+
+      for (th_index = 0; strcmp(tunnel_handlers_list[th_index].type, ""); th_index++) {
+	if (!strcmp(tunnel_handlers_list[th_index].type, tun_type)) {
+	  if (tr_index < TUNNEL_REGISTRY_ENTRIES) {
+	    (*tunnel_handlers_list[th_index].tc)(&tunnel_registry[0][tr_index], tun_entry);
+	    tr_index++;
+	  }
+	  break;
+	}
+      }
+    }
+  }
+}
+
+int gtp_tunnel_configurator(struct tunnel_handler *th, char *opts)
+{
+  th->proto = IPPROTO_UDP;
+  th->port = atoi(opts);
+
+  if (th->port) {
+    th->tf = gtp_tunnel_func;
+  }
+  else {
+    th->tf = NULL;
+    Log(LOG_WARNING, "WARN ( default/core ): GTP tunnel handler not loaded due to invalid options: '%s'\n", opts);
+  }
+
+  return 0;
+}
+
+int gtp_tunnel_func(register struct packet_ptrs *pptrs)
+{
+  register u_int16_t caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
+  struct my_gtphdr *gtp_hdr = (struct my_gtphdr *) pptrs->payload_ptr;
+  struct my_udphdr *udp_hdr = (struct my_udphdr *) pptrs->tlh_ptr;
+  u_int16_t off = pptrs->payload_ptr-pptrs->packet_ptr, gtp_len;
+  char *ptr = pptrs->payload_ptr;
+  int ret;
+
+  if (off+sizeof(struct my_gtphdr) < caplen) {
+    gtp_len = (ntohs(udp_hdr->uh_ulen)-sizeof(struct my_udphdr))-ntohs(gtp_hdr->length);
+    if (off+gtp_len < caplen) {
+      off += gtp_len;
+      ptr += gtp_len;
+
+      pptrs->iph_ptr = ptr;
+      pptrs->tlh_ptr = NULL; pptrs->payload_ptr = NULL;
+      pptrs->l4_proto = 0; pptrs->tcp_flags = 0;
+
+      /* same trick used for MPLS BoS in ll.c: let's look at the first
+	 payload byte to guess which protocol we are speaking about */
+      switch (*pptrs->iph_ptr) {
+      case 0x45:
+      case 0x46:
+      case 0x47:
+      case 0x48:
+      case 0x49:
+      case 0x4a:
+      case 0x4b:
+      case 0x4c:
+      case 0x4d:
+      case 0x4e:
+      case 0x4f:
+	pptrs->tun_layer++;
+	ret = ip_handler(pptrs);
+	break;
+#if defined ENABLE_IPV6
+      case 0x60:
+      case 0x61:
+      case 0x62:
+      case 0x63:
+      case 0x64:
+      case 0x65:
+      case 0x66:
+      case 0x67:
+      case 0x68:
+      case 0x69:
+      case 0x6a:
+      case 0x6b:
+      case 0x6c:
+      case 0x6d:
+      case 0x6e:
+      case 0x6f:
+	pptrs->tun_layer++;
+	ret = ip6_handler(pptrs);
+	break;
+#endif
+      default:
+        ret = FALSE;
+	break;
+      }
+    }
+    else {
+      Log(LOG_INFO, "INFO ( default/core ): short GTP packet read (%u/%u/tunnel/#1). Snaplen issue ?\n", caplen, off+gtp_len);
+      return FALSE;
+    }
+  } 
+  else {
+    Log(LOG_INFO, "INFO ( default/core ): short GTP packet read (%u/%u/tunnel/#2). Snaplen issue ?\n", caplen, off+sizeof(struct my_gtphdr));
+    return FALSE;
+  }
+
+  return ret;
 }

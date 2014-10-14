@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -55,7 +55,7 @@ void usage_daemon(char *prog_name)
   printf("\nGeneral options:\n");
   printf("  -h  \tShow this page\n");
   printf("  -f  \tLoad configuration from the specified file\n");
-  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | none ] \n\tAggregation string (DEFAULT: src_host)\n");
+  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | in_iface | out_iface | src_mask | dst_mask | none ] \n\tAggregation string (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
   printf("  -n  \tPath to a file containing Network definitions\n");
   printf("  -o  \tPath to a file containing Port definitions\n");
@@ -118,6 +118,9 @@ int main(int argc,char **argv, char **envp)
   struct pcap_pkthdr hdr;
   struct timeval tv;
 
+  char jumbo_container[10000];
+  u_int8_t mac_len;
+
 
 
 #if defined ENABLE_IPV6
@@ -157,6 +160,7 @@ int main(int argc,char **argv, char **envp)
   memset(&bta_table, 0, sizeof(bta_table));
   memset(&client, 0, sizeof(client));
   memset(&cb_data, 0, sizeof(cb_data));
+  memset(&tunnel_registry, 0, sizeof(tunnel_registry));
   config.acct_type = ACCT_PM;
 
   rows = 0;
@@ -371,6 +375,12 @@ int main(int argc,char **argv, char **envp)
 #endif
 	list->cfg.what_to_count |= COUNT_SRC_HOST;
 	list->cfg.what_to_count |= COUNT_DST_HOST;
+
+        if (list->cfg.networks_file || list->cfg.networks_mask || list->cfg.nfacctd_net) {
+          list->cfg.what_to_count |= COUNT_SRC_NMASK;
+          list->cfg.what_to_count |= COUNT_DST_NMASK;
+        }
+
 	list->cfg.what_to_count |= COUNT_SRC_PORT;
 	list->cfg.what_to_count |= COUNT_DST_PORT;
 	list->cfg.what_to_count |= COUNT_IP_TOS;
@@ -387,6 +397,8 @@ int main(int argc,char **argv, char **envp)
 	  list->cfg.what_to_count |= COUNT_ID;
 	  list->cfg.what_to_count |= COUNT_ID2;
 	}
+	list->cfg.what_to_count |= COUNT_IN_IFACE;
+	list->cfg.what_to_count |= COUNT_OUT_IFACE;
 	if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                        COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
 				       COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
@@ -414,6 +426,10 @@ int main(int argc,char **argv, char **envp)
         if (list->cfg.nfacctd_bgp && list->cfg.nfacctd_as == NF_AS_BGP) {
           list->cfg.what_to_count |= COUNT_SRC_AS;
           list->cfg.what_to_count |= COUNT_DST_AS;
+        }
+        if (list->cfg.nfacctd_bgp && list->cfg.nfacctd_net == NF_NET_BGP) {
+          list->cfg.what_to_count |= COUNT_SRC_NMASK;
+          list->cfg.what_to_count |= COUNT_DST_NMASK;
         }
 	if (list->cfg.pre_tag_map) {
 	  list->cfg.what_to_count |= COUNT_ID;
@@ -449,7 +465,7 @@ int main(int argc,char **argv, char **envp)
 	  Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation selected but NO 'networks_file' or 'uacctd_as' are specified. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
 	}
-        if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) {
+        if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET|COUNT_SRC_NMASK|COUNT_DST_NMASK)) {
           if (!list->cfg.nfacctd_net) {
             if (list->cfg.networks_file) list->cfg.nfacctd_net |= NF_NET_NEW;
             if (list->cfg.networks_mask) list->cfg.nfacctd_net |= NF_NET_STATIC;
@@ -493,7 +509,11 @@ int main(int argc,char **argv, char **envp)
   if (config.handle_flows) init_ip_flow_handler();
   load_networks(config.networks_file, &nt, &nc);
 
+#if defined (HAVE_L2)
+  device.link_type = DLT_EN10MB; 
+#else
   device.link_type = DLT_RAW; 
+#endif
   for (index = 0; _devices[index].link_type != -1; index++) {
     if (device.link_type == _devices[index].link_type)
       device.data = &_devices[index];
@@ -684,7 +704,35 @@ int main(int argc,char **argv, char **envp)
       }
       else cb_data.ifindex_out = 0;
 
+#if defined (HAVE_L2)
+      if (ulog_pkt->mac_len) {
+	memcpy(jumbo_container, ulog_pkt->mac, ulog_pkt->mac_len);
+	memcpy(jumbo_container+ulog_pkt->mac_len, ulog_pkt->payload, hdr.caplen);
+	// XXX
+	hdr.caplen += ulog_pkt->mac_len;
+	hdr.len += ulog_pkt->mac_len;
+      }
+      else {
+	memset(jumbo_container, 0, ETHER_HDRLEN);
+	memcpy(jumbo_container+ETHER_HDRLEN, ulog_pkt->payload, hdr.caplen);
+	hdr.caplen += ETHER_HDRLEN;
+	hdr.len += ETHER_HDRLEN;
+
+	switch (IP_V((struct my_iphdr *) ulog_pkt->payload)) {
+	case 4:
+	  ((struct eth_header *)jumbo_container)->ether_type = ntohs(ETHERTYPE_IP);
+	  break;
+	case 6:
+	  ((struct eth_header *)jumbo_container)->ether_type = ntohs(ETHERTYPE_IPV6);
+	  break;
+	}
+
+      }
+
+      pcap_cb((u_char *) &cb_data, &hdr, jumbo_container);
+#else
       pcap_cb((u_char *) &cb_data, &hdr, ulog_pkt->payload);
+#endif
 
       if (nlh->nlmsg_type == NLMSG_DONE || !(nlh->nlmsg_flags & NLM_F_MULTI)) {
         /* Last part of the multilink message */
