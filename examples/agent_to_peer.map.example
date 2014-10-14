@@ -1,32 +1,35 @@
 ! 
-! NetFlow/sFlow agent to BGP peer map
+! bgp_agent_map: NetFlow/sFlow agent to BGP peer map
 !
 ! File syntax is key-based. Read full syntax rules in 'pretag.map.example' in
 ! this same directory.
 !
-! nfacctd, sfacctd: valid keys: id, ip.
+! All daemons valid keys: id, ip, filter.
 !
 ! list of currently supported keys follow:
 !
-! 'id'			IPv4 address or router ID of the BGP peer
-! 'ip'                  In nfacctd it's compared against the source IP address
-!                       of the device which is originating NetFlow packets; in
-!                       sfacctd this is compared against the AgentId field of
-!                       received sFlow samples.
+! 'bgp_ip'		LOOKUP: IPv4/IPv6 session address or router ID of the
+!			BGP peer.
+! 'bgp_port'		LOOKUP: TCP port used by the BGP peer to establish the
+!			session, useful in NAT traversal scenarios. 
+! 'ip'                  MATCH: in nfacctd this is compared against the source
+!                       IP address of the device originating NetFlow packets;
+!                       in sfacctd this is compared against the AgentId field
+!                       of received sFlow samples. Expected argument are an IP
+!                       address or prefix (ie. XXX.XXX.XXX.XXX/NN)
+! 'filter'              MATCH: incoming data is compared against the supplied
+!			filter expression (expected in libpcap syntax); the
+!			filter needs to be enclosed in quotes ('). In this map
+!			this is meant to discriminate among IPv4 ('ip') and
+!			IPv6 ('ip6') traffic. 
 !
 ! A couple of straightforward examples follow.  
 !
-id=1.2.3.4	ip=2.3.4.5
+bgp_ip=1.2.3.4	ip=2.3.4.5
 !
-! The following comes handy when compiling pmacct for IPv6; BGP peers
-! are always IPv4 addresses. Whereas remote sFlow or NetFlow agents are
-! likely to be intended as IPv4-mapped IPv6 addresses, if nfacctd_ip is
-! not specified.
+! The following maps something which any Netflow/sFlow agent to the specified
+! BGP peer. This syntax applies also to non-telemetry daemons, ie. pmacctd and
+! uacctd. 
 !
-! id=3.4.5.6	ip=::ffff:4.5.6.7
-!
-! The following maps something which isn't a Netflow/sFlow agent to the
-! specified BGP peer. The only application for this lies with pmacctd.
-!
-! id=4.5.6.7	ip=0.0.0.0
+! bgp_ip=4.5.6.7	ip=0.0.0.0/0
 !

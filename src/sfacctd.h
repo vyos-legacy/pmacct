@@ -3,20 +3,6 @@
 #define SFLOW_MIN_MSG_SIZE 200 
 #define SFLOW_MAX_MSG_SIZE 65536 /* inflated ? */
 
-#if (!defined NF9_FTYPE_IPV4)
-#define NF9_FTYPE_IPV4                  0
-#define NF9_FTYPE_IPV6                  1
-#define NF9_FTYPE_VLAN                  5
-#define NF9_FTYPE_VLAN_IPV4             5
-#define NF9_FTYPE_VLAN_IPV6             6
-#define NF9_FTYPE_MPLS                  10
-#define NF9_FTYPE_MPLS_IPV4             10
-#define NF9_FTYPE_MPLS_IPV6             11
-#define NF9_FTYPE_VLAN_MPLS             15
-#define NF9_FTYPE_VLAN_MPLS_IPV4        15
-#define NF9_FTYPE_VLAN_MPLS_IPV6        16
-#endif
-
 enum INMPacket_information_type {
   INMPACKETTYPE_HEADER  = 1,      /* Packet headers are sampled */
   INMPACKETTYPE_IPV4    = 2,      /* IP version 4 data */
@@ -168,6 +154,7 @@ typedef struct _SFSample {
 
   /* mpls */
   SFLAddress mpls_nextHop;
+  u_int32_t mpls_vll_vc_id;
 
   /* nat */
   SFLAddress nat_src;
@@ -243,7 +230,7 @@ EXT void reset_mac_vlan(struct packet_ptrs *);
 EXT void reset_ip4(struct packet_ptrs *);
 EXT void reset_ip6(struct packet_ptrs *);
 EXT void notify_malf_packet(short int, char *, struct sockaddr *);
-EXT void SF_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
+EXT int SF_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 
 EXT u_int32_t getData32(SFSample *);
 EXT u_int32_t getData32_nobswap(SFSample *);
@@ -257,7 +244,7 @@ EXT void process_SF_raw_packet(SFSample *, struct packet_ptrs_vector *, struct p
 EXT void readv2v4FlowSample(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT void readv5FlowSample(SFSample *, int, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT void readv2v4CountersSample(SFSample *);
-EXT void readv5CountersSample(SFSample *);
+EXT void readv5CountersSample(SFSample *, int, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT void finalizeSample(SFSample *, struct packet_ptrs_vector *, struct plugin_requests *);
 EXT void InterSampleCleanup(SFSample *);
 EXT void decodeMpls(SFSample *);

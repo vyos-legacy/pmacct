@@ -1,9 +1,12 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl configuration file for pmacct 
 
-AC_INIT([src/pmacctd.c], [0.14.0], [paolo@pmacct.net])
-AM_INIT_AUTOMAKE([pmacctd], [0.14.0])
+AC_INIT([src/pmacctd.c], [1.5.0], [paolo@pmacct.net])
+AM_INIT_AUTOMAKE([pmacctd], [1.5.0])
 AC_PREFIX_DEFAULT([/usr/local])
+
+COMPILE_ARGS="${ac_configure_args}"
+AC_DEFINE_UNQUOTED(COMPILE_ARGS, "$COMPILE_ARGS")
 
 dnl Checks for programs.
 AC_PROG_CC
@@ -44,7 +47,7 @@ fi
 dnl set debug level
 AC_MSG_CHECKING([whether to enable debugging compiler options])
 AC_ARG_ENABLE(debug,
-	[  --enable-debug                   enable debugging compiler options],
+	[  --enable-debug                   Enable debugging compiler options (default: no)],
 	AC_MSG_RESULT(yes)
 	tmp_CFLAGS=`echo $CFLAGS | sed 's/O2/O0/g'`
 	CFLAGS="$tmp_CFLAGS"
@@ -58,12 +61,45 @@ AC_ARG_ENABLE(debug,
 dnl set relax level
 AC_MSG_CHECKING([whether to relax compiler optimizations])
 AC_ARG_ENABLE(relax,
-[  --enable-relax                   relax compiler optimization],
+[  --enable-relax                   Relax compiler optimization (default: no)],
 	AC_MSG_RESULT(yes)
         tmp_CFLAGS=`echo $CFLAGS | sed 's/O2/O0/g'`
         CFLAGS="$tmp_CFLAGS",
         AC_MSG_RESULT(no)
 )
+
+dnl: shared object handling
+AC_MSG_CHECKING([whether to disable linking against shared objects])
+AC_ARG_ENABLE(so,
+        [  --disable-so                     Disable linking against shared objects (default: no)],
+        if test x$enableval = x"yes" ; then
+          AC_MSG_RESULT(no)
+          AC_CHECK_FUNC(dlopen, [ USING_DLOPEN="yes" ], [])
+          AC_CHECK_LIB(dl, dlopen,
+                [ USING_DLOPEN="yes"
+                  LIBS="${LIBS} -ldl" ],
+                  [])
+          if test x"$USING_DLOPEN" != x"yes"; then
+                AC_MSG_ERROR(Unable to find dlopen(). Try with --disable-so)
+          fi
+        else
+          AC_MSG_RESULT(yes)
+	  if test "x$ac_cv_prog_gcc" = xyes ; then
+		LDFLAGS="-static ${LDFLAGS}"
+	  fi
+        fi
+        ,
+        AC_MSG_RESULT(no)
+        AC_CHECK_FUNC(dlopen, [ USING_DLOPEN="yes" ], [])
+        AC_CHECK_LIB(dl, dlopen,
+                [ USING_DLOPEN="yes"
+                  LIBS="${LIBS} -ldl" ],
+                  [])
+        if test x"$USING_DLOPEN" != x"yes"; then
+                AC_MSG_ERROR(Unable to find dlopen(). Try with --disable-so)
+        fi
+)
+dnl finish: shared object handling
 
 dnl os specific flags
 case "$host_os" in
@@ -77,16 +113,9 @@ case "$host_os" in
   IRIX*)
     AC_DEFINE(IRIX, 1)
     ;;
-esac
-
-dnl os-version specific flags
-case "$host_os1" in
-  "FreeBSD 4"*)
-  AC_DEFINE(FBSD4, 1)
-  ;;
-  "DragonFly"*)
-  AC_DEFINE(FBSD4, 1)
-  ;;
+  *BSD)
+    AC_DEFINE(BSD, 1)
+    ;;
 esac
 
 dnl cpu specific flags
@@ -245,23 +274,23 @@ if test x"$ac_cv_unaligned" = x"fail"; then
   AC_DEFINE(NEED_ALIGN, 1)
 fi
 
-AC_MSG_CHECKING([whether to disable L2 features])
+AC_MSG_CHECKING([whether to enable L2 features])
 AC_ARG_ENABLE(l2,
-        [  --disable-l2                     disable Layer-2 features and support],
+        [  --enable-l2                      Enable Layer-2 features and support (default: yes)],
         if test x$enableval = x"yes" ; then
-          AC_MSG_RESULT(no)
+          AC_MSG_RESULT(yes)
 	  AC_DEFINE(HAVE_L2, 1) 
         else
-          AC_MSG_RESULT(yes)
+          AC_MSG_RESULT(no)
         fi
         ,
-        AC_MSG_RESULT(no)
+        AC_MSG_RESULT(yes)
 	AC_DEFINE(HAVE_L2, 1) 
 )
 
 AC_MSG_CHECKING([whether to enable IPv6 code])
 AC_ARG_ENABLE(ipv6,
-        [  --enable-ipv6                    Enable IPv6 code],
+        [  --enable-ipv6                    Enable IPv6 code (default: no)],
 	[ 
         AC_MSG_RESULT(yes)
         AC_CHECK_FUNCS(inet_pton)
@@ -288,7 +317,7 @@ AC_ARG_ENABLE(ipv6,
 if test $ipv6support = "yes"; then 
 AC_MSG_CHECKING([whether to enable IPv4-mapped IPv6 sockets ])
 AC_ARG_ENABLE(v4-mapped,		    
-	[  --enable-v4-mapped               allow IPv6 sockets to handle IPv4 connections],
+	[  --enable-v4-mapped               Allow IPv6 sockets to handle IPv4 connections (default: no)],
 	[ 
 	if test x$enableval = x"yes" ; then
 	  AC_DEFINE(V4_MAPPED, 1)
@@ -308,6 +337,15 @@ AC_ARG_ENABLE(v4-mapped,
 	esac ]
 )
 fi
+
+AC_MSG_CHECKING([whether to enable IP prefix labels])
+AC_ARG_ENABLE(plabel,
+  [  --enable-plabel                  Enable IP prefix labels (default: no)],
+  [
+        AC_MSG_RESULT(yes)
+
+        AC_DEFINE(ENABLE_PLABEL, 1)
+  ])
 
 AC_ARG_WITH(pcap-includes,
   [  --with-pcap-includes=DIR         Search the specified directories for header files],
@@ -411,7 +449,18 @@ if test x"$PFRING_LIB_FOUND" = x""; then
     ERROR: missing pcap library. Refer to: http://www.tcpdump.org/
   ])])
 
-AC_CHECK_LIB([pcap], [pcap_setnonblock], [ AC_DEFINE(PCAP_7, 1) ], [])
+  AC_CHECK_LIB([pcap], [pcap_setnonblock], [ AC_DEFINE(PCAP_7, 1) ], [])
+else
+  dnl Unable to test: we should check for these libs
+  #AC_CHECK_LIB([numa], [numa_bind], [], [AC_MSG_ERROR([
+  #  ERROR: missing libnuma devel. Requirement for building PF_RING.
+  #])])
+
+  #AC_CHECK_LIB([rt], [clock_gettime], [], [AC_MSG_ERROR([
+  #  ERROR: missing librt devel. Requirement for building PF_RING.
+  #])])
+
+  LIBS="${LIBS} -lrt -lnuma"
 fi
 
 dnl packet capture type check; taken from libpcap.
@@ -454,11 +503,12 @@ AC_DEFINE_UNQUOTED(PCAP_TYPE_$V_PCAP, 1)
 dnl start: mysql handling
 AC_MSG_CHECKING(whether to enable MySQL support)
 AC_ARG_ENABLE(mysql,
-  [  --enable-mysql                   Enable MySQL support],
+  [  --enable-mysql                   Enable MySQL support (default: no)],
   [ case "$enableval" in
   yes)
     AC_MSG_RESULT(yes)
     USING_SQL="yes"
+    USING_MYSQL="yes"
 
     AC_ARG_WITH(mysql-libs,
       [  --with-mysql-libs=DIR            Search for MySQL libs in the specified directory],
@@ -485,6 +535,10 @@ AC_ARG_ENABLE(mysql,
 	LIBS="${LIBS} -L/usr/lib/mysql"
 	AC_MSG_RESULT([found in /usr/lib/mysql])
 	MYSQLLIBFOUND=1
+      elif test -r /usr/lib64/mysql/libmysqlclient.a -o -r /usr/lib64/mysql/libmysqlclient.so; then
+        LIBS="${LIBS} -L/usr/lib64/mysql"
+        AC_MSG_RESULT([found in /usr/lib64/mysql])
+        MYSQLLIBFOUND=1
       elif test -r /usr/local/mysql/lib/libmysqlclient.a -o -r /usr/local/mysql/lib/libmysqlclient.so; then
 	LIBS="${LIBS} -L/usr/local/mysql/lib"
 	AC_MSG_RESULT([found in /usr/local/mysql/lib])
@@ -504,12 +558,15 @@ AC_ARG_ENABLE(mysql,
       ])])
     else 
       LIBS="${LIBS} -lmysqlclient"
-      case "$host_os" in
-        Sun*)
-	  LIBS="${LIBS} -lrt"
-	  ;;
-      esac
     fi 
+
+    # Adding these as prerequisite for MySQL 5.6 
+    AC_CHECK_LIB([stdc++], [main], [LIBS="${LIBS} -lstdc++"], [AC_MSG_ERROR([
+      ERROR: missing libstdc++ devel. Requirement for building MySQL.
+    ])])
+    AC_CHECK_LIB([rt], [clock_gettime], [LIBS="${LIBS} -lrt"], [AC_MSG_ERROR([
+      ERROR: missing librt devel. Requirement for building MySQL.
+    ])])
 
     AC_ARG_WITH(mysql-includes,
       [  --with-mysql-includes=DIR        Search for MySQL includes in the specified directory],
@@ -572,11 +629,12 @@ dnl finish: mysql handling
 dnl start: pgsql handling
 AC_MSG_CHECKING(whether to enable PostgreSQL support)
 AC_ARG_ENABLE(pgsql,
-  [  --enable-pgsql                   Enable PostgreSQL support],
+  [  --enable-pgsql                   Enable PostgreSQL support (default: no)],
   [ case "$enableval" in
   yes)
     AC_MSG_RESULT(yes)
     USING_SQL="yes"
+    USING_PGSQL="yes"
 
     AC_ARG_WITH(pgsql-libs,
       [  --with-pgsql-libs=DIR            Search for PostgreSQL libs in the specified directory],
@@ -601,6 +659,10 @@ AC_ARG_ENABLE(pgsql,
       AC_MSG_CHECKING([default locations for libpq])
       if test -r /usr/lib/libpq.a -o -r /usr/lib/libpq.so; then
         AC_MSG_RESULT([found in /usr/lib])
+        PGSQLLIBFOUND=1
+      elif test -r /usr/lib64/libpq.a -o -r /usr/lib64/libpq.so; then
+	LIBS="${LIBS} -L/usr/lib64"
+        AC_MSG_RESULT([found in /usr/lib64])
         PGSQLLIBFOUND=1
       elif test -r /usr/local/lib/libpq.a -o -r /usr/local/lib/libpq.so; then
 	LIBS="${LIBS} -L/usr/local/lib"
@@ -677,13 +739,118 @@ AC_ARG_ENABLE(pgsql,
 AC_MSG_RESULT(no))
 dnl finish: pgsql handling
 
+dnl start: mongodb handling
+AC_MSG_CHECKING(whether to enable MongoDB support)
+AC_ARG_ENABLE(mongodb,
+  [  --enable-mongodb                 Enable MongoDB support (default: no)],
+  [ case "$enableval" in
+  yes)
+    AC_MSG_RESULT(yes)
+dnl USING_SQL="yes"
+    USING_MONGODB="yes"
+
+    AC_ARG_WITH(mongodb-libs,
+      [  --with-mongodb-libs=DIR          Search for MongoDB libs in the specified directory],
+      [
+	AC_LINEARIZE_PATH($withval, withval=$absdir)
+	LIBS="${LIBS} -L$withval"
+	MONGODBLIB=$withval
+	MONGODBLIBFOUND=1
+      ]) 
+
+    if test x"$MONGODBLIB" != x""; then
+      AC_MSG_CHECKING(your own MongoDB library)
+      if test -r $MONGODBLIB/libmongoc.a -o -r $MONGODBLIB/libmongoc.so; then
+        AC_MSG_RESULT(ok)
+      else
+        AC_MSG_RESULT(no)
+	AC_MSG_ERROR(ERROR: missing MongoDB library in $MONGODBLIB)
+      fi
+    fi
+
+    if test x"$MONGODBLIBFOUND" = x""; then
+      AC_MSG_CHECKING([default locations for libmongoc])
+      if test -r /usr/lib/libmongoc.a -o -r /usr/lib/libmongoc.so; then
+	AC_MSG_RESULT([found in /usr/lib])
+	MONGODBLIBFOUND=1
+      elif test -r /usr/lib64/libmongoc.a -o -r /usr/lib64/libmongoc.so; then
+        LIBS="${LIBS} -L/usr/lib64"
+        AC_MSG_RESULT([found in /usr/lib64])
+        MONGODBLIBFOUND=1
+      elif test -r /usr/local/lib/libmongoc.a -o -r /usr/local/lib/libmongoc.so; then
+	LIBS="${LIBS} -L/usr/local/lib"
+	AC_MSG_RESULT([found in /usr/local/lib])
+	MONGODBLIBFOUND=1
+      else 
+        AC_MSG_RESULT([not found])
+      fi
+    fi
+
+    if test x"$MONGODBLIBFOUND" = x""; then
+      AC_CHECK_LIB([mongoc], [mongo_connect], [], [AC_MSG_ERROR([
+        ERROR: missing MongoDB library. Refer to: http://api.mongodb.org/c/
+      ])])
+    else 
+      LIBS="${LIBS} -lmongoc"
+    fi 
+
+    AC_ARG_WITH(mongodb-includes,
+      [  --with-mongodb-includes=DIR      Search for MongoDB includes in the specified directory],
+      [
+	AC_LINEARIZE_PATH($withval, withval=$absdir)
+	INCLUDES="${INCLUDES} -I$withval"
+	MONGODBINCLUDES=$withval
+	MONGODBINCLUDESFOUND=1
+      ])
+
+    if test x"$MONGODBINCLUDES" != x""; then
+      AC_MSG_CHECKING(your own MongoDB headers)
+      if test -r $MONGODBINCLUDES/mongo.h; then
+        AC_MSG_RESULT(ok)
+      else
+	AC_MSG_RESULT(no)
+	AC_MSG_ERROR(ERROR: missing MongoDB headers in $MONGODBINCLUDES)
+      fi
+    fi
+
+    if test x"$MONGODBINCLUDESFOUND" = x""; then 
+      AC_MSG_CHECKING([default locations for mongo.h])
+      if test -r /usr/include/mongo.h; then
+	AC_MSG_RESULT([found in /usr/include])
+	MONGODBINCLUDESFOUND=1;
+      elif test -r /usr/local/include/mongo.h; then
+	INCLUDES="${INCLUDES} -I/usr/local/include"
+	AC_MSG_RESULT([found in /usr/local/include])
+	MONGODBINCLUDESFOUND=1;
+      fi
+      if test x"$MONGODBINCLUDESFOUND" = x""; then
+	AC_MSG_RESULT([not found])
+      fi
+    fi
+
+    if test x"$MONGODBINCLUDESFOUND" = x""; then
+      AC_CHECK_HEADER([mongo.h],,
+      [AC_MSG_ERROR(ERROR: missing MongoDB headers)])      
+    fi
+
+    AC_DEFINE(WITH_MONGODB, 1)
+    PLUGINS="${PLUGINS} mongodb_plugin.c"
+    ;;
+  no)
+    AC_MSG_RESULT(no)
+    ;;
+  esac ],
+AC_MSG_RESULT(no))
+dnl finish: mongodb handling
+
 AC_MSG_CHECKING(whether to enable SQLite3 support)
 AC_ARG_ENABLE(sqlite3,
-  [  --enable-sqlite3                 Enable SQLite3 support],
+  [  --enable-sqlite3                 Enable SQLite3 support (default: no)],
   [ case "$enableval" in
   yes)
     AC_MSG_RESULT(yes)
     USING_SQL="yes"
+    USING_SQLITE3="yes"
 
     AC_ARG_WITH(sqlite3-libs,
       [  --with-sqlite3-libs=DIR          Search for SQLite3 libs in the specified directory],
@@ -707,9 +874,12 @@ AC_ARG_ENABLE(sqlite3,
     if test x"$SQLITE3LIBFOUND" = x""; then
       AC_MSG_CHECKING([default locations for libsqlite3])
       if test -r /usr/lib/libsqlite3.a -o -r /usr/lib/libsqlite3.so; then
-	# LIBS="${LIBS} -L/usr/lib/sqlite3"
 	AC_MSG_RESULT([found in /usr/lib])
 	SQLITE3LIBFOUND=1
+      elif test -r /usr/lib64/libsqlite3.a -o -r /usr/lib64/libsqlite3.so; then
+        LIBS="${LIBS} -L/usr/lib64"
+        AC_MSG_RESULT([found in /usr/lib64])
+        SQLITE3LIBFOUND=1
       elif test -r /usr/local/sqlite3/lib/libsqlite3.a -o -r /usr/local/sqlite3/lib/libsqlite3.so; then
 	LIBS="${LIBS} -L/usr/local/sqlite3/lib"
 	AC_MSG_RESULT([found in /usr/local/sqlite3/lib])
@@ -784,41 +954,329 @@ AC_ARG_ENABLE(sqlite3,
 AC_MSG_RESULT(no))
 dnl finish: sqlite3 handling
 
-AC_MSG_CHECKING([whether to disable shared objects])
-AC_ARG_ENABLE(so,
-        [  --disable-so                     Disable shared objects],
-        if test x$enableval = x"yes" ; then
-          AC_MSG_RESULT(no)
-	  AC_CHECK_FUNC(dlopen, [ USING_DLOPEN="yes" ], []) 
-	  if test x"$USING_DLOPEN" != x"yes"; then 
-	    AC_CHECK_LIB(dl, dlopen,
-		[ USING_DLOPEN="yes"
-		  LIBS="${LIBS} -ldl" ],
-		[ AC_MSG_ERROR(Unable to find dlopen(). Try with --disable-so) ]) 
-	  fi
-        else
-          AC_MSG_RESULT(yes)
-        fi
-        ,
+dnl start: RabbitMQ/AMQP handling
+AC_MSG_CHECKING(whether to enable RabbitMQ/AMQP support)
+AC_ARG_ENABLE(rabbitmq,
+  [  --enable-rabbitmq                Enable RabbitMQ/AMQP support (default: no)],
+  [ case "$enableval" in
+  yes)
+    AC_MSG_RESULT(yes)
+dnl USING_SQL="yes"
+    USING_RABBITMQ="yes"
+
+    AC_ARG_WITH(rabbitmq-libs,
+      [  --with-rabbitmq-libs=DIR         Search for RabbitMQ libs in the specified directory],
+      [
+	AC_LINEARIZE_PATH($withval, withval=$absdir)
+	LIBS="${LIBS} -L$withval"
+	RABBITMQLIB=$withval
+	RABBITMQLIBFOUND=1
+      ]) 
+
+    if test x"$RABBITMQLIB" != x""; then
+      AC_MSG_CHECKING(your own RabbitMQ library)
+      if test -r $RABBITMQLIB/librabbitmq.a -o -r $RABBITMQLIB/librabbitmq.so; then
+        AC_MSG_RESULT(ok)
+      else
         AC_MSG_RESULT(no)
-        AC_CHECK_FUNC(dlopen, [ USING_DLOPEN="yes" ], [])
-        if test x"$USING_DLOPEN" != x"yes"; then
-          AC_CHECK_LIB(dl, dlopen,
-		[ USING_DLOPEN="yes"
-		  LIBS="${LIBS} -ldl" ],
-		[ AC_MSG_ERROR(Unable to find dlopen(). Try with --disable-so) ])
-	fi
-)
-dnl finish: shared object handling
+	AC_MSG_ERROR(ERROR: missing RabbitMQ library in $RABBITMQLIB)
+      fi
+    fi
+
+    if test x"$RABBITMQLIBFOUND" = x""; then
+      AC_MSG_CHECKING([default locations for librabbitmq])
+      if test -r /usr/lib/librabbitmq.a -o -r /usr/lib/librabbitmq.so; then
+	AC_MSG_RESULT([found in /usr/lib])
+	RABBITMQLIBFOUND=1
+      elif test -r /usr/lib64/librabbitmq.a -o -r /usr/lib64/librabbitmq.so; then
+        LIBS="${LIBS} -L/usr/lib64"
+        AC_MSG_RESULT([found in /usr/lib64])
+        RABBITMQLIBFOUND=1
+      elif test -r /usr/local/lib/librabbitmq.a -o -r /usr/local/lib/librabbitmq.so; then
+	LIBS="${LIBS} -L/usr/local/lib"
+	AC_MSG_RESULT([found in /usr/local/lib])
+	RABBITMQLIBFOUND=1
+      else 
+        AC_MSG_RESULT([not found])
+      fi
+    fi
+
+    if test x"$RABBITMQLIBFOUND" = x""; then
+      AC_CHECK_LIB([rabbitmq], [amqp_new_connection], [], [AC_MSG_ERROR([
+        ERROR: missing RabbitMQ library. Refer to: https://github.com/alanxz/rabbitmq-c/
+      ])])
+    else 
+      LIBS="${LIBS} -lrabbitmq"
+    fi 
+
+    AC_ARG_WITH(rabbitmq-includes,
+      [  --with-rabbitmq-includes=DIR     Search for RabbitMQ includes in the specified directory],
+      [
+	AC_LINEARIZE_PATH($withval, withval=$absdir)
+	INCLUDES="${INCLUDES} -I$withval"
+	RABBITMQINCLUDES=$withval
+	RABBITMQINCLUDESFOUND=1
+      ])
+
+    if test x"$RABBITMQINCLUDES" != x""; then
+      AC_MSG_CHECKING(your own RabbitMQ headers)
+      if test -r $RABBITMQINCLUDES/amqp.h; then
+        AC_MSG_RESULT(ok)
+      else
+	AC_MSG_RESULT(no)
+	AC_MSG_ERROR(ERROR: missing RabbitMQ headers in $RABBITMQINCLUDES)
+      fi
+    fi
+
+    if test x"$RABBITMQINCLUDESFOUND" = x""; then 
+      AC_MSG_CHECKING([default locations for amqp.h])
+      if test -r /usr/include/amqp.h; then
+	AC_MSG_RESULT([found in /usr/include])
+	RABBITMQINCLUDESFOUND=1;
+      elif test -r /usr/local/include/rabbitmq.h; then
+	INCLUDES="${INCLUDES} -I/usr/local/include"
+	AC_MSG_RESULT([found in /usr/local/include])
+	RABBITMQINCLUDESFOUND=1;
+      fi
+      if test x"$RABBITMQINCLUDESFOUND" = x""; then
+	AC_MSG_RESULT([not found])
+      fi
+    fi
+
+    if test x"$RABBITMQINCLUDESFOUND" = x""; then
+      AC_CHECK_HEADER([amqp.h],,
+      [AC_MSG_ERROR(ERROR: missing RabbitMQ headers)])      
+    fi
+
+    AC_DEFINE(WITH_RABBITMQ, 1)
+    PLUGINS="${PLUGINS} amqp_common.c amqp_plugin.c"
+    ;;
+  no)
+    AC_MSG_RESULT(no)
+    ;;
+  esac ],
+AC_MSG_RESULT(no))
+dnl finish: RabbitMQ/AMQP handling
+
+dnl start: geoip handling
+AC_MSG_CHECKING(whether to enable GeoIP support)
+AC_ARG_ENABLE(geoip,
+  [  --enable-geoip                   Enable GeoIP support (default: no)],
+  [ case "$enableval" in
+  yes)
+    AC_MSG_RESULT(yes)
+    USING_MMGEOIP="yes"
+
+    AC_ARG_WITH(geoip-libs,
+      [  --with-geoip-libs=DIR            Search for Maxmind GeoIP libs in the specified directory],
+      [
+	AC_LINEARIZE_PATH($withval, withval=$absdir)
+	LIBS="${LIBS} -L$withval"
+	MMGEOIPLIB=$withval
+	MMGEOIPLIBFOUND=1
+      ]) 
+
+    if test x"$MMGEOIPLIB" != x""; then
+      AC_MSG_CHECKING(your own Maxmind GeoIP library)
+      if test -r $MMGEOIPLIB/libGeoIP.a -o -r $MMGEOIPLIB/libGeoIP.so; then
+        AC_MSG_RESULT(ok)
+      else
+        AC_MSG_RESULT(no)
+	AC_MSG_ERROR(ERROR: missing Maxmind GeoIP library in $MMGEOIPLIB)
+      fi
+    fi
+
+    if test x"$MMGEOIPLIBFOUND" = x""; then
+      AC_MSG_CHECKING([default locations for libGeoIP])
+      if test -r /usr/lib/libGeoIP.a -o -r /usr/lib/libGeoIP.so; then
+	AC_MSG_RESULT([found in /usr/lib])
+	MMGEOIPLIBFOUND=1
+      elif test -r /usr/lib64/libGeoIP.a -o -r /usr/lib64/libGeoIP.so; then
+        LIBS="${LIBS} -L/usr/lib64"
+        AC_MSG_RESULT([found in /usr/lib64])
+        MMGEOIPLIBFOUND=1
+      elif test -r /usr/local/lib/libGeoIP.a -o -r /usr/local/lib/libGeoIP.so; then
+	LIBS="${LIBS} -L/usr/local/lib"
+	AC_MSG_RESULT([found in /usr/local/lib])
+	MMGEOIPLIBFOUND=1
+      else 
+        AC_MSG_RESULT([not found])
+      fi
+    fi
+
+    if test x"$MMGEOIPLIBFOUND" = x""; then
+      AC_CHECK_LIB([GeoIP], [GeoIP_open], [], [AC_MSG_ERROR([
+	ERROR: missing Maxmind GeoIP library. Refer to: http://www.maxmind.com/download/geoip/api/c/ 
+      ])])
+    else 
+      LIBS="${LIBS} -lGeoIP"
+    fi 
+
+    AC_ARG_WITH(geoip-includes,
+      [  --with-geoip-includes=DIR        Search for Maxmind GeoIP includes in the specified directory],
+      [
+	AC_LINEARIZE_PATH($withval, withval=$absdir)
+	INCLUDES="${INCLUDES} -I$withval"
+	MMGEOIPINCLUDES=$withval
+	MMGEOIPINCLUDESFOUND=1
+      ])
+
+    if test x"$MMGEOIPINCLUDES" != x""; then
+      AC_MSG_CHECKING(your own Maxmind GeoIP headers)
+      if test -r $MMGEOIPINCLUDES/GeoIP.h; then
+        AC_MSG_RESULT(ok)
+      else
+	AC_MSG_RESULT(no)
+	AC_MSG_ERROR(ERROR: missing Maximind GeoIP headers in $MMGEOIPINCLUDES)
+      fi
+    fi
+
+    if test x"$MMGEOIPINCLUDESFOUND" = x""; then 
+      AC_MSG_CHECKING([default locations for GeoIP.h])
+      if test -r /usr/include/GeoIP.h; then
+	AC_MSG_RESULT([found in /usr/include])
+	MMGEOIPINCLUDESFOUND=1;
+      elif test -r /usr/local/include/GeoIP.h; then
+	INCLUDES="${INCLUDES} -I/usr/local/include"
+	AC_MSG_RESULT([found in /usr/local/include])
+	MMGEOIPINCLUDESFOUND=1;
+      fi
+      if test x"$MMGEOIPINCLUDESFOUND" = x""; then
+	AC_MSG_RESULT([not found])
+      fi
+    fi
+
+    if test x"$MMGEOIPINCLUDESFOUND" = x""; then
+      AC_CHECK_HEADER([GeoIP.h],,
+      [AC_MSG_ERROR(ERROR: missing Maxmind GeoIP headers)])      
+    fi
+
+    AC_DEFINE(WITH_GEOIP, 1)
+    ;;
+  no)
+    AC_MSG_RESULT(no)
+    ;;
+  esac ],
+AC_MSG_RESULT(no))
+dnl finish: GeoIP handling
+
+dnl start: Jansson handling
+AC_MSG_CHECKING(whether to enable Jansson support)
+AC_ARG_ENABLE(jansson,
+  [  --enable-jansson                 Enable Jansson support (default: no)],
+  [ case "$enableval" in
+  yes)
+    AC_MSG_RESULT(yes)
+    USING_JANSSON="yes"
+
+    AC_ARG_WITH(jansson-libs,
+      [  --with-jansson-libs=DIR          Search for Jansson libs in the specified directory],
+      [
+	AC_LINEARIZE_PATH($withval, withval=$absdir)
+	LIBS="${LIBS} -L$withval"
+	JANSSONLIB=$withval
+	JANSSONLIBFOUND=1
+      ]) 
+
+    if test x"$JANSSONLIB" != x""; then
+      AC_MSG_CHECKING(your own Jansson library)
+      if test -r $JANSSONLIB/libjansson.a -o -r $JANSSONLIB/libjansson.so; then
+        AC_MSG_RESULT(ok)
+      else
+        AC_MSG_RESULT(no)
+	AC_MSG_ERROR(ERROR: missing Jansson library in $JANSSONLIB)
+      fi
+    fi
+
+    if test x"$JANSSONLIBFOUND" = x""; then
+      AC_MSG_CHECKING([default locations for Jansson library])
+      if test -r /usr/lib/libjansson.a -o -r /usr/lib/libjansson.so; then
+	AC_MSG_RESULT([found in /usr/lib])
+	JANSSONLIBFOUND=1
+      elif test -r /usr/lib64/libjansson.a -o -r /usr/lib64/libjansson.so; then
+        LIBS="${LIBS} -L/usr/lib64"
+        AC_MSG_RESULT([found in /usr/lib64])
+        JANSSONLIBFOUND=1
+      elif test -r /usr/local/lib/libjansson.a -o -r /usr/local/lib/libjansson.so; then
+	LIBS="${LIBS} -L/usr/local/lib"
+	AC_MSG_RESULT([found in /usr/local/lib])
+	JANSSONLIBFOUND=1
+      else 
+        AC_MSG_RESULT([not found])
+      fi
+    fi
+
+    if test x"$JANSSONLIBFOUND" = x""; then
+      AC_CHECK_LIB([jansson], [json_object], [], [AC_MSG_ERROR([
+	ERROR: missing Jansson library. Refer to: http://www.digip.org/jansson/ 
+      ])])
+    else 
+      LIBS="${LIBS} -ljansson"
+    fi 
+
+    AC_ARG_WITH(jansson-includes,
+      [  --with-jansson-includes=DIR      Search for Jansson includes in the specified directory],
+      [
+	AC_LINEARIZE_PATH($withval, withval=$absdir)
+	INCLUDES="${INCLUDES} -I$withval"
+	JANSSONINCLUDES=$withval
+	JANSSONINCLUDESFOUND=1
+      ])
+
+    if test x"$JANSSONINCLUDES" != x""; then
+      AC_MSG_CHECKING(your own Jansson headers)
+      if test -r $JANSSONINCLUDES/jansson.h; then
+        AC_MSG_RESULT(ok)
+      else
+	AC_MSG_RESULT(no)
+	AC_MSG_ERROR(ERROR: missing Jansson headers in $JANSSONINCLUDES)
+      fi
+    fi
+
+    if test x"$JANSSONINCLUDESFOUND" = x""; then 
+      AC_MSG_CHECKING([default locations for jansson.h])
+      if test -r /usr/include/jansson.h; then
+	AC_MSG_RESULT([found in /usr/include])
+	JANSSONINCLUDESFOUND=1;
+      elif test -r /usr/local/include/jansson.h; then
+	INCLUDES="${INCLUDES} -I/usr/local/include"
+	AC_MSG_RESULT([found in /usr/local/include])
+	JANSSONINCLUDESFOUND=1;
+      fi
+      if test x"$JANSSONINCLUDESFOUND" = x""; then
+	AC_MSG_RESULT([not found])
+      fi
+    fi
+
+    if test x"$JANSSONINCLUDESFOUND" = x""; then
+      AC_CHECK_HEADER([jansson.h],,
+      [AC_MSG_ERROR(ERROR: missing Jansson headers)])      
+    fi
+
+    AC_DEFINE(WITH_JANSSON, 1)
+    ;;
+  no)
+    AC_MSG_RESULT(no)
+    ;;
+  esac ],
+AC_MSG_RESULT(no))
+dnl finish: Jansson handling
 
 if test x"$USING_DLOPEN" = x"yes"; then
 	AC_DEFINE(HAVE_DLOPEN, 1)
+else
+	# Adding linking to libdl here 1) if required and 2) in case of --disable-so
+	if test x"$USING_MYSQL" = x"yes" -o x"$USING_SQLITE3" = x"yes"; then
+		AC_CHECK_LIB([dl], [dlopen], [LIBS="${LIBS} -ldl"], [AC_MSG_ERROR([
+		  ERROR: missing libdl devel.
+		])])
+	fi
 fi
 
-  if test x"$USING_SQL" = x"yes"; then
-    PLUGINS="${PLUGINS} sql_common.c sql_handlers.c log_templates.c preprocess.c"
-    LIBS="${LIBS} -lm -lz"
-  fi
+if test x"$USING_SQL" = x"yes"; then
+	PLUGINS="${PLUGINS} sql_common.c sql_handlers.c log_templates.c"
+	LIBS="${LIBS} -lm -lz"
+fi
 
 dnl Checks for header files.
 AC_HEADER_STDC
@@ -837,7 +1295,7 @@ AC_CHECK_TYPEDEF(uint8_t, sys/types.h)
 
 AC_MSG_CHECKING([whether to enable 64bit counters])
 AC_ARG_ENABLE(64bit,
-        [  --enable-64bit                   Enable 64bit counters],
+        [  --enable-64bit                   Enable 64bit counters (default: yes)],
         if test x$enableval = x"yes" ; then
           AC_MSG_RESULT(yes)
           AC_DEFINE(HAVE_64BIT_COUNTERS, 1)
@@ -845,12 +1303,13 @@ AC_ARG_ENABLE(64bit,
           AC_MSG_RESULT(no)
         fi
         ,
-        AC_MSG_RESULT(no)
+        AC_MSG_RESULT(yes)
+	AC_DEFINE(HAVE_64BIT_COUNTERS, 1)
 )
 
-AC_MSG_CHECKING([whether to enable multithreading in pmacctd])
+AC_MSG_CHECKING([whether to enable multithreading in pmacct])
 AC_ARG_ENABLE(threads,
-        [  --enable-threads                 Enable multi-threading in pmacctd],
+        [  --enable-threads                 Enable multi-threading in pmacct (default: yes)],
         if test x$enableval = x"yes" ; then
           AC_MSG_RESULT(yes)
           AC_DEFINE(ENABLE_THREADS, 1)
@@ -873,12 +1332,27 @@ AC_ARG_ENABLE(threads,
 	  THREADS_SOURCES=""
         fi
         ,
-        AC_MSG_RESULT(no)
+        AC_MSG_RESULT(yes)
+        AC_DEFINE(ENABLE_THREADS, 1)
+
+          dnl OS Specifics
+          [
+            case "$host" in
+            *-linux-*)
+              AC_DEFINE(_XOPEN_SOURCE, 600)
+              AC_DEFINE(_GNU_SOURCE, 1)
+              ;;
+            esac
+          ]
+
+
+          LIBS="${LIBS} -lpthread"
+          THREADS_SOURCES="thread_pool.c"
 )
 
 AC_MSG_CHECKING(whether to enable ULOG support)
 AC_ARG_ENABLE(ulog,
-  [  --enable-ulog                    Enable ULOG support],
+  [  --enable-ulog                    Enable ULOG support (default: no)],
        if test "x$enableval" = xyes ; then
                AC_MSG_RESULT(yes)
                CFLAGS="${CFLAGS} -DENABLE_ULOG"
@@ -893,7 +1367,7 @@ dnl Checks for library functions.
 AC_TYPE_SIGNAL
 
 dnl AC_CHECK_FUNCS(inet_ntoa socket)
-AC_CHECK_FUNCS([strlcpy vsnprintf setproctitle])
+AC_CHECK_FUNCS([strlcpy vsnprintf setproctitle mallopt])
 
 dnl final checks
 dnl trivial solution to portability issue 
@@ -906,7 +1380,7 @@ case "$host_os" in
     ;;
 esac
 
-LIBS="${LIBS} -lnfprobe_plugin -Lnfprobe_plugin/ -lsfprobe_plugin -Lsfprobe_plugin/ -lbgp -Lbgp/ -ltee_plugin -Ltee_plugin/ -lisis -Lisis/"
+SERVER_LIBS="-lnfprobe_plugin -Lnfprobe_plugin/ -lsfprobe_plugin -Lsfprobe_plugin/ -lbgp -Lbgp/ -ltee_plugin -Ltee_plugin/ -lisis -Lisis/"
 
 echo "
 PLATFORM ..... : `uname -m`
@@ -914,6 +1388,7 @@ OS ........... : `uname -rs` (`uname -n`)
 COMPILER ..... : ${CC}
 CFLAGS ....... : ${CFLAGS}
 LIBS ......... : ${LIBS}
+SERVER_LIBS ...: ${SERVER_LIBS}
 LDFLAGS ...... : ${LDFLAGS}
 
 Now type 'make' to compile the source code.
@@ -928,6 +1403,7 @@ Read the README file or go to http://wiki.pmacct.net/
 AC_SUBST([PLUGINS])
 AC_SUBST([THREADS_SOURCES])
 AC_SUBST([EXTRABIN])
+AC_SUBST([SERVER_LIBS])
 AC_OUTPUT([ Makefile \
 	    src/Makefile src/nfprobe_plugin/Makefile \
 	    src/sfprobe_plugin/Makefile src/bgp/Makefile \

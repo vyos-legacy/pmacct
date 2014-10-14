@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -24,6 +24,9 @@
 
 /* defines */
 #define CFG_LINE_LEN(x) (SRVBUFLEN-strlen(x))
+#define MAX_CUSTOM_PRIMITIVES		64
+#define MAX_CUSTOM_PRIMITIVE_NAMELEN	64
+#define MAX_CUSTOM_PRIMITIVE_PD_PTRS	8
 
 /* structures */
 struct _dictionary_line {
@@ -31,17 +34,61 @@ struct _dictionary_line {
   int (*func)(char *, char *, char *);
 };
 
+struct packet_data_ptr {
+  s_uint8_t ptr_idx;
+  u_int16_t off;
+  s_uint16_t proto;
+};
+
+struct custom_primitive_entry {
+  /* compiled from map */
+  u_char name[MAX_CUSTOM_PRIMITIVE_NAMELEN];
+  struct packet_data_ptr pd_ptr[MAX_CUSTOM_PRIMITIVE_PD_PTRS];
+  u_int32_t pen;
+  u_int16_t field_type;
+  u_int16_t len;
+  u_int16_t alloc_len;
+  u_int8_t semantics;
+
+  /* generated internally */
+  pm_cfgreg_t type;
+};
+
+struct custom_primitives {
+  struct custom_primitive_entry primitive[MAX_CUSTOM_PRIMITIVES];
+  int num;
+};
+
+struct custom_primitive_ptrs {
+  char *name;
+  u_int16_t off;
+  struct custom_primitive_entry *ptr;
+};
+
+struct custom_primitives_ptrs {
+  struct custom_primitive_ptrs primitive[MAX_CUSTOM_PRIMITIVES];
+  int num;
+  int len;
+};
+
 struct configuration {
-  u_int64_t what_to_count;
-  u_int64_t nfprobe_what_to_count;
+  pm_cfgreg_t what_to_count;	/* first registry */
+  pm_cfgreg_t what_to_count_2;	/* second registry */
+  pm_cfgreg_t nfprobe_what_to_count;
+  pm_cfgreg_t nfprobe_what_to_count_2;
+  char *aggregate_primitives;
+  struct custom_primitives_ptrs cpptrs;
   char *name;
   char *type;
+  int type_id;
+  char *proc_name;
   int sock;
+  int bgp_sock;
   int acct_type; 
   int data_type; 
-  int pipe_size;
+  u_int64_t pipe_size;
+  u_int64_t buffer_size;
   int pipe_backlog;
-  int buffer_size;
   int files_umask;
   int files_uid;
   int files_gid;
@@ -52,6 +99,7 @@ struct configuration {
   int flow_hashsz;
   int conntrack_bufsz;
   int flow_lifetime;
+  int flow_tcp_lifetime;
   int num_protos;
   int num_hosts;
   char *imt_plugin_path;
@@ -69,6 +117,7 @@ struct configuration {
   int sql_optimize_clauses;
   int sql_refresh_time;
   int sql_history;
+  int sql_history_offset;
   int sql_history_howmany; /* internal */
   int sql_history_since_epoch;
   int sql_startup_delay;
@@ -88,24 +137,44 @@ struct configuration {
   char *sql_locking_style;
   int sql_use_copy;
   char *sql_delimiter;
-  int print_refresh_time;
+  int timestamps_secs;
+  int mongo_insert_batch;
+  char *amqp_exchange_type;
+  int amqp_persistent_msg;
+  u_int32_t amqp_frame_max;
   int print_cache_entries;
   int print_markers;
   int print_output;
+  int print_output_file_append;
+  char *print_output_separator;
   char *print_output_file;
+  char *print_latest_file;
   int nfacctd_port;
   char *nfacctd_ip;
   char *nfacctd_allow_file;
   int nfacctd_time;
+  int nfacctd_pro_rating;
+  int nfacctd_account_options;
   u_int32_t nfacctd_as;
   u_int32_t nfacctd_net;
+  u_int64_t nfacctd_pipe_size;
   int sfacctd_renormalize;
   int nfacctd_disable_checks;
-  int nfacctd_sql_log;
   int nfacctd_bgp;
-  int nfacctd_bgp_msglog;
+  int nfacctd_bgp_msglog_output;
+  char *nfacctd_bgp_msglog_file;
+  char *nfacctd_bgp_msglog_amqp_host;
+  char *nfacctd_bgp_msglog_amqp_user;
+  char *nfacctd_bgp_msglog_amqp_passwd;
+  char *nfacctd_bgp_msglog_amqp_exchange;
+  char *nfacctd_bgp_msglog_amqp_exchange_type;
+  char *nfacctd_bgp_msglog_amqp_routing_key;
+  int nfacctd_bgp_msglog_amqp_persistent_msg;
+  u_int32_t nfacctd_bgp_msglog_amqp_frame_max;
+  int nfacctd_bgp_msglog_amqp_retry;
   char *nfacctd_bgp_ip;
   int nfacctd_bgp_port;
+  u_int64_t nfacctd_bgp_pipe_size;
   int nfacctd_bgp_ipprec;
   char *nfacctd_bgp_allow_file;
   int nfacctd_bgp_max_peers;
@@ -120,22 +189,48 @@ struct configuration {
   int nfacctd_bgp_src_local_pref_type;
   int nfacctd_bgp_src_med_type;
   int nfacctd_bgp_peer_as_skip_subas;
+  int nfacctd_bgp_batch;
+  int nfacctd_bgp_batch_interval;
   char *nfacctd_bgp_peer_as_src_map;
   char *nfacctd_bgp_src_local_pref_map;
   char *nfacctd_bgp_src_med_map;
   char *nfacctd_bgp_to_agent_map;
-  char *nfacctd_bgp_iface_to_rd_map;
+  char *nfacctd_flow_to_rd_map;
   int nfacctd_bgp_follow_default;
   struct prefix nfacctd_bgp_follow_nexthop[FOLLOW_BGP_NH_ENTRIES];
   char *nfacctd_bgp_neighbors_file;
   char *nfacctd_bgp_md5_file;
   int bgp_table_peer_buckets;
+  int bgp_table_per_peer_buckets;
+  int bgp_table_attr_hash_buckets;
+  int bgp_table_per_peer_hash;
+  int bgp_table_dump_output;
+  char *bgp_table_dump_file;
+  int bgp_table_dump_refresh_time;
+  char *bgp_table_dump_amqp_host;
+  char *bgp_table_dump_amqp_user;
+  char *bgp_table_dump_amqp_passwd;
+  char *bgp_table_dump_amqp_exchange;
+  char *bgp_table_dump_amqp_exchange_type;
+  char *bgp_table_dump_amqp_routing_key;
+  int bgp_table_dump_amqp_persistent_msg;
+  u_int32_t bgp_table_dump_amqp_frame_max;
   int nfacctd_isis;
   char *nfacctd_isis_ip;
   char *nfacctd_isis_net;
   char *nfacctd_isis_iface;
   int nfacctd_isis_mtu;
   int nfacctd_isis_msglog;
+  char *igp_daemon_map;
+  char *igp_daemon_map_msglog;
+  char *geoip_ipv4_file;
+  char *geoip_ipv6_file;
+#if defined WITH_GEOIP
+  GeoIP *geoip_ipv4;
+#if defined ENABLE_IPV6
+  GeoIP *geoip_ipv6;
+#endif
+#endif
   int promisc; /* pcap_open_live() promisc parameter */
   char *clbuf; /* pcap filter */
   char *pcap_savefile;
@@ -152,17 +247,24 @@ struct configuration {
   char *pidfile; 
   int networks_mask;
   char *networks_file;
+  int networks_file_filter;
   int networks_cache_entries;
   char *ports_file;
-  int refresh_maps;
   char *a_filter;
   int bpfp_a_num;
   struct bpf_program *bpfp_a_table[AGG_FILTER_ENTRIES];
   struct pretag_filter ptf;
   struct pretag_filter pt2f;
+  int maps_refresh;
+  int maps_index;
+  int maps_entries;
+  int maps_row_len;
   char *pre_tag_map;
-  int pre_tag_map_entries;
+  struct id_table ptm;
+  int ptm_alloc;
+  int ptm_global;
   pm_id_t post_tag;
+  pm_id_t post_tag2;
   int ext_sampling_rate;
   int sampling_rate;
   char *sampling_map;
@@ -191,11 +293,16 @@ struct configuration {
   int sfprobe_agentsubid;
   u_int64_t sfprobe_ifspeed;
   int tee_transparent;
+  int tee_max_receivers;
+  int tee_max_receiver_pools;
+  char *tee_receivers;
   int uacctd_group;
   int uacctd_nl_size;
   char *tunnel0;
-  int xlate_src;
-  int xlate_dst;
+  char *pkt_len_distrib_bins_str;
+  char *pkt_len_distrib_bins[MAX_PKT_LEN_DISTRIB_BINS];
+  u_int16_t pkt_len_distrib_bins_lookup[ETHER_JUMBO_MTU+1];
+  int use_ip_next_hop;
 };
 
 struct plugin_type_entry {
@@ -223,6 +330,7 @@ struct plugins_list_entry {
 EXT void evaluate_configuration(char *, int);
 EXT int parse_configuration_file(char *);
 EXT int parse_plugin_names(char *, int, int);
+EXT void parse_core_process_name(char *, int, int);
 EXT int create_plugin(char *, char *, char *);
 EXT int delete_plugin_by_id(int);
 EXT struct plugins_list_entry *search_plugin_by_pipe(int);
@@ -232,5 +340,7 @@ EXT void set_default_values();
 
 /* global vars */
 EXT char *cfg[SRVBUFLEN], *cfg_cmdline[SRVBUFLEN];
+EXT struct custom_primitives custom_primitives_registry;
+EXT pm_cfgreg_t custom_primitives_type;
 EXT int rows;
 #undef EXT

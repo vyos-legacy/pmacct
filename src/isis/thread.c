@@ -216,7 +216,8 @@ recent_relative_time (void)
 static unsigned int
 cpu_record_hash_key (struct cpu_thread_history *a)
 {
-  return (uintptr_t) a->func;
+  /* XXX: uintptr_t not portable: changed to "unsigned int *" */
+  return (unsigned int) a->func;
 }
 
 static int 
@@ -465,7 +466,7 @@ funcname_thread_add_read (struct thread_master *m,
 
   if (FD_ISSET (fd, &m->readfd))
     {
-      Log(LOG_WARNING, "WARN (default/core/ISIS ): There is already read fd [%d]\n", fd);
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): There is already read fd [%d]\n", config.name, fd);
       return NULL;
     }
 
@@ -488,7 +489,7 @@ funcname_thread_add_write (struct thread_master *m,
 
   if (FD_ISSET (fd, &m->writefd))
     {
-      Log(LOG_WARNING, "WARN (default/core/ISIS ): There is already write fd [%d]\n", fd);
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): There is already write fd [%d]\n", config.name, fd);
       return NULL;
     }
 
@@ -825,7 +826,7 @@ thread_fetch (struct thread_master *m, struct thread *fetch)
         {
           if (errno == EINTR)
             continue; /* signal received - process it */
-          Log(LOG_WARNING, "WARN (default/core/ISIS ): select() error: %s\n", strerror (errno));
+          Log(LOG_WARNING, "WARN ( %s/core/ISIS ): select() error: %s\n", config.name, strerror (errno));
             return NULL;
         }
 

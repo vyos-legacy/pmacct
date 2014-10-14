@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2013 by Paolo Lucente
 */
 
 /*
@@ -32,6 +32,7 @@ const struct _map_dictionary_line tag_map_dictionary[] = {
   {"filter", PT_map_filter_handler},
   {"v8agg", PT_map_v8agg_handler},
   {"agent_id", PT_map_agent_id_handler},
+  {"flowset_id", PT_map_flowset_id_handler},
   {"sampling_rate", PT_map_sampling_rate_handler},
   {"sample_type", PT_map_sample_type_handler},
   {"direction", PT_map_direction_handler},
@@ -44,18 +45,61 @@ const struct _map_dictionary_line tag_map_dictionary[] = {
   {"src_comms", PT_map_src_comms_handler},
   {"comms", PT_map_comms_handler},
   {"mpls_vpn_rd", PT_map_mpls_vpn_rd_handler},
-  {"label", PT_map_label_handler},
+  {"mpls_pw_id", PT_map_mpls_pw_id_handler},
+  {"src_mac", PT_map_src_mac_handler},
+  {"vlan", PT_map_vlan_id_handler},
+  {"set_tag", PT_map_id_handler},
+  {"set_tag2", PT_map_id2_handler},
+  {"set_label", PT_map_label_handler},
+  {"set_tos", PT_map_set_tos_handler},
+  {"label", PT_map_entry_label_handler},
   {"jeq", PT_map_jeq_handler},
   {"return", PT_map_return_handler},
   {"stack", PT_map_stack_handler},
   {"", NULL}
 };
 
+const struct _map_index_dictionary_line tag_map_index_entries_dictionary[] = {
+  {PRETAG_IP, PT_map_index_entries_ip_handler},
+  {PRETAG_IN_IFACE, PT_map_index_entries_input_handler},
+  {PRETAG_OUT_IFACE, PT_map_index_entries_output_handler},
+  {PRETAG_BGP_NEXTHOP, PT_map_index_entries_bgp_nexthop_handler},
+  {PRETAG_SRC_AS, PT_map_index_entries_src_as_handler},
+  {PRETAG_DST_AS, PT_map_index_entries_dst_as_handler},
+  {PRETAG_PEER_SRC_AS, PT_map_index_entries_peer_src_as_handler},
+  {PRETAG_PEER_DST_AS, PT_map_index_entries_peer_dst_as_handler},
+  {PRETAG_MPLS_LABEL_BOTTOM, PT_map_index_entries_mpls_label_bottom_handler},
+  {PRETAG_MPLS_VPN_RD, PT_map_index_entries_mpls_vpn_rd_handler},
+  {PRETAG_MPLS_PW_ID, PT_map_index_entries_mpls_pw_id_handler},
+  {PRETAG_SRC_MAC, PT_map_index_entries_src_mac_handler},
+  {PRETAG_VLAN_ID, PT_map_index_entries_vlan_id_handler},
+  {0, NULL}
+};
+
+const struct _map_index_dictionary_line tag_map_index_fdata_dictionary[] = {
+  {PRETAG_IP, PT_map_index_fdata_ip_handler},
+  {PRETAG_IN_IFACE, PT_map_index_fdata_input_handler},
+  {PRETAG_OUT_IFACE, PT_map_index_fdata_output_handler},
+  {PRETAG_BGP_NEXTHOP, PT_map_index_fdata_bgp_nexthop_handler},
+  {PRETAG_SRC_AS, PT_map_index_fdata_src_as_handler},
+  {PRETAG_DST_AS, PT_map_index_fdata_dst_as_handler},
+  {PRETAG_PEER_SRC_AS, PT_map_index_fdata_peer_src_as_handler},
+  {PRETAG_PEER_DST_AS, PT_map_index_fdata_peer_dst_as_handler},
+  {PRETAG_MPLS_LABEL_BOTTOM, PT_map_index_fdata_mpls_label_bottom_handler},
+  {PRETAG_MPLS_VPN_RD, PT_map_index_fdata_mpls_vpn_rd_handler},
+  {PRETAG_MPLS_PW_ID, PT_map_index_fdata_mpls_pw_id_handler},
+  {PRETAG_SRC_MAC, PT_map_index_fdata_src_mac_handler},
+  {PRETAG_VLAN_ID, PT_map_index_fdata_vlan_id_handler},
+  {0, NULL}
+};
+
 const struct _map_dictionary_line tag_map_tee_dictionary[] = {
   {"id", PT_map_id_handler},
   {"id2", PT_map_id2_handler},
+  {"set_tag", PT_map_id_handler},
+  {"set_tag2", PT_map_id2_handler},
   {"ip", PT_map_ip_handler},
-  {"label", PT_map_label_handler},
+  {"label", PT_map_entry_label_handler},
   {"jeq", PT_map_jeq_handler},
   {"return", PT_map_return_handler},
   {"stack", PT_map_stack_handler},
@@ -68,13 +112,17 @@ const struct _map_dictionary_line bpas_map_dictionary[] = {
   {"in", PT_map_input_handler},
   {"bgp_nexthop", BPAS_map_bgp_nexthop_handler},
   {"peer_dst_as", BPAS_map_bgp_peer_dst_as_handler},
-  {"src_mac", BPAS_map_src_mac_handler},
+  {"src_mac", PT_map_src_mac_handler},
+  {"vlan", PT_map_vlan_id_handler},
   {"", NULL}
 };
 
 const struct _map_dictionary_line bta_map_dictionary[] = {
   {"id", PT_map_id_handler},
+  {"bgp_ip", PT_map_id_handler},
+  {"bgp_port", BTA_map_lookup_bgp_port_handler},
   {"ip", PT_map_ip_handler},
+  {"filter", PT_map_filter_handler},
   {"", NULL}
 };
 
@@ -91,5 +139,16 @@ const struct _map_dictionary_line bitr_map_dictionary[] = {
   {"ip", PT_map_ip_handler},
   {"in", PT_map_input_handler},
   {"out", PT_map_output_handler},
+  {"bgp_nexthop", PT_map_bgp_nexthop_handler},
+  {"mpls_label_bottom", BITR_map_mpls_label_bottom_handler},
+  {"", NULL}
+};
+
+const struct _map_dictionary_line custom_primitives_map_dictionary[] = {
+  {"name", custom_primitives_map_name_handler},
+  {"packet_ptr", custom_primitives_map_packet_ptr_handler},
+  {"field_type", custom_primitives_map_field_type_handler},
+  {"len", custom_primitives_map_len_handler},
+  {"semantics", custom_primitives_map_semantics_handler},
   {"", NULL}
 };

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /* 
@@ -31,7 +31,7 @@ Software Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
 #include "bgp.h"
 
 static void bgp_node_delete (struct bgp_node *);
-static void bgp_node_free_aggressive (struct bgp_node *);
+static void bgp_node_free_aggressive (struct bgp_node *, safi_t);
 static void bgp_table_free (struct bgp_table *);
 
 struct bgp_table *
@@ -40,20 +40,19 @@ bgp_table_init (afi_t afi, safi_t safi)
   struct bgp_table *rt;
 
   rt = malloc (sizeof (struct bgp_table));
-  memset (rt, 0, sizeof (struct bgp_table));
+  if (rt) {
+    memset (rt, 0, sizeof (struct bgp_table));
 
-  rt->type = BGP_TABLE_MAIN;
-  rt->afi = afi;
-  rt->safi = safi;
+    rt->type = BGP_TABLE_MAIN;
+    rt->afi = afi;
+    rt->safi = safi;
+  }
+  else {
+    Log(LOG_ERR, "ERROR ( %s/core/BGP ): malloc() failed (bgp_table_init). Exiting ..\n", config.name);
+    exit_all(1);
+  }
   
   return rt;
-}
-
-void
-bgp_table_finish (struct bgp_table **rt)
-{
-  bgp_table_free (*rt);
-  *rt = NULL;
 }
 
 static struct bgp_node *
@@ -62,12 +61,20 @@ bgp_node_create ()
   struct bgp_node *rn;
 
   rn = (struct bgp_node *) malloc (sizeof (struct bgp_node));
-  memset (rn, 0, sizeof (struct bgp_node));
+  if (rn) {
+    memset (rn, 0, sizeof (struct bgp_node));
 
-  rn->info = (void **) malloc(sizeof(struct bgp_info *) * config.bgp_table_peer_buckets);
-  memset (rn->info, 0, sizeof(struct bgp_info *) * config.bgp_table_peer_buckets);
+    rn->info = (void **) malloc(sizeof(struct bgp_info *) * (config.bgp_table_peer_buckets * config.bgp_table_per_peer_buckets));
+    if (rn->info) memset (rn->info, 0, sizeof(struct bgp_info *) * (config.bgp_table_peer_buckets * config.bgp_table_per_peer_buckets));
+    else goto malloc_failed;
+  }
+  else goto malloc_failed;
 
   return rn;
+
+  malloc_failed:
+  Log(LOG_ERR, "ERROR ( %s/core/BGP ): malloc() failed (bgp_node_create). Exiting ..\n", config.name);
+  exit_all(1);
 }
 
 /* Allocate new route node with prefix set. */
@@ -95,26 +102,21 @@ bgp_node_free (struct bgp_node *node)
 /* Free route node aggressively: also attributes and info;
    should be meant to be invoked only by bgp_table_free() */
 static void
-bgp_node_free_aggressive (struct bgp_node *node)
+bgp_node_free_aggressive (struct bgp_node *node, safi_t safi)
 {
   struct bgp_info *ri, *next;
   u_int32_t ri_idx;
 
-  for (ri_idx = 0; ri_idx < config.bgp_table_peer_buckets; ri_idx++) {
+  /* XXX: this should be moved further outside */
+  if (config.nfacctd_bgp_msglog_file || config.nfacctd_bgp_msglog_amqp_routing_key)
+    gettimeofday(&log_tstamp, NULL);
+
+  for (ri_idx = 0; ri_idx < (config.bgp_table_peer_buckets * config.bgp_table_per_peer_buckets); ri_idx++) {
     for (ri = node->info[ri_idx]; ri; ri = next) {
-      if (config.nfacctd_bgp_msglog) {
-        char empty[] = "";
-        char prefix_str[INET6_ADDRSTRLEN];
-        char *aspath, *comm, *ecomm;
+      if (config.nfacctd_bgp_msglog_file || config.nfacctd_bgp_msglog_amqp_routing_key) {
+        char event_type[] = "delete";
 
-        memset(prefix_str, 0, INET6_ADDRSTRLEN);
-        prefix2str(&node->p, prefix_str, INET6_ADDRSTRLEN);
-
-        aspath = ri->attr->aspath ? ri->attr->aspath->str : empty;
-        comm = ri->attr->community ? ri->attr->community->str : empty;
-        ecomm = ri->attr->ecommunity ? ri->attr->ecommunity->str : empty;
-
-        Log(LOG_INFO, "INFO ( default/core/BGP ): d Prefix: %s Path: '%s' Comms: '%s' EComms: '%s'\n", prefix_str, aspath, comm, ecomm);
+        bgp_peer_log_msg(node, ri, safi, event_type, config.nfacctd_bgp_msglog_output);
       }
 
       next = ri->next;
@@ -162,11 +164,11 @@ bgp_table_free (struct bgp_table *rt)
 	  else
 	    node->l_right = NULL;
 
-	  bgp_node_free_aggressive (tmp_node);
+	  bgp_node_free_aggressive (tmp_node, rt->safi);
 	}
       else
 	{
-	  bgp_node_free_aggressive (tmp_node);
+	  bgp_node_free_aggressive (tmp_node, rt->safi);
 	  break;
 	}
     }
@@ -277,7 +279,7 @@ bgp_node_match (const struct bgp_table *table, struct prefix *p, struct bgp_peer
   struct bgp_node *node;
   struct bgp_node *matched;
   struct bgp_info *info;
-  u_int32_t modulo = peer->fd % config.bgp_table_peer_buckets;
+  u_int32_t modulo = bgp_route_info_modulo(peer, NULL);
 
   matched = NULL;
   node = table->top;
@@ -395,7 +397,7 @@ bgp_node_delete (struct bgp_node *node)
   u_int32_t ri_idx;
 
   assert (node->lock == 0);
-  for (ri_idx = 0; ri_idx < config.bgp_table_peer_buckets; ri_idx++)
+  for (ri_idx = 0; ri_idx < (config.bgp_table_peer_buckets * config.bgp_table_per_peer_buckets); ri_idx++)
     assert (node->info[ri_idx] == NULL);
 
   if (node->l_left && node->l_right)

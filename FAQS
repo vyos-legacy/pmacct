@@ -1,5 +1,5 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2003-2011 by Paolo Lucente
+pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 
 Q1: What is pmacct project homepage ?
 A: It is http://www.pmacct.net/ . There isn't any official mirror site. 
@@ -22,12 +22,14 @@ A: That is not entirely correct today, it was originally though. pmacct born as 
 
 
 Q4: What are pmacct main features?
-A: pmacct can collect, replicate and export network data. Collect in memory tables, OSS
-   RDBMS (MySQL, PostgreSQL, SQLite 3.x, BerkeleyDB 5.x via SQLite API) and files (csv,
-   formatted output). Export speaking sFlow v5, NetFlow v1/v5/v9 and IPFIX. pmacct is
-   able to perform data aggregation, offering a rich set of primitives to choose from;
-   it can also filter, sample, renormalize, tag and classify at L7. pmacct integrates a 
-   BGP daemon join routing visibility and network traffic information.
+A: pmacct can collect, replicate and export network data. Collect in memory tables,
+   store persistently to RDBMS (MySQL, PostgreSQL, SQLite 3.x), noSQL databases
+   (key-value: BerkeleyDB 5.x via SQLite API or document-oriented: MongoDB) and
+   flat-files (csv, formatted, JSON output), publish to message exchanges via AMQP.
+   Export speaking sFlow v5, NetFlow v1/v5/v9 and IPFIX. pmacct is able to perform
+   data aggregation, offering a rich set of primitives to choose from; it can also
+   filter, sample, renormalize, tag and classify at L7. pmacct integrates a BGP
+   daemon join routing visibility and network traffic information.
 
 
 Q5: Does any of the pmacct daemons logs to flat files?
@@ -38,19 +40,22 @@ A: Yes, but in a specific way. In other tools flat-files are typically used to l
    By inception, pmacct always aimed to a single-stage approach instead, ie. offer data
    reduction tecniques and correlation tools to process network traffic data on the fly,
    so to immediately offer the desired view(s) of the traffic. pmacct writes to files in
-   text-format (either csv or formatted via its 'print' plugin, see EXAMPLES for further
-   information) so to maximize potential integration with 3rd party applications while
-   keeping low the effort of customization.
+   text-format (either csv or formatted via its 'print' plugin, see QUICKSTART doc for
+   further information) so to maximize potential integration with 3rd party applications
+   while keeping low the effort of customization.
 
 
 Q6: Is it feasible for pmacct to scale by making use of either memory tables or RDBMS
     as backend for logging network traffic?
-A: pmacct doesn't log network traffic at packet/micro-flow level: it allows to get an
-   aggregated view of the traffic -- both in space and in time. On top of that, there
-   are layers of filtering, sampling and tagging. These are the keys to scale. As
-   these features are fully configurable, data granularity and resolution can be, at
-   any given moment, traded off in favour of increased scalability or less resources
-   consumption. 
+A: pmacct was not originally meant to log network traffic at packet/micro-flow level: it
+   allows to get an aggregated view of the traffic -- both in space and in time. On top
+   of that, there are layers of filtering, sampling and tagging. These are the keys to
+   scale. As these features are fully configurable, data granularity and resolution can
+   be traded off in favour of increased scalability or less resources consumption. More
+   recently, logging has been introduced, by means of two new primitives timestamp_start
+   and timestamp_end, fostered by the development of NetFlow/IPFIX as generic transport
+   protocol, ie. as a replacement of syslog; it was then intuitive to generalize the 
+   logging support to the more traditional traffic accounting part.
 
 
 Q7: When using pmacctd, i feel a high CPU usage: i see the process getting a great
@@ -73,19 +78,8 @@ A: Granted that the CPU in use for accounting purposes is somewhat 'compatible' 
    recompilation (with "options DEVICE_POLLING"), and a polling-aware NIC. Linux kernel
    2.6.x also supports device polling. 
 
-   Then also look at internal buffering which is applicable to all the pmacctd/nfacctd/
-   sfacctd daemons (for in-depth information you might want to see also 'Communications
-   between core process and plugins' chapter of the INTERNALS document):
-
-   'plugin_buffer_size': turns on bufferization. '1024', '2048' or '4096' are sufficient
-   values for common environments. If the circular queue size (plugin_pipe_size) is not
-   defined, it is calculated the following way: ('plugin_buffer_size' / as) * dss. Where
-   'dss' is the default OS socket size and 'as' is the memory address size (4 bytes for
-   a 32 bit architecture, 8 bytes for 64 bit architectures, etc.).
-
-   'plugin_pipe_size': sets the circular queue size. If bufferization is also enabled,
-   this value has to be greater or equal to the buffer size. Values like 1MB (1024000),
-   2MB (2048000) or 4MB (4096000) are generally sufficient. 
+   Then also look at internal buffering which is applicable to all the daemons. Look
+   up plugin_buffer_size and plugin_pipe_size directives in the CONFIG-KEYS document.
 
 
 Q8: I want to to account both inbound and outbound traffic of my network, with an host
@@ -152,7 +146,7 @@ Q11: How to get the historical accounting enabled ? SQL table have a 'stamp_inse
    and 'stamp_updated' fields but they remain empty.
 A: Historical accounting is easily enabled by adding to the SQL plugin configuration a
    'sql_history' directive. Associate to it a 'sql_history_roundoff'. For examples and
-   syntax, refer to CONFIG-KEYS and EXAMPLES documents. 
+   syntax, refer to CONFIG-KEYS and QUICKSTART documents. 
 
 
 Q12: CLI is not enough to me. I would like to graph traffic data: how to do that?
@@ -307,5 +301,19 @@ A: In general, it's good rule to run the backend part of any accounting system a
    pmacct uses the underlying system clock, expecially in the SQL plugins to calculate
    time-bins and scanner deadlines among the others. The use of timezones is supported
    but not recommended. 
+
+
+Q20: I'm using the 'tee' plugin with transparent mode set to true and keep receiving
+     "Can't bridge Address Families when in transparent mode. Exiting ..." messages,
+     why?
+
+A: It means you can't receive packets on an IPv4 address and transparently replicate
+   to an IPv6 collector or vice-versa. Less obvious scenarios are: a) some operating
+   systems where loopback (127.0.0.1) is considered a different address family hence
+   it's not possible to replicate to a 127.0.0.1 address; it's possible though to use
+   any locally configured IPv4 address bound to a (sub-)interface in 'up' state; b)
+   an  IPv4-mapped IPv6 address is still technically an IPv6 address hence on servers
+   running IPv4 and IPv6 it is good practice to explicitely define also the receiving
+   IP address (nfacctd_ip), if IPv4 is used.
 
 /* EOF */

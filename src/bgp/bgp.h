@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -24,6 +24,7 @@
 #include "bgp_table.h"
 #include "bgp_community.h"
 #include "bgp_ecommunity.h"
+#include "bgp_logdump.h"
 
 #ifndef _BGP_H_
 #define _BGP_H_
@@ -98,10 +99,13 @@ struct bgp_peer {
   time_t last_keepalive;
   struct host_addr id;
   struct host_addr addr;
+  u_int16_t tcp_port;
   u_int8_t cap_mp;
   char *cap_4as;
+  u_int8_t cap_add_paths;
   u_int32_t msglen;
   struct bgp_peer_buf buf;
+  struct bgp_peer_log *log;
 };
 
 struct bgp_nlri {
@@ -153,11 +157,12 @@ EXT int bgp_attr_parse_as4path(struct bgp_peer *, u_int16_t, struct bgp_attr *, 
 EXT int bgp_attr_parse_nexthop(struct bgp_peer *, u_int16_t, struct bgp_attr *, char *, u_int8_t);
 EXT int bgp_attr_parse_med(struct bgp_peer *, u_int16_t, struct bgp_attr *, char *, u_char);
 EXT int bgp_attr_parse_local_pref(struct bgp_peer *, u_int16_t, struct bgp_attr *, char *, u_char);
+EXT int bgp_attr_parse_origin(struct bgp_peer *, u_int16_t, struct bgp_attr *, char *, u_char);
 EXT int bgp_attr_parse_mp_reach(struct bgp_peer *, u_int16_t, struct bgp_attr *, char *, struct bgp_nlri *);
 EXT int bgp_attr_parse_mp_unreach(struct bgp_peer *, u_int16_t, struct bgp_attr *, char *, struct bgp_nlri *);
 EXT int bgp_nlri_parse(struct bgp_peer *, void *, struct bgp_nlri *);
-EXT int bgp_process_update(struct bgp_peer *, struct prefix *, void *, afi_t, safi_t, rd_t *, char *);
-EXT int bgp_process_withdraw(struct bgp_peer *, struct prefix *, void *, afi_t, safi_t, rd_t *, char *);
+EXT int bgp_process_update(struct bgp_peer *, struct prefix *, void *, afi_t, safi_t, rd_t *, path_id_t *, char *);
+EXT int bgp_process_withdraw(struct bgp_peer *, struct prefix *, void *, afi_t, safi_t, rd_t *, path_id_t *, char *);
 EXT int bgp_afi2family(int);
 EXT int bgp_rd2str(char *, rd_t *);
 EXT int bgp_str2rd(rd_t *, char *);
@@ -172,26 +177,28 @@ EXT void bgp_attr_init();
 EXT struct bgp_attr *bgp_attr_intern(struct bgp_attr *);
 EXT void bgp_attr_unintern (struct bgp_attr *);
 EXT void *bgp_attr_hash_alloc (void *);
-EXT void bgp_peer_init(struct bgp_peer *);
+EXT int bgp_peer_init(struct bgp_peer *);
 EXT void bgp_peer_close(struct bgp_peer *);
+EXT void bgp_peer_info_delete(struct bgp_peer *);
 EXT int bgp_attr_munge_as4path(struct bgp_peer *, struct bgp_attr *, struct aspath *);
 EXT void load_comm_patterns(char **, char **, char **);
 EXT void load_peer_src_as_comm_ranges(char *, char *);
 EXT void evaluate_comm_patterns(char *, char *, char **, int);
-//EXT as_t evaluate_last_asn(char *);
 EXT as_t evaluate_last_asn(struct aspath *);
 EXT as_t evaluate_first_asn(char *);
 EXT void bgp_srcdst_lookup(struct packet_ptrs *);
 EXT void bgp_follow_nexthop_lookup(struct packet_ptrs *);
 EXT void write_neighbors_file(char *);
 EXT void process_bgp_md5_file(int, struct bgp_md5_table *);
+EXT u_int32_t bgp_route_info_modulo_pathid(struct bgp_peer *, path_id_t *);
 
 EXT unsigned int attrhash_key_make(void *);
-EXT int attrhash_cmp(void *, void *);
+EXT int attrhash_cmp(const void *, const void *);
 EXT void attrhash_init();
 
 EXT void cache_to_pkt_bgp_primitives(struct pkt_bgp_primitives *, struct cache_bgp_primitives *);
-EXT void pkt_to_cache_bgp_primitives(struct cache_bgp_primitives *, struct pkt_bgp_primitives *, u_int64_t);
+EXT void pkt_to_cache_bgp_primitives(struct cache_bgp_primitives *, struct pkt_bgp_primitives *, pm_cfgreg_t);
+EXT void free_cache_bgp_primitives(struct cache_bgp_primitives **);
 EXT void bgp_config_checks(struct configuration *);
 
 /* global variables */
@@ -206,6 +213,7 @@ EXT char *std_comm_patterns_to_asn[MAX_BGP_COMM_PATTERNS];
 EXT struct bgp_comm_range peer_src_as_ifrange; 
 EXT struct bgp_comm_range peer_src_as_asrange; 
 EXT struct bgp_table *rib[AFI_MAX][SAFI_MAX];
+EXT u_int32_t (*bgp_route_info_modulo)(struct bgp_peer *, path_id_t *);
 
 #undef EXT
 #endif 

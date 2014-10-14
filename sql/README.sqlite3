@@ -58,7 +58,9 @@ Similarly, BGP tables:
 - Aggregation primitives to SQL schema mapping:
   Aggregation primitive => SQL table field
   * tag => agent_id (INT(8) NOT NULL DEFAULT 0)
-  * tag2 => agent_id2 (INT(8) NOT NULL DEFAULT 0, see README.agent_id2)
+    - tag => tag (INT(8) NOT NULL DEFAULT 0, if sql_table_version >= 9)
+  * tag2 => tag2 (INT(8) NOT NULL DEFAULT 0, see README.tag2)
+  * label => label (VARCHAR(255) NOT NULL DEFAULT ' ', see README.label)
   * src_as => as_src (INT(8) NOT NULL DEFAULT 0)
   * dst_as => as_dst (INT(8) NOT NULL DEFAULT 0)
   * peer_src_as => peer_as_src (INT(8) NOT NULL DEFAULT 0)
@@ -83,7 +85,11 @@ Similarly, BGP tables:
   * src_mask => mask_src (INT(2) NOT NULL DEFAULT 0, see README.mask)
   * dst_mask => mask_dst (INT(2) NOT NULL DEFAULT 0, see README.mask)
   * cos => cos (INT(2) NOT NULL DEFAULT 0, see README.cos)
-  * etype => etype (INT(2) NOT NULL DEFAULT 0, see README.etype)
+  * etype => etype (CHAR(5) NOT NULL DEFAULT ' ', see README.etype)
+  * src_host_country => country_ip_src (CHAR(2) NOT NULL DEFAULT '--', see README.country)
+  * dst_host_country => country_ip_dst (CHAR(2) NOT NULL DEFAULT '--', see README.country)
+  * sampling_rate => sampling_rate (INT(8) NOT NULL DEFAULT 0, see README.sampling_rate)
+  * pkt_len_distrib => pkt_len_distrib (CHAR(10) NOT NULL DEFAULT ' ', see README.pkt_len_distrib)
   * class => class_id (CHAR(16) NOT NOT NULL DEFAULT ' ')
   * src_mac => mac_src (CHAR(17) NOT NULL DEFAULT '0:0:0:0:0:0')
   * dst_mac => mac_dst (CHAR(17) NOT NULL DEFAULT '0:0:0:0:0:0')
@@ -99,19 +105,41 @@ Similarly, BGP tables:
   * dst_net => ip_dst (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
     - dst_net => ip_dst (INT(8) DEFAULT 0, if sql_num_hosts: true)
   * src_port => src_port (INT(4) NOT NULL DEFAULT 0)
-    - src_port => port_src (INT(4) NOT NULL DEFAULT 0, if sql_table_version: 8)
+    - src_port => port_src (INT(4) NOT NULL DEFAULT 0, if sql_table_version >= 8 or sql_table_type == bgp)
   * dst_port => dst_port (INT(4) NOT NULL DEFAULT 0)
-    - dst_port => port_dst (INT(4) NOT NULL DEFAULT 0, if sql_table_version: 8)
+    - dst_port => port_dst (INT(4) NOT NULL DEFAULT 0, if sql_table_version >= 8 or sql_table_type == bgp 
   * tcpflags => tcp_flags (INT(2) NOT NULL DEFAULT 0)
   * proto => ip_proto (CHAR(6) NOT NULL DEFAULT ' ')
     - proto => ip_proto (INT(2) DEFAULT 0, if sql_num_protos: true)
   * tos => tos (INT(4) NOT NULL DEFAULT 0)
+  * post_nat_src_host => post_nat_ip_src (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+    - or (INT(8) NOT NULL DEFAULT 0, if sql_num_hosts: true)
+  * post_nat_dst_host => post_nat_ip_dst (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+    - or (INT(8) NOT NULL DEFAULT 0, if sql_num_hosts: true)
+  * post_nat_src_port => post_nat_port_src (INT(4) NOT NULL DEFAULT 0)
+  * post_nat_dst_port => post_nat_port_dst (INT(4) NOT NULL DEFAULT 0)
+  * nat_event => nat_event (INT(2) NOT NULL DEFAULT 0)
+  * mpls_label_top => mpls_label_top (INT(4) NOT NULL DEFAULT 0)
+  * mpls_label_bottom => mpls_label_bottom (INT(4) NOT NULL DEFAULT 0)
+  * mpls_stack_depth => mpls_stack_depth (INT(1) NOT NULL DEFAULT 0)
+  * timestamp_start => timestamp_start, timestamp_start_residual:
+    - timestamp_start DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', see README.timestamp)
+    - timestamp_start_residual INT NOT NULL DEFAULT 0, see README.timestamp)
+  * timestamp_end => timestamp_end, timestamp_end_residual:
+    - timestamp_end DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', see README.timestamp)
+    - timestamp_end_residual INT NOT NULL DEFAULT 0, see README.timestamp)
 
-- Counters and time reference need always to be defined as part of the SQL schema:
-  * packets (INT(4) UNSIGNED NOT NULL)
-  * bytes (INT(8) UNSIGNED NOT NULL)
-  * stamp_inserted (DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', enabled by sql_history)
-  * stamp_updated (DATETIME, enabled by sql_history)
+- 'packets' and 'bytes' counters need to be defined as part of the SQL schema
+  whenever traffic flows are being accounted for; they are not required, and 
+  are zeroed, if accounting for events, ie. using Cisco NEL; 'stamp_inserted'
+  and 'stamp_updated' time references are mandatory only if temporal aggregation
+  (sql_history) is enabled:
+  * packets (INT(8) NOT NULL DEFAULT 0)
+  * bytes (INT(8) NOT NULL DEFAULT 0)
+  * stamp_inserted (DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00')
+  * stamp_updated (DATETIME)
+
+- For custom-defined primitives refer to the README.custom_primitives doc.
 
 NOTE: mind to specify EVERYTIME which SQL table version you
 intend to adhere to by using either of the following rules:

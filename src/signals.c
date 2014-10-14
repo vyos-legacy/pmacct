@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -132,7 +132,8 @@ void my_sigint_handler(int signum)
   if (config.acct_type == ACCT_PM && !config.uacctd_group /* XXX */) {
     if (config.dev) {
       if (pcap_stats(glob_pcapt, &ps) < 0) printf("\npcap_stats: %s\n", pcap_geterr(glob_pcapt));
-      printf("\n%u packets received by filter\n", ps.ps_recv);
+      printf("\n");
+      printf("%u packets received by filter\n", ps.ps_recv);
       printf("%u packets dropped by kernel\n", ps.ps_drop);
     }
   }
@@ -155,10 +156,13 @@ void reload()
     openlog(NULL, LOG_PID, logf);
     Log(LOG_INFO, "INFO: Start logging ...\n");
   }
-  else if (config.logfile) {
+
+  if (config.logfile) {
     fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile);
+    config.logfile_fd = open_logfile(config.logfile, "a");
   }
+
+  if (config.nfacctd_bgp_msglog_file) reload_log_bgp_thread = TRUE;
 
   signal(SIGHUP, reload);
 }
@@ -170,7 +174,8 @@ void push_stats()
   if (config.acct_type == ACCT_PM) {
     if (config.dev) {
       if (pcap_stats(glob_pcapt, &ps) < 0) Log(LOG_INFO, "\npcap_stats: %s\n", pcap_geterr(glob_pcapt));
-      Log(LOG_NOTICE, "\n%s: (%u) %u packets received by filter\n", config.dev, now, ps.ps_recv);
+      Log(LOG_NOTICE, "\n");
+      Log(LOG_NOTICE, "%s: (%u) %u packets received by filter\n", config.dev, now, ps.ps_recv);
       Log(LOG_NOTICE, "%s: (%u) %u packets dropped by kernel\n", config.dev, now, ps.ps_drop);
     }
   }
@@ -184,10 +189,12 @@ void reload_maps()
 {
   reload_map = FALSE;
   reload_map_bgp_thread = FALSE;
+  reload_map_exec_plugins = FALSE;
 
-  if (config.refresh_maps) {
+  if (config.maps_refresh) {
     reload_map = TRUE; 
     reload_map_bgp_thread = TRUE;
+    reload_map_exec_plugins = TRUE;
   }
   
   signal(SIGUSR2, reload_maps);

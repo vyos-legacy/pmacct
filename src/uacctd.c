@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -48,18 +48,20 @@ u_char dummy_tlhdr[16];
 /* Functions */
 void usage_daemon(char *prog_name)
 {
-  printf("%s\n", UACCTD_USAGE_HEADER);
+  printf("%s (%s)\n", UACCTD_USAGE_HEADER, PMACCT_BUILD);
   printf("Usage: %s [ -D | -d ] [ -g ULOG group ] [ -c primitive [ , ... ] ] [ -P plugin [ , ... ] ]\n", prog_name);
   printf("       %s [ -f config_file ]\n", prog_name);
   printf("       %s [ -h ]\n", prog_name);
   printf("\nGeneral options:\n");
   printf("  -h  \tShow this page\n");
+  printf("  -V  \tShow version and compile-time options and exit\n");
   printf("  -f  \tLoad configuration from the specified file\n");
-  printf("  -c  \t[ src_mac | dst_mac | vlan | src_host | dst_host | src_net | dst_net | src_port | dst_port |\n\t proto | tos | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag |\n\t tag2 | flows | class | tcpflags | in_iface | out_iface | src_mask | dst_mask | cos | etype | none ] \n\tAggregation string (DEFAULT: src_host)\n");
+  printf("  -a  \tPrint list of supported aggregation primitives\n");
+  printf("  -c  \tAggregation method, see full list of primitives with -a (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
   printf("  -n  \tPath to a file containing Network definitions\n");
   printf("  -o  \tPath to a file containing Port definitions\n");
-  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | nfprobe | sfprobe ] \n\tActivate plugin\n"); 
+  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | mongodb | nfprobe | sfprobe ] \n\tActivate plugin\n"); 
   printf("  -d  \tEnable debug\n");
   printf("  -S  \t[ auth | mail | daemon | kern | user | local[0-7] ] \n\tLog to the specified syslog facility\n");
   printf("  -F  \tWrite Core Process PID into the specified file\n");
@@ -77,9 +79,9 @@ void usage_daemon(char *prog_name)
   printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 ] \n\tTable version\n");
   printf("\nPrint plugin (-P print) plugin options:\n");
   printf("  -r  \tRefresh time (in seconds)\n");
-  printf("  -O  \t[ formatted | csv ] \n\tOutput format\n");
+  printf("  -O  \t[ formatted | csv | json ] \n\tOutput format\n");
   printf("\n");
-  printf("  See EXAMPLES or visit http://wiki.pmacct.net/ for examples.\n");
+  printf("  See QUICKSTART or visit http://wiki.pmacct.net/ for examples.\n");
   printf("\n");
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
@@ -91,7 +93,7 @@ int main(int argc,char **argv, char **envp)
   struct bpf_program filter;
   struct pcap_device device;
   char errbuf[PCAP_ERRBUF_SIZE];
-  int index, logf;
+  int index, logf, ret;
 
   struct plugins_list_entry *list;
   struct plugin_requests req;
@@ -103,7 +105,6 @@ int main(int argc,char **argv, char **envp)
   struct id_table bmed_table;
   struct id_table biss_table;
   struct id_table bta_table;
-  struct id_table idt;
   struct pcap_callback_data cb_data;
 
   /* getopt() stuff */
@@ -133,6 +134,9 @@ int main(int argc,char **argv, char **envp)
   struct sockaddr client;
 #endif
 
+#if defined HAVE_MALLOPT
+  mallopt(M_CHECK_ACTION, 0);
+#endif
 
   umask(077);
   compute_once();
@@ -140,11 +144,13 @@ int main(int argc,char **argv, char **envp)
   /* a bunch of default definitions */ 
   have_num_memory_pools = FALSE;
   reload_map = FALSE;
-  tag_map_allocated = FALSE;
   bpas_map_allocated = FALSE;
   blp_map_allocated = FALSE;
   bmed_map_allocated = FALSE;
   biss_map_allocated = FALSE;
+  bta_map_caching = FALSE;
+  sampling_map_caching = FALSE;
+  custom_primitives_allocated = FALSE;
   find_id_func = PM_find_id;
 
   errflag = 0;
@@ -165,6 +171,8 @@ int main(int argc,char **argv, char **envp)
   memset(&client, 0, sizeof(client));
   memset(&cb_data, 0, sizeof(cb_data));
   memset(&tunnel_registry, 0, sizeof(tunnel_registry));
+  memset(&reload_map_tstamp, 0, sizeof(reload_map_tstamp));
+  log_notifications_init(&log_notifications);
   config.acct_type = ACCT_PM;
 
   rows = 0;
@@ -240,10 +248,6 @@ int main(int argc,char **argv, char **envp)
       strlcpy(cfg_cmdline[rows], "sql_refresh_time: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
-      cfg_cmdline[rows] = malloc(SRVBUFLEN);
-      strlcpy(cfg_cmdline[rows], "print_refresh_time: ", SRVBUFLEN);
-      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
-      rows++;
       break;
     case 'v':
       strlcpy(cfg_cmdline[rows], "sql_table_version: ", SRVBUFLEN);
@@ -278,6 +282,14 @@ int main(int argc,char **argv, char **envp)
       usage_daemon(argv[0]);
       exit(0);
       break;
+    case 'V':
+      version_daemon(UACCTD_USAGE_HEADER);
+      exit(0);
+      break;
+    case 'a':
+      print_primitives(config.acct_type, UACCTD_USAGE_HEADER);
+      exit(0);
+      break;
     default:
       usage_daemon(argv[0]);
       exit(1);
@@ -301,8 +313,11 @@ int main(int argc,char **argv, char **envp)
   while (list) {
     list->cfg.acct_type = ACCT_PM;
     set_default_preferences(&list->cfg);
-    if (!strcmp(list->name, "default") && !strcmp(list->type.string, "core")) 
+    if (!strcmp(list->type.string, "core")) { 
       memcpy(&config, &list->cfg, sizeof(struct configuration)); 
+      config.name = list->name;
+      config.type = list->type.string;
+    }
     list = list->next;
   }
 
@@ -313,8 +328,8 @@ int main(int argc,char **argv, char **envp)
 
   /* Let's check whether we need superuser privileges */
   if (getuid() != 0) {
-    printf("%s\n\n", UACCTD_USAGE_HEADER);
-    printf("ERROR ( default/core ): You need superuser privileges to run this command.\nExiting ...\n\n");
+    printf("%s (%s)\n\n", UACCTD_USAGE_HEADER, PMACCT_BUILD);
+    printf("ERROR ( %s/core ): You need superuser privileges to run this command.\nExiting ...\n\n", config.name);
     exit(1);
   }
 
@@ -330,11 +345,11 @@ int main(int argc,char **argv, char **envp)
   if (config.daemon) {
     list = plugins_list;
     while (list) {
-      if (!strcmp(list->type.string, "print")) printf("WARN ( default/core ): Daemonizing. Hmm, bye bye screen.\n");
+      if (!strcmp(list->type.string, "print")) printf("WARN ( %s/core ): Daemonizing. Hmm, bye bye screen.\n", config.name);
       list = list->next;
     }
     if (debug || config.debug)
-      printf("WARN ( default/core ): debug is enabled; forking in background. Console logging will get lost.\n"); 
+      printf("WARN ( %s/core ): debug is enabled; forking in background. Console logging will get lost.\n", config.name); 
     daemonize();
   }
 
@@ -343,15 +358,15 @@ int main(int argc,char **argv, char **envp)
     logf = parse_log_facility(config.syslog);
     if (logf == ERR) {
       config.syslog = NULL;
-      printf("WARN ( default/core ): specified syslog facility is not supported; logging to console.\n");
+      printf("WARN ( %s/core ): specified syslog facility is not supported; logging to console.\n", config.name);
     }
     else openlog(NULL, LOG_PID, logf);
-    Log(LOG_INFO, "INFO ( default/core ): Start logging ...\n");
+    Log(LOG_INFO, "INFO ( %s/core ): Start logging ...\n", config.name);
   }
 
   if (config.logfile)
   {
-    config.logfile_fd = open_logfile(config.logfile);
+    config.logfile_fd = open_logfile(config.logfile, "a");
     list = plugins_list;
     while (list) {
       list->cfg.logfile_fd = config.logfile_fd ;
@@ -359,22 +374,30 @@ int main(int argc,char **argv, char **envp)
     }
   }
 
+  if (strlen(config_file)) {
+    char canonical_path[PATH_MAX], *canonical_path_ptr;
+
+    canonical_path_ptr = realpath(config_file, canonical_path);
+    if (canonical_path_ptr) Log(LOG_INFO, "INFO ( %s/core ): Reading configuration file '%s'.\n", config.name, canonical_path);
+  }
+  else Log(LOG_INFO, "INFO ( %s/core ): Reading configuration from cmdline.\n", config.name);
+
   /* Enforcing policies over aggregation methods */
   list = plugins_list;
   while (list) {
     if (list->type.id != PLUGIN_ID_CORE) {
       /* applies to all plugins */
       if (config.classifiers_path && (list->cfg.sampling_rate || config.ext_sampling_rate)) {
-        Log(LOG_ERR, "ERROR ( default/core ): Packet sampling and classification are mutual exclusive.\n");
+        Log(LOG_ERR, "ERROR ( %s/core ): Packet sampling and classification are mutual exclusive.\n", config.name);
         exit(1);
       }
       if (list->cfg.sampling_rate && config.ext_sampling_rate) {
-        Log(LOG_ERR, "ERROR ( default/core ): Internal packet sampling and external packet sampling are mutual exclusive.\n");
+        Log(LOG_ERR, "ERROR ( %s/core ): Internal packet sampling and external packet sampling are mutual exclusive.\n", config.name);
         exit(1);
       }
 
       if (list->type.id == PLUGIN_ID_TEE) {
-        Log(LOG_ERR, "ERROR ( default/core ): 'tee' plugin not supported in 'uacctd'.\n");
+        Log(LOG_ERR, "ERROR ( %s/core ): 'tee' plugin not supported in 'uacctd'.\n", config.name);
         exit(1);
       }
       else if (list->type.id == PLUGIN_ID_NFPROBE) {
@@ -384,7 +407,9 @@ int main(int argc,char **argv, char **envp)
 
 	config.handle_fragments = TRUE;
 	list->cfg.nfprobe_what_to_count = list->cfg.what_to_count;
+	list->cfg.nfprobe_what_to_count_2 = list->cfg.what_to_count_2;
 	list->cfg.what_to_count = 0;
+	list->cfg.what_to_count_2 = 0;
 #if defined (HAVE_L2)
 	if (list->cfg.nfprobe_version == 9 || list->cfg.nfprobe_version == 10) {
 	  list->cfg.what_to_count |= COUNT_SRC_MAC;
@@ -414,8 +439,9 @@ int main(int argc,char **argv, char **envp)
 	  config.handle_flows = TRUE;
 	}
 	if (list->cfg.pre_tag_map) {
-	  list->cfg.what_to_count |= COUNT_ID;
-	  list->cfg.what_to_count |= COUNT_ID2;
+	  list->cfg.what_to_count |= COUNT_TAG;
+	  list->cfg.what_to_count |= COUNT_TAG2;
+	  list->cfg.what_to_count_2 |= COUNT_LABEL;
 	}
 	list->cfg.what_to_count |= COUNT_IN_IFACE;
 	list->cfg.what_to_count |= COUNT_OUT_IFACE;
@@ -423,13 +449,22 @@ int main(int argc,char **argv, char **envp)
                                        COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_SRC_STD_COMM|
                                        COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
 				       COUNT_MPLS_VPN_RD)) {
-          Log(LOG_ERR, "ERROR ( default/core ): 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n");
+          Log(LOG_ERR, "ERROR ( %s/core ): 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n", config.name);
           exit(1);
 	}
 	list->cfg.what_to_count |= COUNT_COUNTERS;
 
+        if (list->cfg.nfacctd_as & NF_AS_FALLBACK && list->cfg.networks_file)
+          list->cfg.nfacctd_as |= NF_AS_NEW;
+
+        if (list->cfg.nfacctd_net & NF_NET_FALLBACK && list->cfg.networks_file)
+          list->cfg.nfacctd_net |= NF_NET_NEW;
+
 	list->cfg.data_type = PIPE_TYPE_METADATA;
 	list->cfg.data_type |= PIPE_TYPE_EXTRAS;
+
+        if (list->cfg.what_to_count_2 & (COUNT_LABEL))
+          list->cfg.data_type |= PIPE_TYPE_VLEN;
       }
       else if (list->type.id == PLUGIN_ID_SFPROBE) {
         /* If we already renormalizing an external sampling rate,
@@ -438,30 +473,30 @@ int main(int argc,char **argv, char **envp)
 
 	if (psize < 128) psize = config.snaplen = 128; /* SFL_DEFAULT_HEADER_SIZE */
 	list->cfg.what_to_count = COUNT_PAYLOAD;
+	list->cfg.what_to_count_2 = 0;
 	if (list->cfg.classifiers_path) {
 	  list->cfg.what_to_count |= COUNT_CLASS;
 	  config.handle_fragments = TRUE;
 	  config.handle_flows = TRUE;
 	}
-        if (list->cfg.nfacctd_bgp && list->cfg.nfacctd_as == NF_AS_BGP) {
+        if (list->cfg.networks_file || (list->cfg.nfacctd_bgp && list->cfg.nfacctd_as == NF_AS_BGP)) {
           list->cfg.what_to_count |= COUNT_SRC_AS;
           list->cfg.what_to_count |= COUNT_DST_AS;
           list->cfg.what_to_count |= COUNT_PEER_DST_IP;
         }
-        if ((list->cfg.nfacctd_bgp && list->cfg.nfacctd_net == NF_NET_BGP) ||
-            (list->cfg.nfacctd_isis && list->cfg.nfacctd_net == NF_NET_IGP)) {
+        if (list->cfg.networks_file || list->cfg.networks_mask || list->cfg.nfacctd_net) {
           list->cfg.what_to_count |= COUNT_SRC_NMASK;
           list->cfg.what_to_count |= COUNT_DST_NMASK;
         }
 	if (list->cfg.pre_tag_map) {
-	  list->cfg.what_to_count |= COUNT_ID;
-	  list->cfg.what_to_count |= COUNT_ID2;
+	  list->cfg.what_to_count |= COUNT_TAG;
+	  list->cfg.what_to_count |= COUNT_TAG2;
 	}
         if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                        COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_SRC_STD_COMM|
                                        COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
 				       COUNT_MPLS_VPN_RD)) {
-          Log(LOG_ERR, "ERROR ( default/core ): 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n");
+          Log(LOG_ERR, "ERROR ( %s/core ): 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n", config.name);
           exit(1);
         }
 
@@ -470,9 +505,27 @@ int main(int argc,char **argv, char **envp)
         list->cfg.what_to_count |= COUNT_COS;
 #endif
 
+        if (list->cfg.nfacctd_as & NF_AS_FALLBACK && list->cfg.networks_file)
+          list->cfg.nfacctd_as |= NF_AS_NEW;
+
+        if (list->cfg.nfacctd_net & NF_NET_FALLBACK && list->cfg.networks_file)
+          list->cfg.nfacctd_net |= NF_NET_NEW;
+
 	list->cfg.data_type = PIPE_TYPE_PAYLOAD;
       }
       else {
+        if (list->cfg.what_to_count_2 & (COUNT_POST_NAT_SRC_HOST|COUNT_POST_NAT_DST_HOST|
+                        COUNT_POST_NAT_SRC_PORT|COUNT_POST_NAT_DST_PORT|COUNT_NAT_EVENT|
+                        COUNT_TIMESTAMP_START|COUNT_TIMESTAMP_END))
+          list->cfg.data_type |= PIPE_TYPE_NAT;
+
+        if (list->cfg.what_to_count_2 & (COUNT_MPLS_LABEL_TOP|COUNT_MPLS_LABEL_BOTTOM|
+                        COUNT_MPLS_STACK_DEPTH))
+          list->cfg.data_type |= PIPE_TYPE_MPLS;
+
+        if (list->cfg.what_to_count_2 & (COUNT_LABEL))
+          list->cfg.data_type |= PIPE_TYPE_VLEN;
+
 	evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
 	if (list->cfg.what_to_count & (COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_SUM_PORT|COUNT_TCPFLAGS))
 	  config.handle_fragments = TRUE;
@@ -484,13 +537,17 @@ int main(int argc,char **argv, char **envp)
 	  config.handle_fragments = TRUE;
 	  config.handle_flows = TRUE;
 	}
-	if (!list->cfg.what_to_count) {
+	if (!list->cfg.what_to_count && !list->cfg.what_to_count_2 && !list->cfg.cpptrs.num) {
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	  list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
-	if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file && list->cfg.nfacctd_as != NF_AS_BGP) { 
-	  Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation selected but NO 'networks_file' or 'uacctd_as' are specified. Exiting...\n\n", list->name, list->type.string);
-	  exit(1);
+	if (list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) {
+	  if (!list->cfg.networks_file && list->cfg.nfacctd_as != NF_AS_BGP) { 
+	    Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation selected but NO 'networks_file' or 'uacctd_as' are specified. Exiting...\n\n", list->name, list->type.string);
+	    exit(1);
+	  }
+          if (list->cfg.nfacctd_as & NF_AS_FALLBACK && list->cfg.networks_file)
+            list->cfg.nfacctd_as |= NF_AS_NEW;
 	}
         if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET|COUNT_SRC_NMASK|COUNT_DST_NMASK|COUNT_PEER_DST_IP)) {
           if (!list->cfg.nfacctd_net) {
@@ -510,6 +567,8 @@ int main(int argc,char **argv, char **envp)
               Log(LOG_ERR, "ERROR ( %s/%s ): network aggregation selected but none of 'bgp_daemon', 'isis_daemon', 'networks_file', 'networks_mask' is specified. Exiting ...\n\n", list->name, list->type.string);
               exit(1);
             }
+            if (list->cfg.nfacctd_net & NF_NET_FALLBACK && list->cfg.networks_file)
+              list->cfg.nfacctd_net |= NF_NET_NEW;
           }
         }
 	if (list->cfg.what_to_count & COUNT_CLASS && !list->cfg.classifiers_path) {
@@ -531,6 +590,21 @@ int main(int argc,char **argv, char **envp)
     init_classifiers(config.classifiers_path);
     init_conntrack_table();
   }
+
+  if (config.aggregate_primitives) {
+    req.key_value_table = (void *) &custom_primitives_registry;
+    load_id_file(MAP_CUSTOM_PRIMITIVES, config.aggregate_primitives, NULL, &req, &custom_primitives_allocated);
+  }
+  else memset(&custom_primitives_registry, 0, sizeof(custom_primitives_registry));
+
+  /* fixing per plugin custom primitives pointers, offsets and lengths */
+  list = plugins_list;
+  while(list) {
+    custom_primitives_reconcile(&list->cfg.cpptrs, &custom_primitives_registry);
+    if (custom_primitives_vlen(&list->cfg.cpptrs)) list->cfg.data_type |= PIPE_TYPE_VLEN;
+    list = list->next;
+  }
+
   load_plugins(&req);
 
   if (config.handle_fragments) init_ip_fragment_handler();
@@ -559,27 +633,27 @@ int main(int argc,char **argv, char **envp)
 
   ulog_fd = socket(PF_NETLINK, SOCK_RAW, NETLINK_NFLOG);
   if (ulog_fd == -1) {
-    Log(LOG_ERR, "ERROR ( default/core ): Failed to create Netlink ULOG socket\n");
+    Log(LOG_ERR, "ERROR ( %s/core ): Failed to create Netlink ULOG socket\n", config.name);
     exit_all(1);
   }
 
-  Log(LOG_INFO, "INFO ( default/core ): Successfully connected Netlink ULOG socket\n");
+  Log(LOG_INFO, "INFO ( %s/core ): Successfully connected Netlink ULOG socket\n", config.name);
 
   /* Turn off netlink errors from overrun. */
   if (setsockopt(ulog_fd, SOL_NETLINK, NETLINK_NO_ENOBUFS, &one, sizeof(one)))
-    Log(LOG_ERR, "ERROR ( default/core ): Failed to turn off netlink ENOBUFS\n");
+    Log(LOG_ERR, "ERROR ( %s/core ): Failed to turn off netlink ENOBUFS\n", config.name);
 
   if (config.uacctd_nl_size > ULOG_BUFLEN) {
     /* If configured buffer size is larger than default 4KB */
     if (setsockopt(ulog_fd, SOL_SOCKET, SO_RCVBUF, &config.uacctd_nl_size, sizeof(config.uacctd_nl_size)))
-      Log(LOG_ERR, "ERROR ( default/core ): Failed to set Netlink receive buffer size\n");
+      Log(LOG_ERR, "ERROR ( %s/core ): Failed to set Netlink receive buffer size\n", config.name);
     else
-      Log(LOG_INFO, "INFO ( default/core ): Netlink receive buffer size set to %u\n", config.uacctd_nl_size);
+      Log(LOG_INFO, "INFO ( %s/core ): Netlink receive buffer size set to %u\n", config.name, config.uacctd_nl_size);
   }
 
   ulog_buffer = malloc(config.snaplen);
   if (ulog_buffer == NULL) {
-    Log(LOG_ERR, "ERROR ( default/core ): ULOG buffer malloc() failed\n");
+    Log(LOG_ERR, "ERROR ( %s/core ): ULOG buffer malloc() failed\n", config.name);
     close(ulog_fd);
     exit_all(1);
   }
@@ -591,21 +665,11 @@ int main(int argc,char **argv, char **envp)
   alen = sizeof(nls);
 
   if (bind(ulog_fd, (struct sockaddr *) &nls, sizeof(nls))) {
-    Log(LOG_ERR, "ERROR ( default/core ): bind() to Netlink ULOG socket failed\n");
+    Log(LOG_ERR, "ERROR ( %s/core ): bind() to Netlink ULOG socket failed\n", config.name);
     close(ulog_fd);
     exit_all(1);
   }
-  Log(LOG_INFO, "INFO ( default/core ): Netlink ULOG: binding to group %x\n", config.uacctd_group);
-
-  /* loading pre-tagging map, if any */
-  if (config.pre_tag_map) {
-    load_id_file(config.acct_type, config.pre_tag_map, &idt, &req, &tag_map_allocated);
-    cb_data.idt = (u_char *) &idt;
-  }
-  else {
-    memset(&idt, 0, sizeof(idt));
-    cb_data.idt = NULL; 
-  }
+  Log(LOG_INFO, "INFO ( %s/core ): Netlink ULOG: binding to group %x\n", config.name, config.uacctd_group);
 
 #if defined ENABLE_THREADS
   /* starting the ISIS threa */
@@ -664,7 +728,7 @@ int main(int argc,char **argv, char **envp)
       cb_data.bta_table = (u_char *) &bta_table;
     }
     else {
-      Log(LOG_ERR, "ERROR ( default/core ): 'bgp_daemon' configured but no 'bgp_agent_map' has been specified. Exiting.\n");
+      Log(LOG_ERR, "ERROR ( %s/core ): 'bgp_daemon' configured but no 'bgp_agent_map' has been specified. Exiting.\n", config.name);
       exit(1);
     }
 
@@ -672,11 +736,6 @@ int main(int argc,char **argv, char **envp)
        but in case maps are reloadable (ie. bta), it could be handy
        to keep a backup feed in memory */
     config.nfacctd_bgp_max_peers = 2;
-
-    if (config.nfacctd_bgp_iface_to_rd_map) {
-      Log(LOG_ERR, "ERROR ( default/core ): 'bgp_iface_to_rd_map' is not supported by this daemon. Exiting.\n");
-      exit(1);
-    }
 
     cb_data.f_agent = (char *)&client;
     nfacctd_bgp_wrapper();
@@ -686,19 +745,31 @@ int main(int argc,char **argv, char **envp)
   }
 #else
   if (config.nfacctd_isis) {
-    Log(LOG_ERR, "ERROR ( default/core ): 'isis_daemon' is available only with threads (--enable-threads). Exiting.\n");
+    Log(LOG_ERR, "ERROR ( %s/core ): 'isis_daemon' is available only with threads (--enable-threads). Exiting.\n", config.name);
     exit(1);
   }
 
   if (config.nfacctd_bgp) {
-    Log(LOG_ERR, "ERROR ( default/core ): 'bgp_daemon' is available only with threads (--enable-threads). Exiting.\n");
+    Log(LOG_ERR, "ERROR ( %s/core ): 'bgp_daemon' is available only with threads (--enable-threads). Exiting.\n", config.name);
     exit(1);
   }
 #endif
 
+#if defined WITH_GEOIP
+  if (config.geoip_ipv4_file || config.geoip_ipv6_file) {
+    req.bpf_filter = TRUE;
+  }
+#endif
+
+  if (config.nfacctd_flow_to_rd_map) { 
+    Log(LOG_ERR, "ERROR ( %s/core ): 'flow_to_rd_map' is not supported by this daemon. Exiting.\n", config.name);
+    exit(1);
+  } 
+
   /* plugins glue: creation (until 093) */
   evaluate_packet_handlers();
-  pm_setproctitle("%s [%s]", "Core Process", "default");
+  if (!config.proc_name) pm_setproctitle("%s [%s]", "Core Process", "default");
+  else pm_setproctitle("%s [%s]", "Core Process", config.proc_name);
   if (config.pidfile) write_pid_file(config.pidfile);  
 
   /* signals to be handled only by pmacctd;
@@ -716,7 +787,7 @@ int main(int argc,char **argv, char **envp)
         /* We can't deal with permanent errors.
          * Just sleep a bit.
          */
-        Log(LOG_ERR, "ERROR ( default/core ): Syscall returned %d: %s. Sleeping for 1 sec.\n", errno, strerror(errno));
+        Log(LOG_ERR, "ERROR ( %s/core ): Syscall returned %d: %s. Sleeping for 1 sec.\n", config.name, errno, strerror(errno));
         sleep(1);
       }
     }
@@ -741,12 +812,12 @@ int main(int argc,char **argv, char **envp)
       hdr.len = ulog_pkt->data_len;
 
       if (strlen(ulog_pkt->indev_name) > 1) {
-       cb_data.ifindex_in = get_ifindex(ulog_pkt->indev_name);
+	cb_data.ifindex_in = cache_ifindex(ulog_pkt->indev_name, tv.tv_sec);
       }
       else cb_data.ifindex_in = 0;
 
       if (strlen(ulog_pkt->outdev_name) > 1) {
-       cb_data.ifindex_out = get_ifindex(ulog_pkt->outdev_name);
+	cb_data.ifindex_out = cache_ifindex(ulog_pkt->outdev_name, tv.tv_sec);
       }
       else cb_data.ifindex_out = 0;
 

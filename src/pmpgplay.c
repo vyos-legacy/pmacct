@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2013 by Paolo Lucente
 */
 
 /*
@@ -39,6 +39,7 @@ int sql_dont_try_update = 0;
 int sql_history_since_epoch = 0;
 char *sql_table, *sql_user, *sql_db;
 char timebuf[SRVBUFLEN];
+struct configuration config;
 
 void usage(char *prog)
 {
@@ -103,7 +104,7 @@ void print_data(struct db_cache *cache_elem, u_int32_t wtc, int num)
   int j;
 
   printf("%-8d  ", num);
-  printf("%-5d  ", data->id);
+  printf("%-5d  ", data->tag);
 #if defined (HAVE_L2)
   etheraddr_string(data->eth_shost, src_mac);
   printf("%-17s  ", src_mac);
@@ -483,7 +484,7 @@ int PG_evaluate_history(int primitive)
 
 int PG_evaluate_primitives(int primitive)
 {
-  u_int64_t what_to_count = 0, fakes = 0;
+  pm_cfgreg_t what_to_count = 0, fakes = 0;
   short int assume_custom_table = FALSE;
 
   if (lh.sql_optimize_clauses) {
@@ -519,7 +520,7 @@ int PG_evaluate_primitives(int primitive)
     if (lh.what_to_count & COUNT_SUM_PORT) what_to_count |= COUNT_SUM_PORT;
     if (lh.what_to_count & COUNT_SUM_MAC) what_to_count |= COUNT_SUM_MAC;
 
-    what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_IP_PROTO|COUNT_ID|COUNT_VLAN|COUNT_IP_TOS;
+    what_to_count |= COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_IP_PROTO|COUNT_TAG|COUNT_VLAN|COUNT_IP_TOS;
   }
 
   /* 1st part: arranging pointers to an opaque structure and 
@@ -723,15 +724,15 @@ int PG_evaluate_primitives(int primitive)
     primitive++;
   }
 
-  if (what_to_count & COUNT_ID) {
+  if (what_to_count & COUNT_TAG) {
     int count_it = FALSE;
 
     if ((lh.sql_table_version < 2) && !assume_custom_table) {
-      if (lh.what_to_count & COUNT_ID) {
+      if (lh.what_to_count & COUNT_TAG) {
         printf("ERROR: The use of IDs requires SQL table version 2. Exiting.\n");
         exit(1);
       }
-      else what_to_count ^= COUNT_ID;
+      else what_to_count ^= COUNT_TAG;
     }
     else count_it = TRUE;
 
@@ -744,8 +745,8 @@ int PG_evaluate_primitives(int primitive)
       strncat(insert_clause, "agent_id", SPACELEFT(insert_clause));
       strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
       strncat(where[primitive].string, "agent_id=%u", SPACELEFT(where[primitive].string));
-      values[primitive].type = where[primitive].type = COUNT_ID;
-      values[primitive].handler = where[primitive].handler = count_id_handler;
+      values[primitive].type = where[primitive].type = COUNT_TAG;
+      values[primitive].handler = where[primitive].handler = count_tag_handler;
       primitive++;
     }
   }
@@ -893,8 +894,16 @@ static int PG_affected_rows(PGresult *result)
   return atoi(PQcmdTuples(result));
 }
 
-/* Dummy version of bgp_rd2str() to resolve code dependencies */
+/* Dummy version of unsupported functions for the purpose of resolving code dependencies */
 int bgp_rd2str(u_char *str, rd_t *rd)
 {
   return TRUE;
+}
+
+void custom_primitive_value_print(char *out, int outlen, char *in, struct custom_primitive_ptrs *cp_entry, int formatted)
+{
+}
+
+void vlen_prims_get(struct pkt_vlen_hdr_primitives *pvlen, pm_cfgreg_t wtc, char **label_ptr)
+{
 }

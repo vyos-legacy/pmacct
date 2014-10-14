@@ -179,7 +179,7 @@ remove_excess_adjs (struct list *adjs)
 	}
     }
 
-  list_delete_node (adjs, excess);
+  isis_list_delete_node (adjs, excess);
 
   return;
 }
@@ -192,19 +192,19 @@ isis_spftree_new ()
   tree = calloc(1, sizeof (struct isis_spftree));
   if (tree == NULL)
     {
-      Log(LOG_ERR, "ERROR ( default/core/ISIS ): ISIS-Spf: isis_spftree_new Out of memory!\n");
+      Log(LOG_ERR, "ERROR ( %s/core/ISIS ): ISIS-Spf: isis_spftree_new Out of memory!\n", config.name);
       return NULL;
     }
 
-  tree->tents = list_new ();
-  tree->paths = list_new ();
+  tree->tents = isis_list_new ();
+  tree->paths = isis_list_new ();
   return tree;
 }
 
 static void
 isis_vertex_del (struct isis_vertex *vertex)
 {
-  list_delete (vertex->Adj_N);
+  isis_list_delete (vertex->Adj_N);
 
   free(vertex);
 
@@ -216,10 +216,10 @@ static void
 isis_spftree_del (struct isis_spftree *spftree)
 {
   spftree->tents->del = (void (*)(void *)) isis_vertex_del;
-  list_delete (spftree->tents);
+  isis_list_delete (spftree->tents);
 
   spftree->paths->del = (void (*)(void *)) isis_vertex_del;
-  list_delete (spftree->paths);
+  isis_list_delete (spftree->paths);
 
   free(spftree);
 
@@ -262,7 +262,7 @@ isis_vertex_new (void *id, enum vertextype vtype)
   vertex = calloc(1, sizeof (struct isis_vertex));
   if (vertex == NULL)
     {
-      Log(LOG_ERR, "ERROR ( default/core/ISIS ): isis_vertex_new Out of memory!\n");
+      Log(LOG_ERR, "ERROR ( %s/core/ISIS ): isis_vertex_new Out of memory!\n", config.name);
       return NULL;
     }
 
@@ -289,10 +289,10 @@ isis_vertex_new (void *id, enum vertextype vtype)
 	      sizeof (struct isis_prefix));
       break;
     default:
-      Log(LOG_ERR, "ERROR ( default/core/ISIS ): WTF!\n");
+      Log(LOG_ERR, "ERROR ( %s/core/ISIS ): WTF!\n", config.name);
     }
 
-  vertex->Adj_N = list_new ();
+  vertex->Adj_N = isis_list_new ();
 
   return vertex;
 }
@@ -314,7 +314,7 @@ isis_spf_add_self (struct isis_spftree *spftree, struct isis_area *area,
   lsp = lsp_search (lspid, area->lspdb[level - 1]);
 
   if (lsp == NULL)
-    Log(LOG_WARNING, "WARN ( default/core/ISIS ): ISIS-Spf: could not find own l%d LSP!\n", level);
+    Log(LOG_WARNING, "WARN ( %s/core/ISIS ): ISIS-Spf: could not find own l%d LSP!\n", config.name, level);
 
   if (!area->oldmetric)
     vertex = isis_vertex_new (isis->sysid, VTYPE_NONPSEUDO_TE_IS);
@@ -323,7 +323,7 @@ isis_spf_add_self (struct isis_spftree *spftree, struct isis_area *area,
 
   vertex->lsp = lsp;
 
-  listnode_add (spftree->paths, vertex);
+  isis_listnode_add (spftree->paths, vertex);
 
   return;
 }
@@ -390,17 +390,17 @@ isis_spf_add2tent (struct isis_spftree *spftree, enum vertextype vtype,
   vertex->depth = depth;
 
   if (adj)
-    listnode_add (vertex->Adj_N, adj);
+    isis_listnode_add (vertex->Adj_N, adj);
 
   if (config.nfacctd_isis_msglog) 
-    Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-Spf: add to TENT  %s %s depth %d dist %d\n",
-              vtype2string (vertex->type), vid2string (vertex, buff),
+    Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-Spf: add to TENT  %s %s depth %d dist %d\n",
+              config.name, vtype2string (vertex->type), vid2string (vertex, buff),
               vertex->depth, vertex->d_N);
 
-  listnode_add (spftree->tents, vertex);
-  if (list_isempty (spftree->tents))
+  isis_listnode_add (spftree->tents, vertex);
+  if (isis_list_isempty (spftree->tents))
     {
-      listnode_add (spftree->tents, vertex);
+      isis_listnode_add (spftree->tents, vertex);
       return vertex;
     }
   
@@ -410,7 +410,7 @@ isis_spf_add2tent (struct isis_spftree *spftree, enum vertextype vtype,
       v = listgetdata (node);
       if (v->d_N > vertex->d_N)
 	{
-	  list_add_node_prev (spftree->tents, node, vertex);
+	  isis_list_add_node_prev (spftree->tents, node, vertex);
 	  break;
 	}
       else if (v->d_N == vertex->d_N)
@@ -426,12 +426,12 @@ isis_spf_add2tent (struct isis_spftree *spftree, enum vertextype vtype,
 	      node = listnextnode (node);
 	      (node) ? (v = listgetdata (node)) : (v = NULL);
 	    }
-	  list_add_node_prev (spftree->tents, node, vertex);
+	  isis_list_add_node_prev (spftree->tents, node, vertex);
 	  break;
 	}
       else if (node->next == NULL)
 	{
-	  list_add_node_next (spftree->tents, node, vertex);
+	  isis_list_add_node_next (spftree->tents, node, vertex);
 	  break;
 	}
     }
@@ -453,7 +453,7 @@ isis_spf_add_local (struct isis_spftree *spftree, enum vertextype vtype,
       if (vertex->d_N == cost)
 	{
 	  if (adj)
-	    listnode_add (vertex->Adj_N, adj);
+	    isis_listnode_add (vertex->Adj_N, adj);
 	  /*       d) */
 	  if (listcount (vertex->Adj_N) > ISIS_MAX_PATH_SPLITS)
 	    remove_excess_adjs (vertex->Adj_N);
@@ -461,7 +461,7 @@ isis_spf_add_local (struct isis_spftree *spftree, enum vertextype vtype,
       /*         f) */
       else if (vertex->d_N > cost)
 	{
-	  listnode_delete (spftree->tents, vertex);
+	  isis_listnode_delete (spftree->tents, vertex);
 	  goto add2tent;
 	}
       /*       e) do nothing */
@@ -498,7 +498,7 @@ process_N (struct isis_spftree *spftree, enum vertextype vtype, void *id,
       if (vertex->d_N == dist)
 	{
 	  if (adj)
-	    listnode_add (vertex->Adj_N, adj);
+	    isis_listnode_add (vertex->Adj_N, adj);
 	  /*      2) */
 	  if (listcount (vertex->Adj_N) > ISIS_MAX_PATH_SPLITS)
 	    remove_excess_adjs (vertex->Adj_N);
@@ -512,7 +512,7 @@ process_N (struct isis_spftree *spftree, enum vertextype vtype, void *id,
 	}
       else
 	{
-	  listnode_delete (spftree->tents, vertex);
+	  isis_listnode_delete (spftree->tents, vertex);
 	}
     }
 
@@ -548,7 +548,7 @@ isis_spf_process_lsp (struct isis_spftree *spftree, struct isis_lsp *lsp,
 lspfragloop:
   if (lsp->lsp_header->seq_num == 0)
     {
-      Log(LOG_WARNING, "WARN ( default/core/ISIS ): isis_spf_process_lsp(): lsp with 0 seq_num - do not process\n");
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): isis_spf_process_lsp(): lsp with 0 seq_num - do not process\n", config.name);
       return ISIS_WARNING;
     }
 
@@ -611,7 +611,7 @@ lspfragloop:
 
               /* Set advertising router to the first IP address */
               if (lsp->tlv_data.ipv4_addrs) {
-                memcpy(&prefix.adv_router, listnode_head(lsp->tlv_data.ipv4_addrs), sizeof(struct in_addr));
+                memcpy(&prefix.adv_router, isis_listnode_head(lsp->tlv_data.ipv4_addrs), sizeof(struct in_addr));
               }
 	      prefix.u.prefix4 = ipreach->prefix;
 	      prefix.prefixlen = isis_ip_masklen (ipreach->mask);
@@ -630,7 +630,7 @@ lspfragloop:
 
 	      /* Set advertising router to the first IP address */
 	      if (lsp->tlv_data.ipv4_addrs) {
-		memcpy(&prefix.adv_router, listnode_head(lsp->tlv_data.ipv4_addrs), sizeof(struct in_addr));
+		memcpy(&prefix.adv_router, isis_listnode_head(lsp->tlv_data.ipv4_addrs), sizeof(struct in_addr));
 	      }
 	      prefix.u.prefix4 = newprefix2inaddr (&te_ipv4_reach->prefix_start,
 						   te_ipv4_reach->control);
@@ -688,7 +688,7 @@ pseudofragloop:
 
   if (lsp->lsp_header->seq_num == 0)
     {
-      Log(LOG_WARNING, "WARN ( default/core/ISIS ): isis_spf_process_pseudo_lsp(): lsp with 0 seq_num - do not process\n");
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): isis_spf_process_pseudo_lsp(): lsp with 0 seq_num - do not process\n", config.name);
       return ISIS_WARNING;
     }
 
@@ -822,13 +822,13 @@ isis_spf_preload_tent (struct isis_spftree *spftree,
 	      break;
 	    case ISIS_SYSTYPE_UNKNOWN:
 	    default:
-	      Log(LOG_WARNING, "WARN ( default/core/ISIS ): isis_spf_preload_tent unknow adj type\n");
+	      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): isis_spf_preload_tent unknow adj type\n", config.name);
 	      break;
 	    }
 	}
       else
 	{
-	  Log(LOG_WARNING, "WARN ( default/core/ISIS ): isis_spf_preload_tent unsupported media\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): isis_spf_preload_tent unsupported media\n", config.name);
 	  retval = ISIS_WARNING;
 	}
     }
@@ -844,7 +844,7 @@ static void
 add_to_paths (struct isis_spftree *spftree, struct isis_vertex *vertex,
 	      struct isis_area *area, int level)
 {
-  listnode_add (spftree->paths, vertex);
+  isis_listnode_add (spftree->paths, vertex);
 
   if (vertex->type > VTYPE_ES)
     {
@@ -857,7 +857,8 @@ add_to_paths (struct isis_spftree *spftree, struct isis_vertex *vertex,
 
 	  isis_prefix2str (&vertex->N.prefix, prefix, BUFSIZ);
 	  if (config.nfacctd_isis_msglog)
-	    Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-Spf (tag: %s, level: %u): route installed: %s\n", area->area_tag, area->is_type, prefix);
+	    Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-Spf (tag: %s, level: %u): route installed: %s\n",
+			config.name, area->area_tag, area->is_type, prefix);
 	}
       }
       else {
@@ -866,7 +867,8 @@ add_to_paths (struct isis_spftree *spftree, struct isis_vertex *vertex,
 
 	  isis_prefix2str (&vertex->N.prefix, prefix, BUFSIZ);
 	  if (config.nfacctd_isis_msglog)
-	    Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-Spf (tag: %s, level: %u): no adjacencies do not install route: %s\n", area->area_tag, area->is_type, prefix);
+	    Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-Spf (tag: %s, level: %u): no adjacencies do not install route: %s\n",
+			config.name, area->area_tag, area->is_type, prefix);
 	}
       }
     }
@@ -878,8 +880,8 @@ static void
 init_spt (struct isis_spftree *spftree)
 {
   spftree->tents->del = spftree->paths->del = (void (*)(void *)) isis_vertex_del;
-  list_delete_all_node (spftree->tents);
-  list_delete_all_node (spftree->paths);
+  isis_list_delete_all_node (spftree->tents);
+  isis_list_delete_all_node (spftree->paths);
   spftree->tents->del = spftree->paths->del = NULL;
 
   return;
@@ -938,7 +940,7 @@ isis_run_spf (struct isis_area *area, int level, int family)
    */
   if (listcount (spftree->tents) == 0)
     {
-      Log(LOG_WARNING, "WARN ( default/core/ISIS ): ISIS-Spf: TENT is empty\n");
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): ISIS-Spf: TENT is empty\n", config.name);
       goto out;
     }
 
@@ -948,7 +950,7 @@ isis_run_spf (struct isis_area *area, int level, int family)
       vertex = listgetdata (node);
 
       /* Remove from tent list */
-      list_delete_node (spftree->tents, node);
+      isis_list_delete_node (spftree->tents, node);
 
       if (isis_find_vertex (spftree->paths, vertex->N.id, vertex->type))
 	continue;
@@ -978,8 +980,8 @@ isis_run_spf (struct isis_area *area, int level, int family)
 	    }
 	  else
 	    {
-	      Log(LOG_WARNING, "WARN ( default/core/ISIS ): ISIS-Spf: No LSP found for %s\n",
-			 rawlspid_print (lsp_id));
+	      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): ISIS-Spf: No LSP found for %s\n",
+			 config.name, rawlspid_print (lsp_id));
 	    }
 	}
     }
@@ -989,7 +991,8 @@ out:
   spftree->lastrun = time (NULL);
   spftree->pending = 0;
 
-  Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-Spf (tag: %s, level: %u): SPF algorithm run\n", area->area_tag, area->is_type);
+  Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-Spf (tag: %s, level: %u): SPF algorithm run\n",
+		config.name, area->area_tag, area->is_type);
 
   return retval;
 }
@@ -1007,12 +1010,12 @@ isis_run_spf_l1 (struct thread *thread)
 
   if (!(area->is_type & IS_LEVEL_1))
     {
-      Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-SPF (%s) area does not share level\n",
-		   area->area_tag);
+      Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-SPF (%s) area does not share level\n",
+		   config.name, area->area_tag);
       return ISIS_WARNING;
     }
 
-  Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-Spf (%s) L1 SPF needed, periodic SPF\n", area->area_tag);
+  Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-Spf (%s) L1 SPF needed, periodic SPF\n", config.name, area->area_tag);
 
   if (area->ip_circuits)
     retval = isis_run_spf (area, 1, AF_INET);
@@ -1036,11 +1039,11 @@ isis_run_spf_l2 (struct thread *thread)
 
   if (!(area->is_type & IS_LEVEL_2))
     {
-      Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-SPF (%s) area does not share level\n", area->area_tag);
+      Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-SPF (%s) area does not share level\n", config.name, area->area_tag);
       return ISIS_WARNING;
     }
 
-  Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-Spf (%s) L2 SPF needed, periodic SPF\n", area->area_tag);
+  Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-Spf (%s) L2 SPF needed, periodic SPF\n", config.name, area->area_tag);
 
   if (area->ip_circuits)
     retval = isis_run_spf (area, 2, AF_INET);
@@ -1117,11 +1120,11 @@ isis_run_spf6_l1 (struct thread *thread)
 
   if (!(area->is_type & IS_LEVEL_1))
     {
-      Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-SPF (%s) area does not share level\n", area->area_tag);
+      Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-SPF (%s) area does not share level\n", config.name, area->area_tag);
       return ISIS_WARNING;
     }
 
-  Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-Spf (%s) L1 SPF needed, periodic SPF\n", area->area_tag);
+  Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-Spf (%s) L1 SPF needed, periodic SPF\n", config.name, area->area_tag);
 
   if (area->ipv6_circuits)
     retval = isis_run_spf (area, 1, AF_INET6);
@@ -1145,11 +1148,11 @@ isis_run_spf6_l2 (struct thread *thread)
 
   if (!(area->is_type & IS_LEVEL_2))
     {
-      Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-SPF (%s) area does not share level\n", area->area_tag);
+      Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-SPF (%s) area does not share level\n", config.name, area->area_tag);
       return ISIS_WARNING;
     }
 
-  Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-Spf (%s) L2 SPF needed, periodic SPF\n", area->area_tag);
+  Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-Spf (%s) L2 SPF needed, periodic SPF\n", config.name, area->area_tag);
 
   if (area->ipv6_circuits)
     retval = isis_run_spf (area, 2, AF_INET6);

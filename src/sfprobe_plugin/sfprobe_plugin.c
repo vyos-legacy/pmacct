@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /* 
@@ -452,7 +452,7 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
 	SFLADD_ELEMENT(&fs, &classHdrElem);
     }
 
-    if (config.what_to_count & (COUNT_ID|COUNT_ID2)) {
+    if (config.what_to_count & (COUNT_TAG|COUNT_TAG2)) {
       memset(&tagHdrElem, 0, sizeof(tagHdrElem));
       tagHdrElem.tag = SFLFLOW_EX_TAG;
       tagHdrElem.flowType.tag.tag = hdr->tag;
@@ -567,6 +567,7 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 {
   struct pkt_payload *hdr;
   struct pkt_data dummy;
+  struct pkt_bgp_primitives dummy_pbgp;
   struct pollfd pfd;
   struct timezone tz;
   unsigned char *pipebuf, *pipebuf_ptr;
@@ -579,6 +580,7 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   unsigned char *rgptr;
   int pollagain = TRUE;
   u_int32_t seq = 1, rg_err_count = 0;
+  struct networks_file_data nfd;
 
   time_t clk, test_clk;
   SflSp sp;
@@ -591,7 +593,7 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
   if (config.logfile) {
     fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile);
+    config.logfile_fd = open_logfile(config.logfile, "a");
   }
 
   reload_map = FALSE;
@@ -601,11 +603,7 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   signal(SIGUSR1, SIG_IGN);
   signal(SIGUSR2, reload_maps);
   signal(SIGPIPE, SIG_IGN);
-#if !defined FBSD4
   signal(SIGCHLD, SIG_IGN);
-#else
-  signal(SIGCHLD, ignore_falling_child);
-#endif
 
   /* ****** sFlow part starts here ****** */
 
@@ -664,10 +662,11 @@ read_data:
           exit_plugin(1); /* we exit silently; something happened at the write end */
       }
 
+      if ((rg->ptr + bufsz) > rg->end) rg->ptr = rg->base;
+
       if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
         if (!pollagain) {
           pollagain = TRUE;
-          // goto poll_again;
           goto handle_tick;
         }
         else {
@@ -685,28 +684,38 @@ read_data:
 
       pollagain = FALSE;
       memcpy(pipebuf, rg->ptr, bufsz);
-      if ((rg->ptr+bufsz) >= rg->end) rg->ptr = rg->base;
-      else rg->ptr += bufsz;
+      rg->ptr += bufsz;
 
       hdr = (struct pkt_payload *) (pipebuf+ChBufHdrSz);
       pipebuf_ptr = (unsigned char *) pipebuf+ChBufHdrSz+PpayloadSz;
 
-      while (((struct ch_buf_hdr *)pipebuf)->num) {
+      while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
 	if (config.networks_file) {
+	  memset(&dummy.primitives, 0, sizeof(dummy.primitives));
+	  memset(&dummy_pbgp, 0, sizeof(dummy_pbgp));
+
 	  memcpy(&dummy.primitives.src_ip, &hdr->src_ip, HostAddrSz);
 	  memcpy(&dummy.primitives.dst_ip, &hdr->dst_ip, HostAddrSz);
+	  dummy.primitives.src_nmask = hdr->src_nmask;
+	  dummy.primitives.dst_nmask = hdr->dst_nmask;
 
-	  for (num = 0; net_funcs[num]; num++) (*net_funcs[num])(&nt, &nc, &dummy.primitives);
+	  for (num = 0; net_funcs[num]; num++) (*net_funcs[num])(&nt, &nc, &dummy.primitives, &dummy_pbgp, &nfd);
 
-          if (config.nfacctd_as == NF_AS_NEW) {
+	  /* hacky */
+	  if (config.nfacctd_as & NF_AS_NEW && dummy.primitives.src_as)
 	    hdr->src_as = dummy.primitives.src_as;
-	    hdr->dst_as = dummy.primitives.dst_as;
-          }
 
-          if (config.nfacctd_net == NF_NET_NEW) {
-            hdr->src_nmask = dummy.primitives.src_nmask;
-            hdr->dst_nmask = dummy.primitives.dst_nmask;
-          }
+	  if (config.nfacctd_as & NF_AS_NEW && dummy.primitives.dst_as)
+	    hdr->dst_as = dummy.primitives.dst_as;
+
+          if (config.nfacctd_net & NF_NET_NEW && dummy.primitives.src_nmask)
+	    hdr->src_nmask = dummy.primitives.src_nmask;
+
+          if (config.nfacctd_net & NF_NET_NEW && dummy.primitives.dst_nmask)
+	    hdr->dst_nmask = dummy.primitives.dst_nmask;
+
+          if (config.nfacctd_net & NF_NET_NEW && dummy_pbgp.peer_dst_ip.family)
+            memcpy(&hdr->bgp_next_hop, &dummy_pbgp.peer_dst_ip, sizeof(struct host_addr));
 	}
 	
 	readPacket(&sp, hdr, pipebuf_ptr);
