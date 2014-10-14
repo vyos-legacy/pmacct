@@ -513,49 +513,40 @@ void NF_src_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
   case 9:
     if (tpl->tpl[NF9_SRC_AS].len == 2) {
       memcpy(&asn16, pptrs->f_data+tpl->tpl[NF9_SRC_AS].off, 2);
-      pdata->primitives.src_ip.address.ipv4.s_addr = htonl(ntohs(asn16));
+      pdata->primitives.src_as = ntohs(asn16);
     }
     else if (tpl->tpl[NF9_SRC_AS].len == 4) {
       memcpy(&asn32, pptrs->f_data+tpl->tpl[NF9_SRC_AS].off, 4); 
-      pdata->primitives.src_ip.address.ipv4.s_addr = asn32; 
+      pdata->primitives.src_as = ntohl(asn32); 
     }
-    pdata->primitives.src_ip.family = AF_INET;
     break;
   case 8:
     switch(hdr->aggregation) {
     case 1:
-      pdata->primitives.src_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_1 *) pptrs->f_data)->src_as));
-      pdata->primitives.src_ip.family = AF_INET;
+      pdata->primitives.src_as = ntohs(((struct struct_export_v8_1 *) pptrs->f_data)->src_as);
       break;
     case 3:
-      pdata->primitives.src_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_3 *) pptrs->f_data)->src_as));
-      pdata->primitives.src_ip.family = AF_INET;
+      pdata->primitives.src_as = ntohs(((struct struct_export_v8_3 *) pptrs->f_data)->src_as);
       break;
     case 5:
-      pdata->primitives.src_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_5 *) pptrs->f_data)->src_as));
-      pdata->primitives.src_ip.family = AF_INET;
+      pdata->primitives.src_as = ntohs(((struct struct_export_v8_5 *) pptrs->f_data)->src_as);
       break;
     case 9:
-      pdata->primitives.src_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_9 *) pptrs->f_data)->src_as));
-      pdata->primitives.src_ip.family = AF_INET;
+      pdata->primitives.src_as = ntohs(((struct struct_export_v8_9 *) pptrs->f_data)->src_as);
       break;
     case 11:
-      pdata->primitives.src_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_11 *) pptrs->f_data)->src_as));
-      pdata->primitives.src_ip.family = AF_INET;
+      pdata->primitives.src_as = ntohs(((struct struct_export_v8_11 *) pptrs->f_data)->src_as);
       break;
     case 13:
-      pdata->primitives.src_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_13 *) pptrs->f_data)->src_as));
-      pdata->primitives.src_ip.family = AF_INET;
+      pdata->primitives.src_as = ntohs(((struct struct_export_v8_13 *) pptrs->f_data)->src_as);
       break;
     default:
-      pdata->primitives.src_ip.address.ipv4.s_addr = 0;
-      pdata->primitives.src_ip.family = AF_INET;
+      pdata->primitives.src_as = 0;
       break;
     }
     break;
   default:
-    pdata->primitives.src_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v5 *) pptrs->f_data)->src_as));
-    pdata->primitives.src_ip.family = AF_INET;
+    pdata->primitives.src_as = ntohs(((struct struct_export_v5 *) pptrs->f_data)->src_as);
     break;
   }
 }
@@ -571,49 +562,40 @@ void NF_dst_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
   case 9:
     if (tpl->tpl[NF9_DST_AS].len == 2) {
       memcpy(&asn16, pptrs->f_data+tpl->tpl[NF9_DST_AS].off, 2); 
-      pdata->primitives.dst_ip.address.ipv4.s_addr = htonl(ntohs(asn16));
+      pdata->primitives.dst_as = ntohs(asn16);
     }
     else if (tpl->tpl[NF9_DST_AS].len == 4) {
       memcpy(&asn32, pptrs->f_data+tpl->tpl[NF9_DST_AS].off, 4);
-      pdata->primitives.dst_ip.address.ipv4.s_addr = asn32; 
+      pdata->primitives.dst_as = ntohl(asn32); 
     }
-    pdata->primitives.dst_ip.family = AF_INET;
     break;
   case 8:
     switch(hdr->aggregation) {
     case 1:
-      pdata->primitives.dst_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_1 *) pptrs->f_data)->dst_as));
-      pdata->primitives.dst_ip.family = AF_INET;
+      pdata->primitives.dst_as = ntohs(((struct struct_export_v8_1 *) pptrs->f_data)->dst_as);
       break;
     case 4:
-      pdata->primitives.dst_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_4 *) pptrs->f_data)->dst_as));
-      pdata->primitives.dst_ip.family = AF_INET;
+      pdata->primitives.dst_as = ntohs(((struct struct_export_v8_4 *) pptrs->f_data)->dst_as);
       break;
     case 5:
-      pdata->primitives.dst_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_5 *) pptrs->f_data)->dst_as));
-      pdata->primitives.dst_ip.family = AF_INET;
+      pdata->primitives.dst_as = ntohs(((struct struct_export_v8_5 *) pptrs->f_data)->dst_as);
       break;
     case 9:
-      pdata->primitives.dst_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_9 *) pptrs->f_data)->dst_as));
-      pdata->primitives.dst_ip.family = AF_INET;
+      pdata->primitives.dst_as = ntohs(((struct struct_export_v8_9 *) pptrs->f_data)->dst_as);
       break;
     case 12:
-      pdata->primitives.dst_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_12 *) pptrs->f_data)->dst_as));
-      pdata->primitives.dst_ip.family = AF_INET;
+      pdata->primitives.dst_as = ntohs(((struct struct_export_v8_12 *) pptrs->f_data)->dst_as);
       break;
     case 13:
-      pdata->primitives.dst_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v8_13 *) pptrs->f_data)->dst_as));
-      pdata->primitives.dst_ip.family = AF_INET;
+      pdata->primitives.dst_as = ntohs(((struct struct_export_v8_13 *) pptrs->f_data)->dst_as);
       break;
     default:
-      pdata->primitives.dst_ip.address.ipv4.s_addr = 0;
-      pdata->primitives.dst_ip.family = AF_INET;
+      pdata->primitives.dst_as = 0;
       break;
     }
     break;
   default:
-    pdata->primitives.dst_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v5 *) pptrs->f_data)->dst_as));
-    pdata->primitives.dst_ip.family = AF_INET;
+    pdata->primitives.dst_as = ntohs(((struct struct_export_v5 *) pptrs->f_data)->dst_as);
     break;
   }
 }
@@ -1210,15 +1192,15 @@ void SF_counters_renormalize_handler(struct channels_list_entry *chptr, struct p
 void SF_src_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
   SFSample *sample = (SFSample *) pptrs->f_data;
+  u_int32_t asn32;
   
-  pdata->primitives.src_ip.address.ipv4.s_addr = htonl(sample->src_as);
-  pdata->primitives.src_ip.family = AF_INET;
+  pdata->primitives.src_as = sample->src_as;
 }
 
 void SF_dst_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
   SFSample *sample = (SFSample *) pptrs->f_data;
+  u_int32_t asn32;
 
-  pdata->primitives.dst_ip.address.ipv4.s_addr = htonl(sample->dst_as);
-  pdata->primitives.dst_ip.family = AF_INET;
+  pdata->primitives.dst_as = sample->dst_as;
 }

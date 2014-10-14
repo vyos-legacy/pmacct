@@ -45,22 +45,26 @@ static const char fake_as[] = "0";
 #if defined (HAVE_L2)
 void count_src_mac_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
-  char buf[17];
+  char sbuf[17];
+  u_int8_t ubuf[ETH_ADDR_LEN];
 
-  etheraddr_string(cache_elem->primitives.eth_shost, buf);
-  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, buf);
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, buf);
+  memcpy(&ubuf, &cache_elem->primitives.eth_shost, ETH_ADDR_LEN);
+  etheraddr_string(ubuf, sbuf);
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, sbuf);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, sbuf);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
 
 void count_dst_mac_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
-  char buf[17];
+  char sbuf[17];
+  u_int8_t ubuf[ETH_ADDR_LEN];
 
-  etheraddr_string(cache_elem->primitives.eth_dhost, buf);
-  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, buf);
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, buf);
+  memcpy(ubuf, &cache_elem->primitives.eth_dhost, ETH_ADDR_LEN);
+  etheraddr_string(ubuf, sbuf);
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, sbuf);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, sbuf);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
@@ -87,8 +91,8 @@ void count_src_host_handler(const struct db_cache *cache_elem, const struct inse
 
 void count_src_as_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
-  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ntohl(cache_elem->primitives.src_ip.address.ipv4.s_addr));
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ntohl(cache_elem->primitives.src_ip.address.ipv4.s_addr));
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->primitives.src_as);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->primitives.src_as);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
@@ -106,8 +110,8 @@ void count_dst_host_handler(const struct db_cache *cache_elem, const struct inse
 
 void count_dst_as_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
-  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ntohl(cache_elem->primitives.dst_ip.address.ipv4.s_addr));
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ntohl(cache_elem->primitives.dst_ip.address.ipv4.s_addr));
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->primitives.dst_as);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->primitives.dst_as);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }

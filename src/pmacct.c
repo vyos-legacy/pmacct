@@ -118,6 +118,8 @@ void write_stats_header(u_int32_t what_to_count, u_int8_t have_wtc)
     printf("SRC_MAC            ");
     printf("DST_MAC            ");
     printf("VLAN   ");
+    printf("SRC_AS  ");
+    printf("DST_AS  "); 
 #if defined ENABLE_IPV6
     printf("SRC_IP                                         ");
     printf("DST_IP                                         ");
@@ -147,14 +149,16 @@ void write_stats_header(u_int32_t what_to_count, u_int8_t have_wtc)
     if (what_to_count & COUNT_DST_MAC) printf("DST_MAC            "); 
     if (what_to_count & COUNT_VLAN) printf("VLAN   ");
 #endif
+    if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("SRC_AS  ");
+    if (what_to_count & COUNT_DST_AS) printf("DST_AS  "); 
 #if defined ENABLE_IPV6
-    if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SRC_AS)) printf("SRC_IP                                         "); 
-    if (what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS)) printf("SRC_IP                                         ");
-    if (what_to_count & (COUNT_DST_HOST|COUNT_DST_NET|COUNT_DST_AS)) printf("DST_IP                                         ");
+    if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET)) printf("SRC_IP                                         "); 
+    if (what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET)) printf("SRC_IP                                         ");
+    if (what_to_count & (COUNT_DST_HOST|COUNT_DST_NET)) printf("DST_IP                                         ");
 #else
-    if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET|COUNT_SRC_AS)) printf("SRC_IP           ");
-    if (what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET|COUNT_SUM_AS)) printf("SRC_IP           ");
-    if (what_to_count & (COUNT_DST_HOST|COUNT_DST_NET|COUNT_DST_AS)) printf("DST_IP           ");
+    if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET)) printf("SRC_IP           ");
+    if (what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET)) printf("SRC_IP           ");
+    if (what_to_count & (COUNT_DST_HOST|COUNT_DST_NET)) printf("DST_IP           ");
 #endif
     if (what_to_count & (COUNT_SRC_PORT|COUNT_SUM_PORT)) printf("SRC_PORT  ");
     if (what_to_count & COUNT_DST_PORT) printf("DST_PORT  "); 
@@ -648,14 +652,16 @@ int main(int argc,char **argv)
 	else if (!strcmp(count_token[match_string_index], "none"));
 	else if (!strcmp(count_token[match_string_index], "src_as") ||
 		 !strcmp(count_token[match_string_index], "sum_as")) {
-	  request.data.src_ip.family = AF_INET;
-	  request.data.src_ip.address.ipv4.s_addr = atoi(match_string_token);
-	  request.data.src_ip.address.ipv4.s_addr = htonl(request.data.src_ip.address.ipv4.s_addr);
+	  u_int32_t asn32; 
+
+	  asn32 = atoi(match_string_token);
+	  request.data.src_as = asn32;
 	}
 	else if (!strcmp(count_token[match_string_index], "dst_as")) {
-	  request.data.dst_ip.family = AF_INET;
-	  request.data.dst_ip.address.ipv4.s_addr = atoi(match_string_token);
-	  request.data.dst_ip.address.ipv4.s_addr = htonl(request.data.dst_ip.address.ipv4.s_addr);
+	  u_int32_t asn32;
+
+	  asn32 = atoi(match_string_token);
+	  request.data.dst_as = asn32;
 	}
 	else if (!strcmp(count_token[match_string_index], "tag")) {
 	  int value = atoi(match_string_token);
@@ -788,37 +794,31 @@ int main(int argc,char **argv)
           printf("%-5d  ", acc_elem->primitives.vlan_id);
         }
 #endif
-	if (!have_wtc || (what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST|COUNT_SRC_NET
-	    |COUNT_SUM_NET|COUNT_SRC_AS|COUNT_SUM_AS))) {
+	if (!have_wtc || (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS))) {
+          printf("%-5d   ", acc_elem->primitives.src_as);
+        }
+
+	if (!have_wtc || (what_to_count & COUNT_DST_AS)) {
+          printf("%-5d   ", acc_elem->primitives.dst_as);
+        }
+
+	if (!have_wtc || (what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST|
+					   COUNT_SRC_NET|COUNT_SUM_NET))) {
+	  addr_to_str(ip_address, &acc_elem->primitives.src_ip);
 #if defined ENABLE_IPV6
-	  if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-45d  ", ntohl(acc_elem->primitives.src_ip.address.ipv4.s_addr));
+	  printf("%-45s  ", ip_address);
 #else
-	  if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%-15d  ", ntohl(acc_elem->primitives.src_ip.address.ipv4.s_addr));
+	  printf("%-15s  ", ip_address);
 #endif
-	  else {
-	    addr_to_str(ip_address, &acc_elem->primitives.src_ip);
-#if defined ENABLE_IPV6
-	    printf("%-45s  ", ip_address);
-#else
-	    printf("%-15s  ", ip_address);
-#endif
-	  }
 	}
 
-	if (!have_wtc || (what_to_count & (COUNT_DST_HOST|COUNT_DST_NET|COUNT_DST_AS))) {
+	if (!have_wtc || (what_to_count & (COUNT_DST_HOST|COUNT_DST_NET))) {
+	  addr_to_str(ip_address, &acc_elem->primitives.dst_ip);
 #if defined ENABLE_IPV6
-	  if (what_to_count & COUNT_DST_AS) printf("%-45d  ", ntohl(acc_elem->primitives.dst_ip.address.ipv4.s_addr));
+	  printf("%-45s  ", ip_address);
 #else
-	  if (what_to_count & COUNT_DST_AS) printf("%-15d  ", ntohl(acc_elem->primitives.dst_ip.address.ipv4.s_addr));
+	  printf("%-15s  ", ip_address);
 #endif
-	  else {
-	    addr_to_str(ip_address, &acc_elem->primitives.dst_ip);
-#if defined ENABLE_IPV6
-	    printf("%-45s  ", ip_address);
-#else
-	    printf("%-15s  ", ip_address);
-#endif
-	  }
 	}
 
 	if (!have_wtc || (what_to_count & (COUNT_SRC_PORT|COUNT_SUM_PORT)))

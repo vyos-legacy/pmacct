@@ -284,20 +284,22 @@ DESC:		full pathname to a file containing a SQL table schema. It allows to creat
 		closed in a 'ring' fashion (e.g., the days of the week) but 'open' (e.g., current date).  
 
 KEY:		sql_table_version (-v)
-VALUES		[ 1 | 2 | 3 | 4 | 5 ]
-DESC:		defines the version of the SQL table. If not stated explicitely, for example using the
-		'sql_optimize_clauses' directive, the SQL plugins expect the SQL table to endorse a
-		known schema. Default schemas have been introduced over the time, each identified by a
-		(small, incremental) version number (default: 1). 
+VALUES		[ 1 | 2 | 3 | 4 | 5 | 6 ]
+DESC:		defines the version of the SQL table. SQL table versioning has been introduced to allow
+                introduction of new features over the time (which, in turn, translate in changes to the
+		SQL schema) without giving the pain of breaking backward compatibility. Mind to specify
+		EVERYTIME which SQL table version you intend to adhere to as this will strongly influence
+		the way data will be written to the database (ie. until v5 AS numbers are written into
+		ip_src-ip_dst table fields; since v6 they are written to as_src-as-dst ones). At this
+		propo, take also a look to the 'sql_optimize_clauses' directive. (default: 1) 
 
 KEY:		sql_data
-VALUES:		[typed|unified]
-DESC:		this switch makes sense only when using PostgreSQL plugin and a default table; each
-		pgsql script in sql/ tree will create one 'unified' table and multiple 'typed' tables.
-		The 'unified' table has IP and MAC addresses specified as standard CHAR strings, slower
-		and not space savy but flexible; 'typed' tables sport PostgreSQL own types (inet, mac,
-		etc.), resulting in a faster but more rigid structure. When not supplying your custom
-		'sql_table', the directive instructs the plugin about which data types it has to expect
+VALUES:		[ typed | unified ]
+DESC:		this switch makes sense only when using PostgreSQL plugin; each of the pgsql scripts in
+		the sql/ tree will create one 'unified' table and multiple 'typed' tables. The 'unified'
+		table has IP and MAC addresses specified as standard CHAR strings, slower and not space
+		savy but flexible; 'typed' tables sport PostgreSQL own types (inet, mac, etc.), resulting
+		in a faster but more rigid structure. Since v6 unified mode will be no longer supported.
 		(default: 'typed').
 
 KEY:	 	sql_host
@@ -324,10 +326,14 @@ DESC:		defines the time, in seconds, the first purging event has to be delayed. 
 
 KEY:		sql_optimize_clauses
 VALUES:		[true|false]
-DESC:		enables the optimization of the SQL clauses, telling explicitely the SQL plugin to not
-		adhere to any SQL table version but to generate queries containing only the primitives
-		actually in use (default: false; read carefully INTERNALS 'SQL issues and *SQL plugins'
-		section before enabling it). (default: false)
+DESC:		enables the optimization of the statements sent to the SQL engine allowing, in turn, to
+		run stripped-down variants of each default SQL table which translates in both disk space
+		and CPU cycles savings. While this is highly adviceable for a production environment, it
+		isn't for an evaluation system: optimization, in fact, means specialization of general-
+		purpose (default) tables; subsequent changes of data aggregation will very likely require
+		the creation of brand-new (specialized) tables, posing a problem for the existing data.
+		As a general rule, mind to specify EVERYTIME which SQL table version you intend to adhere
+		to (or strip-down) by using the 'sql_table_version' directive. (default: false)
 
 KEY:		sql_history
 VALUES:		#[m|h|d|w|M]
@@ -672,7 +678,7 @@ DESC:		full path to a spool directory containing the packet classification patte
 		same order while classifying packets. Supported RE patterns are those from the great L7-filter
 		project, which is a new packet classifier for Linux kernel, and are avilable for download at:
 		http://sourceforge.net/projects/l7-filter/ (then point to the Protocol definitions archive).
-		Existing SO patterns are available at: http://www.ba.cnr.it/~paolo/pmacct/classification/ . 
+		Existing SO patterns are available at: http://www.pmacct.net/classification/ . 
 		This configuration directive should be specified whenever the 'class' aggregation method is in
 		use (ie. 'aggregate: class'). It's supported only by pmacctd. 
 

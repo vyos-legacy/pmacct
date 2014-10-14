@@ -55,18 +55,20 @@ create database, tables and grant default permissions will follow.
 IIIa. SQL table versioning
 pmacct version 0.7.1 introduced SQL table versioning: what is it ? It allows to introduce new
 features over the time (which translate in changes to the SQL schema) without giving the pain
-of breaking backward compatibility. Who actually benefits from table versioning ? Everyone
-using DEFAULT pmacct SQL tables. Default are those tables created by scripts into the sql/ 
-tree. What about the others ? pmacct offers chances to who wishes to customize his tables
-(ie. the 'sql_optimize_clauses directive): it will continue using such tables as specified
-by you. Whenever you will use default tables, mind to specify which table version you are
-actually using:
+of breaking backward compatibility. Mind to specify EVERYTIME which SQL table version you
+intend to adhere to as this will strongly influence the way collected data will be written to
+the database (ie. until v5 AS numbers are written into ip_src-ip_dst table fields; since v6
+they are written to as_src-as-dst ones). Furthermore, 'sql_optimize_clauses' directive allows
+to run stripped-down versions of each SQL table thus allowing to save both disk space and CPU
+cycles required to run the SQL engine (read more about it in CONFIG-KEYS). To specify the SQL
+table version, you an use either of the following rules: 
 
-commandline: 	'-v [ 1 | 2 | 3 | 4 | 5 ]'
-configuration:  'sql_table_version: [ 1 | 2 | 3 | 4 | 5 ]'	
+commandline: 	'-v [ 1 | 2 | 3 | 4 | 5 | 6 ]'
+configuration:  'sql_table_version: [ 1 | 2 | 3 | 4 | 5 | 6 ]'
 
-Now, v1, v2, v3, v4 or v5 tables ? Few rules of thumb follow:
+To understand difference between v1, v2, v3, v4, v5 and v6 tables:
 
+- Do you need both IP addresses and AS numbers in the same table ? Then you have to use v6.
 - Do you need packet classification ? Then you have to use v5.
 - Do you need flows (other than packets) accounting ? Then you have to use v4.
 - Do you need ToS/DSCP field (QoS) accounting ? Then you have to use v3.
@@ -112,6 +114,8 @@ A few tables will be created into 'pmacct' DB. 'acct' ('acct_v2' or 'acct_v3') t
 the default table where data will be written when in 'typed' mode (see 'sql_data' option
 in CONFIG-KEYS document; default value is 'typed'); 'acct_uni' ('acct_uni_v2' or
 'acct_uni_v3') is the default table where data will be written when in 'unified' mode.
+Since v6 unified mode will be no longer supported: an unique table ('acct_v6', etc.) is
+used instead. 
 
 IIId. SQLite examples
 shell> cd sql/
@@ -345,7 +349,7 @@ community). Don't miss a visit to the L7-filter project homepage, http://l7-filt
 Now, the quickstarter guide:
 
 a) download pmacct
-shell> wget http://www.ba.cnr.it/~paolo/pmacct/pmacct-x.y.z.tar.gz 
+shell> wget http://www.pmacct.net/pmacct-x.y.z.tar.gz 
 
 b) compile pmacct
 shell> cd pmacct-x.y.z; ./configure && make && make install 
@@ -360,9 +364,9 @@ c-2) download all RE classifiers: point your browser to http://sourceforge.net/p
      to the latest Protocol definitions tarball).
 
 c-3) download shared object (SO) classifiers (written in C) as-you-need them: you need just to point your
-     browser to http://www.ba.cnr.it/~paolo/pmacct/classification/ , download the available package, extract
-     files and compile things following INSTALL instructions. When everything is finished, install the
-     produced shared objects:
+     browser to http://www.pmacct.net/classification/ , download the available package, extract files and
+     compile things following INSTALL instructions. When everything is finished, install the produced shared
+     objects:
 
      shell> mv *.so /path/to/classifiers/
 

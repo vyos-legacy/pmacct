@@ -642,7 +642,8 @@ void SQLI_init_default_values(struct insert_data *idata)
   /* Linking database parameters */
   if (!config.sql_db) config.sql_db = sqlite3_db;
   if (!config.sql_table) {
-    if (config.sql_table_version == 5) config.sql_table = sqlite3_table_v5;
+    if (config.sql_table_version == 6) config.sql_table = sqlite3_table_v6;
+    else if (config.sql_table_version == 5) config.sql_table = sqlite3_table_v5;
     else if (config.sql_table_version == 4) config.sql_table = sqlite3_table_v4;
     else if (config.sql_table_version == 3) config.sql_table = sqlite3_table_v3;
     else if (config.sql_table_version == 2) config.sql_table = sqlite3_table_v2;

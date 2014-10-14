@@ -33,7 +33,7 @@ struct template_entry *build_template(struct template_header *th)
   u_char *te;
   u_int16_t tot_size = 0;
 
-  th->num = 15;
+  th->num = 17;
 
   te = malloc(th->num*sizeof(struct template_entry));  
   memset(te, 0, th->num*sizeof(struct template_entry));
@@ -70,6 +70,16 @@ struct template_entry *build_template(struct template_header *th)
 
   ptr->tag = COUNT_DST_HOST;
   ptr->size = sizeof(dummy.primitives.dst_ip);
+  tot_size += ptr->size;
+  ptr++;
+
+  ptr->tag = COUNT_SRC_AS;
+  ptr->size = sizeof(dummy.primitives.src_as);
+  tot_size += ptr->size;
+  ptr++;
+
+  ptr->tag = COUNT_DST_AS;
+  ptr->size = sizeof(dummy.primitives.dst_as);
   tot_size += ptr->size;
   ptr++;
 
@@ -154,6 +164,12 @@ void set_template_funcs(struct template_header *th, struct template_entry *head)
       break;
     case COUNT_DST_HOST:
       template_funcs[cnt] = TPL_push_dst_ip;
+      break;
+    case COUNT_SRC_AS:
+      template_funcs[cnt] = TPL_push_src_as;
+      break;
+    case COUNT_DST_AS:
+      template_funcs[cnt] = TPL_push_dst_as;
       break;
     case COUNT_SRC_PORT:
       template_funcs[cnt] = TPL_push_src_port;
@@ -255,6 +271,22 @@ void TPL_push_dst_ip(u_char **dst, const struct db_cache *src)
   int size = sizeof(src->primitives.dst_ip);
 
   memcpy(*dst, &src->primitives.dst_ip, size);
+  *dst += size;
+}
+
+void TPL_push_src_as(u_char **dst, const struct db_cache *src)
+{
+  int size = sizeof(src->primitives.src_as);
+
+  memcpy(*dst, &src->primitives.src_as, size);
+  *dst += size;
+}
+
+void TPL_push_dst_as(u_char **dst, const struct db_cache *src)
+{
+  int size = sizeof(src->primitives.dst_as);
+
+  memcpy(*dst, &src->primitives.dst_as, size);
   *dst += size;
 }
 
@@ -383,6 +415,12 @@ void TPL_pop(u_char *src, struct db_cache *dst, struct template_header *th, u_ch
       }
       memcpy(&dst->primitives.dst_ip, ptr, sz);
       break;
+    case COUNT_SRC_AS:
+      memcpy(&dst->primitives.src_as, ptr, sz);
+      break;
+    case COUNT_DST_AS:
+      memcpy(&dst->primitives.dst_as, ptr, sz);
+      break;
     case COUNT_SRC_PORT:
       memcpy(&dst->primitives.src_port, ptr, sz);
       break;
@@ -466,6 +504,12 @@ void TPL_check_sizes(struct template_header *th, struct db_cache *elem, u_char *
       break;
     case COUNT_DST_HOST:
       if (teptr->size > sizeof(elem->primitives.dst_ip)) goto exit_lane;
+      break;
+    case COUNT_SRC_AS:
+      if (teptr->size > sizeof(elem->primitives.src_as)) goto exit_lane;
+      break;
+    case COUNT_DST_AS:
+      if (teptr->size > sizeof(elem->primitives.dst_as)) goto exit_lane;
       break;
     case COUNT_SRC_PORT:
       if (teptr->size > sizeof(elem->primitives.src_port)) goto exit_lane;

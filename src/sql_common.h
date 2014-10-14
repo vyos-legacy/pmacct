@@ -240,6 +240,7 @@ EXT void sql_invalidate_shadow_entries(struct db_cache *[], int *);
 
 EXT void sql_sum_host_insert(struct pkt_data *, struct insert_data *);
 EXT void sql_sum_port_insert(struct pkt_data *, struct insert_data *);
+EXT void sql_sum_as_insert(struct pkt_data *, struct insert_data *);
 #if defined (HAVE_L2)
 EXT void sql_sum_mac_insert(struct pkt_data *, struct insert_data *);
 #endif
