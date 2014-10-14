@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -25,8 +25,17 @@ Inline void AddToLRUTail(struct db_cache *Cursor)
 {
   if (Cursor == lru_tail) return;
 
-  if (Cursor->lru_prev) Cursor->lru_prev->lru_next = Cursor->lru_next;
-  if (Cursor->lru_next) Cursor->lru_next->lru_prev = Cursor->lru_prev;
+  if (Cursor->lru_prev) {
+    if (Cursor->lru_next) {
+      Cursor->lru_prev->lru_next = Cursor->lru_next;
+      Cursor->lru_next->lru_prev = Cursor->lru_prev;
+    }
+    else Cursor->lru_prev->lru_next = NULL;
+  }
+  else {
+    if (Cursor->lru_next) Cursor->lru_next->lru_prev = NULL;
+  }
+
   Cursor->lru_prev = lru_tail;
   Cursor->lru_prev->lru_next = Cursor;
   Cursor->lru_next = NULL;
@@ -36,10 +45,19 @@ Inline void AddToLRUTail(struct db_cache *Cursor)
 Inline void RetireElem(struct db_cache *Cursor)
 {
   assert(Cursor->prev);
+  assert(Cursor->lru_prev);
 
-  Cursor->lru_prev->lru_next = Cursor->lru_next;
-  if (Cursor->lru_next) Cursor->lru_next->lru_prev = Cursor->lru_prev;
-  if (Cursor == lru_tail) lru_tail = &lru_head; 
+  if (Cursor->lru_next) { 
+    Cursor->lru_prev->lru_next = Cursor->lru_next;
+    Cursor->lru_next->lru_prev = Cursor->lru_prev;
+  }
+  else {
+    /* no lru_next: we are tail! */
+    assert(Cursor == lru_tail);
+
+    Cursor->lru_prev->lru_next = NULL;
+    lru_tail = Cursor->lru_prev;
+  }
 
   if (Cursor->next) {
     Cursor->prev->next = Cursor->next;
@@ -47,15 +65,12 @@ Inline void RetireElem(struct db_cache *Cursor)
   }
   else Cursor->prev->next = NULL;
 
-  if (Cursor->cbgp) {
-    if (Cursor->cbgp->std_comms) free(Cursor->cbgp->std_comms);
-    if (Cursor->cbgp->ext_comms) free(Cursor->cbgp->ext_comms);
-    if (Cursor->cbgp->as_path) free(Cursor->cbgp->as_path);
-    if (Cursor->cbgp->src_std_comms) free(Cursor->cbgp->src_std_comms);
-    if (Cursor->cbgp->src_ext_comms) free(Cursor->cbgp->src_ext_comms);
-    if (Cursor->cbgp->src_as_path) free(Cursor->cbgp->src_as_path);
-    free(Cursor->cbgp);
-  }
+  if (Cursor->cbgp) free_cache_bgp_primitives(&Cursor->cbgp); 
+  if (Cursor->pnat) free(Cursor->pnat);
+  if (Cursor->pmpls) free(Cursor->pmpls);
+  if (Cursor->pcust) free(Cursor->pcust);
+  if (Cursor->pvlen) free(Cursor->pvlen);
+
   free(Cursor);
 }
 

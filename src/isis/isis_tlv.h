@@ -189,12 +189,17 @@ struct te_ipv4_reachability
   u_char prefix_start;		/* since this is variable length by nature it only */
 };				/* points to an approximate location */
 
-
-
+#define ISIS_TLV_HDR_LEN	2
 struct idrp_info
 {
+  u_char value;
   u_char len;
-  u_char *value;
+};
+
+struct area_address {
+  u_char len;
+  u_char afi;
+  u_int16_t area_id;
 };
 
 #ifdef ENABLE_IPV6

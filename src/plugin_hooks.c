@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -39,9 +39,10 @@
    area */
 void load_plugins(struct plugin_requests *req)
 {
-  int x, v, socklen, nfprobe_id = 0, min_sz = 0;
+  u_int64_t snd_buflen = 0, rcv_buflen = 0, socklen = 0, target_buflen = 0;
+  int nfprobe_id = 0, min_sz = 0;
   struct plugins_list_entry *list = plugins_list;
-  int l = sizeof(list->cfg.pipe_size);
+  int l = sizeof(list->cfg.pipe_size), offset = 0;
   struct channels_list_entry *chptr = NULL;
 
   init_random_seed(); 
@@ -62,78 +63,69 @@ void load_plugins(struct plugin_requests *req)
 	else min_sz += (PpayloadSz+DEFAULT_PLOAD_SIZE); 
       }
       if (list->cfg.data_type & PIPE_TYPE_EXTRAS) min_sz += PextrasSz; 
-      if (list->cfg.data_type & PIPE_TYPE_BGP) min_sz += PbgpSz; 
       if (list->cfg.data_type & PIPE_TYPE_MSG) min_sz += PmsgSz; 
+      if (list->cfg.data_type & PIPE_TYPE_BGP) min_sz += sizeof(struct pkt_bgp_primitives);
+      if (list->cfg.data_type & PIPE_TYPE_NAT) min_sz += sizeof(struct pkt_nat_primitives);
+      if (list->cfg.data_type & PIPE_TYPE_MPLS) min_sz += sizeof(struct pkt_mpls_primitives);
+      if (list->cfg.cpptrs.len) min_sz += list->cfg.cpptrs.len;
+      if (list->cfg.data_type & PIPE_TYPE_VLEN) min_sz += sizeof(struct pkt_vlen_hdr_primitives);
 
       /* If nothing is supplied, let's hint some working default values */
-      if (list->cfg.pcap_savefile && !list->cfg.pipe_size && !list->cfg.buffer_size) {
-        list->cfg.pipe_size = 4096000; /* 4Mb */
-        list->cfg.buffer_size = 10240; /* 10Kb */
+      if (!list->cfg.pipe_size || !list->cfg.buffer_size) {
+        if (!list->cfg.pipe_size) list->cfg.pipe_size = 4096000; /* 4Mb */
+        if (!list->cfg.buffer_size) {
+	  if (list->cfg.pcap_savefile) list->cfg.buffer_size = 10240; /* 10Kb */
+	  else list->cfg.buffer_size = MIN(min_sz, 10240);
+	}
       }
+
       /* creating communication channel */
       socketpair(AF_UNIX, SOCK_DGRAM, 0, list->pipe);
-      if (list->cfg.pipe_size) {
-	if (list->cfg.pipe_size < min_sz) list->cfg.pipe_size = min_sz;
-      }
-      else {
-        x = DEFAULT_PIPE_SIZE;
-	Setsocksize(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &x, l);
-        Setsocksize(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &x, l);
-      }
+
+      /* some validations */
+      if (list->cfg.pipe_size < min_sz) list->cfg.pipe_size = min_sz;
+      if (list->cfg.buffer_size < min_sz) list->cfg.buffer_size = min_sz;
+      if (list->cfg.buffer_size > list->cfg.pipe_size) list->cfg.buffer_size = list->cfg.pipe_size;
 
       /* checking SO_RCVBUF and SO_SNDBUF values; if different we take the smaller one */
-      getsockopt(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &v, &l);
-      x = v;
-      getsockopt(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &v, &l);
-      socklen = (v < x) ? v : x;
+      getsockopt(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &rcv_buflen, &l);
+      getsockopt(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &snd_buflen, &l);
+      socklen = (rcv_buflen < snd_buflen) ? rcv_buflen : snd_buflen;
 
-      /* checking Core <-> Plugins buffer size; then, if required let's align it on
-         4 bytes boundary -- on the assumption that data strucures are aligned aswell. */
-      if (list->cfg.buffer_size < min_sz) list->cfg.buffer_size = min_sz;
+      /*  if required let's align plugin_buffer_size to  4 bytes boundary */
 #if NEED_ALIGN
       while (list->cfg.buffer_size % 4 != 0) list->cfg.buffer_size--;
 #endif
 
-      if (list->cfg.data_type == PIPE_TYPE_PAYLOAD) {
-	/* Let's tweak plugin_pipe_size if we don't have an explicit size */
-	if (!list->cfg.pipe_size) list->cfg.pipe_size = 4096000; /* 4Mb */
+      target_buflen = (list->cfg.pipe_size/list->cfg.buffer_size)*sizeof(char *);
+      if (target_buflen > socklen) {
+	Setsocksize(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &target_buflen, l);
+	Setsocksize(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &target_buflen, l);
       }
 
-      /* if we are not supplied a 'plugin_pipe_size', then we calculate it using
-         buffer size and given socket size; if 'plugin_pipe_size' is known, we
-	 reverse the method: we try to obtain needed socket size to accomodate
-	 given pipe and buffer size */
-      if (!list->cfg.pipe_size) { 
-        list->cfg.pipe_size = (socklen/sizeof(char *))*list->cfg.buffer_size;
-	if ((list->cfg.debug) || (list->cfg.pipe_size > WARNING_PIPE_SIZE))  {
-          Log(LOG_INFO, "INFO ( %s/%s ): %d bytes are available to address shared memory segment; buffer size is %d bytes.\n",
-			list->name, list->type.string, socklen, list->cfg.buffer_size);
-	  Log(LOG_INFO, "INFO ( %s/%s ): Trying to allocate a shared memory segment of %d bytes.\n",
-			list->name, list->type.string, list->cfg.pipe_size);
-	}
+      getsockopt(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &rcv_buflen, &l);
+      getsockopt(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &snd_buflen, &l);
+      if (rcv_buflen < snd_buflen) snd_buflen = rcv_buflen;
+
+      if (snd_buflen < socklen) {
+	Setsocksize(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &socklen, l);
+	Setsocksize(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &socklen, l);
+
+        getsockopt(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &rcv_buflen, &l);
+        getsockopt(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &snd_buflen, &l);
+        if (rcv_buflen < snd_buflen) snd_buflen = rcv_buflen;
       }
-      else {
-        if (list->cfg.buffer_size > list->cfg.pipe_size)
-	  list->cfg.buffer_size = list->cfg.pipe_size;
 
-        x = (list->cfg.pipe_size/list->cfg.buffer_size)*sizeof(char *);
-        if (x > socklen) {
-	  Setsocksize(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &x, l);
-	  Setsocksize(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &x, l);
-        }
-
-        socklen = x;
-        getsockopt(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &v, &l);
-        x = v;
-        getsockopt(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &v, &l);
-        if (x > v) x = v;
-
-        if ((x < socklen) || (list->cfg.debug))
-          Log(LOG_INFO, "INFO ( %s/%s ): Pipe size obtained: %d / %d.\n", list->name, list->type.string, x, socklen);
+      if (list->cfg.debug || (list->cfg.pipe_size > WARNING_PIPE_SIZE)) {
+	Log(LOG_INFO, "INFO ( %s/%s ): plugin_pipe_size=%llu bytes plugin_buffer_size=%llu bytes\n", 
+	    list->name, list->type.string, list->cfg.pipe_size, list->cfg.buffer_size);
+        Log(LOG_INFO, "INFO ( %s/%s ): ctrl channel: obtained=%llu bytes target=%llu bytes\n",
+	    list->name, list->type.string, snd_buflen, target_buflen);
       }
 
       list->cfg.name = list->name;
       list->cfg.type = list->type.string;
+      list->cfg.type_id = list->type.id;
       chptr = insert_pipe_channel(list->type.id, &list->cfg, list->pipe[1]);
       if (!chptr) {
 	Log(LOG_ERR, "ERROR ( %s/%s ): Unable to setup a new Core Process <-> Plugin channel.\nExiting.\n", list->name, list->type.string);
@@ -144,14 +136,51 @@ void load_plugins(struct plugin_requests *req)
       /* sets new value to be assigned to 'wakeup'; 'TRUE' disables on-request wakeup */ 
       if (list->type.id == PLUGIN_ID_MEMORY) chptr->request = TRUE; 
 
-      /* sets cleaner routine; XXX: we should definitely refine the way it works, maybe
-         by looking at stacking more of them, ie. extras assumes it's automagically piled
-	 with metadata */
-      if (list->cfg.data_type & PIPE_TYPE_METADATA) chptr->clean_func = pkt_data_clean;
+      /* sets fixed/vlen offsets and cleaner routine; XXX: we should refine the cleaner
+	 part: 1) ie. extras assumes it's automagically piled with metadata; 2) what if
+	 multiple vlen components are stacked up? */
+      if (list->cfg.data_type & PIPE_TYPE_METADATA) {
+	chptr->clean_func = pkt_data_clean;
+	offset = sizeof(struct pkt_data);
+      }
       if (list->cfg.data_type & PIPE_TYPE_PAYLOAD) chptr->clean_func = pkt_payload_clean;
-      if (list->cfg.data_type & PIPE_TYPE_EXTRAS) chptr->clean_func = pkt_extras_clean;
-      if (list->cfg.data_type & PIPE_TYPE_BGP) chptr->clean_func = pkt_bgp_clean;
+      if (list->cfg.data_type & PIPE_TYPE_EXTRAS) {
+	chptr->extras.off_pkt_extras = offset;
+	offset += sizeof(struct pkt_extras);
+      }
       if (list->cfg.data_type & PIPE_TYPE_MSG) chptr->clean_func = pkt_msg_clean;
+      if (list->cfg.data_type & PIPE_TYPE_BGP) {
+        chptr->extras.off_pkt_bgp_primitives = offset;
+	offset += sizeof(struct pkt_bgp_primitives);
+      }
+      else chptr->extras.off_pkt_bgp_primitives = 0; 
+      if (list->cfg.data_type & PIPE_TYPE_NAT) {
+        chptr->extras.off_pkt_nat_primitives = offset;
+        offset += sizeof(struct pkt_nat_primitives);
+      }
+      else chptr->extras.off_pkt_nat_primitives = 0; 
+      if (list->cfg.data_type & PIPE_TYPE_MPLS) {
+        chptr->extras.off_pkt_mpls_primitives = offset;
+        offset += sizeof(struct pkt_mpls_primitives);
+      }
+      else chptr->extras.off_pkt_mpls_primitives = 0;
+      if (list->cfg.cpptrs.len) {
+	chptr->extras.off_custom_primitives = offset;
+	offset += list->cfg.cpptrs.len;
+      }
+      /* PIPE_TYPE_VLEN at the end of the stack so to not make
+	 vlen other structures (although possible it would not
+	 make much sense) */
+      if (list->cfg.data_type & PIPE_TYPE_VLEN) {
+        chptr->extras.off_pkt_vlen_hdr_primitives = offset;
+        offset += sizeof(struct pkt_vlen_hdr_primitives);
+      }
+      else chptr->extras.off_pkt_vlen_hdr_primitives = 0;
+      /* any further offset beyond this point must be set to
+         PM_VARIABLE_LENGTH so to indicate plugins to resolve
+         value at runtime. */
+
+      chptr->datasize = min_sz-ChBufHdrSz;
 
       /* sets nfprobe ID */
       if (list->type.id == PLUGIN_ID_NFPROBE) {
@@ -160,6 +189,10 @@ void load_plugins(struct plugin_requests *req)
       }
       
       switch (list->pid = fork()) {  
+      case -1: /* Something went wrong */
+	Log(LOG_WARNING, "WARN ( %s/%s ): Unable to initialize plugin: %s\n", list->name, list->type.string, strerror(errno));
+	delete_pipe_channel(list->pipe[1]);
+	break;
       case 0: /* Child */
 	/* SIGCHLD handling issue: SysV avoids zombies by ignoring SIGCHLD; to emulate
 	   such semantics on BSD systems, we need an handler like handle_falling_child() */
@@ -168,7 +201,13 @@ void load_plugins(struct plugin_requests *req)
 #else
 	signal(SIGCHLD, ignore_falling_child);
 #endif
+
+#if defined HAVE_MALLOPT
+  mallopt(M_CHECK_ACTION, 0);
+#endif
+
 	close(config.sock);
+	close(config.bgp_sock);
 	close(list->pipe[1]);
 	(*list->type.func)(list->pipe[0], &list->cfg, chptr);
 	exit(0);
@@ -185,16 +224,86 @@ void load_plugins(struct plugin_requests *req)
   }
 
   sort_pipe_channels();
+
+  /* define pre_tag_map(s) now so that they don't finish unnecessarily in plugin memory space */
+  {
+    int ptm_index = 0, ptm_global = FALSE;
+    char *ptm_ptr = NULL;
+
+    list = plugins_list;
+
+    while (list) {
+      if (list->cfg.pre_tag_map) {
+        if (!ptm_index) {
+          ptm_ptr = list->cfg.pre_tag_map;
+          ptm_global = TRUE;
+        }
+        else {
+          if (!ptm_ptr || strcmp(ptm_ptr, list->cfg.pre_tag_map))
+            ptm_global = FALSE;
+        }
+
+        load_pre_tag_map(config.acct_type, list->cfg.pre_tag_map, &list->cfg.ptm, req, &list->cfg.ptm_alloc,
+                         list->cfg.maps_entries, list->cfg.maps_row_len);
+      }
+
+      list = list->next;
+      ptm_index++;
+    }
+
+    /* enforcing global flag */
+    list = plugins_list;
+
+    while (list) {
+      list->cfg.ptm_global = ptm_global;
+      list = list->next;
+    }
+  }
 }
 
-void exec_plugins(struct packet_ptrs *pptrs) 
+void exec_plugins(struct packet_ptrs *pptrs, struct plugin_requests *req) 
 {
-  int num, size, already_reprocessed = 0;
+  int saved_have_tag = FALSE, saved_have_tag2 = FALSE, saved_have_label = FALSE;
+  pm_id_t saved_tag = 0, saved_tag2 = 0;
+  pt_label_t saved_label;
+
+  int num, fixed_size, already_reprocessed = 0;
   u_int32_t savedptr;
   char *bptr;
-  int index;
+  int index, got_tags = FALSE;
 
-  for (index = 0; channels_list[index].aggregation; index++) {
+  pretag_init_label(&saved_label);
+
+  for (index = 0; channels_list[index].aggregation || channels_list[index].aggregation_2; index++) {
+    struct plugins_list_entry *p = channels_list[index].plugin;
+
+    if (p->cfg.pre_tag_map && find_id_func) {
+      if (p->cfg.ptm_global && got_tags) {
+        pptrs->tag = saved_tag;
+        pptrs->tag2 = saved_tag2;
+	pretag_copy_label(&pptrs->label, &saved_label);
+
+        pptrs->have_tag = saved_have_tag;
+        pptrs->have_tag2 = saved_have_tag2;
+        pptrs->have_label = saved_have_label;
+      }
+      else {
+        find_id_func(&p->cfg.ptm, pptrs, &pptrs->tag, &pptrs->tag2);
+
+	if (p->cfg.ptm_global) {
+	  saved_tag = pptrs->tag;
+	  saved_tag2 = pptrs->tag2;
+	  pretag_copy_label(&saved_label, &pptrs->label);
+
+	  saved_have_tag = pptrs->have_tag;
+	  saved_have_tag2 = pptrs->have_tag2;
+	  saved_have_label = pptrs->have_label;
+
+          got_tags = TRUE;
+        }
+      }
+    }
+
     if (evaluate_filters(&channels_list[index].agg_filter, pptrs->packet_ptr, pptrs->pkthdr) &&
         !evaluate_tags(&channels_list[index].tag_filter, pptrs->tag) && 
         !evaluate_tags(&channels_list[index].tag2_filter, pptrs->tag2) && 
@@ -207,7 +316,8 @@ reprocess:
       /* rg.ptr points to slot's base address into the ring (shared memory); bufptr works
 	 as a displacement into the slot to place sequentially packets */
       bptr = channels_list[index].rg.ptr+ChBufHdrSz+channels_list[index].bufptr; 
-      size = (*channels_list[index].clean_func)(bptr);
+      fixed_size = (*channels_list[index].clean_func)(bptr, channels_list[index].datasize);
+      channels_list[index].var_size = 0; 
       savedptr = channels_list[index].bufptr;
       reset_fallback_status(pptrs);
       
@@ -220,7 +330,8 @@ reprocess:
 	channels_list[index].reprocess = FALSE;
 	channels_list[index].bufptr = savedptr;
 	channels_list[index].hdr.num--; /* let's cheat this value as it will get increased later */
-	size = 0;
+	fixed_size = 0;
+	channels_list[index].var_size = 0;
       }
 
       if (channels_list[index].reprocess) {
@@ -234,17 +345,19 @@ reprocess:
         already_reprocessed = TRUE;
 
 	/* Let's cheat the size in order to send out the current buffer */
-	size = channels_list[index].plugin->cfg.pipe_size;
+	fixed_size = channels_list[index].plugin->cfg.pipe_size;
       }
       else {
         channels_list[index].hdr.num++;
-        channels_list[index].bufptr += size;
+        channels_list[index].bufptr += (fixed_size + channels_list[index].var_size);
       }
 
-      if ((channels_list[index].bufptr+size) > channels_list[index].bufend) {
+      if ((channels_list[index].bufptr+fixed_size) > channels_list[index].bufend ||
+	  channels_list[index].hdr.num == INT_MAX) {
 	channels_list[index].hdr.seq++;
 	channels_list[index].hdr.seq %= MAX_SEQNUM;
 
+	/* let's commit the buffer we just finished writing */
 	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->seq = channels_list[index].hdr.seq;
 	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->num = channels_list[index].hdr.num;
 
@@ -263,14 +376,44 @@ reprocess:
 	if ((channels_list[index].rg.ptr+channels_list[index].bufsize) > channels_list[index].rg.end)
 	  channels_list[index].rg.ptr = channels_list[index].rg.base;
 
+	/* let's protect the buffer we are going to write */
+        ((struct ch_buf_hdr *)channels_list[index].rg.ptr)->seq = -1;
+        ((struct ch_buf_hdr *)channels_list[index].rg.ptr)->num = 0;
+
         /* rewind pointer */
         channels_list[index].bufptr = channels_list[index].buf;
         channels_list[index].hdr.num = 0;
 
 	if (channels_list[index].reprocess) goto reprocess;
+
+	/* if reading from a savefile, let's sleep a bit after
+	   having sent over a buffer worth of data */
+	if (channels_list[index].plugin->cfg.pcap_savefile) usleep(1000); /* 1 msec */ 
+      }
+    }
+
+    pptrs->tag = 0;
+    pptrs->tag2 = 0;
+    pretag_free_label(&pptrs->label);
+  }
+
+  /* check if we have to reload the map: new loop is to
+     ensure we reload it for all plugins and prevent any
+     timing issues with pointers to labels */
+  if (reload_map_exec_plugins) {
+    for (index = 0; channels_list[index].aggregation || channels_list[index].aggregation_2; index++) {
+      struct plugins_list_entry *p = channels_list[index].plugin;
+
+      if (p->cfg.pre_tag_map && find_id_func) {
+        load_pre_tag_map(config.acct_type, p->cfg.pre_tag_map, &p->cfg.ptm, req, &p->cfg.ptm_alloc,
+                         p->cfg.maps_entries, p->cfg.maps_row_len);
       }
     }
   }
+
+  /* cleanups */
+  reload_map_exec_plugins = FALSE;
+  pretag_free_label(&saved_label);
 }
 
 struct channels_list_entry *insert_pipe_channel(int plugin_type, struct configuration *cfg, int pipe)
@@ -280,13 +423,15 @@ struct channels_list_entry *insert_pipe_channel(int plugin_type, struct configur
 
   while (index < MAX_N_PLUGINS) {
     chptr = &channels_list[index]; 
-    if (!chptr->aggregation) { /* found room */
+    if (!chptr->aggregation && !chptr->aggregation_2) { /* found room */
       chptr->aggregation = cfg->what_to_count;
+      chptr->aggregation_2 = cfg->what_to_count_2;
       chptr->pipe = pipe; 
       chptr->agg_filter.table = cfg->bpfp_a_table;
       chptr->agg_filter.num = (int *) &cfg->bpfp_a_num; 
       chptr->bufsize = cfg->buffer_size;
-      chptr->id = cfg->post_tag;
+      chptr->tag = cfg->post_tag;
+      chptr->tag2 = cfg->post_tag2;
       if (cfg->sampling_rate && plugin_type != PLUGIN_ID_SFPROBE) { /* sfprobe cares for itself */
 	chptr->s.rate = cfg->sampling_rate;
 
@@ -299,10 +444,10 @@ struct channels_list_entry *insert_pipe_channel(int plugin_type, struct configur
       chptr->bufptr = chptr->buf;
       chptr->bufend = cfg->buffer_size-sizeof(struct ch_buf_hdr);
 
-      /* +1550 (NETFLOW_MSG_SIZE) has been introduced as a margin as a
+      /* +PKT_MSG_SIZE has been introduced as a margin as a
          countermeasure against the reception of malicious NetFlow v9
 	 templates */
-      chptr->rg.base = map_shared(0, cfg->pipe_size+1550, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
+      chptr->rg.base = map_shared(0, cfg->pipe_size+PKT_MSG_SIZE, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANONYMOUS, -1, 0);
       if (chptr->rg.base == MAP_FAILED) {
         Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate pipe buffer. Exiting ...\n", cfg->name, cfg->type); 
 	exit_all(1);
@@ -338,6 +483,7 @@ void delete_pipe_channel(int pipe)
 
     if (chptr->pipe == pipe) {
       chptr->aggregation = FALSE;
+      chptr->aggregation_2 = FALSE;
 	
       /* we ensure that any plugin is depending on the one
 	 being removed via the 'same_aggregate' flag */
@@ -346,7 +492,7 @@ void delete_pipe_channel(int pipe)
 	for (index2++; index2 < MAX_N_PLUGINS; index2++) {
 	  chptr = &channels_list[index2];
 
-	  if (!chptr->aggregation) break; /* we finished channels */
+	  if (!chptr->aggregation && !chptr->aggregation_2) break; /* we finished channels */
 	  if (chptr->same_aggregate) {
 	    chptr->same_aggregate = FALSE;
 	    break; 
@@ -358,7 +504,7 @@ void delete_pipe_channel(int pipe)
       index2 = index;
       for (index2++; index2 < MAX_N_PLUGINS; index2++) {
 	chptr = &channels_list[index2];
-	if (chptr->aggregation) {
+	if (chptr->aggregation || chptr->aggregation_2) {
 	  memcpy(&channels_list[index], chptr, sizeof(struct channels_list_entry)); 
 	  memset(chptr, 0, sizeof(struct channels_list_entry)); 
 	  index++;
@@ -380,11 +526,12 @@ void sort_pipe_channels()
   int x = 0, y = 0; 
 
   while (x < MAX_N_PLUGINS) {
-    if (!channels_list[x].aggregation) break;
+    if (!channels_list[x].aggregation && !channels_list[x].aggregation_2) break;
     y = x+1; 
     while (y < MAX_N_PLUGINS) {
-      if (!channels_list[y].aggregation) break;
-      if (channels_list[x].aggregation == channels_list[y].aggregation) {
+      if (!channels_list[y].aggregation && !channels_list[y].aggregation_2) break;
+      if (channels_list[x].aggregation == channels_list[y].aggregation &&
+          channels_list[x].aggregation_2 == channels_list[y].aggregation_2) {
 	channels_list[y].same_aggregate = TRUE;
 	if (y == x+1) x++;
 	else {
@@ -465,25 +612,6 @@ pm_counter_t take_simple_systematic_skip(pm_counter_t mean)
    TRUE: We want it!
    FALSE: Discard it!
 */
-
-int evaluate_tags(struct pretag_filter *filter, pm_id_t tag)
-{
-  int index;
-
-  if (filter->num == 0) return FALSE; /* no entries in the filter array: tag filtering disabled */
-  
-  for (index = 0; index < filter->num; index++) {
-    if (filter->table[index].n <= tag && filter->table[index].r >= tag) return (FALSE | filter->table[index].neg);
-    else if (filter->table[index].neg) return FALSE;
-  }
-  
-  return TRUE;
-}
-
-/* return value:
-   TRUE: We want it!
-   FALSE: Discard it!
-*/
 int evaluate_filters(struct aggregate_filter *filter, char *pkt, struct pcap_pkthdr *pkthdr)
 {
   int index;
@@ -505,7 +633,7 @@ void recollect_pipe_memory(struct channels_list_entry *mychptr)
   while (index < MAX_N_PLUGINS) {
     chptr = &channels_list[index];
     if (mychptr->rg.base != chptr->rg.base) {
-      munmap(chptr->rg.base, (chptr->rg.end-chptr->rg.base)+1550);
+      munmap(chptr->rg.base, (chptr->rg.end-chptr->rg.base)+PKT_MSG_SIZE);
       munmap(chptr->status, sizeof(struct ch_status));
     }
     index++;
@@ -514,9 +642,9 @@ void recollect_pipe_memory(struct channels_list_entry *mychptr)
 
 void init_random_seed()
 {
-  struct timeval tv; struct timezone tz;
+  struct timeval tv;
 
-  gettimeofday(&tv, &tz);
+  gettimeofday(&tv, NULL);
   srandom((unsigned int)tv.tv_usec);
 }
 
@@ -524,7 +652,7 @@ void fill_pipe_buffer()
 {
   int index;
 
-  for (index = 0; channels_list[index].aggregation; index++) {
+  for (index = 0; channels_list[index].aggregation || channels_list[index].aggregation_2; index++) {
     channels_list[index].hdr.seq++;
     channels_list[index].hdr.seq %= MAX_SEQNUM;
 
@@ -539,11 +667,48 @@ void fill_pipe_buffer()
   }
 }
 
+int check_pipe_buffer_space(struct channels_list_entry *mychptr, struct pkt_vlen_hdr_primitives *pvlen, int len)
+{
+  int buf_space = 0;
+
+  if (!mychptr || !pvlen) return ERR;
+
+  /* init to base of current element */
+  buf_space = mychptr->bufend - mychptr->bufptr;
+
+  /* subtract fixed part, current variable part and new var part (len) */
+  buf_space -= mychptr->datasize;
+  buf_space -= pvlen->tot_len;
+  buf_space -= len;
+
+  /* return virdict. if positive fix sizes. if negative take care of triggering a reprocess */
+  if (buf_space >= 0) {
+    mychptr->var_size += len;
+    return FALSE;
+  }
+  else {
+    mychptr->bufptr += (mychptr->bufend - mychptr->bufptr);
+    mychptr->reprocess = TRUE;
+    mychptr->var_size = 0;
+
+    return TRUE;
+  }
+}
+
+void return_pipe_buffer_space(struct channels_list_entry *mychptr, int len)
+{
+  if (!mychptr || !len) return;
+
+  if (mychptr->var_size < len) return;
+
+  mychptr->var_size -= len;
+}
+
 int check_shadow_status(struct packet_ptrs *pptrs, struct channels_list_entry *mychptr)
 {
   if (pptrs->shadow) {
-    if (pptrs->tag && mychptr->aggregation & COUNT_ID) return FALSE;
-    else if (pptrs->tag2 && mychptr->aggregation & COUNT_ID2) return FALSE;
+    if (pptrs->tag && mychptr->aggregation & COUNT_TAG) return FALSE;
+    else if (pptrs->tag2 && mychptr->aggregation & COUNT_TAG2) return FALSE;
     else return TRUE;
   } 
   else return FALSE;
@@ -586,37 +751,30 @@ void load_plugin_filters(int link_type)
   }
 }
 
-int pkt_data_clean(void *pdata)
+int pkt_data_clean(void *pdata, int len)
 {
-  memset(pdata, 0, PdataSz);
+  memset(pdata, 0, len);
 
-  return PdataSz;
+  return len;
 }
 
-int pkt_payload_clean(void *ppayload)
+int pkt_payload_clean(void *ppayload, int len)
 {
   memset(ppayload, 0, PpayloadSz);
 
   return PpayloadSz;
 }
 
-int pkt_msg_clean(void *ppayload)
+int pkt_msg_clean(void *ppayload, int len)
 {
   memset(ppayload, 0, PmsgSz);
 
   return PmsgSz;
 }
 
-int pkt_extras_clean(void *pextras)
+int pkt_extras_clean(void *pextras, int len)
 {
   memset(pextras, 0, PdataSz+PextrasSz);
 
   return PdataSz+PextrasSz;
-}
-
-int pkt_bgp_clean(void *pbgp)
-{
-  memset(pbgp, 0, PdataSz+PbgpSz);
-
-  return PdataSz+PbgpSz;
 }

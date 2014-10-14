@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -111,6 +111,10 @@ int parse_configuration_file(char *filename)
         else {
 	  localbuf[sizeof(localbuf)-1] = '\0';
           cfg[rows] = malloc(strlen(localbuf)+2);
+	  if (!cfg[rows]) {
+	    Log(LOG_ERR, "ERROR ( %s ): malloc() failed (parse_configuration_file). Exiting ..\n", filename);
+	    exit(1);
+	  }
           strcpy(cfg[rows], localbuf);
           cfg[rows][strlen(localbuf)+1] = '\0';
           rows++;
@@ -138,9 +142,12 @@ int parse_configuration_file(char *filename)
      plugin names if 'pmacctd' has been invoked commandline;
      if any plugin has been activated we default to a single
      'imt' plugin */ 
-  create_plugin(filename, "default", "core");
+  if (!cmdlineflag) parse_core_process_name(filename, rows, FALSE);
+  else parse_core_process_name(filename, rows, TRUE);
+
   if (!cmdlineflag) num = parse_plugin_names(filename, rows, FALSE);
   else num = parse_plugin_names(filename, rows, TRUE);
+
   if (!num) {
     Log(LOG_WARNING, "WARN ( %s ): No plugin has been activated; defaulting to in-memory table.\n", filename); 
     num = create_plugin(filename, "default", "memory");
@@ -313,6 +320,34 @@ void sanitize_cfg(int rows, char *filename)
   }
 }
 
+void parse_core_process_name(char *filename, int rows, int ignore_names)
+{
+  int index = 0, found = 0;
+  char key[SRVBUFLEN], name[SRVBUFLEN], *start, *end;
+
+  /* searching for 'plugins' key */
+  while (index < rows) {
+    memset(key, 0, SRVBUFLEN);
+    start = NULL; end = NULL;
+
+    start = cfg[index];
+    end = strchr(cfg[index], ':');
+    if (end > start) {
+      strlcpy(key, cfg[index], (end-start)+1);
+      if (!strncmp(key, "core_proc_name", sizeof("core_proc_name"))) {
+        start = end+1;
+        strlcpy(name, start, SRVBUFLEN);
+	found = TRUE;
+        break;
+      }
+    }
+    index++;
+  }
+
+  if (!found || ignore_names) create_plugin(filename, "default", "core");
+  else create_plugin(filename, name, "core");
+}
+
 /* parse_plugin_names() leaves cfg array untouched: parses the key 'plugins'
    if it exists and creates the plugins linked list */ 
 int parse_plugin_names(char *filename, int rows, int ignore_names)
@@ -388,7 +423,7 @@ void set_default_values()
 
   while (list) {
     list->cfg.promisc = TRUE;
-    list->cfg.refresh_maps = TRUE;
+    list->cfg.maps_refresh = TRUE;
 
     list = list->next;
   }
@@ -434,7 +469,7 @@ int create_plugin(char *filename, char *name, char *type)
   /* creating a new plugin structure */
   plugin = (struct plugins_list_entry *) malloc(sizeof(struct plugins_list_entry));
   if (!plugin) {
-    Log(LOG_ERR, "ERROR ( %s ): Unable to allocate memory config_plugin structure.\n", filename);
+    Log(LOG_ERR, "ERROR ( %s ): malloc() failed (create_plugin). Exiting ..\n", filename);
     exit(1);
   }
 

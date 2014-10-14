@@ -73,13 +73,13 @@ isis_csm_state_change (int event, struct isis_circuit *circuit, void *arg)
   int old_state;
 
   old_state = circuit ? circuit->state : C_STATE_NA;
-  Log(LOG_DEBUG, "DEBUG (default/core/ISIS ): CSM_EVENT: %s\n", EVENT2STR (event));
+  Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): CSM_EVENT: %s\n", config.name, EVENT2STR (event));
 
   switch (old_state)
     {
     case C_STATE_NA:
       if (circuit)
-	Log(LOG_WARNING, "WARN (default/core/ISIS ): Non-null circuit while state C_STATE_NA\n");
+	Log(LOG_WARNING, "WARN ( %s/core/ISIS ): Non-null circuit while state C_STATE_NA\n", config.name);
       switch (event)
 	{
 	case ISIS_ENABLE:
@@ -90,13 +90,13 @@ isis_csm_state_change (int event, struct isis_circuit *circuit, void *arg)
 	case IF_UP_FROM_Z:
 	  circuit = isis_circuit_new ();
 	  // isis_circuit_if_add (circuit, (struct interface *) arg);
-	  listnode_add (isis->init_circ_list, circuit);
+	  isis_listnode_add (isis->init_circ_list, circuit);
 	  circuit->state = C_STATE_INIT;
 	  break;
 	case ISIS_DISABLE:
-	  Log(LOG_WARNING, "WARN (default/core/ISIS ): circuit already disabled\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): circuit already disabled\n", config.name);
 	case IF_DOWN_FROM_Z:
-	  Log(LOG_WARNING, "WARN (default/core/ISIS ): circuit already disconnected\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): circuit already disconnected\n", config.name);
 	  break;
 	}
       break;
@@ -108,17 +108,17 @@ isis_csm_state_change (int event, struct isis_circuit *circuit, void *arg)
 	  isis_circuit_up (circuit);
 	  circuit->state = C_STATE_UP;
 	  isis_event_circuit_state_change (circuit, 1);
-	  listnode_delete (isis->init_circ_list, circuit);
+	  isis_listnode_delete (isis->init_circ_list, circuit);
 	  break;
 	case IF_UP_FROM_Z:
-	  Log(LOG_WARNING, "WARN (default/core/ISIS ): circuit already connected\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): circuit already connected\n", config.name);
 	  break;
 	case ISIS_DISABLE:
-	  Log(LOG_WARNING, "WARN (default/core/ISIS ): circuit already disabled\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): circuit already disabled\n", config.name);
 	  break;
 	case IF_DOWN_FROM_Z:
 	  // isis_circuit_if_del (circuit);
-	  listnode_delete (isis->init_circ_list, circuit);
+	  isis_listnode_delete (isis->init_circ_list, circuit);
 	  isis_circuit_del (circuit);
 	  circuit = NULL;
 	  break;
@@ -128,7 +128,7 @@ isis_csm_state_change (int event, struct isis_circuit *circuit, void *arg)
       switch (event)
 	{
 	case ISIS_ENABLE:
-	  Log(LOG_WARNING, "WARN (default/core/ISIS ): circuit already enabled\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): circuit already enabled\n", config.name);
 	  break;
 	case IF_UP_FROM_Z:
 	  // isis_circuit_if_add (circuit, (struct interface *) arg);
@@ -142,7 +142,7 @@ isis_csm_state_change (int event, struct isis_circuit *circuit, void *arg)
 	  circuit = NULL;
 	  break;
 	case IF_DOWN_FROM_Z:
-	  Log(LOG_WARNING, "WARN (default/core/ISIS ): circuit already disconnected\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): circuit already disconnected\n", config.name);
 	  break;
 	}
       break;
@@ -150,14 +150,14 @@ isis_csm_state_change (int event, struct isis_circuit *circuit, void *arg)
       switch (event)
 	{
 	case ISIS_ENABLE:
-	  Log(LOG_WARNING, "WARN (default/core/ISIS ): circuit already configured\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): circuit already configured\n", config.name);
 	  break;
 	case IF_UP_FROM_Z:
-	  Log(LOG_WARNING, "WARN (default/core/ISIS ): circuit already connected\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): circuit already connected\n", config.name);
 	  break;
 	case ISIS_DISABLE:
 	  isis_circuit_deconfigure (circuit, (struct isis_area *) arg);
-	  listnode_add (isis->init_circ_list, circuit);
+	  isis_listnode_add (isis->init_circ_list, circuit);
 	  circuit->state = C_STATE_INIT;
 	  isis_event_circuit_state_change (circuit, 0);
 	  break;
@@ -170,10 +170,10 @@ isis_csm_state_change (int event, struct isis_circuit *circuit, void *arg)
       break;
 
     default:
-      Log(LOG_WARNING, "WARN (default/core/ISIS ): Invalid circuit state %d\n", old_state);
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): Invalid circuit state %d\n", config.name, old_state);
     }
 
-  Log(LOG_DEBUG, "DEBUG (default/core/ISIS ): CSM_STATE_CHANGE: %s -> %s \n", STATE2STR (old_state),
+  Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): CSM_STATE_CHANGE: %s -> %s \n", config.name, STATE2STR (old_state),
 		circuit ? STATE2STR (circuit->state) : STATE2STR (C_STATE_NA));
 
   return circuit;

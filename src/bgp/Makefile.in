@@ -1,4 +1,4 @@
-# $Id: Makefile.in,v 1.1.1.1 2009/03/06 13:42:01 paolo Exp $
+# $Id: Makefile.in,v 1.2 2014/05/02 23:09:22 paolo Exp $
 
 prefix=@prefix@
 exec_prefix=@exec_prefix@
@@ -28,8 +28,8 @@ COMMON=
 
 all: $(TARGETS)
 
-libbgp.a: bgp.o bgp_aspath.o bgp_community.o bgp_ecommunity.o bgp_hash.o bgp_prefix.o bgp_table.o $(COMMON)
-	ar rc $@ bgp.o bgp_aspath.o bgp_community.o bgp_ecommunity.o bgp_hash.o bgp_prefix.o bgp_table.o $(COMMON)
+libbgp.a: bgp.o bgp_aspath.o bgp_community.o bgp_ecommunity.o bgp_hash.o bgp_prefix.o bgp_table.o bgp_logdump.o $(COMMON)
+	ar rc $@ bgp.o bgp_aspath.o bgp_community.o bgp_ecommunity.o bgp_hash.o bgp_prefix.o bgp_table.o bgp_logdump.o $(COMMON)
 	$(RANLIB) $@
 
 clean:

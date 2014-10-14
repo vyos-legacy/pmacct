@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -39,6 +39,7 @@ int sql_dont_try_update = 0;
 int sql_history_since_epoch = 0;
 char timebuf[SRVBUFLEN];
 char *sql_table;
+struct configuration config;
 
 void usage(char *prog)
 {
@@ -102,7 +103,7 @@ void print_data(struct db_cache *cache_elem, u_int32_t wtc, int num)
   char src_mac[18], dst_mac[18], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN];
 
   printf("%-8d  ", num);
-  printf("%-5d  ", data->id);
+  printf("%-5d  ", data->tag);
 #if defined (HAVE_L2)
   etheraddr_string(data->eth_shost, src_mac);
   printf("%-17s  ", src_mac);
@@ -156,7 +157,7 @@ int main(int argc, char **argv)
   char default_pwd[] = "arealsmartpwd";
   int have_pwd = 0, have_logfile = 0, n;
   int result = 0, position = 0, howmany = 0; 
-  int do_nothing = 0; 
+  int do_nothing = 0, ret; 
   char *cl_sql_host = NULL, *cl_sql_user = NULL, *cl_sql_db = NULL, *cl_sql_table = NULL;
 
   char sql_pwd[SRVBUFLEN];
@@ -271,7 +272,10 @@ int main(int argc, char **argv)
     exit(1);
   }
 
-  fread(&lh, sizeof(lh), 1, f);
+  if ((ret = fread(&lh, sizeof(lh), 1, f)) != 1) {
+    printf("ERROR: Short read from %s\nExiting...\n", logfile);
+    exit(1);
+  }
   lh.sql_table_version = ntohs(lh.sql_table_version);
   lh.sql_optimize_clauses = ntohs(lh.sql_optimize_clauses);
   lh.sql_history = ntohs(lh.sql_history);
@@ -306,7 +310,10 @@ int main(int argc, char **argv)
   if (cl_sql_host) sql_host = cl_sql_host;
   else sql_host = lh.sql_host;
   
-  fread(&th, sizeof(th), 1, f);
+  if ((ret = fread(&th, sizeof(th), 1, f)) != 1) {
+    printf("ERROR: Short read from %s\nExiting...\n", logfile);
+    exit(1);
+  }
   th.magic = ntohl(th.magic);
   th.num = ntohs(th.num);
   th.sz = ntohs(th.sz);
@@ -319,7 +326,10 @@ int main(int argc, char **argv)
     }
     te = malloc(th.num*sizeof(struct template_entry));
     memset(te, 0, th.num*sizeof(struct template_entry));
-    fread(te, th.num*sizeof(struct template_entry), 1, f);
+    if ((ret = fread(te, th.num*sizeof(struct template_entry), 1, f)) != 1) {
+      printf("ERROR: Short read from %s\nExiting...\n", logfile);
+      exit(1);
+    }
   }
   else {
     if (debug) printf("ERROR: no template header found.\n");
@@ -472,7 +482,7 @@ int MY_evaluate_history(int primitive)
 
 int MY_evaluate_primitives(int primitive)
 {
-  u_int64_t what_to_count = 0;
+  pm_cfgreg_t what_to_count = 0;
   short int assume_custom_table = FALSE;
 
   if (lh.sql_optimize_clauses) {
@@ -497,7 +507,7 @@ int MY_evaluate_primitives(int primitive)
     what_to_count |= COUNT_DST_PORT;
     what_to_count |= COUNT_IP_TOS;
     what_to_count |= COUNT_IP_PROTO;
-    what_to_count |= COUNT_ID;
+    what_to_count |= COUNT_TAG;
     what_to_count |= COUNT_VLAN;
     if (lh.what_to_count & COUNT_SUM_PORT) what_to_count |= COUNT_SUM_PORT; 
     if (lh.what_to_count & COUNT_SUM_MAC) what_to_count |= COUNT_SUM_MAC; 
@@ -704,15 +714,15 @@ int MY_evaluate_primitives(int primitive)
     primitive++;
   }
 
-  if (what_to_count & COUNT_ID) {
+  if (what_to_count & COUNT_TAG) {
     int count_it = FALSE;
                                                                                             
     if ((lh.sql_table_version < 2) && !assume_custom_table) {
-      if (lh.what_to_count & COUNT_ID) {
+      if (lh.what_to_count & COUNT_TAG) {
         printf("ERROR: The use of IDs requires SQL table version 2. Exiting.\n");
         exit(1);
       }
-      else what_to_count ^= COUNT_ID;
+      else what_to_count ^= COUNT_TAG;
     }
     else count_it = TRUE;
 
@@ -725,8 +735,8 @@ int MY_evaluate_primitives(int primitive)
       strncat(insert_clause, "agent_id", SPACELEFT(insert_clause));
       strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
       strncat(where[primitive].string, "agent_id=%u", SPACELEFT(where[primitive].string));
-      values[primitive].type = where[primitive].type = COUNT_ID;
-      values[primitive].handler = where[primitive].handler = count_id_handler;
+      values[primitive].type = where[primitive].type = COUNT_TAG;
+      values[primitive].handler = where[primitive].handler = count_tag_handler;
       primitive++;
     }
   }
@@ -787,8 +797,16 @@ void MY_exit_gracefully(int signum)
   exit(0);
 }
 
-/* Dummy version of bgp_rd2str() to resolve code dependencies */
+/* Dummy version of unsupported functions for the purpose of resolving code dependencies */
 int bgp_rd2str(u_char *str, rd_t *rd)
 {
   return TRUE;
+}
+
+void custom_primitive_value_print(char *out, int outlen, char *in, struct custom_primitive_ptrs *cp_entry, int formatted)
+{
+}
+
+void vlen_prims_get(struct pkt_vlen_hdr_primitives *pvlen, pm_cfgreg_t wtc, char **label_ptr)
+{
 }

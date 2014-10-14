@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -41,6 +41,10 @@
 #include <getopt.h> 
 #endif
 
+#if defined HAVE_MALLOPT
+#include <malloc.h>
+#endif
+
 #include <ctype.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -66,6 +70,15 @@
 #endif
 #endif
 
+#if defined (WITH_GEOIP)
+#include <GeoIP.h>
+#endif
+
+#include "pmacct-build.h"
+
+#if !defined ETHER_ADDRSTRLEN
+#define ETHER_ADDRSTRLEN 18
+#endif
 #if !defined INET_ADDRSTRLEN 
 #define INET_ADDRSTRLEN 16
 #endif
@@ -152,8 +165,16 @@
 }
 #endif
 
+/* structure to pass requests: probably plugin_requests
+   name outdated at this point .. */
 struct plugin_requests {
-  u_int8_t bpf_filter; /* On-request packet copy for BPF purposes */
+  u_int8_t bpf_filter;		/* On-request packet copy for BPF purposes */
+
+  /* load_id_file() stuff */
+  void *key_value_table;	/* table to be filled in from key-value files */
+  int line_num;			/* line number being processed */
+  int map_entries;		/* number of map entries: wins over global setting */
+  int map_row_len;		/* map row length: wins over global setting */
 };
 
 #include "pmacct-defines.h"
@@ -193,7 +214,6 @@ struct pcap_device {
 
 struct pcap_callback_data {
   u_char * f_agent; 
-  u_char * idt; 
   u_char * bta_table;
   u_char * bpas_table; 
   u_char * blp_table; 
@@ -212,6 +232,15 @@ struct _protocols_struct {
 struct _devices_struct {
   void (*handler)(const struct pcap_pkthdr *, register struct packet_ptrs *);
   int link_type;
+};
+
+struct _primitives_matrix_struct {
+  char name[PRIMITIVE_LEN];
+  u_int8_t pmacctd;
+  u_int8_t uacctd;
+  u_int8_t nfacctd;
+  u_int8_t sfacctd;
+  char desc[PRIMITIVE_DESC_LEN];
 };
 
 struct smallbuf {
@@ -277,8 +306,9 @@ EXT int gtp_tunnel_func(register struct packet_ptrs *);
 EXT int gtp_tunnel_configurator(struct tunnel_handler *, char *);
 EXT void tunnel_registry_init();
 EXT void pcap_cb(u_char *, const struct pcap_pkthdr *, const u_char *);
-EXT void PM_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
+EXT int PM_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 EXT void compute_once();
+EXT void set_index_pkt_ptrs(struct packet_ptrs *);
 #undef EXT
 
 #if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C)
@@ -287,7 +317,10 @@ EXT void compute_once();
 #define EXT
 #endif
 EXT struct host_addr mcast_groups[MAX_MCAST_GROUPS];
-EXT int reload_map, reload_map_bgp_thread, data_plugins, tee_plugins;
+EXT int reload_map, reload_map_exec_plugins;
+EXT int reload_map_bgp_thread, reload_log_bgp_thread;
+EXT int data_plugins, tee_plugins;
+EXT struct timeval reload_map_tstamp;
 EXT struct child_ctl sql_writers;
 #undef EXT
 

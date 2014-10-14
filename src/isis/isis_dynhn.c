@@ -44,7 +44,7 @@ void
 dyn_cache_init (void)
 {
   dyn_cache = NULL;
-  dyn_cache = list_new ();
+  dyn_cache = isis_list_new ();
 }
 
 int
@@ -61,7 +61,7 @@ dyn_cache_cleanup ()
       if ((now - dyn->refresh) < (MAX_AGE + 120))
 	continue;
 
-      list_delete_node (dyn_cache, node);
+      isis_list_delete_node (dyn_cache, node);
       free(dyn);
     }
 
@@ -97,7 +97,7 @@ isis_dynhn_insert (u_char * id, struct hostname *hostname, int level)
   dyn = calloc(1, sizeof (struct isis_dynhn));
   if (!dyn)
     {
-      Log(LOG_WARNING, "WARN (default/core/ISIS ): isis_dynhn_insert(): out of memory!\n");
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): isis_dynhn_insert(): out of memory!\n", config.name);
       return;
     }
 
@@ -107,7 +107,7 @@ isis_dynhn_insert (u_char * id, struct hostname *hostname, int level)
   dyn->refresh = time (NULL);
   dyn->level = level;
 
-  listnode_add (dyn_cache, dyn);
+  isis_listnode_add (dyn_cache, dyn);
 
   return;
 }

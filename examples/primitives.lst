@@ -1,0 +1,87 @@
+!
+! aggregate_primitives: list of custom-defined primitives
+!
+! File syntax is key-based. Position of keys inside the same row (rule) is not
+! relevant; Spaces are not allowed (ie. 'id = 1' is not valid). The first full
+! match wins (like in firewall rules).
+!
+! list of currently supported keys follows:
+!
+! 'name'		Primitive name: it will be used as identifier of the
+!			primitive itself and hence must be unique. This name
+!			can be used in 'aggregate' statements to include the
+!			primitive as part of plugin aggregation methods.
+! 'packet_ptr'		Applies to pmacctd (libpcap) and uacctd (ULOG):
+!			defines the base pointer in the packet where to read
+!			the primitive value; intuitively, this is to be used
+!			in conjunction with 'len'. The supported syntax is:
+!			"<layer>:[<protocol value>]+[<offset>]". 'layer' keys 
+!			are: 'packet', 'mac', 'vlan', 'mpls', 'l3', 'l4' and
+!			'payload'; 'layer' keyword is mandatory. 'protocol
+!			value' is optional key and can be supplied in either
+!			decimal or hex format. 'offset' is optional key and
+!			is expected as a positive decimal number. A maximum
+!			of 8 'packet_ptr' definitions are allowed per entry. 
+! 'field_type'		Applies to NetFlow v9/IPFIX: defines which field type
+!			(Element ID) to select. Optionally, a PEN value can be
+!			supplied aswell via the <PEN>:<value> format. As a
+!			reference the IPFIX standard IE definition table can be
+!			used: http://www.iana.org/assignments/ipfix/ipfix.xhtml
+! 'len'			Length of the primitive, in bytes. 'vlen' word defines
+!			a primitive to be variable length. In pmacctd and 
+!			uacctd only strings can be defined vlen; in nfacctd
+!			string and raw semantics can be defined vlen.
+! 'semantics'		Specifies semantics of the primitive. Allowed values
+!			are: 'u_int' (unsigned integer, presented as decimal
+!			number), 'hex' (unsigned integer, presented as hexa-
+!			decimal number), 'ip' (IP address), 'mac' (L2 MAC
+!			address), 'str' (string) and 'raw' (raw data, fixed
+!			or variable length in hex format). 
+! 
+! Examples:
+!
+! Defines a primitive called 'mtla': it picks NetFlow v9/IPFIX field type #47
+! (mplsTopLabelIPv4Address), reads for 4 bytes (since it's expected to be an
+! IPv4 address) and will present it as an IP address. 
+! In an 'aggregate' statement this primitive would be intuitively recalled by
+! its name, 'mtla'.
+!
+name=mtla	field_type=47	len=4	semantics=ip
+!
+! Defines a primitive called 'mtlpl': it picks NetFlow v9/IPFIX field type #91
+! (mplsTopLabelPrefixLength), reads for 1 byte (since it's expected to be a
+! prefix length/network mask) and will present it as a decimal unsigned int.
+!
+name=mtlpl	field_type=91	len=1	semantics=u_int
+!
+! Defines a primitive called 'alu_91': it picks NetFlow v9/IPFIX field type
+! #91 and PEN #637 (Alcatel-Lucent), reads for 2 bytes and will present it as
+! a hexadecimal.
+!
+name=alu_91	field_type=637:91	len=2	semantics=hex
+!
+! Defines a primitive called 'ttl': if reading an IPv4 header (l3:0x800) the
+! base pointer is offset by 8 bytes, if reading an IPv6 header (l3:0x86dd) it
+! is offset by 7 bytes; it reads for 1 byte and will present it as unsigned
+! int.
+!
+name=ttl	packet_ptr=l3:0x800+8   packet_ptr=l3:0x86dd+7	len=1   semantics=u_int
+!
+! Defines a primitive called 'udp_len': base pointer is set to the UDP header
+! (l4:17) plus 4 bytes offset, reads for 2 byte and will present it as unsigned
+! int.
+!
+name=udp_len	packet_ptr=l4:17+4      len=2   semantics=u_int
+!
+! Defines a primitive called 'tcp_win': base pointer is set to the TCP header
+! (l4:6) plus 14 bytes offset, reads for 2 byte and will present it as unsigned
+! int.
+!
+name=tcp_win	packet_ptr=l4:6+14      len=2   semantics=u_int
+!
+! nfprobe example: defines a primitive called 'ttl': if reading an IPv4 header
+! (l3:0x800) the base pointer is offset by 8 bytes, if reading an IPv6 header
+! (l3:0x86dd) it is offset by 7 bytes; it reads for 1 byte and will present it
+! as unsigned int. The info is carried via NetFlow/IPFIX in field type #192.
+!
+name=ttl	packet_ptr=l3:0x800+8   packet_ptr=l3:0x86dd+7  len=1   semantics=u_int	field_type=192

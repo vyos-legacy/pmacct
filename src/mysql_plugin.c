@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -36,32 +36,37 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct ports_table pt;
   struct pollfd pfd;
   struct insert_data idata;
-  struct timezone tz;
   time_t refresh_deadline;
   int timeout;
   int ret, num;
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
+  int datasize = ((struct channels_list_entry *)ptr)->datasize;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
-  struct pkt_bgp_primitives *pbgp;
+  struct networks_file_data nfd;
   char *dataptr;
 
   unsigned char *rgptr;
   int pollagain = TRUE;
   u_int32_t seq = 1, rg_err_count = 0; 
 
+  struct extra_primitives extras;
+  struct primitives_ptrs prim_ptrs;
+
   memcpy(&config, cfgptr, sizeof(struct configuration));
+  memcpy(&extras, &((struct channels_list_entry *)ptr)->extras, sizeof(struct extra_primitives));
   recollect_pipe_memory(ptr);
   pm_setproctitle("%s [%s]", "MySQL Plugin", config.name);
+
   memset(&idata, 0, sizeof(idata));
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
   if (config.logfile) {
     fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile);
+    config.logfile_fd = open_logfile(config.logfile, "a");
   }
 
   sql_set_signals();
-  sql_init_default_values();
+  sql_init_default_values(&extras);
   MY_init_default_values(&idata);
   MY_set_callbacks(&sqlfunc_cbr);
   sql_set_insert_func();
@@ -70,8 +75,9 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   reload_map = FALSE;
   idata.now = time(NULL);
   refresh_deadline = idata.now;
+  idata.cfg = &config;
 
-  sql_init_maps(&nt, &nc, &pt);
+  sql_init_maps(&extras, &prim_ptrs, &nt, &nc, &pt);
   sql_init_global_buffers();
   sql_init_pipe(&pfd, pipe_fd);
   sql_init_historical_acct(idata.now, &idata);
@@ -89,9 +95,6 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   te = sql_init_logfile_template(&th); 
   INIT_BUF(logbuf);
 
-  /* handling purge preprocessor */
-  set_preprocess_funcs(config.sql_preprocess, &prep); 
-
   /* setting up environment variables */
   SQL_SetENV();
 
@@ -101,9 +104,17 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   for(;;) {
     poll_again:
     status->wakeup = TRUE;
-    sql_calc_refresh_timeout(refresh_deadline, idata.now, &timeout);
+    calc_refresh_timeout(refresh_deadline, idata.now, &timeout);
     ret = poll(&pfd, 1, timeout);
-    if (ret < 0) goto poll_again;
+
+    if (ret <= 0) {
+      if (getppid() == 1) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): Core process *seems* gone. Exiting.\n", config.name, config.type);
+        exit_plugin(1);
+      }
+
+      if (ret < 0) goto poll_again;
+    }
 
     idata.now = time(NULL);
 
@@ -123,48 +134,7 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     switch (ret) {
     case 0: /* timeout */
       if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata, FALSE);
-      switch (fork()) {
-      case 0: /* Child */
-	/* we have to ignore signals to avoid loops:
-	   because we are already forked */
-	signal(SIGINT, SIG_IGN);
-	signal(SIGHUP, SIG_IGN);
-	pm_setproctitle("%s [%s]", "MySQL Plugin -- DB Writer", config.name);
-
-        if (qq_ptr && sql_writers.flags != CHLD_ALERT) {
-	  if (sql_writers.flags == CHLD_WARNING) sql_db_fail(&p);
-          (*sqlfunc_cbr.connect)(&p, config.sql_host); 
-          (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, &idata);
-	  (*sqlfunc_cbr.close)(&bed);
-	}
-
-	if (config.sql_trigger_exec) {
-	  if (idata.now > idata.triggertime) sql_trigger_exec(config.sql_trigger_exec);
-	}
-	  
-        exit(0);
-      default: /* Parent */
-	if (pqq_ptr) sql_cache_flush_pending(pending_queries_queue, pqq_ptr, &idata);
-	gettimeofday(&idata.flushtime, &tz);
-	while (idata.now > refresh_deadline)
-	  refresh_deadline += config.sql_refresh_time; 
-	while (idata.now > idata.triggertime && idata.t_timeslot > 0) {
-	  idata.triggertime  += idata.t_timeslot;
-	  if (config.sql_trigger_time == COUNT_MONTHLY)
-	    idata.t_timeslot = calc_monthly_timeslot(idata.triggertime, config.sql_trigger_time_howmany, ADD);
-	}
-	idata.new_basetime = FALSE;
-	glob_new_basetime = FALSE;
-	qq_ptr = pqq_ptr;
-	memcpy(queries_queue, pending_queries_queue, qq_ptr*sizeof(struct db_cache *));
-
-	if (reload_map) {
-	  load_networks(config.networks_file, &nt, &nc);
-	  load_ports(config.ports_file, &pt);
-	  reload_map = FALSE;
-	}
-        break;
-      }
+      sql_cache_handle_flush_event(&idata, &refresh_deadline, &pt);
       break;
     default: /* we received data */
       read_data:
@@ -178,6 +148,8 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         if ((ret = read(pipe_fd, &rgptr, sizeof(rgptr))) == 0) 
 	  exit_plugin(1); /* we exit silently; something happened at the write end */
       }
+
+      if ((rg->ptr + bufsz) > rg->end) rg->ptr = rg->base;
 
       if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
 	if (!pollagain) {
@@ -199,54 +171,12 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
       pollagain = FALSE;
       memcpy(pipebuf, rg->ptr, bufsz);
-      if ((rg->ptr+bufsz) >= rg->end) rg->ptr = rg->base;
-      else rg->ptr += bufsz;
+      rg->ptr += bufsz;
 
       /* lazy sql refresh handling */ 
       if (idata.now > refresh_deadline) {
         if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata, FALSE);
-        switch (fork()) {
-        case 0: /* Child */
-          /* we have to ignore signals to avoid loops:
-             because we are already forked */
-          signal(SIGINT, SIG_IGN);
-          signal(SIGHUP, SIG_IGN);
-	  pm_setproctitle("%s [%s]", "MySQL Plugin -- DB Writer", config.name);
-
-          if (qq_ptr && sql_writers.flags != CHLD_ALERT) {
-	    if (sql_writers.flags == CHLD_WARNING) sql_db_fail(&p);
-            (*sqlfunc_cbr.connect)(&p, config.sql_host);
-            (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, &idata);
-	    (*sqlfunc_cbr.close)(&bed);
-	  }
-
-	  if (config.sql_trigger_exec) {
-	    if (idata.now > idata.triggertime) sql_trigger_exec(config.sql_trigger_exec);
-	  }
-
-          exit(0);
-        default: /* Parent */
-	  if (pqq_ptr) sql_cache_flush_pending(pending_queries_queue, pqq_ptr, &idata);
-	  gettimeofday(&idata.flushtime, &tz);
-	  while (idata.now > refresh_deadline)
-	    refresh_deadline += config.sql_refresh_time; 
-          while (idata.now > idata.triggertime && idata.t_timeslot > 0) {
-	    idata.triggertime  += idata.t_timeslot;
-	    if (config.sql_trigger_time == COUNT_MONTHLY)
-	      idata.t_timeslot = calc_monthly_timeslot(idata.triggertime, config.sql_trigger_time_howmany, ADD);
-	  }
-	  idata.new_basetime = FALSE;
-	  glob_new_basetime = FALSE;
-	  qq_ptr = pqq_ptr;
-	  memcpy(queries_queue, pending_queries_queue, qq_ptr*sizeof(struct db_cache *));
-
-	  if (reload_map) {
-	    load_networks(config.networks_file, &nt, &nc);
-	    load_ports(config.ports_file, &pt);
-	    reload_map = FALSE;
-	  }
-          break;
-        }
+        sql_cache_handle_flush_event(&idata, &refresh_deadline, &pt);
       } 
       else {
 	if (config.sql_trigger_exec) {
@@ -261,24 +191,30 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
-      while (((struct ch_buf_hdr *)pipebuf)->num) {
+      while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
+        for (num = 0; primptrs_funcs[num]; num++)
+          (*primptrs_funcs[num])((u_char *)data, &extras, &prim_ptrs);
+
 	for (num = 0; net_funcs[num]; num++)
-	  (*net_funcs[num])(&nt, &nc, &data->primitives);
+	  (*net_funcs[num])(&nt, &nc, &data->primitives, prim_ptrs.pbgp, &nfd);
 
 	if (config.ports_file) {
 	  if (!pt.table[data->primitives.src_port]) data->primitives.src_port = 0;
 	  if (!pt.table[data->primitives.dst_port]) data->primitives.dst_port = 0;
 	}
 
-        if (PbgpSz) pbgp = (struct pkt_bgp_primitives *) ((u_char *)data+PdataSz);
-        else pbgp = NULL;
+        if (config.pkt_len_distrib_bins_str &&
+            config.what_to_count_2 & COUNT_PKT_LEN_DISTRIB)
+          evaluate_pkt_len_distrib(data);
 
-	(*insert_func)(data, pbgp, &idata);
+        prim_ptrs.data = data;
+	(*insert_func)(&prim_ptrs, &idata);
 	
 	((struct ch_buf_hdr *)pipebuf)->num--;
         if (((struct ch_buf_hdr *)pipebuf)->num) {
           dataptr = (unsigned char *) data;
-          dataptr += PdataSz + PbgpSz;
+          if (!prim_ptrs.vlen_next_off) dataptr += datasize;
+          else dataptr += prim_ptrs.vlen_next_off;
           data = (struct pkt_data *) dataptr;
 	}
       }
@@ -289,8 +225,8 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
 int MY_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_data *idata)
 {
-  char *ptr_values, *ptr_where, *ptr_mv, *ptr_set;
-  int num=0, ret=0, have_flows=0, len=0;
+  char *ptr_values, *ptr_where, *ptr_mv, *ptr_set, *ptr_insert;
+  int num=0, num_set=0, ret=0, have_flows=0, len=0;
 
   if (idata->mv.last_queue_elem) {
     ret = mysql_query(db->desc, multi_values_buffer);
@@ -310,18 +246,27 @@ int MY_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_
   ptr_where = where_clause;
   ptr_values = values_clause; 
   ptr_set = set_clause;
+  ptr_insert = insert_full_clause;
   memset(where_clause, 0, sizeof(where_clause));
   memset(values_clause, 0, sizeof(values_clause));
   memset(set_clause, 0, sizeof(set_clause));
+  memset(insert_full_clause, 0, sizeof(insert_full_clause));
 
   for (num = 0; num < idata->num_primitives; num++)
     (*where[num].handler)(cache_elem, idata, num, &ptr_values, &ptr_where);
 
-  for (num = 0; set[num].type; num++)
-    (*set[num].handler)(cache_elem, idata, num, &ptr_set, NULL);
+  if (cache_elem->flow_type == NF9_FTYPE_EVENT || cache_elem->flow_type == NF9_FTYPE_OPTION) {
+    for (num_set = 0; set_event[num_set].type; num_set++)
+      (*set_event[num_set].handler)(cache_elem, idata, num_set, &ptr_set, NULL);
+  }
+  else {
+    for (num_set = 0; set[num_set].type; num_set++)
+      (*set[num_set].handler)(cache_elem, idata, num_set, &ptr_set, NULL);
+  }
   
-  /* sending UPDATE query */
-  if (!config.sql_dont_try_update) {
+  /* sending UPDATE query a) if not switched off and
+     b) if we actually have something to update */
+  if (!config.sql_dont_try_update && num_set) {
     strncpy(sql_data, update_clause, SPACELEFT(sql_data));
     strncat(sql_data, set_clause, SPACELEFT(sql_data));
     strncat(sql_data, where_clause, SPACELEFT(sql_data));
@@ -330,23 +275,40 @@ int MY_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_
     if (ret) goto signal_error; 
   }
 
-  if (config.sql_dont_try_update || (mysql_affected_rows(db->desc) == 0)) {
+  if (config.sql_dont_try_update || !num_set || (mysql_affected_rows(db->desc) == 0)) {
     /* UPDATE failed, trying with an INSERT query */ 
+    if (cache_elem->flow_type == NF9_FTYPE_EVENT || cache_elem->flow_type == NF9_FTYPE_OPTION) {
+      strncpy(insert_full_clause, insert_clause, SPACELEFT(insert_full_clause));
+      strncat(insert_full_clause, insert_nocounters_clause, SPACELEFT(insert_full_clause));
+      strncat(ptr_values, ")", SPACELEFT(values_clause));
+    }
+    else {
+      strncpy(insert_full_clause, insert_clause, SPACELEFT(insert_full_clause));
+      strncat(insert_full_clause, insert_counters_clause, SPACELEFT(insert_full_clause));
 #if defined HAVE_64BIT_COUNTERS
-    if (have_flows) snprintf(ptr_values, SPACELEFT(values_clause), ", %llu, %llu, %llu)", cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
-    else snprintf(ptr_values, SPACELEFT(values_clause), ", %llu, %llu)", cache_elem->packet_counter, cache_elem->bytes_counter);
+      if (have_flows) snprintf(ptr_values, SPACELEFT(values_clause), ", %llu, %llu, %llu)", cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
+      else snprintf(ptr_values, SPACELEFT(values_clause), ", %llu, %llu)", cache_elem->packet_counter, cache_elem->bytes_counter);
 #else
-    if (have_flows) snprintf(ptr_values, SPACELEFT(values_clause), ", %lu, %lu, %lu)", cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
-    else snprintf(ptr_values, SPACELEFT(values_clause), ", %lu, %lu)", cache_elem->packet_counter, cache_elem->bytes_counter);
+      if (have_flows) snprintf(ptr_values, SPACELEFT(values_clause), ", %lu, %lu, %lu)", cache_elem->packet_counter, cache_elem->bytes_counter, cache_elem->flows_counter);
+      else snprintf(ptr_values, SPACELEFT(values_clause), ", %lu, %lu)", cache_elem->packet_counter, cache_elem->bytes_counter);
 #endif
+    }
 
     if (config.sql_multi_values) { 
       multi_values_handling:
+      len = config.sql_multi_values-idata->mv.buffer_offset; 
       if (!idata->mv.buffer_elem_num) {
-	strncpy(multi_values_buffer, insert_clause, config.sql_multi_values);
-	strcat(multi_values_buffer, " VALUES");
-	idata->mv.buffer_offset += strlen(multi_values_buffer);
-	idata->mv.head_buffer_elem = idata->current_queue_elem;
+	if (strlen(insert_full_clause) < len) {
+	  strncpy(multi_values_buffer, insert_full_clause, config.sql_multi_values);
+	  strcat(multi_values_buffer, " VALUES");
+	  idata->mv.buffer_offset += strlen(multi_values_buffer);
+	  idata->mv.head_buffer_elem = idata->current_queue_elem;
+	}
+        else {
+          Log(LOG_ERR, "ERROR ( %s/%s ): 'sql_multi_values' is too small (%d). Try with a larger value.\n",
+                         config.name, config.type, config.sql_multi_values);
+          exit_plugin(1);
+	}
       }
       len = config.sql_multi_values-idata->mv.buffer_offset; 
       if (strlen(values_clause) < len) { 
@@ -379,7 +341,7 @@ int MY_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_
       } 
     }
     else {
-      strncpy(sql_data, insert_clause, sizeof(sql_data));
+      strncpy(sql_data, insert_full_clause, sizeof(sql_data));
       strncat(sql_data, values_clause, SPACELEFT(sql_data));
 
       ret = mysql_query(db->desc, sql_data);
@@ -419,57 +381,119 @@ void MY_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
   struct db_cache *LastElemCommitted = NULL;
   struct logfile lf;
   time_t start;
-  int j, stop, ret;
+  int j, stop, ret, go_to_pending, saved_index = index;
+  char orig_insert_clause[LONGSRVBUFLEN], orig_update_clause[LONGSRVBUFLEN], orig_lock_clause[LONGSRVBUFLEN];
+  char tmpbuf[LONGLONGSRVBUFLEN], tmptable[SRVBUFLEN];
+  struct primitives_ptrs prim_ptrs;
+  struct pkt_data dummy_data;
+  pid_t writer_pid = getpid();
+
+  if (!index) return;
 
   bed.lf = &lf;
   memset(&lf, 0, sizeof(struct logfile));
+  memset(&prim_ptrs, 0, sizeof(prim_ptrs));
+  memset(&dummy_data, 0, sizeof(dummy_data));
 
-  for (j = 0, stop = 0; (!stop) && preprocess_funcs[j]; j++)
-    stop = preprocess_funcs[j](queue, &index, j); 
+  for (j = 0, stop = 0; (!stop) && sql_preprocess_funcs[j]; j++)
+    stop = sql_preprocess_funcs[j](queue, &index, j); 
   if (config.what_to_count & COUNT_CLASS)
     sql_invalidate_shadow_entries(queue, &index);
   idata->ten = index;
 
-  if (config.debug) {
-    Log(LOG_DEBUG, "( %s/%s ) *** Purging cache - START ***\n", config.name, config.type);
-    start = time(NULL);
-  }
+  Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - START (PID: %u) ***\n", config.name, config.type, writer_pid);
+  start = time(NULL);
+
+  /* re-using pending queries queue stuff from parent and saving clauses */
+  memcpy(pending_queries_queue, queue, index*sizeof(struct db_cache *));
+  pqq_ptr = index;
+
+  strlcpy(orig_insert_clause, insert_clause, LONGSRVBUFLEN);
+  strlcpy(orig_update_clause, update_clause, LONGSRVBUFLEN);
+  strlcpy(orig_lock_clause, lock_clause, LONGSRVBUFLEN);
+
+  start:
+  memset(&idata->mv, 0, sizeof(struct multi_values));
+  memcpy(queue, pending_queries_queue, pqq_ptr*sizeof(struct db_cache *));
+  memset(pending_queries_queue, 0, pqq_ptr*sizeof(struct db_cache *));
+  index = pqq_ptr; pqq_ptr = 0;
 
   /* We check for variable substitution in SQL table */ 
   if (idata->dyn_table) {
-    char tmpbuf[LONGLONGSRVBUFLEN];
-    time_t stamp = idata->new_basetime ? idata->new_basetime : idata->basetime;
+    time_t stamp = 0;
+
+    memset(tmpbuf, 0, LONGLONGSRVBUFLEN);
+    stamp = queue[0]->basetime;
+    strlcpy(idata->dyn_table_name, config.sql_table, SRVBUFLEN);
+    strlcpy(insert_clause, orig_insert_clause, LONGSRVBUFLEN);
+    strlcpy(update_clause, orig_update_clause, LONGSRVBUFLEN);
+    strlcpy(lock_clause, orig_lock_clause, LONGSRVBUFLEN);
+
+    prim_ptrs.data = &dummy_data;
+    primptrs_set_all_from_db_cache(&prim_ptrs, queue[0]);
+
+    handle_dynname_internal_strings_same(tmpbuf, LONGSRVBUFLEN, insert_clause, &prim_ptrs);
+    handle_dynname_internal_strings_same(tmpbuf, LONGSRVBUFLEN, update_clause, &prim_ptrs);
+    handle_dynname_internal_strings_same(tmpbuf, LONGSRVBUFLEN, lock_clause, &prim_ptrs);
+    handle_dynname_internal_strings_same(tmpbuf, LONGSRVBUFLEN, idata->dyn_table_name, &prim_ptrs);
 
     strftime_same(insert_clause, LONGSRVBUFLEN, tmpbuf, &stamp);
     strftime_same(update_clause, LONGSRVBUFLEN, tmpbuf, &stamp);
     strftime_same(lock_clause, LONGSRVBUFLEN, tmpbuf, &stamp);
-    if (config.sql_table_schema) sql_create_table(bed.p, &stamp);
+    strftime_same(idata->dyn_table_name, LONGSRVBUFLEN, tmpbuf, &stamp);
+    if (config.sql_table_schema) sql_create_table(bed.p, &stamp, &prim_ptrs);
   }
 
   if (idata->locks == PM_LOCK_EXCLUSIVE) (*sqlfunc_cbr.lock)(bed.p); 
 
   for (idata->current_queue_elem = 0; idata->current_queue_elem < index; idata->current_queue_elem++) {
-    if (queue[idata->current_queue_elem]->valid)
-      sql_query(&bed, queue[idata->current_queue_elem], idata);
-    if (queue[idata->current_queue_elem]->valid == SQL_CACHE_COMMITTED)
-      LastElemCommitted = queue[idata->current_queue_elem];
+    go_to_pending = FALSE;
+
+    if (idata->dyn_table) {
+      time_t stamp = 0;
+
+      memset(tmpbuf, 0, LONGLONGSRVBUFLEN); // XXX: pedantic?
+      stamp = queue[idata->current_queue_elem]->basetime;
+      strlcpy(tmptable, config.sql_table, SRVBUFLEN);
+
+      prim_ptrs.data = &dummy_data;
+      primptrs_set_all_from_db_cache(&prim_ptrs, queue[idata->current_queue_elem]);
+      handle_dynname_internal_strings_same(tmpbuf, LONGSRVBUFLEN, tmptable, &prim_ptrs);
+      strftime_same(tmptable, LONGSRVBUFLEN, tmpbuf, &stamp);
+
+      if (strncmp(idata->dyn_table_name, tmptable, SRVBUFLEN)) {
+	pending_queries_queue[pqq_ptr] = queue[idata->current_queue_elem];
+
+	pqq_ptr++;
+        go_to_pending = TRUE;
+      }
+    }
+
+    if (!go_to_pending) {
+      if (queue[idata->current_queue_elem]->valid)
+        sql_query(&bed, queue[idata->current_queue_elem], idata);
+      if (queue[idata->current_queue_elem]->valid == SQL_CACHE_COMMITTED)
+        LastElemCommitted = queue[idata->current_queue_elem];
+    }
   }
 
   /* multi-value INSERT query: wrap-up */
   if (idata->mv.buffer_elem_num) {
     idata->mv.last_queue_elem = TRUE;
     sql_query(&bed, LastElemCommitted, idata);
+    idata->qn--; /* increased by sql_query() one time too much */
   }
 
   /* rewinding stuff */
   if (idata->locks == PM_LOCK_EXCLUSIVE) (*sqlfunc_cbr.unlock)(&bed);
   if ((lf.fail) || (b.fail)) Log(LOG_ALERT, "ALERT ( %s/%s ): recovery for MySQL daemon failed.\n", config.name, config.type);
+
+  /* If we have pending queries then start again */
+  if (pqq_ptr) goto start;
   
-  if (config.debug) {
-    idata->elap_time = time(NULL)-start; 
-    Log(LOG_DEBUG, "( %s/%s ) *** Purging cache - END (QN: %u, ET: %u) ***\n", 
-		    config.name, config.type, idata->qn, idata->elap_time); 
-  }
+  idata->elap_time = time(NULL)-start; 
+  Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - END (PID: %u, QN: %u/%u, ET: %u) ***\n", 
+		config.name, config.type, writer_pid, idata->qn, saved_index, idata->elap_time); 
 
   if (config.sql_trigger_exec) {
     if (!config.debug) idata->elap_time = time(NULL)-start;
@@ -479,7 +503,7 @@ void MY_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
 
 int MY_evaluate_history(int primitive)
 {
-  if (config.sql_history || config.nfacctd_sql_log) {
+  if (config.sql_history) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
@@ -507,7 +531,7 @@ int MY_evaluate_history(int primitive)
 
 int MY_compose_static_queries()
 {
-  int primitives=0, set_primitives=0, have_flows=0;
+  int primitives=0, set_primitives=0, set_event_primitives=0, have_flows=0;
 
   if (config.what_to_count & COUNT_FLOWS || (config.sql_table_version >= 4 &&
 					     config.sql_table_version < SQL_TABLE_VERSION_BGP &&
@@ -527,9 +551,11 @@ int MY_compose_static_queries()
   strncpy(values[primitives].string, " VALUES (", sizeof(values[primitives].string));
   primitives = MY_evaluate_history(primitives);
   primitives = sql_evaluate_primitives(primitives);
-  strncat(insert_clause, ", packets, bytes", SPACELEFT(insert_clause));
-  if (have_flows) strncat(insert_clause, ", flows", SPACELEFT(insert_clause));
-  strncat(insert_clause, ")", SPACELEFT(insert_clause));
+
+  strncpy(insert_counters_clause, ", packets, bytes", SPACELEFT(insert_counters_clause));
+  if (have_flows) strncat(insert_counters_clause, ", flows", SPACELEFT(insert_counters_clause));
+  strncat(insert_counters_clause, ")", SPACELEFT(insert_counters_clause));
+  strncpy(insert_nocounters_clause, ")", SPACELEFT(insert_nocounters_clause));
 
   /* "LOCK ..." stuff */
   snprintf(lock_clause, sizeof(lock_clause), "LOCK TABLES `%s` WRITE", config.sql_table);
@@ -539,39 +565,36 @@ int MY_compose_static_queries()
   snprintf(update_clause, sizeof(update_clause), "UPDATE `%s` ", config.sql_table);
 
   set_primitives = sql_compose_static_set(have_flows);
+  set_event_primitives = sql_compose_static_set_event();
 
-  if (config.sql_history || config.nfacctd_sql_log) {
-    if (!config.nfacctd_sql_log) {
-      if (!config.sql_history_since_epoch) {
-        strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
-	strncat(set[set_primitives].string, "stamp_updated=NOW()", SPACELEFT(set[set_primitives].string));
-	set[set_primitives].type = TIMESTAMP;
-	set[set_primitives].handler = count_noop_setclause_handler;
-	set_primitives++;
-      }
-      else {
-	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
-	strncat(set[set_primitives].string, "stamp_updated=UNIX_TIMESTAMP(NOW())", SPACELEFT(set[set_primitives].string));
-	set[set_primitives].type = TIMESTAMP;
-	set[set_primitives].handler = count_noop_setclause_handler;
-	set_primitives++;
-      }
+  if (config.sql_history) {
+    if (!config.sql_history_since_epoch) {
+      strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+      strncat(set[set_primitives].string, "stamp_updated=NOW()", SPACELEFT(set[set_primitives].string));
+      set[set_primitives].type = TIMESTAMP;
+      set[set_primitives].handler = count_noop_setclause_handler;
+      set_primitives++;
+
+      if (set_event_primitives) strncpy(set_event[set_event_primitives].string, ", ", SPACELEFT(set_event[set_event_primitives].string));
+      else strncpy(set_event[set_event_primitives].string, "SET ", SPACELEFT(set_event[set_event_primitives].string));
+      strncat(set_event[set_event_primitives].string, "stamp_updated=NOW()", SPACELEFT(set_event[set_event_primitives].string));
+      set_event[set_event_primitives].type = TIMESTAMP;
+      set_event[set_event_primitives].handler = count_noop_setclause_event_handler;
+      set_event_primitives++;
     }
     else {
-      if (!config.sql_history_since_epoch) {
-	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
-	strncat(set[set_primitives].string, "stamp_updated=FROM_UNIXTIME(%u)", SPACELEFT(set[set_primitives].string));
-	set[set_primitives].type = TIMESTAMP;
-	set[set_primitives].handler = count_timestamp_setclause_handler;
-	set_primitives++;
-      }
-      else {
-	strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
-	strncat(set[set_primitives].string, "stamp_updated=%u", SPACELEFT(set[set_primitives].string));
-	set[set_primitives].type = TIMESTAMP;
-	set[set_primitives].handler = count_timestamp_setclause_handler;
-	set_primitives++;
-      }
+      strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
+      strncat(set[set_primitives].string, "stamp_updated=UNIX_TIMESTAMP(NOW())", SPACELEFT(set[set_primitives].string));
+      set[set_primitives].type = TIMESTAMP;
+      set[set_primitives].handler = count_noop_setclause_handler;
+      set_primitives++;
+
+      if (set_event_primitives) strncpy(set_event[set_event_primitives].string, ", ", SPACELEFT(set_event[set_event_primitives].string));
+      else strncpy(set_event[set_event_primitives].string, "SET ", SPACELEFT(set_event[set_event_primitives].string));
+      strncat(set_event[set_event_primitives].string, "stamp_updated=UNIX_TIMESTAMP(NOW())", SPACELEFT(set_event[set_event_primitives].string));
+      set_event[set_event_primitives].type = TIMESTAMP;
+      set_event[set_event_primitives].handler = count_noop_setclause_event_handler;
+      set_event_primitives++;
     }
   }
 
@@ -643,6 +666,10 @@ void MY_create_dyn_table(struct DBdesc *db, char *buf)
 void MY_create_backend(struct DBdesc *db)
 {
   db->desc = malloc(sizeof(MYSQL));
+  if (!db->desc) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (MY_create_backend). Exiting ..\n", config.name, config.type);
+    exit_plugin(1);
+  }
   memset(db->desc, 0, sizeof(MYSQL));
 }
 
@@ -682,7 +709,7 @@ void MY_init_default_values(struct insert_data *idata)
     else if (config.sql_table_version == 2) config.sql_table = mysql_table_v2;
     else config.sql_table = mysql_table;
   }
-  if (strchr(config.sql_table, '%')) idata->dyn_table = TRUE;
+  if (strchr(config.sql_table, '%') || strchr(config.sql_table, '$')) idata->dyn_table = TRUE;
   glob_dyn_table = idata->dyn_table;
 
   if (config.sql_backup_host || config.sql_recovery_logfile) idata->recover = TRUE;

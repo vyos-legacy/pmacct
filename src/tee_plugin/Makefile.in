@@ -1,4 +1,4 @@
-# $Id: Makefile.in,v 1.1 2010/05/04 11:20:38 paolo Exp $
+# $Id: Makefile.in,v 1.2 2013/02/03 22:11:14 paolo Exp $
 
 prefix=@prefix@
 exec_prefix=@exec_prefix@
@@ -24,8 +24,8 @@ TARGETS=libtee_plugin.a
 
 all: $(TARGETS)
 
-libtee_plugin.a: tee_plugin.o
-	ar rc $@ tee_plugin.o
+libtee_plugin.a: tee_plugin.o tee_recvs.o
+	ar rc $@ tee_plugin.o tee_recvs.o
 	$(RANLIB) $@
 
 clean:

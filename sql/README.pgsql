@@ -44,11 +44,14 @@ Similarly, BGP tables:
   * Add 'sql_table_version: 1' line to your configuration.
   * Add 'sql_table_type: bgp' line to your configuration.
 
-Until v5 a few tables are created in the 'pmacct' database. 'acct' (or 'acct_vN')
-table is the default table where data will be written when in 'typed' mode (see
-'sql_data' option in CONFIG-KEYS text file; default value is 'typed'); 'acct_uni'
-(or 'acct_uni_vN') is the default table where data will be written when in 'unified'
-mode. Since v6 unified mode is no longer supported.
+Until SQL table schemas v5 a few tables are created in the 'pmacct' database:
+'acct' (or 'acct_vN') table is the default table where data will be written
+when in 'typed' mode (see 'sql_data' option in CONFIG-KEYS text file; default
+value is 'typed'); 'acct_uni' (or 'acct_uni_vN') is the default table where
+data will be written when in 'unified' mode. Starting with v6 unified schemas
+are no longer supplied as part of the PostgreSQL table creation script: the
+'typed' schema instead can still be customized, ie. to write IP addresses in
+CHAR fields because making use of IP prefix labels, transparently to pmacct.
 
 - To understand difference between the various table versions: 
   * Do you need any of the BGP primitives ? Then look the next section.
@@ -67,7 +70,9 @@ mode. Since v6 unified mode is no longer supported.
 - Aggregation primitives to SQL schema mapping:
   Aggregation primitive => SQL table field
   * tag => agent_id (BIGINT NOT NULL DEFAULT 0)
-  * tag2 => agent_id2 (BIGINT NOT NULL DEFAULT 0, see README.agent_id2)
+    - tag => tag (BIGINT NOT NULL DEFAULT 0, if sql_table_version >= 9)
+  * tag2 => tag2 (BIGINT NOT NULL DEFAULT 0, see README.tag2)
+  * label => label (VARCHAR(255) NOT NULL DEFAULT ' ', see README.label)
   * src_as => as_src (BIGINT NOT NULL DEFAULT 0)
   * dst_as => as_dst (BIGINT NOT NULL DEFAULT 0)
   * peer_src_as => peer_as_src (BIGINT NOT NULL DEFAULT 0)
@@ -90,7 +95,11 @@ mode. Since v6 unified mode is no longer supported.
   * src_mask => mask_src (SMALLINT NOT NULL DEFAULT 0, see README.mask)
   * dst_mask => mask_dst (SMALLINT NOT NULL DEFAULT 0, see README.mask)
   * cos => cos (SMALLINT NOT NULL DEFAULT 0, see README.cos)
-  * etype => etype (INT NOT NULL DEFAULT 0, see README.etype)
+  * etype => etype (CHAR(5) NOT NULL DEFAULT ' ', see README.etype)
+  * src_host_country => country_ip_src (CHAR (2) NOT NULL DEFAULT '--', see README.country)
+  * dst_host_country => country_ip_dst (CHAR (2) NOT NULL DEFAULT '--', see README.country)
+  * sampling_rate => sampling_rate (BIGINT NOT NULL DEFAULT 0, see README.sampling_rate)
+  * pkt_len_distrib => pkt_len_distrib (CHAR(10) NOT NULL DEFAULT ' ', see README.pkt_len_distrib)
   * class => class_id (CHAR(16) NOT NOT NULL DEFAULT ' ')
   * src_mac => mac_src (macaddr NOT NULL DEFAULT '0:0:0:0:0:0')
   * dst_mac => mac_dst (macaddr NOT NULL DEFAULT '0:0:0:0:0:0')
@@ -106,19 +115,43 @@ mode. Since v6 unified mode is no longer supported.
   * tcpflags => tcp_flags (SMALLINT NOT NULL DEFAULT 0)
   * proto => ip_proto (SMALLINT NOT NULL DEFAULT 0)
   * tos => tos (INT NOT NULL DEFAULT 0)
+  * post_nat_src_host => post_nat_ip_src (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * post_nat_dst_host => post_nat_ip_dst (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * post_nat_src_port => post_nat_port_src (INT NOT NULL DEFAULT 0)
+  * post_nat_dst_port => post_nat_port_dst (INT NOT NULL DEFAULT 0)
+  * nat_event => nat_event (INT NOT NULL DEFAULT 0)
+  * mpls_label_top => mpls_label_top (INT NOT NULL DEFAULT 0)
+  * mpls_label_bottom => mpls_label_bottom (INT NOT NULL DEFAULT 0)
+  * mpls_stack_depth => mpls_stack_depth (INT NOT NULL DEFAULT 0)
+  * timestamp_start => timestamp_start, timestamp_start_residual:
+    - timestamp_start timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', see README.timestamp)
+    - timestamp_start_residual INT NOT NULL DEFAULT 0, see README.timestamp)
+  * timestamp_end => timestamp_end, timestamp_end_residual:
+    - timestamp_end timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', see README.timestamp)
+    - timestamp_end_residual INT NOT NULL DEFAULT 0, see README.timestamp)
 
-- Counters and time reference need always to be defined as part of the SQL schema:
-  * packets (INT UNSIGNED NOT NULL)
-  * bytes (BIGINT UNSIGNED NOT NULL)
-  * stamp_inserted (timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', enabled by sql_history)
-  * stamp_updated (timestamp without time zone, enabled by sql_history)
+- If not using COPY statements (sql_use_copy, sql_dont_try_update both enabled)
+  'packets' and 'bytes' counters need to be defined as part of the SQL schema
+  whenever traffic flows are being accounted for; they are not required, and
+  are zeroed, if accounting for events, ie. using Cisco NEL; if instead COPY
+  is in use, 'packets' and 'bytes' counters are mandatory. 'stamp_inserted' and
+  'stamp_updated' time references are mandatory only if temporal aggregation
+  (sql_history) is enabled:
+  * packets (INT NOT NULL)
+  * bytes (BIGINT NOT NULL)
+  * stamp_inserted (timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00')
+  * stamp_updated (timestamp without time zone)
+
+- For custom-defined primitives refer to the README.custom_primitives doc.
 
 - What is the difference between 'typed' and 'unified' modes ? 
-It applies to IP tables only (ie. not to BGP ones). The 'unified' table has IP addresses
-and MAC addresses specified as standard CHAR strings, slower but flexible (in the sense it
-may store each kind of strings); 'typed' tables sport PostgreSQL own types (inet, mac, etc.),
+Read this section only if using a table schema v5 or below and does not apply to BGP table
+schemas. The 'unified' table has IP addresses and MAC addresses specified as standard CHAR
+strings, slower but flexible; 'typed' tables sport PostgreSQL own types (inet, mac, etc.),
 faster but rigid. When not specifying your own 'sql_table', this switch instructs the plugin
-which tables has to use. (default: 'typed'). Since v6 unified mode is not supported anymore.
+which tables has to use, default being 'typed'. Since v6 this is all deprecated but default
+typed schemas, the only still supplied as part of the PostgreSQL table creation script, can
+still be customized transparently to pmacct.
 
 - What is the 'proto' table ?
 The auxiliar 'proto' table will be created by default. Its tuples are simply number-string

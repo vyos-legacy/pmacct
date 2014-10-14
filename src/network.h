@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -32,14 +32,29 @@
 
 #define min(a,b) ((a)>(b)?(b):(a))
 
+#if defined ENABLE_IPV6
+#ifndef IN6_IS_ADDR_V4MAPPED
+#define IN6_IS_ADDR_V4MAPPED(a) \
+        ((((__const uint32_t *) (a))[0] == 0)                                 \
+         && (((__const uint32_t *) (a))[1] == 0)                              \
+         && (((__const uint32_t *) (a))[2] == htonl (0xffff)))
+#endif
+#endif
+
 #define ETH_ADDR_LEN    	6               /* Octets in one ethernet addr   */
 #define ETHER_HDRLEN    	14
 #define ETHERMTU		1500
+#define ETHER_JUMBO_MTU		9000
 #define IEEE8021Q_TAGLEN	4
 #define IEEE8021AH_LEN		10
 #define PPP_TAGLEN              2
 #define MAX_MCAST_GROUPS	20
 #define ROUTING_SEGMENT_MAX	16
+#if defined ENABLE_PLABEL
+#define PREFIX_LABEL_LEN	16
+#define AF_PLABEL		255
+#endif
+#define PRIMPTRS_FUNCS_N	16
 
 /* 10Mb/s ethernet header */
 struct eth_header
@@ -47,6 +62,15 @@ struct eth_header
   u_int8_t  ether_dhost[ETH_ADDR_LEN];      /* destination eth addr */
   u_int8_t  ether_shost[ETH_ADDR_LEN];      /* source ether addr    */
   u_int16_t ether_type;                     /* packet type ID field */
+};
+
+#define CHDLC_MCAST_ADDR	0x8F
+#define CHDLC_FIXED_CONTROL	0x00
+/* CHDLC header */
+struct chdlc_header {
+  u_int8_t address;
+  u_int8_t control;
+  u_int16_t protocol;
 };
 
 #define TR_RIF_LENGTH(trp)		((ntohs((trp)->token_rcf) & 0x1f00) >> 8)
@@ -217,10 +241,19 @@ struct my_tlhdr {
    u_int16_t	dst_port;
 };
 
-struct my_gtphdr {
+#define MAX_GTP_TRIALS	8
+
+struct my_gtphdr_v0 {
     u_int8_t flags;
     u_int8_t message;
     u_int16_t length;
+};
+
+struct my_gtphdr_v1 {
+    u_int8_t flags;
+    u_int8_t message;
+    u_int16_t length;
+    u_int32_t teid;
 };
 
 /* typedefs */
@@ -230,6 +263,7 @@ typedef u_int16_t as16_t;
 #define RD_TYPE_AS      0
 #define RD_TYPE_IP      1
 #define RD_TYPE_AS4     2
+#define RD_TYPE_VRFID	65535
 
 struct rd_as
 {
@@ -255,6 +289,8 @@ struct rd_as4
 /* Picking one of the three structures as rd_t for simplicity */
 typedef struct rd_as rd_t;
 
+typedef u_int32_t path_id_t;
+
 /* class status */
 struct class_st {
    u_int8_t tentatives;	
@@ -271,26 +307,35 @@ struct packet_ptrs {
   u_char *f_data; /* ptr to NetFlow data */ 
   u_char *f_tpl; /* ptr to NetFlow V9 template */
   u_char *f_status; /* ptr to status table entry */
-  u_char *idtable; /* ptr to pretag table map */
+  u_char *f_status_g; /* ptr to status table entry. global per f_agent */
   u_char *bpas_table; /* ptr to bgp_peer_as_src table map */
   u_char *blp_table; /* ptr to bgp_src_local_pref table map */
   u_char *bmed_table; /* ptr to bgp_src_med table map */
   u_char *bta_table; /* ptr to bgp_to_agent table map */
-  u_char *bitr_table; /* ptr to bgp_iface_to_rd table map */
+  u_char *bitr_table; /* ptr to flow_to_rd table map */
   u_char *sampling_table; /* ptr to sampling_map table map */
   u_char *packet_ptr; /* ptr to the whole packet */
   u_char *mac_ptr; /* ptr to mac addresses */
   u_int16_t l3_proto; /* layer-3 protocol: IPv4, IPv6 */
   int (*l3_handler)(register struct packet_ptrs *); /* layer-3 protocol handler */
   u_int16_t l4_proto; /* layer-4 protocol */
+  u_int8_t flow_type; /* Flow, NAT event, etc. */
   pm_id_t tag; /* pre tag id */
+  u_int8_t have_tag; /* have tag? */
   pm_id_t tag2; /* pre tag id2 */
+  u_int8_t have_tag2; /* have tag2? */
+  pt_label_t label; /* pre tag label */
+  u_int8_t have_label; /* have label? */
   pm_id_t bpas; /* bgp_peer_as_src */
   pm_id_t blp; /* bgp_src_local_pref */
   pm_id_t bmed; /* bgp_src_med */
+  u_int16_t bta_af; /* bgp_to_agent address family */
   pm_id_t bta; /* bgp_to_agent */
-  pm_id_t bitr; /* bgp_iface_to_rd */
+  pm_id_t bta2; /* bgp_to_agent (cont.d: 64bits more for IPv6 addresses) */
+  pm_id_t bitr; /* flow_to_rd */
   pm_id_t st; /* sampling_map */
+  s_uint8_t set_tos; /* pretag map: set_tos feature */
+  s_uint16_t lookup_bgp_port; /* bgp_agent_map: lookup BGP port feature */
   char *bgp_src; /* pointer to bgp_node structure for source prefix, if any */  
   char *bgp_dst; /* pointer to bgp_node structure for destination prefix, if any */ 
   char *bgp_src_info; /* pointer to bgp_info structure for source prefix, if any */  
@@ -325,6 +370,8 @@ struct packet_ptrs {
   u_int32_t seqno; /* sFlow/NetFlow sequence number */
   u_int16_t f_len; /* sFlow/NetFlow payload length */
   u_int8_t renormalized; /* Is it renormalized yet ? */
+  char *pkt_data_ptrs[CUSTOM_PRIMITIVE_MAX_PPTRS_IDX]; /* indexed packet pointers */
+  u_int16_t pkt_proto[CUSTOM_PRIMITIVE_MAX_PPTRS_IDX]; /* indexed packet protocols */
 };
 
 struct host_addr {
@@ -334,7 +381,20 @@ struct host_addr {
 #if defined ENABLE_IPV6
     struct in6_addr ipv6;
 #endif
+#if defined ENABLE_PLABEL
+    u_char plabel[PREFIX_LABEL_LEN];
+#endif
   } address;
+};
+
+struct host_mask {
+  u_int8_t family;
+  union {
+    u_int32_t m4;
+#if defined ENABLE_IPV6
+    u_int32_t m6[4];
+#endif
+  } mask;
 };
 
 struct pkt_primitives {
@@ -357,9 +417,15 @@ struct pkt_primitives {
   u_int8_t proto;
   u_int32_t ifindex_in;
   u_int32_t ifindex_out;
-  pm_id_t id;
-  pm_id_t id2;
+#if defined (WITH_GEOIP)
+  pm_country_t src_ip_country;
+  pm_country_t dst_ip_country;
+#endif
+  pm_id_t tag;
+  pm_id_t tag2;
   pm_class_t class;
+  u_int32_t sampling_rate;
+  u_int16_t pkt_len_distrib;
 };
 
 struct pkt_data {
@@ -367,6 +433,7 @@ struct pkt_data {
   pm_counter_t pkt_len;
   pm_counter_t pkt_num;
   pm_counter_t flo_num;
+  u_int8_t flow_type;
   u_int32_t tcp_flags; /* XXX */
   struct timeval time_start;
   struct timeval time_end;
@@ -395,18 +462,27 @@ struct pkt_payload {
   struct host_addr bgp_next_hop;
 };
 
+struct pkt_vlen_hdr_primitives {
+  u_int16_t tot_len;
+  u_int16_t num;
+};
+
+// XXX: eventually deprecate pkt_extras
 struct pkt_extras {
   u_int8_t tcp_flags;
   u_int32_t mpls_top_label;
   struct host_addr bgp_next_hop;
 };
 
-#define PKT_MSG_SIZE 1550
+// #define PKT_MSG_SIZE 1550
+#define PKT_MSG_SIZE 10000
 struct pkt_msg {
   struct sockaddr agent;
   u_int32_t seqno;
   u_int16_t len;
   u_char payload[PKT_MSG_SIZE];
+  pm_id_t tag;
+  pm_id_t tag2;
   u_int16_t pad;
 };
 
@@ -414,6 +490,29 @@ struct pkt_msg {
 #define MAX_BGP_STD_COMMS       96
 #define MAX_BGP_EXT_COMMS       96
 #define MAX_BGP_ASPATH          128
+
+struct extra_primitives {
+  u_int16_t off_pkt_bgp_primitives;
+  u_int16_t off_pkt_nat_primitives;
+  u_int16_t off_pkt_mpls_primitives;
+  u_int16_t off_custom_primitives;
+  u_int16_t off_pkt_extras; /* nfprobe only */
+  u_int16_t off_pkt_vlen_hdr_primitives;
+};
+
+struct primitives_ptrs {
+  struct pkt_data *data;
+  struct pkt_bgp_primitives *pbgp;
+  struct pkt_nat_primitives *pnat;
+  struct pkt_mpls_primitives *pmpls;
+  char *pcust;
+  struct pkt_extras *pextras;
+  struct pkt_vlen_hdr_primitives *pvlen;
+
+  u_int16_t vlen_next_off;
+};
+
+typedef void (*primptrs_func) (u_char *, struct extra_primitives *, struct primitives_ptrs *);
 
 struct pkt_bgp_primitives {
   as_t peer_src_as;
@@ -431,7 +530,22 @@ struct pkt_bgp_primitives {
   u_int32_t src_local_pref;
   u_int32_t src_med;
   rd_t mpls_vpn_rd;
-  u_int32_t pad;
+};
+
+struct pkt_nat_primitives {
+  struct host_addr post_nat_src_ip;
+  struct host_addr post_nat_dst_ip;
+  u_int16_t post_nat_src_port;
+  u_int16_t post_nat_dst_port;
+  u_int8_t nat_event;
+  struct timeval timestamp_start; /* XXX: clean-up: to be moved in a separate structure */
+  struct timeval timestamp_end; /* XXX: clean-up: to be moved in a separate structure */
+};
+
+struct pkt_mpls_primitives {
+  u_int32_t mpls_label_top;
+  u_int32_t mpls_label_bottom;
+  u_int8_t mpls_stack_depth;
 };
 
 /* same as above but pointers in place of strings */

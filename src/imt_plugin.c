@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -35,7 +35,6 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct sockaddr cAddr;
   struct pkt_data *data;
   struct ports_table pt;
-  struct timezone tz;
   unsigned char srvbuf[maxqsize];
   unsigned char *srvbufptr;
   struct query_header *qh;
@@ -44,11 +43,21 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   short int go_to_clear = FALSE;
   u_int32_t request, sz;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
+  int datasize = ((struct channels_list_entry *)ptr)->datasize;
+  struct extra_primitives extras;
   unsigned char *rgptr;
   int pollagain = 0;
   u_int32_t seq = 0;
   int rg_err_count = 0;
-  struct pkt_bgp_primitives *pbgp;
+  int ret;
+  struct pkt_bgp_primitives *pbgp, empty_pbgp;
+  struct pkt_nat_primitives *pnat, empty_pnat;
+  struct pkt_mpls_primitives *pmpls, empty_pmpls;
+  char *pcust, empty_pcust[] = "";
+  struct pkt_vlen_hdr_primitives *pvlen, empty_pvlen;
+  struct networks_file_data nfd;
+  struct timeval select_timeout;
+  struct primitives_ptrs prim_ptrs;
 
   fd_set read_descs, bkp_read_descs; /* select() stuff */
   int select_fd, lock = FALSE;
@@ -56,12 +65,19 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   char *dataptr;
 
   memcpy(&config, cfgptr, sizeof(struct configuration));
+  memcpy(&extras, &((struct channels_list_entry *)ptr)->extras, sizeof(struct extra_primitives));
   recollect_pipe_memory(ptr);
   pm_setproctitle("%s [%s]", "IMT Plugin", config.name);
+
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
   if (config.logfile) {
     fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile);
+    config.logfile_fd = open_logfile(config.logfile, "a");
+  }
+
+  if (extras.off_pkt_vlen_hdr_primitives) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): variable-length primitives, ie. label, are not supported in IMT plugin. Exiting ..\n", config.name, config.type);
+    exit_plugin(1);
   }
 
   reload_map = FALSE;
@@ -69,6 +85,10 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   /* a bunch of default definitions and post-checks */
   pipebuf = (unsigned char *) malloc(config.buffer_size);
+  if (!pipebuf) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (pipebuf). Exiting ..\n", config.name, config.type);
+    exit_plugin(1);
+  }
 
   setnonblocking(pipe_fd);
   memset(pipebuf, 0, config.buffer_size);
@@ -83,14 +103,6 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 #endif
   else insert_func = insert_accounting_structure;
 
-  /* Dirty but allows to save some IFs, centralizes
-     checks and makes later comparison statements lean */
-  if (!(config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
-                                COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
-				COUNT_SRC_AS_PATH|COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_MED|
-				COUNT_SRC_LOCAL_PREF|COUNT_MPLS_VPN_RD))) 
-    PbgpSz = 0;
-
   memset(&nt, 0, sizeof(nt));
   memset(&nc, 0, sizeof(nc));
   memset(&pt, 0, sizeof(pt));
@@ -99,6 +111,13 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   set_net_funcs(&nt);
 
   if (config.ports_file) load_ports(config.ports_file, &pt);
+  if (config.pkt_len_distrib_bins_str) load_pkt_len_distrib_bins();
+  else {
+    if (config.what_to_count_2 & COUNT_PKT_LEN_DISTRIB) {
+      Log(LOG_ERR, "ERROR ( %s/%s ): 'aggregate' contains pkt_len_distrib but no 'pkt_len_distrib_bins' defined. Exiting.\n", config.name, config.type);
+      exit_plugin(1); 
+    }
+  }
 
   if ((!config.num_memory_pools) && (!have_num_memory_pools))
     config.num_memory_pools = NUM_MEMORY_POOLS;
@@ -145,11 +164,12 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   signal(SIGUSR1, SIG_IGN);
   signal(SIGUSR2, reload_maps);
   signal(SIGPIPE, SIG_IGN);
-#if !defined FBSD4 
   signal(SIGCHLD, SIG_IGN); 
-#else
-  signal(SIGCHLD, ignore_falling_child); 
-#endif
+
+  memset(&empty_pbgp, 0, sizeof(empty_pbgp));
+  memset(&empty_pnat, 0, sizeof(empty_pnat));
+  memset(&empty_pmpls, 0, sizeof(empty_pmpls));
+  memset(&empty_pvlen, 0, sizeof(empty_pvlen));
 
   /* building a server for interrogations by clients */
   sd = build_query_server(config.imt_plugin_path);
@@ -170,11 +190,21 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   /* plugin main loop */
   for(;;) {
     select_again:
-    memcpy(&read_descs, &bkp_read_descs, sizeof(bkp_read_descs));
-    num = select(select_fd, &read_descs, NULL, NULL, NULL);
-    if (num < 0) goto select_again;  
+    select_timeout.tv_sec = DEFAULT_IMT_PLUGIN_SELECT_TIMEOUT;
+    select_timeout.tv_usec = 0;
 
-    gettimeofday(&cycle_stamp, &tz);
+    memcpy(&read_descs, &bkp_read_descs, sizeof(bkp_read_descs));
+    num = select(select_fd, &read_descs, NULL, NULL, &select_timeout);
+    if (num <= 0) {
+      if (getppid() == 1) {
+	Log(LOG_ERR, "ERROR ( %s/%s ): Core process *seems* gone. Exiting.\n", config.name, config.type);
+	exit_plugin(1);
+      } 
+
+      goto select_again;  
+    }
+
+    gettimeofday(&cycle_stamp, NULL);
 
     /* doing server tasks */
     if (FD_ISSET(sd, &read_descs)) {
@@ -235,7 +265,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       if (request & WANT_ERASE) {
 	request ^= WANT_ERASE;
 	if (request) {
-	  if (num > 0) process_query_data(sd2, srvbuf, num, FALSE);
+	  if (num > 0) process_query_data(sd2, srvbuf, num, &extras, datasize, FALSE);
 	  else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. Errno: %d\n", config.name, config.type, num, errno);
 	}
 	Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
@@ -243,27 +273,35 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
       else if (((request == WANT_COUNTER) || (request == WANT_MATCH)) &&
 	(qh->num == 1) && (qh->what_to_count == config.what_to_count)) {
-	if (num > 0) process_query_data(sd2, srvbuf, num, FALSE);
+	if (num > 0) process_query_data(sd2, srvbuf, num, &extras, datasize, FALSE);
         else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. ERRNO: %d\n", config.name, config.type, num, errno);
         Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
       } 
       else if (request == WANT_CLASS_TABLE) {
-	if (num > 0) process_query_data(sd2, srvbuf, num, FALSE);
+	if (num > 0) process_query_data(sd2, srvbuf, num, &extras, datasize, FALSE);
+        else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. ERRNO: %d\n", config.name, config.type, num, errno);
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
+      }
+      else if (request == WANT_PKT_LEN_DISTRIB_TABLE) {
+        if (num > 0) process_query_data(sd2, srvbuf, num, &extras, datasize, FALSE);
         else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. ERRNO: %d\n", config.name, config.type, num, errno);
         Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
       }
       else {
 	if (lock) {
-	  if (num > 0) process_query_data(sd2, srvbuf, num, FALSE);
+	  if (num > 0) process_query_data(sd2, srvbuf, num, &extras, datasize, FALSE);
           else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. Errno: %d\n", config.name, config.type, num, errno);
           Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
 	}
 	else { 
           switch (fork()) {
+	  case -1: /* Something went wrong */
+	    Log(LOG_WARNING, "WARN ( %s/%s ): Unable to serve client query: %s\n", config.name, config.type, strerror(errno));
+	    break;
           case 0: /* Child */
             close(sd);
 	    pm_setproctitle("%s [%s]", "IMT Plugin -- serving client", config.name);
-            if (num > 0) process_query_data(sd2, srvbuf, num, TRUE);
+            if (num > 0) process_query_data(sd2, srvbuf, num, &extras, datasize, TRUE);
 	    else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %d incoming bytes. Errno: %d\n", config.name, config.type, num, errno);
             Log(LOG_DEBUG, "DEBUG ( %s/%s ): Closing connection with client ...\n", config.name, config.type);
             close(sd2);
@@ -280,7 +318,13 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     if (go_to_clear) {
       /* When using extended BGP features we need to
 	 free() up memory allocations before erasing */ 
-      if (PbgpSz) free_bgp_allocs(); 
+      /* XXX: given the current use of empty_* vars we have always to
+         free_extra_allocs() in order to prevent memory leaks */
+      /*
+      if (extras.off_pkt_bgp_primitives || extras.off_pkt_nat_primitives ||
+	  extras.off_pkt_mpls_primitives || extras.off_custom_primitives)
+      */
+	free_extra_allocs(); 
       clear_memory_pool_table();
       current_pool = request_memory_pool(config.buckets*sizeof(struct acc));
       if (current_pool == NULL) {
@@ -330,25 +374,50 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       if (num > 0) {
 	data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
-	while (((struct ch_buf_hdr *)pipebuf)->num) {
+	while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
+
+	  // XXX: to be optimized: remove empty_* vars
+          if (extras.off_pkt_bgp_primitives)
+	    pbgp = (struct pkt_bgp_primitives *) ((u_char *)data + extras.off_pkt_bgp_primitives);
+	  else pbgp = &empty_pbgp;
+          if (extras.off_pkt_nat_primitives) 
+            pnat = (struct pkt_nat_primitives *) ((u_char *)data + extras.off_pkt_nat_primitives);
+          else pnat = &empty_pnat;
+          if (extras.off_pkt_mpls_primitives) 
+            pmpls = (struct pkt_mpls_primitives *) ((u_char *)data + extras.off_pkt_mpls_primitives);
+          else pmpls = &empty_pmpls;
+          if (extras.off_custom_primitives)
+	    pcust = ((u_char *)data + extras.off_custom_primitives);
+          else pcust = empty_pcust;
+	  if (extras.off_pkt_vlen_hdr_primitives)
+	    pvlen = (struct pkt_vlen_hdr_primitives *) ((u_char *)data + extras.off_pkt_vlen_hdr_primitives); 
+	  else pvlen = &empty_pvlen;
+
 	  for (num = 0; net_funcs[num]; num++)
-	    (*net_funcs[num])(&nt, &nc, &data->primitives);
+	    (*net_funcs[num])(&nt, &nc, &data->primitives, pbgp, &nfd);
 
 	  if (config.ports_file) {
 	    if (!pt.table[data->primitives.src_port]) data->primitives.src_port = 0;
 	    if (!pt.table[data->primitives.dst_port]) data->primitives.dst_port = 0;
 	  }
 
-	  /* XXX: can be optimized? */
-	  if (PbgpSz) pbgp = (struct pkt_bgp_primitives *) ((u_char *)data+PdataSz);
-	  else pbgp = NULL;
+	  if (config.pkt_len_distrib_bins_str &&
+	      config.what_to_count_2 & COUNT_PKT_LEN_DISTRIB)
+	    evaluate_pkt_len_distrib(data);
 
-          (*insert_func)(data, pbgp);
+	  prim_ptrs.data = data; 
+	  prim_ptrs.pbgp = pbgp; 
+	  prim_ptrs.pnat = pnat;
+	  prim_ptrs.pmpls = pmpls;
+	  prim_ptrs.pcust = pcust;
+	  prim_ptrs.pvlen = pvlen;
+	  
+          (*insert_func)(&prim_ptrs);
 
 	  ((struct ch_buf_hdr *)pipebuf)->num--;
 	  if (((struct ch_buf_hdr *)pipebuf)->num) {
             dataptr = (unsigned char *) data;
-            dataptr += PdataSz + PbgpSz;
+            dataptr += datasize;
             data = (struct pkt_data *) dataptr;
 	  }
         }
@@ -365,74 +434,61 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
 void exit_now(int signum)
 {
+  if (config.imt_plugin_path) unlink(config.imt_plugin_path);
   exit_plugin(0);
 }
 
-void sum_host_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp)
+void sum_host_insert(struct primitives_ptrs *prim_ptrs)
 {
-  struct in_addr ip;
-#if defined ENABLE_IPV6
-  struct in6_addr ip6;
-#endif
+  struct pkt_data *data = prim_ptrs->data;
+  struct host_addr tmp;
 
-  if (data->primitives.dst_ip.family == AF_INET) {
-    ip.s_addr = data->primitives.dst_ip.address.ipv4.s_addr;
-    data->primitives.dst_ip.address.ipv4.s_addr = 0;
-    data->primitives.dst_ip.family = 0;
-    insert_accounting_structure(data, pbgp);
-    data->primitives.src_ip.address.ipv4.s_addr = ip.s_addr;
-    insert_accounting_structure(data, pbgp);
-    return;
-  }
-#if defined ENABLE_IPV6
-  if (data->primitives.dst_ip.family == AF_INET6) {
-    memcpy(&ip6, &data->primitives.dst_ip.address.ipv6, sizeof(struct in6_addr));
-    memset(&data->primitives.dst_ip.address.ipv6, 0, sizeof(struct in6_addr));
-    data->primitives.dst_ip.family = 0;
-    insert_accounting_structure(data, pbgp);
-    memcpy(&data->primitives.src_ip.address.ipv6, &ip6, sizeof(struct in6_addr));
-    insert_accounting_structure(data, pbgp);
-    return;
-  }
-#endif
+  memcpy(&tmp, &data->primitives.dst_ip, HostAddrSz);
+  memset(&data->primitives.dst_ip, 0, HostAddrSz);
+  insert_accounting_structure(prim_ptrs);
+  memcpy(&data->primitives.src_ip, &tmp, HostAddrSz);
+  insert_accounting_structure(prim_ptrs);
 }
 
-void sum_port_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp)
+void sum_port_insert(struct primitives_ptrs *prim_ptrs)
 {
+  struct pkt_data *data = prim_ptrs->data;
   u_int16_t port;
 
   port = data->primitives.dst_port;
   data->primitives.dst_port = 0;
-  insert_accounting_structure(data, pbgp);
+  insert_accounting_structure(prim_ptrs);
   data->primitives.src_port = port;
-  insert_accounting_structure(data, pbgp);
+  insert_accounting_structure(prim_ptrs);
 }
 
-void sum_as_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp)
+void sum_as_insert(struct primitives_ptrs *prim_ptrs)
 {
+  struct pkt_data *data = prim_ptrs->data;
   as_t asn;
 
   asn = data->primitives.dst_as;
   data->primitives.dst_as = 0;
-  insert_accounting_structure(data, pbgp);
+  insert_accounting_structure(prim_ptrs);
   data->primitives.src_as = asn;
-  insert_accounting_structure(data, pbgp);
+  insert_accounting_structure(prim_ptrs);
 }
 
 #if defined (HAVE_L2)
-void sum_mac_insert(struct pkt_data *data, struct pkt_bgp_primitives *pbgp)
+void sum_mac_insert(struct primitives_ptrs *prim_ptrs)
 {
+  struct pkt_data *data = prim_ptrs->data;
   u_char macaddr[ETH_ADDR_LEN];
 
   memcpy(macaddr, &data->primitives.eth_dhost, ETH_ADDR_LEN);
   memset(data->primitives.eth_dhost, 0, ETH_ADDR_LEN);
-  insert_accounting_structure(data, pbgp);
+  insert_accounting_structure(prim_ptrs);
   memcpy(&data->primitives.eth_shost, macaddr, ETH_ADDR_LEN);
-  insert_accounting_structure(data, pbgp);
+  insert_accounting_structure(prim_ptrs);
 }
 #endif
 
-void free_bgp_allocs()
+void free_extra_allocs()
 {
   struct acc *acc_elem = NULL;
   unsigned char *elem;
@@ -443,18 +499,26 @@ void free_bgp_allocs()
 
   for (idx = 0; idx < config.buckets; idx++) {
     if (!following_chain) acc_elem = (struct acc *) elem;
-    if (acc_elem->cbgp) {
-      if (acc_elem->cbgp->std_comms) free(acc_elem->cbgp->std_comms);
-      if (acc_elem->cbgp->ext_comms) free(acc_elem->cbgp->ext_comms);
-      if (acc_elem->cbgp->as_path) free(acc_elem->cbgp->as_path);
-      if (acc_elem->cbgp->src_std_comms) free(acc_elem->cbgp->src_std_comms);
-      if (acc_elem->cbgp->src_ext_comms) free(acc_elem->cbgp->src_ext_comms);
-      if (acc_elem->cbgp->src_as_path) free(acc_elem->cbgp->src_as_path);
-      free(acc_elem->cbgp);
+    if (acc_elem->cbgp) free_cache_bgp_primitives(&acc_elem->cbgp);
+    if (acc_elem->pnat) {
+      free(acc_elem->pnat);
+      acc_elem->pnat = NULL;
+    }
+    if (acc_elem->pmpls) {
+      free(acc_elem->pmpls);
+      acc_elem->pmpls = NULL;
+    }
+    if (acc_elem->pcust) {
+      free(acc_elem->pcust);
+      acc_elem->pcust = NULL;
+    }
+    if (acc_elem->pvlen) {
+      free(acc_elem->pvlen);
+      acc_elem->pvlen= NULL;
     }
     if (acc_elem->next) {
       acc_elem = acc_elem->next;
-      following_chain = TRUE;
+      following_chain++;
       idx--;
     }
     else {
