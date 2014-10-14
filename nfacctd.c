@@ -360,6 +360,7 @@ int main(int argc,char **argv)
     memset(&idt, 0, sizeof(idt));
     pptrs.idtable = NULL;
   }
+  load_nfv8_handlers();
 
   /* plugins glue: creation */
   memset(&device, 0, sizeof(struct pcap_device));
@@ -418,15 +419,20 @@ int main(int argc,char **argv)
   /* Main loop */
   for(;;) {
     memset(netflow_packet, 0, NETFLOW_MSG_SIZE);
+    memset(pptrs.iph_ptr, 0, IP4TlSz);  
+#if defined ENABLE_IPV6
+    memset(pptrs6.iph_ptr, 0, IP6TlSz);  
+#endif 
+
     ret = recvfrom(sd, netflow_packet, NETFLOW_MSG_SIZE, 0, (struct sockaddr *) &client, &clen);
 
-    /* check if Hosts Allow Table is loaded; if it is, we will
-       enforce rules */
+    if (ret < 1) continue; /* we don't have enough data to decode the version */ 
+
+    /* check if Hosts Allow Table is loaded; if it is, we will enforce rules */
     if (allow.num) allowed = check_allow(&allow, (struct sockaddr *)&client); 
     if (!allowed) continue;
 
-    /* We will change byte ordering in order to avoid a bunch
-       of ntohs() calls */
+    /* We will change byte ordering in order to avoid a bunch of ntohs() calls */
     ((struct struct_header_v5 *)netflow_packet)->version = ntohs(((struct struct_header_v5 *)netflow_packet)->version);
     
     switch(((struct struct_header_v5 *)netflow_packet)->version) {
@@ -435,6 +441,12 @@ int main(int argc,char **argv)
       break;
     case 5:
       process_v5_packet(netflow_packet, ret, &pptrs, &req); 
+      break;
+    case 7:
+      process_v7_packet(netflow_packet, ret, &pptrs, &req);
+      break;
+    case 8:
+      process_v8_packet(netflow_packet, ret, &pptrs, &req);
       break;
     case 9:
 #if defined ENABLE_IPV6
@@ -527,6 +539,78 @@ void process_v5_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs *pp
     return;
   }
 } 
+
+void process_v7_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs *pptrs,
+                struct plugin_requests *req)
+{
+  struct struct_header_v7 *hdr_v7 = (struct struct_header_v7 *)pkt;
+  struct struct_export_v7 *exp_v7;
+  unsigned short int count = ntohs(hdr_v7->count);
+
+  if (len < NfHdrV7Sz) {
+    if (config.debug) Log(LOG_INFO, "INFO: discarding short NetFlow v7 packet.\n");
+    return;
+  }
+  pptrs->f_header = pkt;
+  pkt += NfHdrV7Sz;
+  exp_v7 = (struct struct_export_v7 *)pkt;
+
+  if ((count <= V7_MAXFLOWS) && ((count*NfDataV7Sz)+NfHdrV7Sz == len)) {
+    while (count) {
+      pptrs->f_data = (unsigned char *) exp_v7;
+      if (req->bpf_filter) {
+        Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_src.s_addr, exp_v7->srcaddr);
+        Assign32(((struct my_iphdr *)pptrs->iph_ptr)->ip_dst.s_addr, exp_v7->dstaddr);
+        Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_p, exp_v7->prot);
+        Assign16(((struct my_tlhdr *)pptrs->tlh_ptr)->src_port, exp_v7->srcport);
+        Assign16(((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port, exp_v7->dstport);
+      }
+
+      /* IP header's id field is unused; we will use it to transport our id */
+      if (config.pre_tag_map) pptrs->tag = NF_find_id(pptrs);
+      exec_plugins(pptrs);
+      exp_v7++;
+      count--;
+    }
+  }
+  else {
+    if (config.debug) Log(LOG_INFO, "INFO: discarding malformed NetFlow v7 packet.\n");
+    return;
+  }
+}
+
+void process_v8_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs *pptrs,
+                struct plugin_requests *req)
+{
+  struct struct_header_v8 *hdr_v8 = (struct struct_header_v8 *)pkt;
+  unsigned char *exp_v8;
+  unsigned short int count = ntohs(hdr_v8->count);
+
+  if (len < NfHdrV8Sz) {
+    if (config.debug) Log(LOG_INFO, "INFO: discarding short NetFlow v8 packet.\n");
+      return;
+  }
+  pptrs->f_header = pkt;
+  pkt += NfHdrV8Sz;
+  exp_v8 = pkt;
+
+  if ((count <= v8_handlers[hdr_v8->aggregation].max_flows) && ((count*v8_handlers[hdr_v8->aggregation].exp_size)+NfHdrV8Sz <= len)) {
+    while (count) {
+      pptrs->f_data = exp_v8;
+      if (req->bpf_filter) v8_handlers[hdr_v8->aggregation].fh(pptrs, exp_v8);
+
+      /* IP header's id field is unused; we will use it to transport our id */
+      if (config.pre_tag_map) pptrs->tag = NF_find_id(pptrs);
+      exec_plugins(pptrs);
+      exp_v8 += v8_handlers[hdr_v8->aggregation].exp_size;
+      count--;
+    }
+  }
+  else {
+    if (config.debug) Log(LOG_INFO, "INFO: discarding malformed NetFlow v8 packet.\n");
+    return;
+  }
+}
 
 void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs *pptrs,
 		struct packet_ptrs *pptrs6, struct plugin_requests *req)
@@ -736,15 +820,20 @@ void compute_once()
   CharPtrSz = sizeof(char *);
   NfHdrV1Sz = sizeof(struct struct_header_v1);
   NfHdrV5Sz = sizeof(struct struct_header_v5);
+  NfHdrV7Sz = sizeof(struct struct_header_v7);
+  NfHdrV8Sz = sizeof(struct struct_header_v8);
   NfHdrV9Sz = sizeof(struct struct_header_v9);
   NfDataHdrV9Sz = sizeof(struct data_hdr_v9);
   NfTplHdrV9Sz = sizeof(struct template_hdr_v9);
   NfDataV1Sz = sizeof(struct struct_export_v1);
   NfDataV5Sz = sizeof(struct struct_export_v5);
+  NfDataV7Sz = sizeof(struct struct_export_v7);
+  IP4TlSz = sizeof(struct my_iphdr)+sizeof(struct my_tlhdr);
 
 #if defined ENABLE_IPV6
   IP6HdrSz = sizeof(struct ip6_hdr);
   IP6AddrSz = sizeof(struct in6_addr);
+  IP6TlSz = sizeof(struct ip6_hdr)+sizeof(struct my_tlhdr);
 #endif
 }
 

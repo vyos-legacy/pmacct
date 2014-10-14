@@ -11,7 +11,7 @@ pmacctd_LDADD = $(pmacctd_PLUGINS)
 nfacctd_SOURCES = nfacctd.c signals.c util.c strlcpy.c plugin_hooks.c \
         server.c acct.c memory.c cfg.c imt_plugin.c log.c pkt_handlers.c \
         cfg_handlers.c net_aggr.c bpf_filter.c print_plugin.c pretag.c \
-	pretag_handlers.c ports_aggr.c nfv9_template.c addr.c
+	pretag_handlers.c ports_aggr.c nfv8_handlers.c nfv9_template.c addr.c
 nfacctd_LDFLAGS = $(DEFS)
 nfacctd_LDADD = $(pmacctd_PLUGINS)
 pmacct_SOURCES = pmacct.c strlcpy.c addr.c

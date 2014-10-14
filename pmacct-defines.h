@@ -41,11 +41,11 @@
 #define LARGEBUFLEN 8192
 
 #define MANTAINER "Paolo Lucente <paolo.lucente@ic.cnr.it>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.8.3"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.8.3"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.8.3"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.8.3"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.8.3"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.8.4"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.8.4"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.8.4"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.8.4"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.8.4"
 
 #ifndef TRUE
 #define TRUE 1

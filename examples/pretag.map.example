@@ -32,6 +32,8 @@
 ! 'filter'		Matches incoming packets against the supplied filter expression
 !			(expected in libpcap syntax); the filter needs to be enclosed in
 !			quotes ('). 
+! 'v8agg'		In NetFlow V8 it's compared against the aggregation method in use.
+!			Valid values are in the range 0 > value > 15. 
 !
 
 !

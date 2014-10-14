@@ -122,6 +122,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   signal(SIGHUP, reload); /* handles reopening of syslog channel */
   signal(SIGINT, exit_now); /* exit lane */
+  signal(SIGCHLD, SIG_IGN); 
 
   /* building a server for interrogations by clients */
   sd = build_query_server(config.imt_plugin_path);

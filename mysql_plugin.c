@@ -68,6 +68,7 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   /* signal handling */
   signal(SIGINT, MY_exit_gracefully);
   signal(SIGHUP, reload); /* handles reopening of syslog channel */
+  signal(SIGCHLD, SIG_IGN); 
 
   if (!config.sql_refresh_time)
     config.sql_refresh_time = DEFAULT_DB_REFRESH_TIME;

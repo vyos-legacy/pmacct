@@ -506,6 +506,13 @@ void lower_string(char *string)
 
 void evaluate_sums(u_int32_t *wtc)
 {
+  int tag = FALSE;
+
+  if (*wtc & COUNT_ID) {
+    *wtc ^= COUNT_ID;
+    tag = TRUE;
+  }
+
   if (*wtc & COUNT_SUM_HOST) {
     if (*wtc != COUNT_SUM_HOST) {
       *wtc = COUNT_SUM_HOST;
@@ -530,6 +537,8 @@ void evaluate_sums(u_int32_t *wtc)
       Log(LOG_WARNING, "WARN: SUM aggregation is to be used alone. Resetting other aggregation methods.\n");
     }
   }
+
+  if (tag) *wtc |= COUNT_ID;
 }
 
 int file_archive(const char *path, int rotations)

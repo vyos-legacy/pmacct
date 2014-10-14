@@ -606,8 +606,8 @@ int main(int argc,char **argv)
 	else if (!strcmp(count_token[match_string_index], "tag")) {
 	  int value = atoi(match_string_token);
 
-	  if ((value < 1) || (value > 65535)) {
-	    printf("WARN: 'tag' has to be in the range 1-65535.\n");
+	  if ((value < 0) || (value > 65535)) {
+	    printf("WARN: 'tag' has to be in the range 0-65535.\n");
 	    exit(1);
 	  }
 

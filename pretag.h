@@ -34,6 +34,7 @@ struct id_entry {
   u_int8_t engine_type;
   u_int8_t engine_id;
   struct bpf_program filter;
+  u_int8_t v8agg;
   pretag_handler func[N_MAP_HANDLERS];
 };
 

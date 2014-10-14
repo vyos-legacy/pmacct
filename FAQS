@@ -15,7 +15,7 @@ A: It's http://www.ba.cnr.it/~paolo/pmacct/ . Actually there isn't any other off
 Q: 'pmacct', 'pmacctd', 'nfacctd' -- but what do they mean ?
 A: 'pmacct' is intended to be the name of the project; 'pmacctd' is the name of the
    libpcap-based IP accounting and aggregation daemon; 'nfacctd' is the name of the
-   NetFlow v1/v5/v9 accounting and aggregation daemon which entered the project
+   NetFlow v1/v5/v7/v8/v9 accounting and aggregation daemon which entered the project
    starting from version 0.7.0.
 
 

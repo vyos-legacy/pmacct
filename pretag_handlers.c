@@ -182,16 +182,75 @@ int PT_map_filter_handler(struct id_entry *e, char *value)
   return FALSE;
 }
 
+int PT_map_v8agg_handler(struct id_entry *e, char *value)
+{
+  int tmp; 
+  int x = 0, len = strlen(value);
+
+  while (x < len) {
+    if (!isdigit(value[x])) {
+      Log(LOG_ERR, "ERROR: bad 'v8agg' value: '%s'. ", value);
+      return TRUE;
+    }
+    x++;
+  }
+
+  tmp = atoi(value);
+  if (tmp < 1 || tmp > 14) {
+    Log(LOG_ERR, "ERROR: 'v8agg' need to be in the following range: 0 > value > 15. ");
+    return TRUE;
+  }
+  e->v8agg = tmp; 
+  for (x = 0; e->func[x]; x++);
+  e->func[x] = pretag_v8agg_handler;
+  return FALSE;
+}
+
 int pretag_input_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
   case 9:
     if (!memcmp(&entry->input, pptrs->f_data+tpl->tpl[NF9_INPUT_SNMP].off, tpl->tpl[NF9_INPUT_SNMP].len)) return FALSE;
     else return TRUE;
+  case 8: 
+    switch(hdr->aggregation) {
+      case 1:
+	if (entry->input == ((struct struct_export_v8_1 *)pptrs->f_data)->input) return FALSE;
+	else return TRUE;
+      case 3:
+	if (entry->input == ((struct struct_export_v8_3 *)pptrs->f_data)->input) return FALSE;
+	else return TRUE;
+      case 5:
+        if (entry->input == ((struct struct_export_v8_5 *)pptrs->f_data)->input) return FALSE;
+	else return TRUE;
+      case 7:
+	if (entry->input == ((struct struct_export_v8_7 *)pptrs->f_data)->input) return FALSE;
+	else return TRUE;
+      case 8:
+        if (entry->input == ((struct struct_export_v8_8 *)pptrs->f_data)->input) return FALSE;
+        else return TRUE;
+      case 9:
+        if (entry->input == ((struct struct_export_v8_9 *)pptrs->f_data)->input) return FALSE;
+        else return TRUE;
+      case 10:
+        if (entry->input == ((struct struct_export_v8_10 *)pptrs->f_data)->input) return FALSE;
+        else return TRUE;
+      case 11: 
+        if (entry->input == ((struct struct_export_v8_11 *)pptrs->f_data)->input) return FALSE;
+        else return TRUE;
+      case 13:
+        if (entry->input == ((struct struct_export_v8_13 *)pptrs->f_data)->input) return FALSE;
+        else return TRUE;
+      case 14:
+        if (entry->input == ((struct struct_export_v8_14 *)pptrs->f_data)->input) return FALSE;
+        else return TRUE;
+      default:
+	return TRUE;
+    }
   default:
     if (entry->input == ((struct struct_export_v5 *)pptrs->f_data)->input) return FALSE;
     else return TRUE; 
@@ -201,13 +260,51 @@ int pretag_input_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 int pretag_output_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
   case 9:
     if (!memcmp(&entry->output, pptrs->f_data+tpl->tpl[NF9_OUTPUT_SNMP].off, tpl->tpl[NF9_OUTPUT_SNMP].len)) return FALSE;
     else return TRUE;
+  case 8:
+    switch(hdr->aggregation) {
+      case 1:
+        if (entry->output == ((struct struct_export_v8_1 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      case 4:
+        if (entry->output == ((struct struct_export_v8_4 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      case 5:
+        if (entry->output == ((struct struct_export_v8_5 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      case 6:
+        if (entry->output == ((struct struct_export_v8_6 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      case 7:
+        if (entry->output == ((struct struct_export_v8_7 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      case 8:
+        if (entry->output == ((struct struct_export_v8_8 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      case 9:
+        if (entry->output == ((struct struct_export_v8_9 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      case 10:
+        if (entry->output == ((struct struct_export_v8_10 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      case 12:
+        if (entry->output == ((struct struct_export_v8_12 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      case 13:
+        if (entry->output == ((struct struct_export_v8_13 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      case 14:
+        if (entry->output == ((struct struct_export_v8_14 *)pptrs->f_data)->output) return FALSE;
+        else return TRUE;
+      default:
+        return TRUE;
+    }
   default:
     if (entry->output == ((struct struct_export_v5 *)pptrs->f_data)->output) return FALSE;
     else return TRUE;
@@ -217,7 +314,7 @@ int pretag_output_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 int pretag_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -231,6 +328,9 @@ int pretag_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
     }
 #endif
     else return TRUE;
+  case 8:
+    /* NetFlow v8 does not seem to contain any nexthop field */
+    return TRUE;
   default:
     if (entry->nexthop.address.ipv4.s_addr == ((struct struct_export_v5 *)pptrs->f_data)->nexthop.s_addr) return FALSE;
     else return TRUE;
@@ -240,7 +340,7 @@ int pretag_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 int pretag_bgp_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -254,6 +354,9 @@ int pretag_bgp_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
     }
 #endif
     else return TRUE;
+  case 8:
+    /* NetFlow v8 does not seem to contain any nexthop field */
+    return TRUE;
   default:
     if (entry->bgp_nexthop.address.ipv4.s_addr == ((struct struct_export_v5 *)pptrs->f_data)->nexthop.s_addr) return FALSE;
     else return TRUE;
@@ -263,7 +366,7 @@ int pretag_bgp_nexthop_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 int pretag_engine_type_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   u_char value[4];
 
@@ -272,8 +375,11 @@ int pretag_engine_type_handler(struct packet_ptrs *pptrs, void *unused, void *e)
     memcpy(value, &((struct struct_header_v9 *)pptrs->f_data)->source_id, 4);
     if (entry->engine_type == (u_int8_t)value[1]) return FALSE;
     else return TRUE;
+  case 8:
+    if (entry->engine_type == ((struct struct_header_v8 *)pptrs->f_header)->engine_type) return FALSE;
+    else return TRUE;
   case 5:
-    if (entry->engine_type == ((struct struct_header_v5 *)pptrs->f_data)->engine_type) return FALSE;
+    if (entry->engine_type == ((struct struct_header_v5 *)pptrs->f_header)->engine_type) return FALSE;
     else return TRUE;
   default:
     return TRUE; /* this field does not exist: condition is always true */
@@ -283,7 +389,7 @@ int pretag_engine_type_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 int pretag_engine_id_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   u_char value[4];
 
@@ -292,8 +398,11 @@ int pretag_engine_id_handler(struct packet_ptrs *pptrs, void *unused, void *e)
     memcpy(value, &((struct struct_header_v9 *)pptrs->f_data)->source_id, 4);
     if (entry->engine_id == (u_int8_t)value[0]) return FALSE;
     else return TRUE;
+  case 8:
+    if (entry->engine_id == ((struct struct_header_v8 *)pptrs->f_header)->engine_id) return FALSE;
+    else return TRUE;
   case 5:
-    if (entry->engine_id == ((struct struct_header_v5 *)pptrs->f_data)->engine_id) return FALSE;
+    if (entry->engine_id == ((struct struct_header_v5 *)pptrs->f_header)->engine_id) return FALSE;
     else return TRUE;
   default:
     return TRUE; /* this field does not exist: condition is always true */
@@ -307,6 +416,20 @@ int pretag_filter_handler(struct packet_ptrs *pptrs, void *unused, void *e)
   if (bpf_filter(entry->filter.bf_insns, pptrs->packet_ptr, pptrs->pkthdr->len, pptrs->pkthdr->caplen)) 
     return FALSE; /* matched filter */
   else return TRUE;
+}
+
+int pretag_v8agg_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+
+  switch(hdr->version) {
+  case 8:
+    if (entry->v8agg == ((struct struct_header_v8 *)pptrs->f_header)->aggregation) return FALSE;
+    else return TRUE;
+  default:
+    return TRUE; 
+  }
 }
 
 int pretag_id_handler(struct packet_ptrs *pptrs, void *id, void *e)

@@ -1,5 +1,5 @@
 NAME:
-  pmacct (Promiscuous mode IP Accounting package) v0.8.3
+  pmacct (Promiscuous mode IP Accounting package) v0.8.4
   pmacct is Copyright (C) 2003-2005 by Paolo Lucente
 
 
@@ -12,7 +12,8 @@ DESCRIPTION:
   breakdown, packet tagging, filtering and sampling. Aggregates can be stored into
   memory tables, SQL databases (MySQL or PostgreSQL) or simply pushed to stdout.
   Data is collected either using libpcap (and optionally promiscuous mode of the
-  listening interface) or reading Netflow v1/v5/v9 packets coming from the network.
+  listening interface) or reading Netflow v1/v5/v7/v8/v9 packets coming from the
+  network.
 
   IP accounting is the key for a range of operations like billing, pricing
   models application, live or historical traffic analysis; it is also a valuable
@@ -44,11 +45,12 @@ PLATFORMS:
   It has been tested and reported to work on:
 
   Red Hat Linux 7.x/8.x/9.x
-  Fedora Core 1/2
+  Fedora Core 1/2/3
   Slackware Linux 8.x/9.x
   Gentoo Linux 1.4.x/1.6.x
   SuSE Linux 9.x
-  OpenBSD 3.2/3.3 i386
+  Debian 3.0
+  Solaris 8/9/10
   FreeBSD 4.x/5.x i386
   LEAF Bering-uClibc
   Tru64 5.x
@@ -59,7 +61,7 @@ PLATFORMS:
 
 
 NETFLOW:
-  Supported versions: V1/V5/V9
+  Supported versions: V1/V5/V7/V8/V9
 
   Netflow packets have been read successfully from:
   Cisco 2500, 2600, 3600, 7500, 12000; IOS 11.2, 12.0(30)S, 12.1, 12.3

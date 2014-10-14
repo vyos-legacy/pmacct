@@ -1,5 +1,34 @@
-pmacct (Promiscuous mode IP Accounting package) v0.8.3
+pmacct (Promiscuous mode IP Accounting package) v0.8.4
 pmacct is Copyright (C) 2003-2005 by Paolo Lucente
+
+0.8.4 -- 14-Apr-2005
+  + Added support for NetFlow v7/v8. The Version 7 (v7) format is exclusively
+    supported by Cisco Catalyst series switches equipped with a NetFlow feature
+    card (NFFC). v7 is not compatible with Cisco routers. The Version 8 (v8)
+    format adds (with respect to older v5/v7 versions) router-based aggregation
+    schemes.
+  + Added the chance to tag packets basing on NetFlow v8 aggregation type field. 
+    As the keyword suggests, it will work successfully just when processing  
+    NetFlow v8 packets. Useful to split - backend side - data per aggregation
+    type. 
+  + pmacct client now is able to ask for the '0' (that is, untagged packets) tag
+    value. Moreover, all 'sum' aggregations (sum_host, sum_net, sum_as, sum_port)
+    can now be associated with both Pre/Post-Tagging.  
+  ! Fixed a serious memory leak located in the routines for handling NetFlow v9
+    templates. While the bug was needing certain conditions to manifest, anyone
+    using NetFlow v9 is strongly encouraged to upgrade to this version. All
+    previous versions were affected.
+  ! Some gcc4 compliance issues have been solved. The source code is known to
+    work fine on amd64 architectures. Thanks very much to Marcelo Goes for his
+    patch.
+  ! Engine Type/Engine ID fields were not correctly evaluated when using NetFlow
+    v5 and Pre-Tagging. The issue has been fixed.
+  ! Long comments in the Ports Definition File were causing some incorrect error
+    messages. However it seems the file were processed correctly. Thanks to Bruno
+    Mattarollo for signalling the issue.
+  ! Minor fix to plugins hooking code. The reception of sparse SIGCHLD signals 
+    were causing the poll() to return. The impact was null. The issue has been
+    fixed by ignoring such signals. 
 
 0.8.3 -- 29-Mar-2005
   + Pre-Tagging capabilities have been further enhanced: captured traffic can

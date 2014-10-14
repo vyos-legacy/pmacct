@@ -228,7 +228,6 @@ extern int debug;
 extern int have_num_memory_pools; /* global getopt() stuff */
 extern struct configuration config; /* global configuration structure */ 
 extern struct plugins_list_entry *plugins_list; /* linked list of each plugin configuration */
-extern struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
 extern pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
 #endif
 

@@ -19,6 +19,10 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+#if (defined __PKT_HANDLERS_C)
+extern struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
+#endif
+
 #if (!defined __PKT_HANDLERS_C)
 #define EXT extern
 #else

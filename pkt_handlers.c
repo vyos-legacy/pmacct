@@ -268,7 +268,7 @@ void id_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, st
 
 void NF_src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -282,7 +282,7 @@ void NF_src_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *p
 
 void NF_dst_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -296,7 +296,7 @@ void NF_dst_mac_handler(struct channels_list_entry *chptr, struct packet_ptrs *p
 
 void NF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -310,7 +310,7 @@ void NF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
 
 void NF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -328,6 +328,42 @@ void NF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
     }
 #endif
     break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 3:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_3 *) pptrs->f_data)->src_prefix;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 5:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_5 *) pptrs->f_data)->src_prefix;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 7:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_7 *) pptrs->f_data)->srcaddr;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 8:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_8 *) pptrs->f_data)->srcaddr;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 11:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_11 *) pptrs->f_data)->src_prefix;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 13:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_13 *) pptrs->f_data)->src_prefix;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 14:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_14 *) pptrs->f_data)->src_prefix;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    default:
+      pdata->primitives.src_ip.address.ipv4.s_addr = 0;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    }  
+    break;
   default:
     pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v5 *) pptrs->f_data)->srcaddr.s_addr;
     pdata->primitives.src_ip.family = AF_INET;
@@ -337,7 +373,7 @@ void NF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
 
 void NF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -355,6 +391,46 @@ void NF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
     }
 #endif
     break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 4:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_4 *) pptrs->f_data)->dst_prefix;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 5:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_5 *) pptrs->f_data)->dst_prefix;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 6:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_6 *) pptrs->f_data)->dstaddr;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 7:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_7 *) pptrs->f_data)->dstaddr;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 8:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_8 *) pptrs->f_data)->dstaddr;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 12:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_12 *) pptrs->f_data)->dst_prefix;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 13:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_13 *) pptrs->f_data)->dst_prefix;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 14:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_14 *) pptrs->f_data)->dst_prefix;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    default:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = 0;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    }
+    break;
   default:
     pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v5 *) pptrs->f_data)->dstaddr.s_addr;
     pdata->primitives.dst_ip.family = AF_INET;
@@ -364,7 +440,7 @@ void NF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
 
 void NF_src_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -375,6 +451,39 @@ void NF_src_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
 #endif
     pdata->primitives.src_ip.family = AF_INET;
     break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 1:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_1 *) pptrs->f_data)->src_as;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 3:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_3 *) pptrs->f_data)->src_as;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 5:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_5 *) pptrs->f_data)->src_as;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 9:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_9 *) pptrs->f_data)->src_as;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 11:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_11 *) pptrs->f_data)->src_as;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    case 13:
+      pdata->primitives.src_ip.address.ipv4.s_addr = ((struct struct_export_v8_13 *) pptrs->f_data)->src_as;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    default:
+      pdata->primitives.src_ip.address.ipv4.s_addr = 0;
+      pdata->primitives.src_ip.family = AF_INET;
+      break;
+    }
+    pdata->primitives.src_ip.address.ipv4.s_addr <<= 16; /* 32-to-16 bit */
+    break;
   default:
     pdata->primitives.src_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v5 *) pptrs->f_data)->src_as));
     pdata->primitives.src_ip.family = AF_INET;
@@ -384,7 +493,7 @@ void NF_src_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
 
 void NF_dst_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -395,6 +504,39 @@ void NF_dst_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
 #endif
     pdata->primitives.dst_ip.family = AF_INET;
     break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 1:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_1 *) pptrs->f_data)->dst_as;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 4:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_4 *) pptrs->f_data)->dst_as;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 5:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_5 *) pptrs->f_data)->dst_as;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 9:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_9 *) pptrs->f_data)->dst_as;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 12:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_12 *) pptrs->f_data)->dst_as;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    case 13:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = ((struct struct_export_v8_13 *) pptrs->f_data)->dst_as;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    default:
+      pdata->primitives.dst_ip.address.ipv4.s_addr = 0;
+      pdata->primitives.dst_ip.family = AF_INET;
+      break;
+    }
+    pdata->primitives.dst_ip.address.ipv4.s_addr <<= 16; /* 32-to-16 bit */
+    break;
   default:
     pdata->primitives.dst_ip.address.ipv4.s_addr = htonl(ntohs(((struct struct_export_v5 *) pptrs->f_data)->dst_as));
     pdata->primitives.dst_ip.family = AF_INET;
@@ -404,7 +546,7 @@ void NF_dst_as_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
 
 void NF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   
   switch(hdr->version) {
@@ -415,6 +557,33 @@ void NF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *
       pdata->primitives.src_port = ntohs(pdata->primitives.src_port);
     }
     else pdata->primitives.src_port = 0;
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 2:
+      if ((((struct struct_export_v8_2 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
+          ((struct struct_export_v8_2 *) pptrs->f_data)->prot == IPPROTO_TCP) 
+        pdata->primitives.src_port = ntohs(((struct struct_export_v8_2 *) pptrs->f_data)->srcport);
+      break;
+    case 8:
+      if ((((struct struct_export_v8_8 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
+          ((struct struct_export_v8_8 *) pptrs->f_data)->prot == IPPROTO_TCP) 
+        pdata->primitives.src_port = ntohs(((struct struct_export_v8_8 *) pptrs->f_data)->srcport);
+      break;
+    case 10:
+      if ((((struct struct_export_v8_10 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
+          ((struct struct_export_v8_10 *) pptrs->f_data)->prot == IPPROTO_TCP) 
+        pdata->primitives.src_port = ntohs(((struct struct_export_v8_10 *) pptrs->f_data)->srcport);
+      break;
+    case 14:
+      if ((((struct struct_export_v8_14 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
+          ((struct struct_export_v8_14 *) pptrs->f_data)->prot == IPPROTO_TCP) 
+        pdata->primitives.src_port = ntohs(((struct struct_export_v8_14 *) pptrs->f_data)->srcport);
+      break;
+    default:
+      pdata->primitives.src_port = 0; 
+      break;
+    }
     break;
   default:
     if ((((struct struct_export_v5 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
@@ -427,7 +596,7 @@ void NF_src_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *
 
 void NF_dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -438,6 +607,33 @@ void NF_dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *
       pdata->primitives.dst_port = ntohs(pdata->primitives.dst_port);
     }
     else pdata->primitives.dst_port = 0;
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 2:
+      if ((((struct struct_export_v8_2 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
+          ((struct struct_export_v8_2 *) pptrs->f_data)->prot == IPPROTO_TCP) 
+        pdata->primitives.dst_port = ntohs(((struct struct_export_v8_2 *) pptrs->f_data)->dstport);
+      break;
+    case 8:
+      if ((((struct struct_export_v8_8 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
+          ((struct struct_export_v8_8 *) pptrs->f_data)->prot == IPPROTO_TCP) 
+        pdata->primitives.dst_port = ntohs(((struct struct_export_v8_8 *) pptrs->f_data)->dstport);
+      break;
+    case 10:
+      if ((((struct struct_export_v8_10 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
+          ((struct struct_export_v8_10 *) pptrs->f_data)->prot == IPPROTO_TCP) 
+        pdata->primitives.dst_port = ntohs(((struct struct_export_v8_10 *) pptrs->f_data)->dstport);
+      break;
+    case 14:
+      if ((((struct struct_export_v8_14 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
+          ((struct struct_export_v8_14 *) pptrs->f_data)->prot == IPPROTO_TCP) 
+        pdata->primitives.dst_port = ntohs(((struct struct_export_v8_14 *) pptrs->f_data)->dstport);
+      break;
+    default:
+      pdata->primitives.dst_port = 0;
+      break;
+    }
     break;
   default:
     if ((((struct struct_export_v5 *) pptrs->f_data)->prot == IPPROTO_UDP) ||
@@ -450,12 +646,46 @@ void NF_dst_port_handler(struct channels_list_entry *chptr, struct packet_ptrs *
 
 void NF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
   case 9:
     memcpy(&pdata->primitives.tos, pptrs->f_data+tpl->tpl[NF9_SRC_TOS].off, tpl->tpl[NF9_SRC_TOS].len);
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 6:
+      pdata->primitives.tos = ((struct struct_export_v8_6 *) pptrs->f_data)->tos;
+      break;
+    case 7:
+      pdata->primitives.tos = ((struct struct_export_v8_7 *) pptrs->f_data)->tos;
+      break;
+    case 8:
+      pdata->primitives.tos = ((struct struct_export_v8_8 *) pptrs->f_data)->tos;
+      break;
+    case 9:
+      pdata->primitives.tos = ((struct struct_export_v8_9 *) pptrs->f_data)->tos;
+      break;
+    case 10:
+      pdata->primitives.tos = ((struct struct_export_v8_10 *) pptrs->f_data)->tos;
+      break;
+    case 11:
+      pdata->primitives.tos = ((struct struct_export_v8_11 *) pptrs->f_data)->tos;
+      break;
+    case 12:
+      pdata->primitives.tos = ((struct struct_export_v8_12 *) pptrs->f_data)->tos;
+      break;
+    case 13:
+      pdata->primitives.tos = ((struct struct_export_v8_13 *) pptrs->f_data)->tos;
+      break;
+    case 14:
+      pdata->primitives.tos = ((struct struct_export_v8_14 *) pptrs->f_data)->tos;
+      break;
+    default:
+      pdata->primitives.tos = 0;
+      break;
+    }
     break;
   default:
     pdata->primitives.tos = ((struct struct_export_v5 *) pptrs->f_data)->tos;
@@ -465,12 +695,31 @@ void NF_ip_tos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pp
 
 void NF_ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
   case 9:
     memcpy(&pdata->primitives.proto, pptrs->f_data+tpl->tpl[NF9_L4_PROTOCOL].off, tpl->tpl[NF9_L4_PROTOCOL].len);
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 2:
+      pdata->primitives.proto = ((struct struct_export_v8_2 *) pptrs->f_data)->prot;
+      break;
+    case 8:
+      pdata->primitives.proto = ((struct struct_export_v8_8 *) pptrs->f_data)->prot;
+      break;
+    case 10:
+      pdata->primitives.proto = ((struct struct_export_v8_10 *) pptrs->f_data)->prot;
+      break;
+    case 14:
+      pdata->primitives.proto = ((struct struct_export_v8_14 *) pptrs->f_data)->prot;
+      break;
+    default:
+      pdata->primitives.proto = 0;
+      break;
+    }
     break;
   default:
     pdata->primitives.proto = ((struct struct_export_v5 *) pptrs->f_data)->prot;
@@ -481,7 +730,7 @@ void NF_ip_proto_handler(struct channels_list_entry *chptr, struct packet_ptrs *
 /* times from the netflow engine are in msecs */
 void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
@@ -490,6 +739,34 @@ void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_
     memcpy(&pdata->pkt_num, pptrs->f_data+tpl->tpl[NF9_IN_PACKETS].off, tpl->tpl[NF9_IN_PACKETS].len);
     memcpy(&pdata->pkt_time, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
     pdata->pkt_time = pdata->pkt_time/1000;
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 6:
+      pdata->pkt_len = ((struct struct_export_v8_6 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_6 *) pptrs->f_data)->dPkts;
+      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->First))/1000);
+      break;
+    case 7:
+      pdata->pkt_len = ((struct struct_export_v8_7 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_7 *) pptrs->f_data)->dPkts;
+      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->First))/1000);
+      break;
+    case 8:
+      pdata->pkt_len = ((struct struct_export_v8_8 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_8 *) pptrs->f_data)->dPkts;
+      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->First))/1000);
+      break;
+    default:
+      pdata->pkt_len = ((struct struct_export_v8_1 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_1 *) pptrs->f_data)->dPkts;
+      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+      ((ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->First))/1000);
+      break;
+    }
     break;
   default:
     pdata->pkt_len = ((struct struct_export_v5 *) pptrs->f_data)->dOctets;
@@ -503,7 +780,7 @@ void NF_counters_msecs_handler(struct channels_list_entry *chptr, struct packet_
 /* times from the netflow engine are in secs */
 void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   
   switch(hdr->version) {
@@ -511,6 +788,34 @@ void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_p
     memcpy(&pdata->pkt_len, pptrs->f_data+tpl->tpl[NF9_IN_BYTES].off, tpl->tpl[NF9_IN_BYTES].len);
     memcpy(&pdata->pkt_num, pptrs->f_data+tpl->tpl[NF9_IN_PACKETS].off, tpl->tpl[NF9_IN_PACKETS].len);
     memcpy(&pdata->pkt_time, pptrs->f_data+tpl->tpl[NF9_FIRST_SWITCHED].off, tpl->tpl[NF9_FIRST_SWITCHED].len);
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 6:
+      pdata->pkt_len = ((struct struct_export_v8_6 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_6 *) pptrs->f_data)->dPkts;
+      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+       (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_6 *) pptrs->f_data)->First));
+      break;
+    case 7:
+      pdata->pkt_len = ((struct struct_export_v8_7 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_7 *) pptrs->f_data)->dPkts;
+      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+       (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_7 *) pptrs->f_data)->First));
+      break;
+    case 8:
+      pdata->pkt_len = ((struct struct_export_v8_8 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_8 *) pptrs->f_data)->dPkts;
+      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+       (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_8 *) pptrs->f_data)->First));
+      break;
+    default:
+      pdata->pkt_len = ((struct struct_export_v8_1 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_1 *) pptrs->f_data)->dPkts;
+      pdata->pkt_time = ntohl(((struct struct_header_v8 *) pptrs->f_header)->unix_secs)-
+       (ntohl(((struct struct_header_v8 *) pptrs->f_header)->SysUptime)-ntohl(((struct struct_export_v8_1 *) pptrs->f_data)->First));
+      break;
+    }
     break;
   default:
     pdata->pkt_len = ((struct struct_export_v5 *) pptrs->f_data)->dOctets;
@@ -524,13 +829,34 @@ void NF_counters_secs_handler(struct channels_list_entry *chptr, struct packet_p
 /* ignore netflow engine times and generate new ones */
 void NF_counters_new_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, struct pkt_data *pdata)
 {
-  struct struct_header_v5 *hdr = (struct struct_header_v5 *) pptrs->f_header;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   switch(hdr->version) {
   case 9:
     memcpy(&pdata->pkt_len, pptrs->f_data+tpl->tpl[NF9_IN_BYTES].off, tpl->tpl[NF9_IN_BYTES].len);
     memcpy(&pdata->pkt_num, pptrs->f_data+tpl->tpl[NF9_IN_PACKETS].off, tpl->tpl[NF9_IN_PACKETS].len);
+    pdata->pkt_time = 0;
+    break;
+  case 8:
+    switch(hdr->aggregation) {
+    case 6:
+      pdata->pkt_len = ((struct struct_export_v8_6 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_6 *) pptrs->f_data)->dPkts;
+      break;
+    case 7:
+      pdata->pkt_len = ((struct struct_export_v8_7 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_7 *) pptrs->f_data)->dPkts;
+      break;
+    case 8:
+      pdata->pkt_len = ((struct struct_export_v8_8 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_8 *) pptrs->f_data)->dPkts;
+      break;
+    default:
+      pdata->pkt_len = ((struct struct_export_v8_1 *) pptrs->f_data)->dOctets;
+      pdata->pkt_num = ((struct struct_export_v8_1 *) pptrs->f_data)->dPkts;
+      break;
+    }
     pdata->pkt_time = 0;
     break;
   default:
