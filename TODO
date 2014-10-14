@@ -28,6 +28,11 @@ them; i'll answer you as soon as possible.
    resolved.
  + explore new capturing 'sources' other than libpcap and
    all supported NetFlow versions. 
+ ! sFlow: lacks of support for common architectures such as 
+   POS, ATM and F-Relay, mainly because of missing hardware
+   to test them. Moreover, the actual PPP support lacks of
+   an extensive testing. Requests, feedbacks and support 
+   are welcome. 
  + improvements to the plugins architecture; more advanced
    concept would be greatly useful: they would permit some
    advanced feature such as hotswap of old plugins without

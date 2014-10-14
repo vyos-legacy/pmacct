@@ -58,6 +58,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   /* XXX: glue */
   memcpy(&config, cfgptr, sizeof(struct configuration));
+  recollect_pipe_memory(ptr);
 
 #if defined (HAVE_MMAP)
   status->wakeup = TRUE;
@@ -125,6 +126,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   signal(SIGHUP, reload); /* handles reopening of syslog channel */
   signal(SIGINT, exit_now); /* exit lane */
+  signal(SIGUSR1, SIG_IGN);
 #if !defined FBSD4 
   signal(SIGCHLD, SIG_IGN); 
 #else

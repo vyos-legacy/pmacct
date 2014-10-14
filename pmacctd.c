@@ -309,18 +309,18 @@ int main(int argc,char **argv)
 	Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	list->cfg.what_to_count |= COUNT_SRC_HOST;
       }
-      if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_NET|COUNT_SUM_AS)) {
-	if (!list->cfg.networks_file) {
-	  Log(LOG_ERR, "ERROR ( %s/%s ): NET/AS aggregation has been selected but NO networks file has been specified. Exiting...\n\n", list->name, list->type.string);
-	  exit(1);
-	}
-	else {
-	  if (((list->cfg.what_to_count & COUNT_SRC_NET) && (list->cfg.what_to_count & COUNT_SRC_AS)) ||
-	     ((list->cfg.what_to_count & COUNT_DST_NET) && (list->cfg.what_to_count & COUNT_DST_AS))) {
-	    Log(LOG_ERR, "ERROR ( %s/%s ): NET/AS are mutually exclusive. Exiting...\n\n", list->name, list->type.string); 
-	    exit(1);
-	  }
-	}
+      if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file) { 
+        Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation has been selected but NO networks file has been specified. Exiting...\n\n", list->name, list->type.string);
+        exit(1);
+      }
+      if ((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) && !list->cfg.networks_file && !list->cfg.networks_mask) {
+	Log(LOG_ERR, "ERROR ( %s/%s ): NET aggregation has been selected but NO networks file has been specified. Exiting...\n\n", list->name, list->type.string);
+	exit(1);
+      }
+      if (((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) && (list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS))) ||
+	  ((list->cfg.what_to_count & COUNT_DST_NET) && (list->cfg.what_to_count & COUNT_DST_AS))) {
+	Log(LOG_ERR, "ERROR ( %s/%s ): NET/AS are mutually exclusive. Exiting...\n\n", list->name, list->type.string); 
+	exit(1);
       }
     } 
     list = list->next;
@@ -423,6 +423,7 @@ int main(int argc,char **argv)
   /* signal handling we want to inherit to plugins (when not re-defined elsewhere) */
   signal(SIGCHLD, startup_handle_falling_child); /* takes note of plugins failed during startup phase */
   signal(SIGHUP, reload); /* handles reopening of syslog channel */
+  signal(SIGUSR1, push_stats); /* logs various statistics via Log() calls */
   signal(SIGPIPE, SIG_IGN); /* we want to exit gracefully when a pipe is broken */
 
   /* loading pre-tagging map, if any */

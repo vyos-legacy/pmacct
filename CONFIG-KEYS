@@ -12,7 +12,8 @@ LEGEND of flags:
 GLOBAL		The option does not apply to single plugins
 NO_GLOBAL	The option has to be applied to single plugins
 NO_PMACCTD	The option does not apply to 'pmacctd' 
-NO_NFACCTD	The option does not apply to 'nfacctd' 
+NO_NFACCTD	The option does not apply to 'nfacctd' (and it's very likely it will not apply to 'sfacctd' too) 
+NO_SFACCTD	The option does not apply to 'sfacctd' 
 
 
 LIST OF DIRECTIVES:
@@ -62,10 +63,8 @@ DESC:		when multiple plugins are active, each one should sport an 'aggregate' di
 		It could be used in conjunction with 'pre_tag_filter' directive. 'pmacctd' you may
 		need to force fragmentation handling when setting up a filter which has to match
 		TCP/UDP ports. Read more, referring to the 'pmacctd_force_frag_handling' directive.
-NOTES:          In order to get support for MPLS label hierarchies, the use of CVS versions >=
-		06-06-2005 of libpcap is adviceable: they include the support for expressions like
-		"mpls 100000 and mpls 1024" that will match packets/flows with an outer label of
-		100000 and an inner label of 1024.
+NOTES:		In order to get a good support for the MPLS stack, the use of libpcap 0.9.x is a
+		need. 
 
 KEY:		pcap_filter (like tcpdump syntax) [GLOBAL, NO_NFACCTD]
 DESC:		this filter is global and applied to all incoming packets. It's passed to libpcap
@@ -168,6 +167,10 @@ DESC:		full pathname to a file containing the list of known (maybe local) networ
 		them as zero) not included in the range of any defined network; b) when it applies to
 		[src|dst]_[net|as], it is of support for network/AS aggregation: [src|dst]_host is
 		rewritten as the matched network/AS.
+
+KEY:            networks_mask
+DESC:           specifies the network mask - in bits - to apply to src_ip and dst_ip primitives. The mask
+		is applied sistematically and before evaluating the 'networks_file' content (if any).
 
 KEY:		networks_cache_entries
 DESC:		Networks Lookup Table (which is the memory structure where the 'networks_file' data is
@@ -432,6 +435,30 @@ DESC:		allows to process aggregates (via a comma-separated list of conditionals 
                 DESC: check. Aggregates on the queue are evaluated one-by-one; each object is marked valid
                       only if the number of packets per flow is '>=' minppf value.
 
+                KEY: fss 
+                DESC: check. Enforces flow (aggregate) size dependent sampling, computed against the bytes
+		      counter and returns renormalized results. Aggregates which have collected more than the
+		      supplied 'fss' threshold in the last time window (specified by the 'sql_refresh_time'
+		      configuration key) are sampled. Those under the threshold are sampled with probability
+		      p(bytes). The method allows to get much more accurate samples compared to classic 1/N
+		      sampling approaches, providing an unbiased estimate of the real bytes counter. It would
+		      be also adviceable to hold the the equality 'sql_refresh_time' = 'sql_history'. 
+		      For further references: http://www.research.att.com/projects/flowsamp/ and specifically
+		      to the papers: N.G. Duffield, C. Lund, M. Thorup, "Charging from sampled network usage",
+		      http://www.research.att.com/~duffield/pubs/DLT01-usage.pdf and N.G. Duffield and C. Lund,
+		      "Predicting Resource Usage and Estimation Accuracy in an IP Flow Measurement Collection
+		      Infrastructure", http://www.research.att.com/~duffield/pubs/p313-duffield-lund.pdf
+
+		KEY: fsrc
+		DESC: check. Enforces flow (aggregate) sampling under hard resource constraints, computed
+		      against the bytes counter and returns renormalized results. The method selects only 'fsrc'
+		      flows from the set of the flows collected during the last time window ('sql_refresh_time'),
+		      providing an unbiasied estimate of the real bytes counter. It would be also adviceable
+		      to hold the equality 'sql_refresh_time' = 'sql_history'.
+		      For further references: http://www.research.att.com/projects/flowsamp/ and specifically
+		      to the paper: N.G. Duffield, C. Lund, M. Thorup, "Flow Sampling Under Hard Resource
+		      Constraints", http://www.research.att.com/~duffield/pubs/DLT03-constrained.pdf 
+
 		KEY: recover
 		DESC: action. If previously evaluated checks have marked the aggregate as invalid, a positive
 		      'recover' value makes the packet to be handled through the recovery mechanism (if enabled).  
@@ -447,10 +474,10 @@ DESC:		this directive applies only to 'print' plugin. Enables the use of START/E
 		purging aggregates to 'stdout'. Start marker includes also informations about current timeslot
 		and refresh time (default: false).
 
-KEY:		nfacctd_port [GLOBAL, NO_PMACCTD]
+KEY:		nfacctd_port (-l) [GLOBAL, NO_PMACCTD]
 DESC:		defines the UDP port where to bind the 'nfacctd' daemon (default: 2100). 
 
-KEY:		nfacctd_ip [GLOBAL, NO_PMACCTD]
+KEY:		nfacctd_ip (-L) [GLOBAL, NO_PMACCTD]
 DESC:		defines the IPv4/IPv6 address where to bind the 'nfacctd' daemon (default: all interfaces).
 
 KEY:		nfacctd_allow_file [GLOBAL, NO_PMACCTD]
@@ -480,15 +507,14 @@ DESC:		if either 'src_as' or 'dst_as' primitives are in use, this directive make
 		networks definition file (see 'networks_file' directive). (default: false) 
 
 KEY:		pre_tag_map [GLOBAL]
-DESC:		full pathname to a file containing ID mappings. In 'nfacctd' this map allows (a) to translate some
-		NetFlow packet fields ('ip' exporting agent IP address, 'in' agent Input interface, 'out' agent
-		Output interface, 'engine_type', 'engine_id', 'nexthop' and 'bgp_nexthop' are actually supported)
-		and (b) to match a filter expression (in libpcap syntax) into an ID (a small number in the range
-		1-65535). In 'pmacctd' it allows just the (b). Take also a look to the 'examples' tree for some
-		practical examples. Pre Tagging is enforced shortly after the packet collection from the network. 
-NOTES:		In order to get support for MPLS label hierarchies, the use of CVS versions >= 06-06-2005 of
-		libpcap is adviceable: they include the support for expressions like "mpls 100000 and mpls 1024"
-		that will match packets/flows with an outer label of 100000 and an inner label of 1024.
+DESC:		full pathname to a file containing ID mappings. In 'nfacctd' and 'sfacctd' this map allows (a)
+		to translate some NetFlow/sFlow packet fields ('ip' exporting agent IP address, 'in' agent Input
+		interface, 'out' agent Output interface, 'engine_type', 'engine_id' (or 'agent_id' for sFlow's
+		agentSubId field), 'nexthop' and 'bgp_nexthop' are actually supported) and (b) to match a filter
+		expression (in libpcap syntax) into an ID (a small number in the range 1-65535). In 'pmacctd' it
+		allows just the (b). Take also a look to the 'examples' tree for some practical examples.
+		Pre Tagging is enforced shortly after the packet collection from the network. 
+NOTES:		In order to get a good support for the MPLS stack, the use of libpcap 0.9.x is a need.
 
 KEY:            pre_tag_filter [NO_GLOBAL]
 VALUES:         [0-65535]
@@ -531,4 +557,23 @@ DESC:           defines the maximum size of the flow buffer size. The value is e
 KEY:            pmacctd_flow_lifetime [GLOBAL, NO_NFACCTD]
 DESC:           defines how long a flow could remain inactive (ie. no packets belonging to such flow are received)
 		before considering it expired. The value is expected in seconds. (default: 60 secs) 
+
+KEY:            sfacctd_port (-l) [GLOBAL, NO_PMACCTD]
+DESC:           defines the UDP port where to bind the 'sfacctd' daemon (default: 2100).
+
+KEY:            sfacctd_ip (-L) [GLOBAL, NO_PMACCTD]
+DESC:           defines the IPv4/IPv6 address where to bind the 'sfacctd' daemon (default: all interfaces).
+
+KEY:            sfacctd_allow_file [GLOBAL, NO_PMACCTD]
+DESC:           full pathname to a file containing the list of IPv4/IPv6 addresses (one for each line) allowed
+                to send NetFlow packets to 'sfacctd'. Current syntax does not implement network masks but only
+                individual IP addresses. The Allow List is intended to be small. If you really need complex,
+                network-prefixed filters, you may prefer a few firewall rules instead.
+
+KEY:            sfacctd_as_new [GLOBAL, NO_PMACCTD]
+VALUES:         [true|false]
+DESC:           if either 'src_as' or 'dst_as' primitives are in use, this directive makes 'sfacctd' generate
+                new AS numbers starting from IP addresses carried by flows. This way, the NetFlow export agent
+                hasn't to generate AS numbers on its own. Note that 'sfacctd' generates them basing over a
+                networks definition file (see 'networks_file' directive). (default: false)
 

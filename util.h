@@ -57,6 +57,7 @@ EXT int file_lock(int);
 EXT int file_unlock(int);
 EXT void strftime_same(char *, int, char *, const time_t *);
 EXT int read_SQLquery_from_file(char *, char *, int);
+EXT void stick_bosbit(u_char *);
 
 EXT unsigned int str_to_addr(const char *, struct host_addr *);
 #undef EXT

@@ -66,6 +66,19 @@ EXT void NF_counters_secs_handler(struct channels_list_entry *, struct packet_pt
 EXT void NF_counters_new_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 EXT void NF_flows_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 
+EXT void SF_src_mac_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_dst_mac_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_vlan_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_src_host_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_dst_host_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_src_port_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_dst_port_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_src_as_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_dst_as_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_ip_tos_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_ip_proto_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+EXT void SF_counters_new_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
+
 EXT void ptag_id_handler(struct channels_list_entry *, struct packet_ptrs *, struct pkt_data *);
 #undef EXT
 

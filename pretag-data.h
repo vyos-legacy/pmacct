@@ -30,5 +30,6 @@ static struct _map_dictionary_line map_dictionary[] = {
   {"bgp_nexthop", PT_map_bgp_nexthop_handler},
   {"filter", PT_map_filter_handler},
   {"v8agg", PT_map_v8agg_handler},
+  {"agent_id", PT_map_agent_id_handler},
   {"", NULL}
 };

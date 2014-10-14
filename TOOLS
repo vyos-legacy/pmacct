@@ -9,6 +9,10 @@ nfacctd		NetFlow accounting daemon; it listens for NetFlow packets
 		v1/v5/v7/v8/v9 on one or more interfaces (IPv4 and IPv6);
 		statistics may be either pushed to stdout, stored in a
 		memory table or a PostgreSQL/MySQL database.
+sfacctd         sFlow accounting daemon; it listens for sFlow packets v2,
+                v4 and v5 on one or more interfaces (both IPv4 and IPv6);
+                statistics may be either pushed to stdout, stored in a
+                memory table or a PostgreSQL/MySQL database.
 pmacct  	commandline pmacct client; used to retrieve data from an
 		active memroy plugin; it may ask for specific entries,
 		partial fields or perform a bulk data retrieval; output

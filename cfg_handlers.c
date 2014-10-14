@@ -951,6 +951,25 @@ int cfg_key_plugin_buffer_size(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_networks_mask(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.networks_mask = atoi(value_ptr);
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.networks_mask = atoi(value_ptr);
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_networks_file(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;

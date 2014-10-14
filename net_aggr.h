@@ -47,6 +47,7 @@ struct networks_table {
   struct networks6_table_entry *table6;
   unsigned int num6;
 #endif
+  u_int32_t maskbits[4];
 };
 
 struct networks_table_entry {
@@ -83,8 +84,10 @@ typedef void (*net_func) (struct networks_table *, struct networks_cache *, stru
 #else
 #define EXT
 #endif
-EXT net_func net_funcs[4]; /* SRC_AS, SRC_NET, DST_NET, DST_AS */
+EXT net_func net_funcs[8]; 
 EXT void set_net_funcs();
+EXT void mask_src_ipaddr(struct networks_table *, struct networks_cache *, struct pkt_primitives *); 
+EXT void mask_dst_ipaddr(struct networks_table *, struct networks_cache *, struct pkt_primitives *); 
 EXT void search_src_host(struct networks_table *, struct networks_cache *, struct pkt_primitives *); 
 EXT void search_dst_host(struct networks_table *, struct networks_cache *, struct pkt_primitives *); 
 EXT void search_src_net(struct networks_table *, struct networks_cache *, struct pkt_primitives *); 

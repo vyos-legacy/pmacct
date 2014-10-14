@@ -1,12 +1,15 @@
 ! 
-! nfacctd ID file -- maps Netflow export agents' IP to a small (1-65535) numerical ID 
+! Pre-Tagging map -- multiplexes various fields into a small (1-65535) numerical ID 
 !
 ! File syntax is key-based. Position of keys inside the same row (rule) is not relevant.
 ! An atomic expression (example: 'id=1') does not allow spaces. The first full match wins
 ! (like in firewall rules); take care to the order you write rules. 
 !
-! 'nfacctd': valid keys: 'id', 'ip', 'in', 'out', 'engine_type', 'engine_id' and 'filter';
-! mandatory keys for each rule: 'id' and 'ip'.
+! 'nfacctd': valid keys: 'id', 'ip', 'in', 'out', 'engine_type', 'engine_id', 'nexthop',
+! 'bgp_nexthop', 'v8agg' and 'filter'; mandatory keys for each rule: 'id' and 'ip'.
+!
+! 'sfacctd': valid keys: 'id', 'ip', 'in', 'out', 'agent_id', 'nexthop', 'bgp_nexthop' and
+! 'filter'; mandatory keys for each rule: 'id' and 'ip'.
 !
 ! 'pmacctd': valid keys: 'id' and 'filter'. 'id' is mandatory for each rule. All remaining
 ! primitives don't apply.
@@ -38,6 +41,8 @@
 !			100000 and an inner label of 1024. 
 ! 'v8agg'		In NetFlow V8 it's compared against the aggregation method in use.
 !			Valid values are in the range 0 > value > 15. 
+! 'agent_id'		In sFlow it's compared against the subAgentId field. sFlow v2/v4
+!			lacks of such field, so it applies only to sFlow v5. 
 !
 
 !

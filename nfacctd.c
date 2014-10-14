@@ -43,11 +43,12 @@ pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
 void usage_daemon(char *prog_name)
 {
   printf("%s\n", NFACCTD_USAGE_HEADER);
-  printf("Usage: %s [-D|-d] [-l port] [-c primitive[,...]] [-P plugin[,...]]\n", prog_name);
+  printf("Usage: %s [-D|-d] [-L IP address] [-l port] [-c primitive[,...]] [-P plugin[,...]]\n", prog_name);
   printf("       %s [-f config_file]\n", prog_name);
   printf("       %s [-h]\n", prog_name);
   printf("\nGeneral options:\n");
   printf("  -h  \tshow this page\n");
+  printf("  -L  \tbind to the specified IP address\n");
   printf("  -l  \tlisten on the specified UDP port\n");
   printf("  -f  \tconfiguration file (see also CONFIG-KEYS)\n");
   printf("  -c  \t[src_mac|dst_mac|vlan|src_host|dst_host|src_net|dst_net|src_port|dst_port|tos|proto|src_as|dst_as, \n\t ,sum_mac,sum_host,sum_net,sum_as,sum_port,tag,flows,none] \n\taggregation primitives and flows (DEFAULT: src_host)\n");
@@ -68,10 +69,10 @@ void usage_daemon(char *prog_name)
   printf("  -v  \t[1|2|3|4] \n\ttable version\n");
   printf("\n");
   printf("Examples:\n");
-  printf("  Daemonize the process; listen on eth0; write stats in a MySQL database\n");
-  printf("  nfacctd -c src_host,dst_host -i eth0 -D -P mysql\n\n");
-  printf("  Print flows over the screen; listen on ee1; refresh data every 30 seconds\n");
-  printf("  nfacctd -c src_host,dst_host,proto -P print -i ee1 -r 30\n");
+  printf("  Daemonize the process and write data into a MySQL database\n");
+  printf("  nfacctd -c src_host,dst_host -D -P mysql\n\n");
+  printf("  Print flows over the screen and refresh data every 30 seconds\n");
+  printf("  nfacctd -c src_host,dst_host,proto -P print -r 30\n");
   printf("\n");
   printf("  See EXAMPLES for further hints\n");
   printf("\n");
@@ -148,6 +149,11 @@ int main(int argc,char **argv)
   while (!errflag && ((cp = getopt(argc, argv, ARGS_NFACCTD)) != -1)) {
     cfg[rows] = malloc(SRVBUFLEN);
     switch (cp) {
+    case 'L':
+      strcpy(cfg[rows], "nfacctd_ip: ");
+      strncat(cfg[rows], optarg, CFG_LINE_LEN(cfg[rows]));
+      rows++;
+      break;
     case 'l':
       strcpy(cfg[rows], "nfacctd_port: ");
       strncat(cfg[rows], optarg, CFG_LINE_LEN(cfg[rows]));
@@ -294,22 +300,18 @@ int main(int argc,char **argv)
 	Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	list->cfg.what_to_count |= COUNT_SRC_HOST;
       }
-      else if (list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_NET|COUNT_SUM_AS)) {
-        if (!list->cfg.networks_file) {
-	  if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && (!(list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET)))
-	      && (list->cfg.nfacctd_as == NF_AS_KEEP));
-	  else {
-            Log(LOG_ERR, "ERROR ( %s/%s ): NET/AS aggregation has been selected but NO networks file has been specified. Exiting.\n\n", list->name, list->type.string);
-	    exit(1);
-	  }
-	}
-	else {
-	  if (((list->cfg.what_to_count & COUNT_SRC_NET) && (list->cfg.what_to_count & COUNT_SRC_AS)) ||
-	     ((list->cfg.what_to_count & COUNT_DST_NET) && (list->cfg.what_to_count & COUNT_DST_AS))) {
-	    Log(LOG_ERR, "ERROR ( %s/%s ): NET/AS are mutually exclusive. Exiting.\n\n", list->name, list->type.string);
-	    exit(1);
-	  }
-	}
+      if ((list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) && !list->cfg.networks_file && list->cfg.nfacctd_as != NF_AS_KEEP) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation has been selected but NO networks file has been specified. Exiting...\n\n", list->name, list->type.string);
+        exit(1);
+      }
+      if ((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET|COUNT_SUM_NET)) && !list->cfg.networks_file && !list->cfg.networks_mask) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): NET aggregation has been selected but NO networks file has been specified. Exiting...\n\n", list->name, list->type.string);
+        exit(1);
+      }
+      if (((list->cfg.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) && (list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS))) ||
+          ((list->cfg.what_to_count & COUNT_DST_NET) && (list->cfg.what_to_count & COUNT_DST_AS))) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): NET/AS are mutually exclusive. Exiting...\n\n", list->name, list->type.string);
+        exit(1);
       }
     } 
     list = list->next;
@@ -784,7 +786,7 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
       while (flowoff+tpl->len <= flowsetlen) {
         pptrs->f_data = pkt;
 	pptrs->f_tpl = (u_char *) tpl;
-	flow_type = evaluate_flow_type(tpl, pptrs);
+	flow_type = NF_evaluate_flow_type(tpl, pptrs);
 
 	/* we need to understand the IP protocol version in order to build the fake packet */ 
 	switch (flow_type) {
@@ -882,23 +884,19 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 
           if (req->bpf_filter) {
 	    u_char *ptr = pptrsv->mpls4.mpls_ptr;
-	    u_int32_t label, idx;
+	    u_int32_t *label, idx;
 
             /* XXX: fix caplen */
             reset_mac(&pptrsv->mpls4);
             memcpy(pptrsv->mpls4.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
             memcpy(pptrsv->mpls4.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
 
-	    for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++) {
-	      label = 0;
-	      memcpy(&label, pkt+tpl->tpl[idx].off, tpl->tpl[idx].len);
-#if defined LITTLE_ENDIAN
-	      label <<= 8; 
-#endif
-	      memcpy(ptr, &label, 4); 
-	      ptr += 4;
+	    for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++, ptr += 4) {
+	      label = (u_int32_t *) ptr;
+	      *label = 0;
+	      memcpy(ptr, pkt+tpl->tpl[idx].off, tpl->tpl[idx].len);
 	    }
-
+	    stick_bosbit(ptr-4);
 	    pptrsv->mpls4.iph_ptr = ptr;
 	    pptrsv->mpls4.tlh_ptr = ptr + IP4HdrSz;
             reset_ip4(&pptrsv->mpls4);
@@ -920,21 +918,18 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 
 	  if (req->bpf_filter) {
 	    u_char *ptr = pptrsv->mpls6.mpls_ptr;
-	    u_int32_t label, idx;
+	    u_int32_t *label, idx;
 
 	    /* XXX: fix caplen */
 	    reset_mac(&pptrsv->mpls6);
 	    memcpy(pptrsv->mpls6.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
 	    memcpy(pptrsv->mpls6.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
-            for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++) {
-	      label = 0;
-	      memcpy(&label, pkt+tpl->tpl[idx].off, tpl->tpl[idx].len);
-#if defined LITTLE_ENDIAN
-	      label <<= 8;
-#endif
-	      memcpy(ptr, &label, 4);
-	      ptr += 4;
+            for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++, ptr += 4) {
+	      label = (u_int32_t *) ptr;
+	      *label = 0;
+	      memcpy(ptr, pkt+tpl->tpl[idx].off, tpl->tpl[idx].len);
 	    }
+	    stick_bosbit(ptr-4);
 	    pptrsv->mpls6.iph_ptr = ptr;
 	    pptrsv->mpls6.tlh_ptr = ptr + IP6HdrSz;
 	    reset_ip6(&pptrsv->mpls6);
@@ -956,7 +951,7 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 
           if (req->bpf_filter) {
             u_char *ptr = pptrsv->vlanmpls4.mpls_ptr;
-	    u_int32_t label, idx;
+	    u_int32_t *label, idx;
 
 	    /* XXX: fix caplen */
 	    reset_mac_vlan(&pptrsv->vlanmpls4);
@@ -964,16 +959,12 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 	    memcpy(pptrsv->vlanmpls4.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
 	    memcpy(pptrsv->vlanmpls4.vlan_ptr, pkt+tpl->tpl[NF9_SRC_VLAN].off, tpl->tpl[NF9_SRC_VLAN].len);
 
-	    for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++) {
-	      label = 0;
-	      memcpy(&label, pkt+tpl->tpl[idx].off, tpl->tpl[idx].len);
-#if defined LITTLE_ENDIAN
-	      label <<= 8;
-#endif
-	      memcpy(ptr, &label, 4);
-	      ptr += 4;
+	    for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++, ptr += 4) {
+	      label = (u_int32_t *) ptr;
+	      *label = 0;
+	      memcpy(ptr, pkt+tpl->tpl[idx].off, tpl->tpl[idx].len);
 	    }
-
+	    stick_bosbit(ptr-4);
 	    pptrsv->vlanmpls4.iph_ptr = ptr;
 	    pptrsv->vlanmpls4.tlh_ptr = ptr + IP4HdrSz;
             reset_ip4(&pptrsv->vlanmpls4);
@@ -996,23 +987,19 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 
           if (req->bpf_filter) {
             u_char *ptr = pptrsv->vlanmpls6.mpls_ptr;
-            u_int32_t label, idx;
+            u_int32_t *label, idx;
 
             /* XXX: fix caplen */
 	    reset_mac_vlan(&pptrsv->vlanmpls6);
 	    memcpy(pptrsv->vlanmpls6.mac_ptr+ETH_ADDR_LEN, pkt+tpl->tpl[NF9_SRC_MAC].off, tpl->tpl[NF9_SRC_MAC].len);
 	    memcpy(pptrsv->vlanmpls6.mac_ptr, pkt+tpl->tpl[NF9_DST_MAC].off, tpl->tpl[NF9_DST_MAC].len);
 	    memcpy(pptrsv->vlanmpls6.vlan_ptr, pkt+tpl->tpl[NF9_SRC_VLAN].off, tpl->tpl[NF9_SRC_VLAN].len);
-	    for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++) {
-	      label = 0;
-	      memcpy(&label, pkt+tpl->tpl[idx].off, tpl->tpl[idx].len);
-#if defined LITTLE_ENDIAN
-	      label <<= 8;
-#endif
-	      memcpy(ptr, &label, 4);
-	      ptr += 4;
+	    for (idx = NF9_MPLS_LABEL_1; idx <= NF9_MPLS_LABEL_10 && tpl->tpl[idx].len; idx++, ptr += 4) {
+	      label = (u_int32_t *) ptr;
+	      *label = 0;
+	      memcpy(ptr, pkt+tpl->tpl[idx].off, tpl->tpl[idx].len);
 	    }
-
+	    stick_bosbit(ptr-4);
 	    pptrsv->vlanmpls6.iph_ptr = ptr;
 	    pptrsv->vlanmpls6.tlh_ptr = ptr + IP6HdrSz;
 	    reset_ip6(&pptrsv->vlanmpls6);
@@ -1103,41 +1090,6 @@ int check_allow(struct hosts_table *allow, struct sockaddr *sa)
   return FALSE;
 }
 
-int NF_find_id(struct packet_ptrs *pptrs)
-{
-  struct id_table *t = (struct id_table *)pptrs->idtable;
-  int x, j, id, stop;
-
-  /* The id_table is shared between by IPv4 and IPv6 NetFlow agents.
-     IPv4 ones are in the lower part (0..x), IPv6 ones are in the upper
-     part (x+1..end)
-  */ 
-
-  id = 0;
-  if (((struct sockaddr *)pptrs->f_agent)->sa_family == AF_INET) { 
-    for (x = 0; x < t->ipv4_num; x++) {
-      if (t->e[x].agent_ip.address.ipv4.s_addr == ((struct sockaddr_in *)pptrs->f_agent)->sin_addr.s_addr) {
-        for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
-        if (id) break;
-      }
-      else if (t->e[x].agent_ip.address.ipv4.s_addr > ((struct sockaddr_in *)pptrs->f_agent)->sin_addr.s_addr) break;
-    }
-  }
-#if defined ENABLE_IPV6
-  else if (((struct sockaddr *)pptrs->f_agent)->sa_family == AF_INET6) {
-    for (x = (t->num-t->ipv6_num); x < t->num; x++) {
-      if (!ip6_addr_cmp(&t->e[x].agent_ip.address.ipv6, (&((struct sockaddr_in6 *)pptrs->f_agent)->sin6_addr))) {
-        for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
-	if (id) break;
-      }
-      else if (ip6_addr_cmp(&t->e[x].agent_ip.address.ipv6, (&((struct sockaddr_in6 *)pptrs->f_agent)->sin6_addr)) > 0)
-	break;
-    }
-  }
-#endif
-  return id;
-}
-
 void compute_once()
 {
   NBO_One = htonl(1);
@@ -1164,7 +1116,7 @@ void compute_once()
 #endif
 }
 
-u_int16_t evaluate_flow_type(struct template_cache_entry *tpl, struct packet_ptrs *pptrs)
+u_int16_t NF_evaluate_flow_type(struct template_cache_entry *tpl, struct packet_ptrs *pptrs)
 {
   u_int8_t ret=0;
 
@@ -1218,3 +1170,39 @@ void notify_malf_packet(short int severity, char *ostr, struct sockaddr *sa)
   ostr, config.nfacctd_ip, config.nfacctd_port, agent_addr, agent_port);
   Log(severity, errstr);
 }
+
+int NF_find_id(struct packet_ptrs *pptrs)
+{
+  struct id_table *t = (struct id_table *)pptrs->idtable;
+  int x, j, id, stop;
+
+  /* The id_table is shared between by IPv4 and IPv6 NetFlow agents.
+     IPv4 ones are in the lower part (0..x), IPv6 ones are in the upper
+     part (x+1..end)
+  */
+
+  id = 0;
+  if (((struct sockaddr *)pptrs->f_agent)->sa_family == AF_INET) {
+    for (x = 0; x < t->ipv4_num; x++) {
+      if (t->e[x].agent_ip.address.ipv4.s_addr == ((struct sockaddr_in *)pptrs->f_agent)->sin_addr.s_addr) {
+        for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
+        if (id) break;
+      }
+      else if (t->e[x].agent_ip.address.ipv4.s_addr > ((struct sockaddr_in *)pptrs->f_agent)->sin_addr.s_addr) break;
+    }
+  }
+#if defined ENABLE_IPV6
+  else if (((struct sockaddr *)pptrs->f_agent)->sa_family == AF_INET6) {
+    for (x = (t->num-t->ipv6_num); x < t->num; x++) {
+      if (!ip6_addr_cmp(&t->e[x].agent_ip.address.ipv6, (&((struct sockaddr_in6 *)pptrs->f_agent)->sin6_addr))) {
+        for (j = 0, stop = 0; !stop; j++) stop = (*t->e[x].func[j])(pptrs, &id, &t->e[x]);
+        if (id) break;
+      }
+      else if (ip6_addr_cmp(&t->e[x].agent_ip.address.ipv6, (&((struct sockaddr_in6 *)pptrs->f_agent)->sin6_addr)) > 0)
+        break;
+    }
+  }
+#endif
+  return id;
+}
+

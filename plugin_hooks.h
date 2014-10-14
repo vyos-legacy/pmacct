@@ -97,6 +97,7 @@ EXT void sort_pipe_channels();
 EXT void init_pipe_channels();
 EXT int evaluate_sampling(struct sampling *);
 EXT int evaluate_tags(struct pretag_filter *, u_int16_t);
+EXT void recollect_pipe_memory(struct channels_list_entry *);
 #undef EXT
 
 #if (defined __PLUGIN_HOOKS_C)

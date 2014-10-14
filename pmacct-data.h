@@ -202,6 +202,7 @@ static struct _dictionary_line dictionary[] = {
   {"plugin_buffer_size", cfg_key_plugin_buffer_size},
   {"interface", cfg_key_interface},
   {"interface_wait", cfg_key_interface_wait},
+  {"networks_mask", cfg_key_networks_mask},
   {"networks_file", cfg_key_networks_file},
   {"networks_cache_entries", cfg_key_networks_cache_entries},
   {"ports_file", cfg_key_ports_file},
@@ -253,6 +254,10 @@ static struct _dictionary_line dictionary[] = {
   {"pre_tag_filter", cfg_key_pre_tag_filter},
   {"post_tag", cfg_key_post_tag},
   {"sampling_rate", cfg_key_sampling_rate},
+  {"sfacctd_port", cfg_key_nfacctd_port},
+  {"sfacctd_ip", cfg_key_nfacctd_ip},
+  {"sfacctd_allow_file", cfg_key_nfacctd_allow_file},
+  {"sfacctd_as_new", cfg_key_nfacctd_as_new},
   {"", NULL},
 };
 

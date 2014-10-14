@@ -67,6 +67,7 @@ EXT int cfg_key_sql_preprocess_type(char *, char *, char *);
 EXT int cfg_key_sql_multi_values(char *, char *, char *);
 EXT int cfg_key_plugin_pipe_size(char *, char *, char *);
 EXT int cfg_key_plugin_buffer_size(char *, char *, char *);
+EXT int cfg_key_networks_mask(char *, char *, char *);
 EXT int cfg_key_networks_file(char *, char *, char *);
 EXT int cfg_key_networks_cache_entries(char *, char *, char *);
 EXT int cfg_key_ports_file(char *, char *, char *);

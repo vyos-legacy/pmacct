@@ -31,8 +31,21 @@ struct preprocess {
   u_int16_t maxppf;
   u_int16_t minbpp;
   u_int16_t minppf;
+  u_int32_t fss;	/* threshold: flow size (flow size dependent sampling) */
+  u_int32_t fsrc;	/* threshold: flows number (flow sampling with resource constraints) */
   u_int8_t recover;
   u_int8_t num;
+};
+
+struct fsrc_queue_elem {
+  struct fsrc_queue_elem *next;
+  struct db_cache *cache_ptr;
+  float z;
+};
+
+struct _fsrc_queue {
+  struct fsrc_queue_elem head; 
+  u_int32_t num;
 };
 
 #if (!defined __PREPROCESS_C)
@@ -52,10 +65,13 @@ EXT int check_maxbpp(struct db_cache *[], int *);
 EXT int check_maxppf(struct db_cache *[], int *);
 EXT int check_minbpp(struct db_cache *[], int *);
 EXT int check_minppf(struct db_cache *[], int *);
+EXT int check_fss(struct db_cache *[], int *);
+EXT int check_fsrc(struct db_cache *[], int *);
 
 EXT int mandatory_invalidate(struct db_cache *[], int *);
 EXT int mandatory_validate(struct db_cache *[], int *);
 
 EXT preprocess_func preprocess_funcs[2*N_FUNCS]; /* 20 */
 EXT struct preprocess prep;
+EXT struct _fsrc_queue fsrc_queue;
 #undef EXT

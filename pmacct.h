@@ -69,14 +69,22 @@
 #define INET6_ADDRSTRLEN 46
 #endif
 
-#if defined SOLARIS
-#if defined CPU_sparc
+#if (defined SOLARIS) && (defined CPU_sparc)
 #define htons(x) (x)
 #define htonl(x) (x)
 #endif
+
+#if (!defined HAVE_U_INT8_T) && (defined HAVE_UINT8_T) 
 #define u_int8_t uint8_t
+#endif
+#if (!defined HAVE_U_INT16_T) && (defined HAVE_UINT16_T)
 #define u_int16_t uint16_t
+#endif
+#if (!defined HAVE_U_INT32_T) && (defined HAVE_UINT32_T)
 #define u_int32_t uint32_t
+#endif
+#if (!defined HAVE_U_INT64_T) && (defined HAVE_UINT64_T)
+#define u_int64_t uint64_t
 #endif
 
 #ifndef LOCK_UN
@@ -193,6 +201,7 @@ void handle_falling_child();
 void ignore_falling_child();
 void my_sigint_handler();
 void reload();
+void push_stats();
 
 #if (!defined __LL_C)
 #define EXT extern
