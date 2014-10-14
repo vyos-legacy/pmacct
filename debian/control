@@ -1,7 +1,7 @@
 Source: pmacct
 Section: net
 Priority: optional
-Maintainer: Jamie Wilkinson <jaq@debian.org>
+Maintainer: Bernd Zeimetz <bzed@debian.org>
 Build-Depends: debhelper (>= 7),
  zlib1g-dev,
  libpcap-dev,
