@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -22,16 +22,27 @@
 /* defines */
 #define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:R"
 #define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:R"
-#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:wWL:"
+#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:wWL:R"
+#define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:v:o:Rg:L:"
 #define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:"
-#define N_PRIMITIVES 21
+#define N_PRIMITIVES 42
 #define N_FUNCS 10 
 #define MAX_N_PLUGINS 32
 #define PROTO_LEN 12
 #define MAX_MAP_ENTRIES 128
 #define AGG_FILTER_ENTRIES 128 
+#define FOLLOW_BGP_NH_ENTRIES 32 
 #define UINT32T_THRESHOLD 4290000000UL
 #define UINT64T_THRESHOLD 18446744073709551360ULL
+#ifndef UINT8_MAX
+#define UINT8_MAX (255U)
+#endif
+#ifndef UINT16_MAX
+#define UINT16_MAX (65535U)
+#endif
+#ifndef UINT32_MAX
+#define UINT32_MAX (4294967295U)
+#endif
 
 #if defined ENABLE_IPV6
 #define DEFAULT_SNAPLEN 128
@@ -45,12 +56,13 @@
 #define LARGEBUFLEN (8192+MOREBUFSZ)
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.11.6-cvs"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.11.6-cvs"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.11.6-cvs"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.11.6-cvs"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.11.6-cvs"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.11.6-cvs"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 0.12.0"
+#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, pmacctd 0.12.0"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 0.12.0"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 0.12.0"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 0.12.0"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 0.12.0"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 0.12.0"
 
 #ifndef TRUE
 #define TRUE 1
@@ -73,33 +85,59 @@
 #define ACCT_PM		1	/* promiscuous mode */
 #define ACCT_NF		2	/* NetFlow */
 #define ACCT_SF		3	/* sFlow */
+#define ACCT_UL		4	/* Linux NetFilter ULOG */
 
-#define COUNT_SRC_HOST		0x00000001
-#define COUNT_DST_HOST		0x00000002
-#define COUNT_SUM_HOST          0x00000004 
-#define COUNT_SRC_PORT          0x00000008 
-#define COUNT_DST_PORT          0x00000010 
-#define COUNT_IP_PROTO          0x00000020 
-#define COUNT_SRC_MAC           0x00000040 
-#define COUNT_DST_MAC           0x00000080
-#define COUNT_SRC_NET		0x00000100
-#define COUNT_DST_NET		0x00000200
-#define COUNT_ID		0x00000400	
-#define COUNT_VLAN		0x00000800	
-#define COUNT_IP_TOS		0x00001000	
-#define COUNT_NONE		0x00002000	
-#define COUNT_SRC_AS		0x00004000
-#define COUNT_DST_AS		0x00008000
-#define COUNT_SUM_NET		0x00010000
-#define COUNT_SUM_AS		0x00020000
-#define COUNT_SUM_PORT		0x00040000
-#define TIMESTAMP               0x00080000 /* USE_TIMESTAMPS */
-#define COUNT_FLOWS		0x00100000
-#define COUNT_SUM_MAC		0x00200000
-#define COUNT_CLASS		0x00400000
-#define COUNT_COUNTERS		0x00800000
-#define COUNT_PAYLOAD		0x01000000
-#define COUNT_TCPFLAGS		0x02000000
+/* map type */
+#define MAP_TAG 		0	/* pre_tag_map */
+#define MAP_BGP_PEER_AS_SRC	100	/* bgp_peer_src_as_map */
+#define MAP_BGP_TO_XFLOW_AGENT	101	/* bgp_to_agent_map */
+#define MAP_BGP_SRC_LOCAL_PREF	102	/* bgp_src_local_pref_map */
+#define MAP_BGP_SRC_MED		103	/* bgp_src_med_map */
+#define MAP_BGP_IS_SYMMETRIC    104	/* bgp_is_symmetric_map */
+
+/* 42 primitives currently defined */
+#define COUNT_SRC_HOST		0x0000000000000001ULL
+#define COUNT_DST_HOST		0x0000000000000002ULL
+#define COUNT_SUM_HOST          0x0000000000000004ULL
+#define COUNT_SRC_PORT          0x0000000000000008ULL
+#define COUNT_DST_PORT          0x0000000000000010ULL
+#define COUNT_IP_PROTO          0x0000000000000020ULL
+#define COUNT_SRC_MAC           0x0000000000000040ULL
+#define COUNT_DST_MAC           0x0000000000000080ULL
+#define COUNT_SRC_NET		0x0000000000000100ULL
+#define COUNT_DST_NET		0x0000000000000200ULL
+#define COUNT_ID		0x0000000000000400ULL
+#define COUNT_VLAN		0x0000000000000800ULL
+#define COUNT_IP_TOS		0x0000000000001000ULL
+#define COUNT_NONE		0x0000000000002000ULL
+#define COUNT_SRC_AS		0x0000000000004000ULL
+#define COUNT_DST_AS		0x0000000000008000ULL
+#define COUNT_SUM_NET		0x0000000000010000ULL
+#define COUNT_SUM_AS		0x0000000000020000ULL
+#define COUNT_SUM_PORT		0x0000000000040000ULL
+#define TIMESTAMP               0x0000000000080000ULL /* USE_TIMESTAMPS */
+#define COUNT_FLOWS		0x0000000000100000ULL
+#define COUNT_SUM_MAC		0x0000000000200000ULL
+#define COUNT_CLASS		0x0000000000400000ULL
+#define COUNT_COUNTERS		0x0000000000800000ULL
+#define COUNT_PAYLOAD		0x0000000001000000ULL
+#define COUNT_TCPFLAGS		0x0000000002000000ULL
+#define COUNT_STD_COMM		0x0000000004000000ULL
+#define COUNT_EXT_COMM		0x0000000008000000ULL
+#define COUNT_AS_PATH		0x0000000010000000ULL
+#define COUNT_LOCAL_PREF	0x0000000020000000ULL
+#define COUNT_MED		0x0000000040000000ULL
+#define COUNT_PEER_SRC_AS	0x0000000080000000ULL
+#define COUNT_PEER_DST_AS	0x0000000100000000ULL
+#define COUNT_PEER_SRC_IP	0x0000000200000000ULL
+#define COUNT_PEER_DST_IP	0x0000000400000000ULL
+#define COUNT_ID2		0x0000000800000000ULL
+#define COUNT_SRC_AS_PATH	0x0000001000000000ULL
+#define COUNT_SRC_STD_COMM	0x0000002000000000ULL
+#define COUNT_SRC_EXT_COMM	0x0000004000000000ULL
+#define COUNT_SRC_LOCAL_PREF	0x0000008000000000ULL
+#define COUNT_SRC_MED		0x0000010000000000ULL
+#define COUNT_IS_SYMMETRIC	0x0000020000000000ULL
 
 /* BYTES and PACKETS are used into templates; we let their values to
    overlap with some values we will not need into templates */ 
@@ -114,6 +152,12 @@
 #define FAKE_DST_HOST		0x00000008
 #define FAKE_SRC_AS		0x00000010
 #define FAKE_DST_AS		0x00000020
+#define FAKE_COMMS		0x00000040
+#define FAKE_PEER_SRC_AS	0x00000080
+#define FAKE_PEER_DST_AS	0x00000100
+#define FAKE_PEER_SRC_IP	0x00000200
+#define FAKE_PEER_DST_IP	0x00000400
+#define FAKE_AS_PATH		0x00000800
 
 #define COUNT_MINUTELY          0x00000001
 #define COUNT_HOURLY            0x00000002
@@ -133,15 +177,31 @@
 #define PIPE_TYPE_METADATA	0x00000001
 #define PIPE_TYPE_PAYLOAD	0x00000002
 #define PIPE_TYPE_EXTRAS	0x00000004
+#define PIPE_TYPE_BGP		0x00000008
 
 #define CHLD_WARNING		0x00000001
 #define CHLD_ALERT		0x00000002
 
+#define BGP_SRC_PRIMITIVES_MAP	0x00000001
+#define BGP_SRC_PRIMITIVES_BGP	0x00000002
+
 typedef u_int32_t pm_class_t;
-typedef u_int16_t pm_id_t;
+typedef u_int32_t pm_id_t;
 
 #if defined HAVE_64BIT_COUNTERS
 typedef u_int64_t pm_counter_t;
 #else
 typedef u_int32_t pm_counter_t;
+#endif
+
+#if defined __PMACCTD_C || defined __UACCTD_C
+#define NF_AS_KEEP 0 
+#define NF_AS_NEW 1 
+#define NF_AS_BGP 2 
+
+#define NF_NET_COMPAT   0x00000000 /* Backward compatibility selection */
+#define NF_NET_KEEP     0x00000001 /* Determine IP network prefixes from NetFlow data */
+#define NF_NET_NEW      0x00000002 /* Determine IP network prefixes from network files */
+#define NF_NET_BGP      0x00000004 /* Determine IP network prefixes from BGP peerings */
+#define NF_NET_STATIC   0x00000008 /* Determine IP network prefixes from static mask */
 #endif

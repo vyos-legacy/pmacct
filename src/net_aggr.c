@@ -27,6 +27,7 @@
 #include "pmacct-data.h"
 #include "plugin_hooks.h"
 #include "net_aggr.h"
+#include "addr.h"
 #include "jhash.h"
 
 void load_networks(char *filename, struct networks_table *nt, struct networks_cache *nc)
@@ -52,6 +53,7 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
   memset(&bkt, 0, sizeof(bkt));
   memset(&tmp, 0, sizeof(tmp));
   memset(&st, 0, sizeof(st));
+  default_route_in_networks4_table = FALSE;
 
   /* backing up pre-existing table and cache */ 
   if (nt->num) {
@@ -66,8 +68,10 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
 
   if (filename) {
     if ((file = fopen(filename,"r")) == NULL) {
-      if ((config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) && (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS)) &&
-	  (!(config.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET))) && (config.nfacctd_as == NF_AS_KEEP))
+      if (((config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) && (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS)) &&
+	  (!(config.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET))) && (config.nfacctd_as == NF_AS_KEEP || config.nfacctd_as == NF_AS_BGP))
+	  || (config.acct_type == ACCT_PM && (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS)) &&
+	  (!(config.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET))) && config.nfacctd_as == NF_AS_BGP))
 	return;
 
       Log(LOG_ERR, "ERROR: network file '%s' not found\n", filename);
@@ -77,7 +81,7 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
       rows = 0;
       /* 1st step: count rows for table allocation */
       while (!feof(file)) {
-	if (fgets(buf, SRVBUFLEN, file) && !iscomment(buf)) rows++;
+	    if (fgets(buf, SRVBUFLEN, file) && !iscomment(buf)) rows++;
       }
       /* 2nd step: loading data into a temporary table */
       freopen(filename, "r", file);
@@ -103,16 +107,18 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
       rows = 1;
 
       while (!feof(file)) {
-	bufptr = buf;
-	memset(buf, 0, SRVBUFLEN);
+	    bufptr = buf;
+	    memset(buf, 0, SRVBUFLEN);
         if (fgets(buf, SRVBUFLEN, file)) { 
-	  if (iscomment(buf))
-	    continue;
+		  if (iscomment(buf))
+			continue;
 	  if (delim = strchr(buf, ',')) {
+	    char *endptr;
+
 	    as = buf;
 	    *delim = '\0';
 	    bufptr = delim+1;
-	    tmpt->table[eff_rows].as = atoi(as);
+	    tmpt->table[eff_rows].as = strtoul(as, &endptr, 10);
 	  }
 	  else tmpt->table[eff_rows].as = 0;
 	  if (!sanitize_buf_net(filename, bufptr, rows)) {
@@ -126,13 +132,13 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
 	    buflen = strlen(mask);
 	    for (j = 0; j < buflen; j++) {
 	      if (!isdigit(mask[j])) {
-		Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%s'.\n", filename, mask);
+		Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%s' at line: %u.\n", filename, mask, rows);
 		goto cycle_end;
 	      }
 	    }
 	    index = atoi(mask); 
 	    if (index > 32) {
-	      Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%d'.\n", filename, index);
+	      Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%d' at line: %u.\n", filename, index, rows);
 	      goto cycle_end;
 	    }
 
@@ -204,7 +210,7 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
 	mdt[index].childs = eff_childs;
       }
 
-      /* 5th step: building final networks table */
+      /* 5a step: building final networks table */
       for (index = 0; index < tmpt->num; index++) {
 	int current, next, prev[128];
 
@@ -230,13 +236,14 @@ void load_networks4(char *filename, struct networks_table *nt, struct networks_c
         }
       }
 
-      if (config.debug) { 
-        index = 0;
-        while (index < tmpt->num) {
+      /* 5b step: debug and default route detection */
+      index = 0;
+      while (index < tmpt->num) {
+        if (config.debug) 
 	  Log(LOG_DEBUG, "DEBUG ( %s ): (networks table IPv4) AS: %x, net: %x, mask: %x\n", 
-		  filename, nt->table[index].as, nt->table[index].net, nt->table[index].mask); 
-	  index++;
-	}
+	  	  filename, nt->table[index].as, nt->table[index].net, nt->table[index].mask); 
+	if (!nt->table[index].mask) default_route_in_networks4_table = TRUE;
+	index++;
       }
 
       /* 6th step: create networks cache BUT only for the first time */
@@ -416,10 +423,10 @@ void set_net_funcs(struct networks_table *nt)
 
   memset(&net_funcs, 0, sizeof(net_funcs));
 
-  if (config.networks_mask) {
+  if ((config.nfacctd_net & NF_NET_STATIC) && config.networks_mask) {
     int j, index = config.networks_mask;
 
-    memset(&nt->maskbits, 0, 4);
+    memset(nt->maskbits, 0, sizeof(nt->maskbits));
     for (j = 0; j < 4 && index >= 32; j++, index -= 32) nt->maskbits[j] = 0xffffffffU;
     if (j < 4 && index) nt->maskbits[j] = ~(0xffffffffU >> index);
 
@@ -444,14 +451,15 @@ void set_net_funcs(struct networks_table *nt)
     count++;
   }
 
-  if (config.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) {
+  if ((config.nfacctd_net & NF_NET_NEW) && config.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) {
     net_funcs[count] = search_src_net;
     count++;
   } 
 
   if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) {
-    if ((config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) &&
-	(config.nfacctd_as == NF_AS_KEEP));
+    if (((config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) &&
+	(config.nfacctd_as == NF_AS_KEEP || config.nfacctd_as == NF_AS_BGP))
+	|| (config.acct_type == ACCT_PM && config.nfacctd_as == NF_AS_BGP));
     else {
       net_funcs[count] = search_src_as;
       count++;
@@ -468,14 +476,15 @@ void set_net_funcs(struct networks_table *nt)
     count++;
   }
 
-  if (config.what_to_count & (COUNT_DST_NET|COUNT_SUM_NET)) {
+  if ((config.nfacctd_net & NF_NET_NEW) && config.what_to_count & (COUNT_DST_NET|COUNT_SUM_NET)) {
     net_funcs[count] = search_dst_net;
     count++;
   }
 
   if (config.what_to_count & (COUNT_DST_AS|COUNT_SUM_AS)) {
-    if ((config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) &&
-	(config.nfacctd_as == NF_AS_KEEP));
+    if (((config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) &&
+	(config.nfacctd_as == NF_AS_KEEP || config.nfacctd_as == NF_AS_BGP))
+	|| (config.acct_type == ACCT_PM && config.nfacctd_as == NF_AS_BGP));
     else {
       net_funcs[count] = search_dst_as;
       count++;
@@ -536,13 +545,13 @@ void search_src_host(struct networks_table *nt, struct networks_cache *nc, struc
   if (p->src_ip.family == AF_INET) {
     res = binsearch(nt, nc, &p->src_ip);
     if (!res) p->src_ip.address.ipv4.s_addr = 0;
-    else if (!res->net) p->src_ip.address.ipv4.s_addr = 0; /* it may have been cached */
+    else if (!res->net && !default_route_in_networks4_table) p->src_ip.address.ipv4.s_addr = 0; /* it may have been cached */
   }
 #if defined ENABLE_IPV6
   else if (p->src_ip.family == AF_INET6) {
     res6 = binsearch6(nt, nc, &p->src_ip);
     if (!res6) memset(&p->src_ip.address.ipv6, 0, IP6AddrSz);
-    else if (!res6->net[0]) memset(&p->src_ip.address.ipv6, 0, IP6AddrSz); /* it may have been cached */
+    else if (!res6->net[0] && !default_route_in_networks6_table) memset(&p->src_ip.address.ipv6, 0, IP6AddrSz); /* it may have been cached */
   }
 #endif
 }
@@ -557,13 +566,13 @@ void search_dst_host(struct networks_table *nt, struct networks_cache *nc, struc
   if (p->dst_ip.family == AF_INET) {
     res = binsearch(nt, nc, &p->dst_ip);
     if (!res) p->dst_ip.address.ipv4.s_addr = 0;
-    else if (!res->net) p->dst_ip.address.ipv4.s_addr = 0; /* it may have been cached */
+    else if (!res->net && !default_route_in_networks4_table) p->dst_ip.address.ipv4.s_addr = 0; /* it may have been cached */
   }
 #if defined ENABLE_IPV6
   else if (p->dst_ip.family == AF_INET6) {
     res6 = binsearch6(nt, nc, &p->dst_ip);
     if (!res6) memset(&p->dst_ip.address.ipv6, 0, IP6AddrSz);
-    else if (!res6->net[0]) memset(&p->dst_ip.address.ipv6, 0, IP6AddrSz); /* it may have been cached */
+    else if (!res6->net[0] && !default_route_in_networks6_table) memset(&p->dst_ip.address.ipv6, 0, IP6AddrSz); /* it may have been cached */
   }
 #endif
 }
@@ -584,7 +593,7 @@ void search_src_net(struct networks_table *nt, struct networks_cache *nc, struct
   else if (p->src_ip.family == AF_INET6) {
     res6 = binsearch6(nt, nc, &p->src_ip);
     if (!res6) memset(&p->src_ip.address.ipv6, 0, IP6AddrSz);
-    else memcpy(&p->src_ip.address.ipv6, (void *)pm_htonl6(res6->net), IP6AddrSz); /* it may have been cached */
+    else memcpy(&p->src_ip.address.ipv6, (void *)pm_htonl6(res6->net), IP6AddrSz);
   }
 #endif
 }
@@ -605,7 +614,7 @@ void search_dst_net(struct networks_table *nt, struct networks_cache *nc, struct
   else if (p->dst_ip.family == AF_INET6) {
     res6 = binsearch6(nt, nc, &p->dst_ip);
     if (!res6) memset(&p->dst_ip.address.ipv6, 0, IP6AddrSz);
-    else memcpy(&p->dst_ip.address.ipv6, (void *)pm_htonl6(res6->net), IP6AddrSz); /* it may have been cached */
+    else memcpy(&p->dst_ip.address.ipv6, (void *)pm_htonl6(res6->net), IP6AddrSz);
   }
 #endif
 }
@@ -658,7 +667,7 @@ void drop_dst_host(struct networks_table *nt, struct networks_cache *nc, struct 
   memset(&p->dst_ip, 0, HostAddrSz);
 }
 
-u_int16_t search_pretag_src_as(struct networks_table *nt, struct networks_cache *nc, struct packet_ptrs *pptrs)
+as_t search_pretag_src_as(struct networks_table *nt, struct networks_cache *nc, struct packet_ptrs *pptrs)
 {
   struct networks_table_entry *res;
   struct host_addr addr;
@@ -684,7 +693,7 @@ u_int16_t search_pretag_src_as(struct networks_table *nt, struct networks_cache 
 #endif
 }
 
-u_int16_t search_pretag_dst_as(struct networks_table *nt, struct networks_cache *nc, struct packet_ptrs *pptrs)
+as_t search_pretag_dst_as(struct networks_table *nt, struct networks_cache *nc, struct packet_ptrs *pptrs)
 {
   struct networks_table_entry *res;
   struct host_addr addr;
@@ -727,6 +736,7 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
   memset(&bkt, 0, sizeof(bkt));
   memset(&tmp, 0, sizeof(tmp));
   memset(&st, 0, sizeof(st));
+  default_route_in_networks6_table = FALSE;
 
   /* backing up pre-existing table and cache */
   if (nt->num6) {
@@ -741,8 +751,10 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
 
   if (filename) {
     if ((file = fopen(filename,"r")) == NULL) {
-      if ((config.acct_type == ACCT_NF) && (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS)) &&
-          (!(config.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET))) && (config.nfacctd_as == NF_AS_KEEP))
+      if (((config.acct_type == ACCT_NF) && (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS)) &&
+          (!(config.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET))) && (config.nfacctd_as == NF_AS_KEEP || config.nfacctd_as == NF_AS_BGP))
+          || (config.acct_type == ACCT_PM && (config.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS)) &&
+          (!(config.what_to_count & (COUNT_SRC_NET|COUNT_DST_NET))) && config.nfacctd_as == NF_AS_BGP))
         return;
 
       Log(LOG_ERR, "ERROR: network file '%s' not found\n", filename);
@@ -782,10 +794,12 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
         memset(buf, 0, SRVBUFLEN);
         if (fgets(buf, SRVBUFLEN, file)) {
           if (delim = strchr(buf, ',')) {
+	    char *endptr;
+
             as = buf;
             *delim = '\0';
             bufptr = delim+1;
-            tmpt->table6[eff_rows].as = atoi(as);
+            tmpt->table6[eff_rows].as = strtoul(as, &endptr, 10);
           }
           else tmpt->table6[eff_rows].as = 0;
           if (!sanitize_buf_net(filename, bufptr, rows)) {
@@ -800,13 +814,13 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
             buflen = strlen(mask);
             for (j = 0; j < buflen; j++) {
               if (!isdigit(mask[j])) {
-                Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%s'.\n", filename, mask);
+                Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%s' at line: %u.\n", filename, mask, rows);
                 goto cycle_end;
               }
             }
             index = atoi(mask);
             if (index > 128) {
-              Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%d'.\n", filename, index);
+              Log(LOG_ERR, "ERROR ( %s ): Invalid network mask '%d' at line: %u.\n", filename, index, rows);
               goto cycle_end;
             }
 
@@ -889,7 +903,7 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
         mdt[index].childs = eff_childs;
       }
 
-      /* 5th step: building final networks table */
+      /* 5a step: building final networks table */
       for (index = 0; index < tmpt->num6; index++) {
         int current, next, prev[128];
 
@@ -914,16 +928,19 @@ void load_networks6(char *filename, struct networks_table *nt, struct networks_c
           memcpy(&nt->table6[current], &tmpt->table6[index], sizeof(struct networks6_table_entry));
         }
       }
-
-      if (config.debug) {
-        index = 0;
-        while (index < tmpt->num6) {
+ 
+      /* 5b step: debug and default route detection */
+      index = 0;
+      while (index < tmpt->num6) {
+        if (config.debug)
           Log(LOG_DEBUG, "DEBUG ( %s ): (networks table IPv6) AS: %x, net: %x:%x:%x:%x, mask: %x:%x:%x:%x\n", filename,
 	    nt->table6[index].as, nt->table6[index].net[0], nt->table6[index].net[1], nt->table6[index].net[2],
 	    nt->table6[index].net[3], nt->table6[index].mask[0], nt->table6[index].mask[1], nt->table6[index].mask[2],
 	    nt->table6[index].mask[3]);
-          index++;
-        }
+	if (!nt->table6[index].mask[0] && !nt->table6[index].mask[1] &&
+	    !nt->table6[index].mask[2] && !nt->table6[index].mask[3])
+	  default_route_in_networks6_table = TRUE;
+        index++;
       }
 
       /* 6th step: create networks cache BUT only for the first time */

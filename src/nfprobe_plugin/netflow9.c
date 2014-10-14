@@ -22,7 +22,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow9.c,v 1.2 2007/02/12 22:00:40 paolo Exp $ */
+/* $Id: netflow9.c,v 1.8 2009/11/30 09:26:37 paolo Exp $ */
 
 #define __NFPROBE_NETFLOW9_C
 
@@ -45,6 +45,11 @@ struct NF9_TEMPLATE_FLOWSET_HEADER {
 	struct NF9_FLOWSET_HEADER_COMMON c;
 	u_int16_t template_id, count;
 } __packed;
+struct NF9_OPTIONS_TEMPLATE_FLOWSET_HEADER {
+        struct NF9_FLOWSET_HEADER_COMMON c;
+        u_int16_t template_id, scope_len;
+        u_int16_t option_len;
+} __packed;
 struct NF9_TEMPLATE_FLOWSET_RECORD {
 	u_int16_t type, length;
 } __packed;
@@ -65,8 +70,12 @@ struct NF9_DATA_FLOWSET_HEADER {
 #define NF9_L4_SRC_PORT			7
 #define NF9_IPV4_SRC_ADDR		8
 /* ... */
+#define NF9_INPUT_SNMP                  10
+/* ... */
 #define NF9_L4_DST_PORT			11
 #define NF9_IPV4_DST_ADDR		12
+/* ... */
+#define NF9_OUTPUT_SNMP                 14
 /* ... */
 #define NF9_SRC_AS                      16
 #define NF9_DST_AS                      17
@@ -77,6 +86,9 @@ struct NF9_DATA_FLOWSET_HEADER {
 #define NF9_IPV6_SRC_ADDR		27
 #define NF9_IPV6_DST_ADDR		28
 /* ... */
+#define NF9_FLOW_SAMPLER_ID             48
+#define NF9_FLOW_SAMPLER_MODE           49
+#define NF9_FLOW_SAMPLER_INTERVAL       50
 #define NF9_SRC_MAC                     56
 #define NF9_DST_MAC                     57
 #define NF9_SRC_VLAN                    58
@@ -87,14 +99,25 @@ struct NF9_DATA_FLOWSET_HEADER {
 /* CUSTOM TYPES START HERE */
 #define NF9_CUST_CLASS			200
 #define NF9_CUST_TAG			201
+#define NF9_CUST_TAG2			202
 /* CUSTOM TYPES END HERE */
 
+/* OPTION SCOPES */
+#define NF9_OPT_SCOPE_SYSTEM            1
+
 /* Stuff pertaining to the templates that softflowd uses */
-#define NF9_SOFTFLOWD_TEMPLATE_NRECORDS	21
+#define NF9_SOFTFLOWD_TEMPLATE_NRECORDS	30
 struct NF9_SOFTFLOWD_TEMPLATE {
 	struct NF9_TEMPLATE_FLOWSET_HEADER h;
 	struct NF9_TEMPLATE_FLOWSET_RECORD r[NF9_SOFTFLOWD_TEMPLATE_NRECORDS];
 	u_int16_t tot_len;
+} __packed;
+
+#define NF9_OPTIONS_TEMPLATE_NRECORDS 4
+struct NF9_OPTIONS_TEMPLATE {
+        struct NF9_OPTIONS_TEMPLATE_FLOWSET_HEADER h;
+        struct NF9_TEMPLATE_FLOWSET_RECORD r[NF9_OPTIONS_TEMPLATE_NRECORDS];
+        u_int16_t tot_len;
 } __packed;
 
 typedef void (*flow_to_flowset_handler) (char *, const struct FLOW *, int, int);
@@ -102,18 +125,25 @@ struct NF9_INTERNAL_TEMPLATE_RECORD {
   flow_to_flowset_handler handler;
   u_int16_t length;
 };
+
 struct NF9_INTERNAL_TEMPLATE {
 	struct NF9_INTERNAL_TEMPLATE_RECORD r[NF9_SOFTFLOWD_TEMPLATE_NRECORDS];
 	u_int16_t tot_rec_len;
 };
 
+struct NF9_INTERNAL_OPTIONS_TEMPLATE {
+        struct NF9_INTERNAL_TEMPLATE_RECORD r[NF9_OPTIONS_TEMPLATE_NRECORDS];
+        u_int16_t tot_rec_len;
+};
+
 /* softflowd data flowset types */
 struct NF9_SOFTFLOWD_DATA_COMMON {
 	u_int32_t last_switched, first_switched;
+	u_int16_t ifindex_in, ifindex_out;
 	u_int32_t bytes, packets, flows;
 	u_int16_t src_port, dst_port;
 	u_int8_t protocol, tos, tcp_flags, ipproto;
-	u_int16_t src_as, dst_as;
+	as_t src_as, dst_as;
 	u_int8_t src_mac[6], dst_mac[6];
 	u_int16_t vlan;
 } __packed;
@@ -132,6 +162,7 @@ struct NF9_SOFTFLOWD_DATA_V6 {
 #define NF9_SOFTFLOWD_MAX_PACKET_SIZE	512
 #define NF9_SOFTFLOWD_V4_TEMPLATE_ID	1024
 #define NF9_SOFTFLOWD_V6_TEMPLATE_ID	2048
+#define NF9_OPTIONS_TEMPLATE_ID		4096
 
 #define NF9_DEFAULT_TEMPLATE_INTERVAL	18
 
@@ -139,10 +170,31 @@ static struct NF9_SOFTFLOWD_TEMPLATE v4_template;
 static struct NF9_INTERNAL_TEMPLATE v4_int_template;
 static struct NF9_SOFTFLOWD_TEMPLATE v6_template;
 static struct NF9_INTERNAL_TEMPLATE v6_int_template;
+static struct NF9_OPTIONS_TEMPLATE options_template;
+static struct NF9_INTERNAL_OPTIONS_TEMPLATE options_int_template;
 static char ftoft_buf_0[sizeof(struct NF9_SOFTFLOWD_DATA_V6)];
 static char ftoft_buf_1[sizeof(struct NF9_SOFTFLOWD_DATA_V6)];
 
 static int nf9_pkts_until_template = -1;
+static u_int8_t send_options = FALSE;
+
+static void
+flow_to_flowset_input_handler(char *flowset, const struct FLOW *flow, int idx, int size)
+{
+  u_int16_t rec16;
+
+  rec16 = htons(flow->ifindex[idx]);
+  memcpy(flowset, &rec16, size);
+}
+
+static void
+flow_to_flowset_output_handler(char *flowset, const struct FLOW *flow, int idx, int size)
+{
+  u_int16_t rec16;
+
+  rec16 = htons(flow->ifindex[idx ^ 1]);
+  memcpy(flowset, &rec16, size);
+}
 
 static void
 flow_to_flowset_flows_handler(char *flowset, const struct FLOW *flow, int idx, int size)
@@ -264,10 +316,28 @@ flow_to_flowset_class_handler(char *flowset, const struct FLOW *flow, int idx, i
 static void
 flow_to_flowset_tag_handler(char *flowset, const struct FLOW *flow, int idx, int size)
 {
-  u_int16_t rec16;
+  u_int32_t rec32;
 
-  rec16 = htons(flow->tag);
-  memcpy(flowset, &rec16, size);
+  rec32 = htonl(flow->tag[idx]);
+  memcpy(flowset, &rec32, size);
+}
+
+static void
+flow_to_flowset_tag2_handler(char *flowset, const struct FLOW *flow, int idx, int size)
+{
+  u_int32_t rec32;
+
+  rec32 = htonl(flow->tag2[idx]);
+  memcpy(flowset, &rec32, size);
+}
+
+static void
+flow_to_flowset_sampler_id_handler(char *flowset, const struct FLOW *flow, int idx, int size)
+{
+  u_int8_t rec8;
+
+  rec8 = 1;
+  memcpy(flowset, &rec8, size);
 }
 
 static void
@@ -321,6 +391,16 @@ nf9_init_template(void)
 	v4_template.r[rcount].length = htons(1);
 	v4_int_template.r[rcount].length = 1;
 	rcount++;
+        v4_template.r[rcount].type = htons(NF9_INPUT_SNMP);
+        v4_template.r[rcount].length = htons(2);
+	v4_int_template.r[rcount].handler = flow_to_flowset_input_handler;
+        v4_int_template.r[rcount].length = 2;
+        rcount++;
+        v4_template.r[rcount].type = htons(NF9_OUTPUT_SNMP);
+        v4_template.r[rcount].length = htons(2);
+	v4_int_template.r[rcount].handler = flow_to_flowset_output_handler;
+        v4_int_template.r[rcount].length = 2;
+        rcount++;
 	if (config.nfprobe_what_to_count & COUNT_FLOWS) { 
 	  v4_template.r[rcount].type = htons(NF9_FLOWS);
 	  v4_template.r[rcount].length = htons(4);
@@ -379,16 +459,16 @@ nf9_init_template(void)
 	}
 	if (config.nfprobe_what_to_count & COUNT_SRC_AS) {
 	  v4_template.r[rcount].type = htons(NF9_SRC_AS);
-	  v4_template.r[rcount].length = htons(2);
+	  v4_template.r[rcount].length = htons(4);
 	  v4_int_template.r[rcount].handler = flow_to_flowset_src_as_handler;
-	  v4_int_template.r[rcount].length = 2;
+	  v4_int_template.r[rcount].length = 4;
 	  rcount++;
 	}
 	if (config.nfprobe_what_to_count & COUNT_DST_AS) {
 	  v4_template.r[rcount].type = htons(NF9_DST_AS);
-	  v4_template.r[rcount].length = htons(2);
+	  v4_template.r[rcount].length = htons(4);
 	  v4_int_template.r[rcount].handler = flow_to_flowset_dst_as_handler;
-	  v4_int_template.r[rcount].length = 2;
+	  v4_int_template.r[rcount].length = 4;
 	  rcount++;
 	}
 	if (config.nfprobe_what_to_count & COUNT_SRC_MAC) {
@@ -428,16 +508,32 @@ nf9_init_template(void)
 	}
 	if (config.nfprobe_what_to_count & COUNT_ID) {
 	  v4_template.r[rcount].type = htons(NF9_CUST_TAG);
-	  v4_template.r[rcount].length = htons(2);
+	  v4_template.r[rcount].length = htons(4);
 	  v4_int_template.r[rcount].handler = flow_to_flowset_tag_handler;
-	  v4_int_template.r[rcount].length = 2;
+	  v4_int_template.r[rcount].length = 4;
 	  rcount++;
 	}
+        if (config.nfprobe_what_to_count & COUNT_ID2) {
+          v4_template.r[rcount].type = htons(NF9_CUST_TAG2);
+          v4_template.r[rcount].length = htons(4);
+          v4_int_template.r[rcount].handler = flow_to_flowset_tag2_handler;
+          v4_int_template.r[rcount].length = 4;
+          rcount++;
+        }
+        if (config.sampling_rate || config.ext_sampling_rate) {
+          v4_template.r[rcount].type = htons(NF9_FLOW_SAMPLER_ID);
+          v4_template.r[rcount].length = htons(1);
+          v4_int_template.r[rcount].handler = flow_to_flowset_sampler_id_handler;
+          v4_int_template.r[rcount].length = 1;
+          rcount++;
+        }
 	v4_template.h.c.flowset_id = htons(0);
 	v4_template.h.c.length = htons( sizeof(struct NF9_TEMPLATE_FLOWSET_HEADER) + (sizeof(struct NF9_TEMPLATE_FLOWSET_RECORD) * rcount) );
 	v4_template.h.template_id = htons(NF9_SOFTFLOWD_V4_TEMPLATE_ID + config.nfprobe_id);
 	v4_template.h.count = htons(rcount);
 	v4_template.tot_len = sizeof(struct NF9_TEMPLATE_FLOWSET_HEADER) + (sizeof(struct NF9_TEMPLATE_FLOWSET_RECORD) * rcount);
+
+	assert(rcount < NF9_SOFTFLOWD_TEMPLATE_NRECORDS);
 
 	for (idx = 0, v4_int_template.tot_rec_len = 0; idx < rcount; idx++)
 	  v4_int_template.tot_rec_len += v4_int_template.r[idx].length;
@@ -466,6 +562,16 @@ nf9_init_template(void)
 	v6_template.r[rcount].length = htons(1);
 	v6_int_template.r[rcount].length = 1;
 	rcount++;
+        v6_template.r[rcount].type = htons(NF9_INPUT_SNMP);
+        v6_template.r[rcount].length = htons(2);
+	v6_int_template.r[rcount].handler = flow_to_flowset_input_handler;
+        v6_int_template.r[rcount].length = 2;
+        rcount++;
+        v6_template.r[rcount].type = htons(NF9_OUTPUT_SNMP);
+        v6_template.r[rcount].length = htons(2);
+	v6_int_template.r[rcount].handler = flow_to_flowset_output_handler;
+        v6_int_template.r[rcount].length = 2;
+        rcount++;
 	if (config.nfprobe_what_to_count & COUNT_FLOWS) { 
 	  v6_template.r[rcount].type = htons(NF9_FLOWS);
 	  v6_template.r[rcount].length = htons(4);
@@ -524,16 +630,16 @@ nf9_init_template(void)
 	}
 	if (config.nfprobe_what_to_count & COUNT_SRC_AS) {
 	  v6_template.r[rcount].type = htons(NF9_SRC_AS);
-	  v6_template.r[rcount].length = htons(2);
+	  v6_template.r[rcount].length = htons(4);
 	  v6_int_template.r[rcount].handler = flow_to_flowset_src_as_handler;
-	  v6_int_template.r[rcount].length = 2;
+	  v6_int_template.r[rcount].length = 4;
 	  rcount++;
 	}
 	if (config.nfprobe_what_to_count & COUNT_DST_AS) {
 	  v6_template.r[rcount].type = htons(NF9_DST_AS);
-	  v6_template.r[rcount].length = htons(2);
+	  v6_template.r[rcount].length = htons(4);
 	  v6_int_template.r[rcount].handler = flow_to_flowset_dst_as_handler;
-	  v6_int_template.r[rcount].length = 2;
+	  v6_int_template.r[rcount].length = 4;
 	  rcount++;
 	}
 	if (config.nfprobe_what_to_count & COUNT_SRC_MAC) {
@@ -573,19 +679,71 @@ nf9_init_template(void)
 	}
         if (config.nfprobe_what_to_count & COUNT_ID) {
 	  v6_template.r[rcount].type = htons(NF9_CUST_TAG);
-	  v6_template.r[rcount].length = htons(2);
+	  v6_template.r[rcount].length = htons(4);
 	  v6_int_template.r[rcount].handler = flow_to_flowset_tag_handler;
-	  v6_int_template.r[rcount].length = 2;
+	  v6_int_template.r[rcount].length = 4;
 	  rcount++;
 	}
+        if (config.nfprobe_what_to_count & COUNT_ID2) {
+          v6_template.r[rcount].type = htons(NF9_CUST_TAG2);
+          v6_template.r[rcount].length = htons(4);
+          v6_int_template.r[rcount].handler = flow_to_flowset_tag2_handler;
+          v6_int_template.r[rcount].length = 4;
+          rcount++;
+        }
+        if (config.sampling_rate || config.ext_sampling_rate) {
+          v6_template.r[rcount].type = htons(NF9_FLOW_SAMPLER_ID);
+          v6_template.r[rcount].length = htons(1);
+          v6_int_template.r[rcount].handler = flow_to_flowset_sampler_id_handler;
+          v6_int_template.r[rcount].length = 1;
+          rcount++;
+        }
 	v6_template.h.c.flowset_id = htons(0);
 	v6_template.h.c.length = htons( sizeof(struct NF9_TEMPLATE_FLOWSET_HEADER) + (sizeof(struct NF9_TEMPLATE_FLOWSET_RECORD) * rcount) );
 	v6_template.h.template_id = htons(NF9_SOFTFLOWD_V6_TEMPLATE_ID + config.nfprobe_id);
 	v6_template.h.count = htons(rcount);
 	v6_template.tot_len = sizeof(struct NF9_TEMPLATE_FLOWSET_HEADER) + (sizeof(struct NF9_TEMPLATE_FLOWSET_RECORD) * rcount);
 
+	assert(rcount < NF9_SOFTFLOWD_TEMPLATE_NRECORDS);
+
 	for (idx = 0, v6_int_template.tot_rec_len = 0; idx < rcount; idx++)
 	  v6_int_template.tot_rec_len += v6_int_template.r[idx].length;
+}
+
+static void
+nf9_init_options_template(void)
+{
+	int rcount, idx;
+
+        rcount = 0;
+        bzero(&options_template, sizeof(options_template));
+        bzero(&options_int_template, sizeof(options_int_template));
+
+        options_template.r[rcount].type = htons(NF9_OPT_SCOPE_SYSTEM);
+        options_template.r[rcount].length = htons(0);
+        options_int_template.r[rcount].length = 0;
+        rcount++;
+        options_template.r[rcount].type = htons(NF9_FLOW_SAMPLER_ID);
+        options_template.r[rcount].length = htons(1);
+        options_int_template.r[rcount].length = 1;
+        rcount++;
+        options_template.r[rcount].type = htons(NF9_FLOW_SAMPLER_MODE);
+        options_template.r[rcount].length = htons(1);
+        options_int_template.r[rcount].length = 1;
+        rcount++;
+        options_template.r[rcount].type = htons(NF9_FLOW_SAMPLER_INTERVAL);
+        options_template.r[rcount].length = htons(4);
+        options_int_template.r[rcount].length = 4;
+        rcount++;
+        options_template.h.c.flowset_id = htons(1);
+        options_template.h.c.length = htons( sizeof(struct NF9_OPTIONS_TEMPLATE_FLOWSET_HEADER) + (sizeof(struct NF9_TEMPLATE_FLOWSET_RECORD) * rcount) );
+        options_template.h.template_id = htons(NF9_OPTIONS_TEMPLATE_ID + config.nfprobe_id );
+        options_template.h.scope_len = htons(4); /* NF9_OPT_SCOPE_SYSTEM */
+        options_template.h.option_len = htons(12); /* NF9_FLOW_SAMPLER_ID + NF9_FLOW_SAMPLER_MODE + NF9_FLOW_SAMPLER_INTERVAL */
+        options_template.tot_len = sizeof(struct NF9_OPTIONS_TEMPLATE_FLOWSET_HEADER) + (sizeof(struct NF9_TEMPLATE_FLOWSET_RECORD) * rcount);
+
+        for (idx = 0, options_int_template.tot_rec_len = 0; idx < rcount; idx++)
+          options_int_template.tot_rec_len += options_int_template.r[idx].length;
 }
 
 static int
@@ -680,6 +838,45 @@ nf_flow_to_flowset(const struct FLOW *flow, u_char *packet, u_int len,
 	return (nflows);
 }
 
+static int
+nf_options_to_flowset(u_char *packet, u_int len, const struct timeval *system_boot_time, u_int *len_used)
+{
+        u_int freclen, ret_len, nflows;
+        u_int32_t rec32;
+        u_int8_t rec8;
+        char *ftoft_ptr_0 = ftoft_buf_0;
+
+        bzero(ftoft_buf_0, sizeof(ftoft_buf_0));
+        *len_used = nflows = ret_len = 0;
+
+        rec8 = 1; /* NF9_FLOW_SAMPLER_ID */ 
+        memcpy(ftoft_ptr_0, &rec8, 1);
+        ftoft_ptr_0 += 1;
+
+        rec8 = 0x02; /* NF9_FLOW_SAMPLER_MODE */
+        memcpy(ftoft_ptr_0, &rec8, 1);
+        ftoft_ptr_0 += 1;
+
+	if (config.sampling_rate)
+          rec32 = htonl(config.sampling_rate); /* NF9_FLOW_SAMPLER_INTERVAL */
+	else if (config.ext_sampling_rate)
+          rec32 = htonl(config.ext_sampling_rate); /* NF9_FLOW_SAMPLER_INTERVAL */
+        memcpy(ftoft_ptr_0, &rec32, 4);
+        ftoft_ptr_0 += 4;
+
+	freclen = options_int_template.tot_rec_len;
+
+	if (ret_len + freclen > len)
+		return (-1);
+
+	memcpy(packet + ret_len, ftoft_buf_0, freclen);
+	ret_len += freclen;
+	nflows++;
+
+        *len_used = ret_len;
+        return (nflows);
+}
+
 /*
  * Given an array of expired flows, send netflow v9 report packets
  * Returns number of packets sent or -1 on error
@@ -692,9 +889,9 @@ send_netflow_v9(struct FLOW **flows, int num_flows, int nfsock,
 	struct NF9_HEADER *nf9;
 	struct NF9_DATA_FLOWSET_HEADER *dh;
 	struct timeval now;
-	u_int offset, last_af, i, j, num_packets, inc, last_valid;
+	u_int offset, last_af, j, num_packets, inc, last_valid;
 	socklen_t errsz;
-	int err, r;
+	int err, r, i;
 	u_char packet[NF9_SOFTFLOWD_MAX_PACKET_SIZE];
 	u_int8_t *sid_ptr;
 
@@ -702,6 +899,7 @@ send_netflow_v9(struct FLOW **flows, int num_flows, int nfsock,
 
 	if (nf9_pkts_until_template == -1) {
 		nf9_init_template();
+		nf9_init_options_template();
 		nf9_pkts_until_template = 0;
 	}		
 
@@ -728,8 +926,16 @@ send_netflow_v9(struct FLOW **flows, int num_flows, int nfsock,
 		if (nf9_pkts_until_template <= 0) {
 			memcpy(packet + offset, &v4_template, v4_template.tot_len);
 			offset += v4_template.tot_len;
+			nf9->flows++;
 			memcpy(packet + offset, &v6_template, v6_template.tot_len);
 			offset += v6_template.tot_len; 
+			nf9->flows++;
+			if (config.sampling_rate || config.ext_sampling_rate) {
+                          memcpy(packet + offset, &options_template, options_template.tot_len);
+                          offset += options_template.tot_len;
+			  nf9->flows++;
+			  send_options = TRUE;
+			}
 			nf9_pkts_until_template = NF9_DEFAULT_TEMPLATE_INTERVAL;
 		}
 
@@ -753,17 +959,27 @@ send_netflow_v9(struct FLOW **flows, int num_flows, int nfsock,
 				}
 				dh = (struct NF9_DATA_FLOWSET_HEADER *)
 				    (packet + offset);
-				dh->c.flowset_id =
+				if (send_options) {
+				  dh->c.flowset_id = options_template.h.template_id;
+				  last_af = 0;
+				}
+				else {
+				  dh->c.flowset_id =
 				    (flows[i + j]->af == AF_INET) ?
 				    v4_template.h.template_id : 
 				    v6_template.h.template_id;
-				last_af = flows[i + j]->af;
+				  last_af = flows[i + j]->af;
+				}
 				last_valid = offset;
 				dh->c.length = sizeof(*dh); /* Filled as we go */
 				offset += sizeof(*dh);
 			}
 
-			r = nf_flow_to_flowset(flows[i + j], packet + offset,
+			if (send_options)
+                          r = nf_options_to_flowset(packet + offset,
+                            sizeof(packet) - offset, system_boot_time, &inc);
+			else 
+			  r = nf_flow_to_flowset(flows[i + j], packet + offset,
 			    sizeof(packet) - offset, system_boot_time, &inc);
 			if (r <= 0) {
 				/* yank off data header, if we had to go back */
@@ -781,6 +997,11 @@ send_netflow_v9(struct FLOW **flows, int num_flows, int nfsock,
 				    "flows %d\n", r, i, j, offset, 
 				    dh->c.flowset_id, dh->c.length, 
 				    dh->c.length, nf9->flows);
+			}
+
+			if (send_options) {
+			  send_options = FALSE;
+			  i--;
 			}
 		}
 		/* Don't finish header if it has already been done */

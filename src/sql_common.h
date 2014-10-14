@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -50,10 +50,13 @@
 #define PM_LOCK_ROW_EXCLUSIVE	1
 
 /* cache element states */
-#define SQL_CACHE_ERROR		-1
 #define SQL_CACHE_FREE		0
 #define SQL_CACHE_COMMITTED	1
-#define SQL_CACHE_INUSE		2 /* has to be SQL_CACHE_ top-most entry */
+#define SQL_CACHE_INUSE		2 
+#define SQL_CACHE_ERROR		255
+
+#define SQL_TABLE_VERSION_PLAIN 0
+#define SQL_TABLE_VERSION_BGP   1000
 
 /* macros */
 #define SPACELEFT(x) (sizeof(x)-strlen(x))
@@ -82,7 +85,8 @@ struct insert_data {
   int dyn_table;
   int recover;
   int locks;
-  int new_basetime;
+  time_t new_basetime;
+  time_t committed_basetime;
   int current_queue_elem;
   struct multi_values mv;
   /* stats */
@@ -103,7 +107,9 @@ struct db_cache {
   u_int8_t tentatives;	/* support to classifiers: tentatives remaining */
   time_t basetime;
   time_t endtime;
-  short int valid;
+  struct cache_bgp_primitives *cbgp;
+  u_int8_t valid;
+  u_int8_t prep_valid;
   unsigned int signature;
   u_int8_t chained;
   struct db_cache *prev;
@@ -123,7 +129,7 @@ struct logfile_header {
   u_int16_t sql_table_version;
   u_int16_t sql_optimize_clauses;
   u_int16_t sql_history;
-  u_int32_t what_to_count;
+  u_int64_t what_to_count;
   u_char pad[8];
 };
 
@@ -134,11 +140,11 @@ struct logfile {
 };
 
 typedef void (*dbop_handler) (const struct db_cache *, const struct insert_data *, int, char **, char **);
-typedef int (*preprocess_func) (struct db_cache *[], int *);
+typedef int (*preprocess_func) (struct db_cache *[], int *, int);
 
 struct frags {
   dbop_handler handler;
-  unsigned long int type;
+  u_int64_t type;
   char string[SRVBUFLEN];
 };
 
@@ -197,6 +203,21 @@ EXT void count_src_host_handler(const struct db_cache *, const struct insert_dat
 EXT void count_src_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_dst_host_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_dst_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_std_comm_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_ext_comm_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_as_path_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_local_pref_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_med_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_src_std_comm_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_src_ext_comm_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_src_as_path_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_src_local_pref_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_src_med_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_is_symmetric_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_peer_src_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_peer_dst_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_peer_src_ip_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_peer_dst_ip_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_src_port_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_dst_port_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_ip_tos_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
@@ -205,11 +226,14 @@ EXT void PG_count_ip_proto_handler(const struct db_cache *, const struct insert_
 EXT void count_timestamp_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_copy_timestamp_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_id_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void count_id2_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_class_id_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_tcpflags_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void fake_mac_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void fake_host_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void fake_as_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void fake_comms_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
+EXT void fake_as_path_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 
 EXT void count_counters_setclause_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
 EXT void count_flows_setclause_handler(const struct db_cache *, const struct insert_data *, int, char **, char **);
@@ -233,13 +257,15 @@ EXT void sql_init_default_values();
 EXT void sql_init_historical_acct(time_t, struct insert_data *);
 EXT void sql_init_triggers(time_t, struct insert_data *);
 EXT void sql_init_refresh_deadline(time_t *);
+EXT void sql_calc_refresh_timeout(time_t, time_t, int *);
 EXT void sql_init_pipe(struct pollfd *, int);
 EXT struct template_entry *sql_init_logfile_template(struct template_header *);
 EXT void sql_link_backend_descriptors(struct BE_descs *, struct DBdesc *, struct DBdesc *);
-EXT void sql_cache_modulo(struct pkt_primitives *, struct insert_data *);
-EXT int sql_cache_flush(struct db_cache *[], int, struct insert_data *);
-EXT void sql_cache_insert(struct pkt_data *, struct insert_data *);
-EXT struct db_cache *sql_cache_search(struct pkt_primitives *, time_t);
+EXT void sql_cache_modulo(struct pkt_primitives *, struct pkt_bgp_primitives *, struct insert_data *);
+EXT int sql_cache_flush(struct db_cache *[], int, struct insert_data *, int);
+EXT int sql_cache_flush_pending(struct db_cache *[], int, struct insert_data *);
+EXT void sql_cache_insert(struct pkt_data *, struct pkt_bgp_primitives *, struct insert_data *);
+EXT struct db_cache *sql_cache_search(struct pkt_primitives *, struct pkt_bgp_primitives *, time_t);
 EXT int sql_trigger_exec(char *);
 EXT void sql_db_ok(struct DBdesc *);
 EXT void sql_db_fail(struct DBdesc *);
@@ -253,12 +279,14 @@ EXT void sql_invalidate_shadow_entries(struct db_cache *[], int *);
 EXT int sql_select_locking_style(char *);
 EXT int sql_compose_static_set(int); 
 
-EXT void sql_sum_host_insert(struct pkt_data *, struct insert_data *);
-EXT void sql_sum_port_insert(struct pkt_data *, struct insert_data *);
-EXT void sql_sum_as_insert(struct pkt_data *, struct insert_data *);
+EXT void sql_sum_host_insert(struct pkt_data *, struct pkt_bgp_primitives *, struct insert_data *);
+EXT void sql_sum_port_insert(struct pkt_data *, struct pkt_bgp_primitives *, struct insert_data *);
+EXT void sql_sum_as_insert(struct pkt_data *, struct pkt_bgp_primitives *, struct insert_data *);
 #if defined (HAVE_L2)
-EXT void sql_sum_mac_insert(struct pkt_data *, struct insert_data *);
+EXT void sql_sum_mac_insert(struct pkt_data *, struct pkt_bgp_primitives *, struct insert_data *);
 #endif
+EXT void sql_sum_std_comm_insert(struct pkt_data *, struct pkt_bgp_primitives *, struct insert_data *);
+EXT void sql_sum_ext_comm_insert(struct pkt_data *, struct pkt_bgp_primitives *, struct insert_data *);
 
 #undef EXT
 
@@ -270,21 +298,21 @@ EXT void sql_sum_mac_insert(struct pkt_data *, struct insert_data *);
 #endif
 
 /* Global Variables: a simple way of gain precious speed when playing with strings */
-EXT char sql_data[LONGLONGSRVBUFLEN];
+EXT char sql_data[LARGEBUFLEN];
 EXT char lock_clause[LONGSRVBUFLEN];
 EXT char unlock_clause[LONGSRVBUFLEN];
 EXT char update_clause[LONGSRVBUFLEN];
 EXT char set_clause[LONGSRVBUFLEN];
 EXT char copy_clause[LONGSRVBUFLEN];
 EXT char insert_clause[LONGSRVBUFLEN];
-EXT char values_clause[LONGSRVBUFLEN];
+EXT char values_clause[LONGLONGSRVBUFLEN];
 EXT char *multi_values_buffer;
-EXT char where_clause[LONGSRVBUFLEN];
+EXT char where_clause[LONGLONGSRVBUFLEN];
 EXT unsigned char *pipebuf;
 EXT struct db_cache *cache;
 EXT struct db_cache **queries_queue, **pending_queries_queue;
 EXT struct db_cache *collision_queue;
-EXT int cq_ptr, qq_ptr, qq_size, pp_size, dbc_size, cq_size, pqq_ptr;
+EXT int cq_ptr, qq_ptr, qq_size, pp_size, pb_size, dbc_size, cq_size, pqq_ptr;
 EXT struct db_cache lru_head, *lru_tail;
 EXT struct frags where[N_PRIMITIVES+2];
 EXT struct frags values[N_PRIMITIVES+2];
@@ -292,12 +320,14 @@ EXT struct frags copy_values[N_PRIMITIVES+2];
 EXT struct frags set[N_PRIMITIVES+2];
 EXT int glob_num_primitives; /* last resort for signal handling */
 EXT int glob_basetime; /* last resort for signal handling */
-EXT int glob_new_basetime; /* last resort for signal handling */
+EXT time_t glob_new_basetime; /* last resort for signal handling */
+EXT time_t glob_committed_basetime; /* last resort for signal handling */
 EXT int glob_dyn_table; /* last resort for signal handling */
 EXT int glob_nfacctd_sql_log; /* last resort for sql handlers */
+EXT int glob_timeslot; /* last resort for sql handlers */
 
 EXT struct sqlfunc_cb_registry sqlfunc_cbr; 
-EXT void (*insert_func)(struct pkt_data *, struct insert_data *);
+EXT void (*insert_func)(struct pkt_data *, struct pkt_bgp_primitives *, struct insert_data *);
 EXT struct DBdesc p;
 EXT struct DBdesc b;
 EXT struct BE_descs bed;

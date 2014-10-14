@@ -1,9 +1,7 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 
-pmacct EXAMPLES file.
-
-(poorman's) TABLE OF CONTENTS:
+TABLE OF CONTENTS:
 I.	Plugins included with pmacct distribution
 II.	Configuring pmacct for compilation
 III.	Brief SQL (MySQL, PostgreSQL, SQLite 3.x) setup examples
@@ -14,34 +12,33 @@ VII.	Running the logfile players (pmmyplay/pmpgplay)
 VIII.	Quickstart guide to packet/stream classifiers
 IX.	Quickstart guide to setup a NetFlow agent/probe 
 X.	Quickstart guide to setup a sFlow agent/probe 
+XI.	Quickstart guide to setup the BGP daemon
 
 
 I. Plugins included with pmacct distribution
-As for any open and pluggable architecture, anyone could write his own plugins for pmacct;
-what follows is the list of plugins included in the official pmacct distribution. That is, 
-what can do pmacct once it has collected data from the network ?
+Given its open and pluggable architecture, pmacct is easily extensible by writing new
+plugins. Here is a list of plugins included within the official pmacct distribution.
 
-'memory':  data are stored in a tunable memory table and can be fetched via the pmacct client
-	   tool, 'pmacct'. It also allows easily data injection into tools like GNUplot, MRTG,
-	   RRDtool or a Net-SNMP server.
-'mysql':   an available MySQL database is selected for data storage.
-'pgsql':   an available PostgreSQL database is selected for data storage.
-'sqlite3': an available SQLite 3.x database is selected for data storage.
-'print':   data are simply pulled to standard output (ie. on the screen) in a way similar to
-	   tcpdump. 
+'memory':  data are stored in a memory table and can be fetched via the pmacct client
+	   tool, 'pmacct'. It also allows easily data injection into 3rd party tools
+	   like GNUplot, MRTG, RRDtool or a Net-SNMP server
+'mysql':   a working MySQL installation can be used for data storage
+'pgsql':   a working PostgreSQL installation can be used for data storage
+'sqlite3': a working SQLite 3.x installation can be used for data storage
+'print':   data are printed at regular intervals to the standard output
 
 
 II. Configuring pmacct for compilation
-The simplest chance is to let the configure script to test default headers and libraries
-locations for you. However note that this will not enable any of the optional plugins, ie.
-MySQL, PostgreSQL and SQLite 3.x; at your convenience you may also enable IPv6 hooks and
-64bit counters. Let's continue with some examples; as usual, to get help and the list of
-available switches:
+The simplest way to configure the package for compilation is to let the configure
+script to probe default headers and libraries for you. By default SQL plugins are
+not enabled; much like multi-threading (pre-requisite for compiling the BGP daemon
+code), IPv6 support and 64 bits counters. A few examples will follow; as usual to
+get the list of available switches, you can use the following command-line:
 
 shell> ./configure --help
 
-Examples on how to enable the support for (1) MySQL, (2) PostgreSQL, (3) SQLite and any (4)
-mixed compilation:
+Examples on how to enable the support for (1) MySQL, (2) PostgreSQL, (3) SQLite and
+any (4) mixed compilation:
 
 (1) shell> ./configure --enable-mysql
 (2) shell> ./configure --enable-pgsql
@@ -50,36 +47,12 @@ mixed compilation:
 
 
 III. Brief SQL setup examples
-Scripts for setting up databases (MySQL, PostgreSQL and SQLite) are into the sql/ tree. Once
-there, if you need an IPv6-ready package, don't miss the 'README.IPv6' document. Examples to
-create database, tables and grant default permissions will follow. 
+Scripts for setting up databases (MySQL, PostgreSQL and SQLite) are into the 'sql/'
+tree. For further guidance read the relevant README files in such directory. One of
+the crucial concepts to deal with, when using default IP or BGP SQL tables, is table
+versioning: please read more about it in the FAQS document (Q16). 
 
-IIIa. SQL table versioning
-pmacct version 0.7.1 introduced SQL table versioning: what is it ? It allows to introduce new
-features over the time (which translate in changes to the SQL schema) without giving the pain
-of breaking backward compatibility. Mind to specify EVERYTIME which SQL table version you
-intend to adhere to as this will strongly influence the way collected data will be written to
-the database (ie. until v5 AS numbers are written into ip_src-ip_dst table fields; since v6
-they are written to as_src-as-dst ones). Furthermore, 'sql_optimize_clauses' directive allows
-to run stripped-down versions of each SQL table thus allowing to save both disk space and CPU
-cycles required to run the SQL engine (read more about it in CONFIG-KEYS). To specify the SQL
-table version, you an use either of the following rules: 
-
-commandline: 	'-v [ 1 | 2 | 3 | 4 | 5 | 6 | 7 ]'
-configuration:  'sql_table_version: [ 1 | 2 | 3 | 4 | 5 | 6 | 7 ]'
-
-To understand difference between v1, v2, v3, v4, v5 and v6 tables:
-
-- Do you need TCP flags ? Then you have to use v7.
-- Do you need both IP addresses and AS numbers in the same table ? Then you have to use v6.
-- Do you need packet classification ? Then you have to use v5.
-- Do you need flows (other than packets) accounting ? Then you have to use v4.
-- Do you need ToS/DSCP field (QoS) accounting ? Then you have to use v3.
-- Do you need agent ID for distributed accounting and packet tagging ? Then you have to use v2.  
-- Do you need VLAN traffic accounting ? Then you have to use v2.
-- If all of the above point sound useless for you, then use v1.
- 
-IIIb. MySQL examples 
+IIIa. MySQL examples 
 shell> cd sql/
 
 - To create v1 tables:
@@ -96,10 +69,10 @@ Data will be available in 'acct_v2' table of 'pmacct' DB.
 
 ... And so on for the newer versions.
 
-IIIc. PostgreSQL examples
-Which user has to execute the following two scripts and how to autenticate with the PostgreSQL
-server depends upon your current configuration. Keep in mind that both scripts need postgres
-superuser permissions to execute some commands successfully:
+IIIb. PostgreSQL examples
+Which user has to execute the following two scripts and how to autenticate with the
+PostgreSQL server depends upon your current configuration. Keep in mind that both
+scripts need postgres superuser permissions to execute some commands successfully:
 shell> cp -p *.pgsql /tmp
 shell> su - postgres
 
@@ -117,10 +90,11 @@ A few tables will be created into 'pmacct' DB. 'acct' ('acct_v2' or 'acct_v3') t
 the default table where data will be written when in 'typed' mode (see 'sql_data' option
 in CONFIG-KEYS document; default value is 'typed'); 'acct_uni' ('acct_uni_v2' or
 'acct_uni_v3') is the default table where data will be written when in 'unified' mode.
-Since v6 unified mode will be no longer supported: an unique table ('acct_v6', etc.) is
-used instead. 
 
-IIId. SQLite examples
+Since v6, PostgreSQL tables are greatly simplified: unified mode is no longer supported
+and an unique table ('acct_v6', for example) is created instead. 
+
+IIIc. SQLite examples
 shell> cd sql/
 
 - To create v1 tables:
@@ -136,29 +110,64 @@ Data will be available in 'acct_v2' table of '/tmp/pmacct.db' DB.
 
 ... And so on for the newer versions.
 
+IIId. Custom SQL tables
+Custom SQL tables can be built by creating your own SQL schema and indexes. This allows
+to freely mix-and-match the primitives relevant to your accounting scenario. Specifying
+SQL table version and type (sql_table_version, sql_table_type) is not required; whereas
+a new directive, sql_optimize_clauses, is introduced to flag table customization to
+pmacct. This is a simple configuration snippet:
+
+sql_optimize_clauses: true
+sql_table: <table name>
+aggregate: <aggregation primitives list> 
+
+IIIe. Historical accounting
+Enabling historical accounting allows to aggregate data over time (ie. 5 mins, hourly,
+daily) in a flexible and fully configurable way. Timestamps are lodged into two fields:
+'stamp_inserted' which represents the basetime of the timeslot and 'stamp_updated' which
+says when a given timeslot was updated for the last time. Following there is a pretty
+standard configuration fragment to slice data into nicely aligned (or rounded-off) 5
+minutes timeslots:
+
+sql_history: 5m 
+sql_history_roundoff: m
+
+IIIf. INSERTs-only 
+UPDATE queries are demanding in terms of resources; this is why, even if they are 
+supported by pmacct, a savy approach is to cache data for longer times in memory and
+write them off once per timeslot (sql_history): this produces a much lighter INSERTs-
+only environemnt. This is an example based on 5 minutes timeslots:
+
+sql_refresh_time: 300
+sql_history: 5m
+sql_history_roundoff: m
+sql_dont_try_update: true
+
+Note that sql_refresh_time is always expressed in seconds.
+
 
 IV. Running the libpcap-based daemon (pmacctd) 
-You can run pmacctd either with commandline options or using a configuration file. Please remember
-that sample configuration files are in examples/ tree. Note also that most of the new features are
-available only as configuration directives (so, no commandline switches). Using a configuration file
-and commandline switches is mutual exclusive. To be aware of the existing configuration directives,
-please read the CONFIG-KEYS document. 
+pmacctd, like the other daemons, can be run with commandline options, using a config
+file or a mix of the two. Sample configuration files are in examples/ tree. Note also 
+that most of the new features are available only as configuration directives. To be
+aware of the existing configuration directives, please read the CONFIG-KEYS document. 
 
 Show all available pmacctd commandline switches:
 shell> pmacctd -h
 
-Run pmacctd reading configuration from a specified file (see examples/ tree for a brief list of some
-commonly useed keys; divert your eyes to CONFIG-KEYS for the full list). This example applies to all
-other daemons too:
+Run pmacctd reading configuration from a specified file (see examples/ tree for a brief
+list of some commonly useed keys; divert your eyes to CONFIG-KEYS for the full list).
+This example applies to all daemons:
 shell> pmacctd -f pmacctd.conf
 
-Daemonize the process; listen on eth0; aggregate data by src_host/dst_host; write to a MySQL server;
-limit traffic matching only source ip network 10.0.0.0/16; note that filters work the same as tcpdump.
-So, refer to libpcap/tcpdump man pages for examples and further reading. 
+Daemonize the process; listen on eth0; aggregate data by src_host/dst_host; write to a
+MySQL server; limit traffic matching only source ip network 10.0.0.0/16; note that
+filters work the same as tcpdump. So, refer to libpcap/tcpdump man pages for examples
+and further reading. 
 
 shell> pmacctd -D -c src_host,dst_host -i eth0 -P mysql src net 10.0.0.0/16
 
-And now written the configuration way:
+Or written the configuration way:
 !
 daemonize: true
 plugins: mysql
@@ -167,11 +176,12 @@ interface: eth0
 pcap_filter: src net 10.0.0.0/16
 ! ...
 
-Print collected traffic data aggregated by src_host/dst_host over the screen; refresh data every 30
-seconds and listen on eth0. 
+Print collected traffic data aggregated by src_host/dst_host over the screen; refresh
+data every 30 seconds and listen on eth0. 
 
 shell> pmacctd -P print -r 30 -i eth0 -c src_host,dst_host
 
+Or written the configuration way:
 !
 plugins: print
 print_refresh_time: 30
@@ -179,9 +189,9 @@ aggregate: src_host, dst_host
 interface: eth0
 ! ...
 
-Daemonize the process; let pmacct aggregate traffic in order to show inbound vs. outbound traffic
-for network 192.168.0.0/16; send data to a PostgreSQL server. This configuration is not possible via
-commandline switches; the corresponding configuration follows: 
+Daemonize the process; let pmacct aggregate traffic in order to show in vs out traffic
+for network 192.168.0.0/16; send data to a PostgreSQL server. This configuration is not
+possible via commandline switches; the corresponding configuration follows: 
 
 !
 daemonize: true
@@ -194,8 +204,8 @@ sql_table[in]: acct_in
 sql_table[out]: acct_out
 ! ...
 
-The previous example looks nice ! But how to make data historical ? Simple enough, let's suppose to
-divide traffic by hour and we wish to refresh data into the database each 60 seconds. 
+The previous example looks nice! But how to make data historical ? Simple enough, let's
+suppose you want to split traffic by hour and write data into the DB every 60 seconds. 
 
 !
 daemonize: true
@@ -211,10 +221,11 @@ sql_history: 1h
 sql_history_roundoff: h
 ! ...
 
-Let's now translate the same example in the memory plugin world. It's use is valuable expecially
-when it's required to feed bytes/packets/flows counters to external programs. Examples about the 
-client program will follow later in this document. Now, note that each memory table need its own
-pipe file in order to get correctly contacted by the client:
+Let's now translate the same example in the memory plugin world. It's use is valuable
+expecially when it's required to feed bytes/packets/flows counters to external programs.
+Examples about the client program will follow later in this document. Now, note that
+each memory table need its own pipe file in order to get correctly contacted by the
+client:
 
 !
 daemonize: true
@@ -227,12 +238,13 @@ imt_path[in]: /tmp/pmacct_in.pipe
 imt_path[out]: /tmp/pmacct_out.pipe
 ! ...
 
-As a further note, check the CONFIG-KEYS document about more imt_* directives as they will help
-to tune the size of memory tables, if default values are not ok for your setup. 
+As a further note, check the CONFIG-KEYS document about more imt_* directives as they
+will support in the task of fine tuning the size and boundaries of memory tables, if
+default values are not ok for your setup. 
 
-Now, fire multiple instances of pmacctd, each on a different interface; again, because each instance will
-have its own memory table, it will require its own pipe file for client queries aswell (as explained in
-the previous examples):
+Now, fire multiple instances of pmacctd, each on a different interface; again, because
+each instance will have its own memory table, it will require its own pipe file for
+client queries aswell (as explained in the previous examples):
 shell> pmacctd -D -i eth0 -m 8 -s 65535 -p /tmp/pipe.eth0 
 shell> pmacctd -D -i ppp0 -m 0 -s 32768 -p /tmp/pipe.ppp0 
 
@@ -243,18 +255,19 @@ NOTE: superuser privileges are needed to execute pmacctd correctly.
 
 
 V. Running the NetFlow and sFlow daemons (nfacctd/sfacctd) 
-All examples about pmacctd are also valid for nfacctd and sfacctd with the exception of directives that apply
-exclusively to libpcap. If you've skipped examples in section 'IV', please read them before continuing. To be
-aware of all existing configuration keys available, please read also the CONFIG-KEYS document. And now, let's
-go to the examples:
+All examples about pmacctd are also valid for nfacctd and sfacctd with the exception
+of directives that apply exclusively to libpcap. If you've skipped examples in section
+'IV', please read them before continuing. All configuration keys available are in the
+CONFIG-KEYS document. Some examples:
 
 Run nfacctd reading configuration from a specified file.
 shell> nfacctd -f nfacctd.conf
 
-Daemonize the process; aggregate data by sum_host (by host, summing inbound + outbound traffic); write to a
-local MySQL server. Listen on port 5678 for incoming Netflow datagrams (from one or multiple NetFlow agents).
-Let's make pmacct refresh data each two minutes and let's make data historical, divided into timeslots of 10
-minutes each. Finally, let's make use of a SQL table, version 4.
+Daemonize the process; aggregate data by sum_host (by host, summing inbound + outbound
+traffic); write to a local MySQL server. Listen on port 5678 for incoming Netflow
+datagrams (from one or multiple NetFlow agents). Let's make pmacct refresh data each
+two minutes and let's make data historical, divided into timeslots of 10 minutes each.
+Finally, let's make use of a SQL table, version 4.
 shell> nfacctd -D -c sum_host -P mysql -l 5678 
 
 And now written the configuration way:
@@ -270,11 +283,11 @@ sql_table_version: 4
 ! ...
 
 VI. Running the pmacct client (pmacct)
-The pmacct client is used to gather data either from a memory table. Requests and answers are exchanged via a
-pipe file; hence, security is strictly connected with pipe file permissions. Of course, when using SQL plugins
-you will just need the specific DB client tool (ie. psql, mysql, sqlite3) to make queries. Note: while writing
-queries commandline, it may happen to write characters with a special meaning for the shell itself (ie. ; or *).
-Mind to either escape ( \; or \* ) or enclose in quotes ( " ) them.
+The pmacct client is used to retrieve data from memory tables. Requests and answers
+are exchanged via a pipe file: authorization is strictly connected to permissions on
+the pipe file. Note: while writing queries commandline, it may happen to write chars
+with a special meaning for the shell itself (ie. ; or *). Mind to either escape ( \;
+or \* ) them or put in quotes ( " ).
 
 Show all available pmacct client commandline switches:
 shell> pmacct -h
@@ -282,48 +295,51 @@ shell> pmacct -h
 Fetch data stored into the memory table:
 shell> pmacct -s 
 
-Match data between src_host 192.168.0.10 and dst_host 192.168.0.3 and return a formatted output; display all
-fields (-a), this way the output is easy to be parsed by tools like awk/sed; each unused field will be zero-
-filled: 
+Match data between source IP 192.168.0.10 and destination IP 192.168.0.3 and return
+a formatted output; display all fields (-a), this way the output is easy to be parsed
+by tools like awk/sed; each unused field will be zero-filled: 
 shell> pmacct -c src_host,dst_host -M 192.168.0.10,192.168.0.3 -a
 
-Similar to previous example; we request to reset data for the matched entry/ies; the server will return the
-actual counters to the client, then will reset them:
+Similar to the previous example; it is requested to reset data for matched entries;
+the server will return the actual counters to the client, then will reset them:
 shell> pmacct -c src_host,dst_host -M 192.168.0.10,192.168.0.3 -r
 
-Fetch data for IP address dst_host 10.0.1.200; we also ask for a 'counter only' output ('-N') suitable, this
-time, for injecting data in tools like MRTG or RRDtool (mind that sample scripts are in the examples/ tree).
-Bytes counter will be returned (but the '-n' switch allows also select which counter to display). If more
-entries match your request (ie. because your query is based just over dst_host but the daemon is aggregating
-by src_host/dst_host) their counters will be summed:
+Fetch data for IP address dst_host 10.0.1.200; we also ask for a 'counter only' output
+('-N') suitable, this time, for injecting data in tools like MRTG or RRDtool (sample
+scripts are in the examples/ tree). Bytes counter will be returned (but the '-n' switch
+allows also select which counter to display). If multiple entries match the request (ie
+because the query is based on dst_host but the daemon is actually aggregating traffic
+as "src_host, dst_host") their counters will be summed:
 shell> pmacct -c dst_host -N 10.0.1.200
 
 Another query; this time let's contact the server listening on pipe file /tmp/pipe.eth0:
 shell> pmacct -c sum_port -N 80 -p /tmp/pipe.eth0 
 
-Find all data matching host 192.168.84.133 as either their source or destination address. In particular, this
-example shows how to use wildcards and how to spawn multiple queries (each separated by the ';' symbol). Take
-care to follow the same order when specifying the primitive name (-c) and its actual value ('-M' or '-N'):
+Find all data matching host 192.168.84.133 as either their source or destination address.
+In particular, this example shows how to use wildcards and how to spawn multiple queries
+(each separated by the ';' symbol). Take care to follow the same order when specifying
+the primitive name (-c) and its actual value ('-M' or '-N'):
 shell> pmacct -c src_host,dst_host -N "192.168.84.133,*;*,192.168.84.133"
 
-Find all web and smtp traffic; we are interested in have just the total of such traffic (for example, to
-split legal network usage from the total); the output will be a unique counter, sum of the partial (coming
-from each query) values.
+Find all web and smtp traffic; we are interested in have just the total of such traffic
+(for example, to split legal network usage from the total); the output will be a unique
+counter, sum of the partial (coming from each query) values.
 shell> pmacct -c src_port,dst_port -N "25,*;*,25;80,*;*,80" -S 
 
-Show traffic between the specified hosts; this aims to be a simple example of a batch query; note that you
-can supply, as value of both '-N' and '-M' switches, a value like: 'file:/home/paolo/queries.list': actual
-values will be read from the specified file (and they need to be written into it, one per line) instead of
-commandline:
+Show traffic between the specified hosts; this aims to be a simple example of a batch
+query; note that as value of both '-N' and '-M' switches it can be supplied a value like:
+'file:/home/paolo/queries.list': actual values will be read from the specified file (and
+they need to be written into it, one per line) instead of commandline:
 shell> pmacct -c src_host,dst_host -N "10.0.0.10,10.0.0.1;10.0.0.9,10.0.0.1;10.0.0.8,10.0.0.1"
 shell> pmacct -c src_host,dst_host -N "file:/home/paolo/queries.list"
 
 
 VII. Running the logfile players (pmmyplay and pmpgplay)
-Examples will be shown using "pmmyplay" tool; they are same way applicable to "pmpgplay" tool. Two methods
-are supported as failover action when something fails while talking with the DB: logfiles or backup DB. Note 
-that using a logfile is a simple way to overcome transient failure situations that requires human intervention
-while using a backup DB could ease the following process of data merging.
+For brevity, examples in this section will revolve around "pmmyplay" tool but the same
+are applicable to "pmpgplay". Currently, two different methods are supported as failover
+action when the RDBMS fails: logfiles or backup DB. While planning for a recovery method,
+consider that the logfile method is being discontinued and you are encouraged to use the
+backup DB option. 
 
 Display online help and available options:
 shell> pmmyplay -h
@@ -331,12 +347,12 @@ shell> pmmyplay -h
 Play the whole specified file, inserting elements in the DB and enabling debug:
 shell> pmmyplay -d -f /tmp/pmacct-recovery.dat
 
-Just see on the screen the content of the supplied logfile; that is, do not interact with the DB:
+Just see on the screen the content of the supplied logfile; that is, do not interact with
+the DB:
 shell> pmmyplay -d -t -f /tmp/pmacct-recovery.dat 
 
-Play a single (-n 1) element (the fifth) from the specified file (useful if just curious or, for example, a
-previously player execution has failed to write some element; remember that all element failed to be written,
-if any, will be displayed over your screen):
+Play a single (-n 1) element (the fifth) from the specified file (useful if for example
+a previous player execution was aborted due to a failure):
 shell> pmmyplay -o 5 -n 1 -f /tmp/pmacct-recovery.dat
 
 Play all elements until the end of file, starting from element number six:
@@ -344,12 +360,12 @@ shell> pmmyplay -o 6 -f /tmp/pmacct-recovery.dat -p ohwhatanicepwrd
 
 
 VIII. Quickstart guide to packet classifiers
-pmacct 0.10.0 sees the introduction of a new packet classification feature. The approach is fully extensible:
-classification patterns are based over regular expressions (RE), human-readable, must be placed into a common
-directory and have a .pat file extension. Many patterns for widespread protocols are available and are just a
-click away. Furthermore, you can write your own patterns (and share them with the active L7-filter project's
-community). Don't miss a visit to the L7-filter project homepage, http://l7-filter.sourceforge.net/ .
-Now, the quickstarter guide:
+pmacct 0.10.0 sees the introduction of a packet classification feature. The approach
+is fully extensible: classification patterns are based over regular expressions (RE),
+must be placed into a common directory and have a .pat file extension. Patterns for
+well-known protocols are available and are just a click away. Furthermore, you can
+write your own patterns (and share them with the active L7-filter project's community).
+Below the quickstarter guide:
 
 a) download pmacct
 shell> wget http://www.pmacct.net/pmacct-x.y.z.tar.gz 
@@ -357,19 +373,21 @@ shell> wget http://www.pmacct.net/pmacct-x.y.z.tar.gz
 b) compile pmacct
 shell> cd pmacct-x.y.z; ./configure && make && make install 
 
-c-1) download regular expression (RE) classifiers as-you-need them: you need just to point your browser to
-     http://l7-filter.sourceforge.net/protocols/ then:
+c-1) download regular expression (RE) classifiers as-you-need them: you just need to
+     point your browser to http://l7-filter.sourceforge.net/protocols/ then:
 
      shell> cd /path/to/classifiers/
      shell> wget http://l7-filter.sourceforge.net/layer7-protocols/protocols/[ protocol ].pat 
 
-c-2) download all RE classifiers: point your browser to http://sourceforge.net/projects/l7-filter (and take
-     to the latest Protocol definitions tarball).
+c-2) download all the RE classifiers available: you just need to point your browser to
+     http://sourceforge.net/projects/l7-filter (and take to the latest L7-protocol
+     definitions tarball). Pay attention to remove potential catch-all patterns which
+     might be part of the downloaded package (ie. unknown.pat and unset.pat).
 
-c-3) download shared object (SO) classifiers (written in C) as-you-need them: you need just to point your
-     browser to http://www.pmacct.net/classification/ , download the available package, extract files and
-     compile things following INSTALL instructions. When everything is finished, install the produced shared
-     objects:
+c-3) download shared object (SO) classifiers (written in C) as-you-need them: you need
+     just to point your browser to http://www.pmacct.net/classification/ , download the
+     available package, extract files and compile things following INSTALL instructions.
+     When everything is finished, install the produced shared objects:
 
      shell> mv *.so /path/to/classifiers/
 
@@ -397,23 +415,22 @@ sql_table_version: 5
 sql_aggressive_classification: true
 !...
 
-e) Ok, we are done ! Fire the pmacct collector daemon:
+e) Ok, we are done! Fire the pmacct collector daemon:
 
    shell> pmacctd -f /path/to/configuration/file 
 
-   You can now play with the SQL or pmacct client; furthermore, you can add/remove/write patterns and load
-   them by restarting the pmacct daemon. If using the memory plugin you can check out the list of loaded
-   plugins with 'pmacct -C'. Don't underestimate the importance of 'snaplen', 'pmacctd_flow_buffer_size',
-   and 'pmacctd_flow_buffer_buckets' values; get the time to take a read about them in the CONFIG-KEYS
-   document.
+   You can now play with the SQL or pmacct client; furthermore, you can add/remove/write
+   patterns and load them by restarting the pmacct daemon. If using the memory plugin
+   you can check out the list of loaded plugins with 'pmacct -C'. Don't underestimate
+   the importance of 'snaplen', 'pmacctd_flow_buffer_size', 'pmacctd_flow_buffer_buckets'
+   values; get the time to take a read about them in the CONFIG-KEYS document.
 
 
 IX. Quickstart guide to setup a NetFlow agent/probe
-pmacct 0.11.0 sees the introduction of new probing capabilities, both on NetFlow and sFlow sides. 
-Exporting traffic data from multiple probes through NetFlow to a collector (one or a set of them)
-is efficient and highly beneficial from a network management standpoint. NetFlow v9 adds further
-flexibility by allowing to transport custom informations (for example, pmacctd NetFlow probe can
-send flow classification tag to a remote collector). Now, the quickstarter guide:
+pmacct 0.11.0 sees the introduction of traffic data export capabilities, through both
+NetFlow and sFlow protocols. While NetFlow v5 is fixed by nature, v9 adds flexibility
+by allowing to transport custom informations (for example, L7-classification tags to a
+remote collector). Below the quickstarter guide:
 
 a) usual initial steps: download pmacct, unpack it, compile it.
 
@@ -433,12 +450,37 @@ nfprobe_version: 9
 ! snaplen: 700
 !...
 
-   This is very simple (and working) configuration. You can complicate it by adding features. 1) you
-   can generate AS numbers by uncommenting 'networks_file' line, crafting a proper Networks File and
-   piling up  'src_as,dst_as' to the 'aggregate' directive; 2) you can embed flow classification
-   informations in your NetFlow v9 datagrams by uncommenting 'classifiers' and 'snaplen' lines,
-   setting up a proper directory for your classification patterns and piling up 'class' to the
-   'aggregate' directive; 3) you can add L2 (MAC addresses, VLANs) informations to your NetFlow v9
+   This is a basic working configuration. Additional features include: 1) generate ASNs
+   by using a networks_file pointing to a valid Networks File (see examples/ directory)
+   and adding src_as, dst_as primitives to the 'aggregate' directive; alternatively, as
+   of release 0.12.0rc2, it's possible to generate ASNs from the pmacctd BGP thread. The
+   following fragment can be added to the configuration above:
+
+pmacctd_as: bgp
+bgp_daemon: true
+bgp_daemon_ip: 127.0.0.1
+bgp_agent_map: /path/to/agent_to_peer.map
+bgp_daemon_port: 17917
+
+   The bgp_daemon_port can be changed from the standard BGP port (179/TCP) in order to
+   co-exist with other BGP routing software which might be running on the same host.
+   Furthermore, they can safely peer each other by using 127.0.0.1 as bgp_daemon_ip. 
+   In pmacctd, bgp_agent_map does the trick of mapping 0.0.0.0 to the IP address of
+   the BGP peer (ie. 127.0.0.1: 'id=127.0.0.1 ip=0.0.0.0'); this setup, while generic,
+   was tested working in conjunction with Quagga 0.99.14. Following a relevant fragment
+   of the Quagga configuration:
+
+router bgp Y 
+ bgp router-id X.X.X.X
+ neighbor 127.0.0.1 remote-as Y 
+ neighbor 127.0.0.1 port 17917
+ neighbor 127.0.0.1 update-source X.X.X.X
+!
+
+   2) embed flow classification informations in NetFlow v9 datagrams by uncommenting
+   'classifiers' and 'snaplen' lines, reading for further information the section of
+   this document about stream classification and finally adding the 'class' key to the
+   'aggregate' directive; 3) add L2 (MAC addresses, VLANs) information to NetFlow v9
    flowsets.
 
 c) build NetFlow collector configuration, using nfacctd:
@@ -453,31 +495,274 @@ aggregate[display]: src_host, dst_host, src_port, dst_port, proto
 
 d) Ok, we are done ! Now fire both daemons:
 
-   shell a> pmacctd -f /path/to/configuration/file
-   shell b> nfacctd -f /path/to/configuration/file
+   shell a> pmacctd -f /path/to/configuration/pmacctd-nfprobe.conf
+   shell b> nfacctd -f /path/to/configuration/nfacctd-memory.conf
 
 
 X. Quickstart guide to setup a sFlow agent/probe
-pmacct 0.11.0 sees the introduction of new probing capabilities, both on NetFlow and sFlow sides.
-Even if interested in sFlow, take a moment to read the previous chapter. Furthermore, steps a/c/d
-will be cut as they are very similar to the previous example. sFlow relies heavily on random packet
-sampling rather than joining proper sets of packets into shared flows; this less-stateful and light
-approach makes it a valuable export protocol expecially tailored for high-speed networks. Further,
-you can exploit the great flexibility offered by sFlow v5 for, ie., embedding packet classification
-informations or adding basic (ie. src_as, dst_as) Extended Gateway informations through the use of
-a 'networks_file'. Now, the quickstarter guide:
+pmacct 0.11.0 sees the introduction of traffic data export capabilities via sFlow; such
+protocol is quite different from NetFlow: in short, it works by exporting portions of
+sampled packets rather than building uni-directional flows as it happens in NetFlow;
+this less-stateful approach makes sFlow a light export protocol well-tailored for high-
+speed networks. Further, sFlow v5 can be extended much like NetFlow v9: meaning, ie.,
+L7 classification or basic Extended Gateway information (ie. src_as, dst_as) can be
+embedded in the record structure being exported. Below the quickstarter guide:
 
 b) build sFlow probe configuration, using pmacctd:
 !
 daemonize: true
 interface: eth0
 plugins: sfprobe
+sampling_rate: 20
 sfprobe_agentsubid: 1402
 sfprobe_receiver: 1.2.3.4:6343
-sfprobe_sampling_rate: 20
 !
 ! networks_file: /path/to/networks.lst
 ! classifiers: /path/to/classifiers/
 ! snaplen: 700
 !...
+
+
+XI. Quickstart guide to setup the BGP daemon
+pmacct 0.12.0 integrates a BGP daemon feature to nfacctd and sfacctd, respectively the
+NetFlow and sFlow collectors. Such daemon is run as a thread within the collector's
+core process. The idea is to receive both (ingress) NetFlow (or sFlow) traffic samples
+and full routing tables via BGP from edge routers. Per-peer BGP RIBs are maintained to
+ensure local or regional views of the network (ie. in case of large networks which
+are partitioned in BGP clusters or federations).
+In case of routers with default-only or partial BGP views, the default route can be
+followed up (bgp_default_follow); also it might be desirable in certain situations,
+for example to save resources, to entirely map one or a set of agents to a BGP peer
+(bgp_agent_map). 
+
+The first requirement is that pmacct has to be configured for compilation with threads,
+this line will do it:
+
+./configure --enable-threads
+
+The following configuration fragment is alone sufficient to set up a BGP daemon which
+will bind to an IP address and will support up to a maximum number of 100 peers. Once
+the PE routers begin sending NetFlow datagrams and peer up, it should be possible to
+see the BGP-related fields, ie. src_as, dst_as, as_path, peer_as_dst, local_pref, MED,
+etc., correctly populated while querying the memory table:
+
+bgp_daemon: true
+bgp_daemon_ip: X.X.X.X
+bgp_daemon_max_peers: 100
+nfacctd_as_new: bgp
+[ ... ]
+plugins: memory
+aggregation: src_as, dst_as, local_pref, med, as_path, peer_dst_as 
+
+The BGP daemon reads the remote ASN upon receipt of a BGP OPEN message and dynamically
+presents itself as part of the same Autonomous System - to ensure an iBGP relationship
+is established all the times. Also, the BGP daemon acts as a passive BGP neighbor and
+hence will never try to re-establish a fallen peering session.  
+
+XIa. Limiting AS-PATH and BGP community attributes length
+AS-PATH and BGP communities can by nature get easily long, when represented as strings.
+Sometimes only a small portion of their content is relevant to the accounting task and
+hence a filtering layer was developed to take special care of these attributes. The
+bgp_aspath_radius cuts the AS-PATH down after a specified amount of hops; whereas the
+bgp_stdcomm_pattern does a simple sub-string matching against standard BGP communities,
+filtering in only those that match (optionally, for better precision, a pre-defined
+number of characters can be wildcarded by employing the '.' symbol, like in regular
+expressions). See a typical usage example below:
+
+bgp_aspath_radius: 3
+bgp_stdcomm_pattern: 12345:
+
+A detailed description of these configuration directives is, as usual, included in
+the CONFIG-KEYS document. 
+
+XIb. The source peer AS case 
+The peer_src_as primitive adds useful insight in understanding where traffic enters
+the observed routing domain; but asymmetric routing impacts accuracy delivered by
+devices configured with either NetFlow or sFlow and the peer-as feature (as it only
+performs a reverse lookup, ie. a lookup on the source IP address, in the BGP table
+hence saying where it would route such traffic). pmacct offers a few ways to perform
+some mapping to tackle this issue and easily model both private and public peerings,
+both bi-lateral or multi-lateral. Find below how to use a map, reloadable at runtime,
+and its contents (for full syntax guide lines, please see the 'peers.map.example'
+file within the examples section):
+
+bgp_peer_src_as_type: map
+bgp_peer_src_as_map: /path/to/peers.map
+
+[/path/to/peers.map]
+id=12345 ip=1.2.3.4 in=10 bgp_nexthop=3.4.5.6
+id=34567 ip=1.2.3.4 in=10
+
+id=45678 ip=2.3.4.5 in=20 src_mac=00:11:22:33:44:55
+id=56789 ip=2.3.4.5 in=20 src_mac=00:22:33:44:55:66
+
+Even though all this mapping is static, it can be auto-provisioned to a good degree
+by means of external scripts running at regular intervals and, for example, querying
+relevant routers via SNMP. In this sense, the bgpPeerTable MIB is a good starting
+point. Alternatively pmacct also offers the option to perform reverse BGP lookups.
+
+NOTE: when mapping, the peer_src_as primitive doesn't really apply to egress NetFlow
+(or egress sFlow) as it mainly relies on either the input interface index (fIndex),
+the source MAC address, a reverse BGP next-hop lookup or a combination of these.
+
+XIc. Tracking entities on the own IP address space
+It might happen that not all entities attached to the service provider network are
+speaking BGP but rather they get IP prefixes redistributed into iBGP (different
+routing protocols, statics, directly connected, etc.). These can be private IP
+addresses or segments of the SP address space. The common factor to all of them is
+that while being present in iBGP, these prefixes can't be tracked any further due
+to the lack of attributes like AS-PATH or an ASN. To overcome this situation the
+simplest approach is to employ a bgp_peer_src_as_map directive, described previously
+(ie. making use of interface descriptions as a possible way to automate the process).
+Alterntively, the bgp_stdcomm_pattern_to_asn directive was developed to fit into
+this scenario: assuming procedures of a SP are (or can be changed) to label every
+relevant non-BGP speaking entity IP prefixes uniquely with a BGP standard community,
+this directive allows to map the community to a peer AS/origin AS couple as per the
+following example: XXXXX:YYYYY => Peer-AS=XXXXX, Origin-AS=YYYYY. 
+
+
+XId. Preparing the router to BGP peer 
+Once the collector is configured and started up the remaining step is to let routers
+to export traffic samples to the collector and BGP peer with it. Configuring the same
+source IP address across both NetFlow and BGP features allows the pmacct collector to
+perform the required correlations. Also, setting the BGP Router ID accordingly allows
+for more clear log messages. It's adviceable to configure the collector at the routers
+as a Route-Reflector (RR) client.
+
+A relevant configuration example for a Cisco router follows:
+
+ip flow-export source Loopback12345
+ip flow-export version 5
+ip flow-export destination X.X.X.X 2100
+!
+router bgp 12345
+ neighbor X.X.X.X remote-as 12345
+ neighbor X.X.X.X update-source Loopback12345
+ neighbor X.X.X.X version 4
+ neighbor X.X.X.X send-community
+ neighbor X.X.X.X route-reflector-client
+ neighbor X.X.X.X description nfacctd 
+
+A relevant configuration example for a Juniper router follows:
+
+forwarding-options {
+    sampling {
+        output {
+            cflowd X.X.X.X {
+                port 2100;
+                source-address Y.Y.Y.Y;
+                version 5;
+            }
+        }
+    }
+}
+protocols bgp {
+    group rr-netflow {
+        type internal;
+        local-address Y.Y.Y.Y;
+        family inet {
+            any;
+        }
+        cluster Y.Y.Y.Y;
+        neighbor X.X.X.X {
+            description "nfacctd";
+        }
+    }
+}
+
+XIe. A working configuration example writing to a MySQL database
+The following setup is a realistic example for a MPLS-enabled IP carrier network
+divided in multiple BGP clusters. Samples are aggregated in a way which is suitable
+to get an overview of traffic trajectories, collecting much information where these
+enter the AS and where they get out. 
+
+daemonize: true
+nfacctd_port: 2100
+nfacctd_time_new: true
+
+plugins: mysql[5mins], mysql[hourly]
+
+sql_optimize_clauses: true
+sql_dont_try_update: true
+sql_multi_values: 1024000
+
+sql_history_roundoff[5mins]: m
+sql_history[5mins]: 5m
+sql_refresh_time[5mins]: 300
+sql_table[5mins]: acct_bgp_5mins
+
+sql_history_roundoff[hourly]: h
+sql_history[hourly]: 1h
+sql_refresh_time[hourly]: 3600
+sql_table[hourly]: acct_bgp_1hr
+
+bgp_daemon: true
+bgp_daemon_ip: X.X.X.X
+bgp_daemon_max_peers: 100
+bgp_aspath_radius: 3
+bgp_follow_default: 1 
+nfacctd_as_new: bgp
+bgp_peer_src_as_type: map
+bgp_peer_src_as_map: /path/to/peers.map
+
+plugin_buffer_size: 10240
+plugin_pipe_size: 1024000
+aggregate: tag, src_as, dst_as, peer_src_as, peer_dst_as, peer_src_ip, peer_dst_ip, local_pref, as_path
+
+pre_tag_map: /path/to/pretag.map
+refresh_maps: true
+pre_tag_map_entries: 3840
+
+The content of the maps (bgp_peer_src_as_map, pre_tag_map) is meant to be pretty
+standard and will not be shown. As it can be grasped from the above configuration,
+the SQL schema was customized. Below a suggestion on how this can be modified for
+more efficiency - with additional INDEXes, to speed up specific queries response
+time, remaining to be worked out:
+
+create table acct_bgp_5mins (
+        id INT(4) UNSIGNED NOT NULL AUTO_INCREMENT,
+        agent_id INT(4) UNSIGNED NOT NULL,
+        as_src INT(4) UNSIGNED NOT NULL,
+        as_dst INT(4) UNSIGNED NOT NULL,
+        peer_as_src INT(4) UNSIGNED NOT NULL,
+        peer_as_dst INT(4) UNSIGNED NOT NULL,
+        peer_ip_src CHAR(15) NOT NULL,
+        peer_ip_dst CHAR(15) NOT NULL,
+        as_path CHAR(21) NOT NULL,
+        local_pref INT(4) UNSIGNED NOT NULL,
+        packets INT UNSIGNED NOT NULL,
+        bytes BIGINT UNSIGNED NOT NULL,
+        stamp_inserted DATETIME NOT NULL,
+        stamp_updated DATETIME,
+        PRIMARY KEY (id),
+        INDEX ...
+) TYPE=MyISAM AUTO_INCREMENT=1;
+
+create table acct_bgp_1hr (
+        id INT(4) UNSIGNED NOT NULL AUTO_INCREMENT,
+        agent_id INT(4) UNSIGNED NOT NULL,
+        as_src INT(4) UNSIGNED NOT NULL,
+        as_dst INT(4) UNSIGNED NOT NULL,
+        peer_as_src INT(4) UNSIGNED NOT NULL,
+        peer_as_dst INT(4) UNSIGNED NOT NULL,
+        peer_ip_src CHAR(15) NOT NULL,
+        peer_ip_dst CHAR(15) NOT NULL,
+        as_path CHAR(21) NOT NULL,
+        local_pref INT(4) UNSIGNED NOT NULL,
+        packets INT UNSIGNED NOT NULL,
+        bytes BIGINT UNSIGNED NOT NULL,
+        stamp_inserted DATETIME NOT NULL,
+        stamp_updated DATETIME,
+        PRIMARY KEY (id),
+        INDEX ...
+) TYPE=MyISAM AUTO_INCREMENT=1;
+
+XIf. BGP daemon implementation concluding notes
+The implementation supports both 4-bytes ASN and IPv6 (MP-BGP); IPv6 peers are not
+supported yet though. When storing data via SQL, BGP primitives can be freely mix-
+and-matched with other primitives (ie. L2/L3/L4) when customizing the SQL table
+(sql_optimize_clauses: true). Environments making use of BGP Multi-Path are not
+currently supported; if you are using this and would like to see it implemented,
+please get in touch. TCP MD5 signature for BGP messages is not supported. For a
+review of all the configurable knobs and features see the CONFIG-KEYS document. 
 

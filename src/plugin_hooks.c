@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -24,6 +24,7 @@
 /* includes */
 #include "pmacct.h"
 #include "pmacct-data.h"
+#include "thread_pool.h"
 #include "plugin_hooks.h"
 #include "pkt_handlers.h"
 
@@ -43,11 +44,6 @@ void load_plugins(struct plugin_requests *req)
   int l = sizeof(list->cfg.pipe_size);
   struct channels_list_entry *chptr = NULL;
 
-#if defined ENABLE_THREADS
-  channels_list_mutex = malloc(sizeof(pthread_mutex_t));
-  assert(channels_list_mutex);
-  pthread_mutex_init(channels_list_mutex, NULL);
-#endif
   init_random_seed(); 
   init_pipe_channels();
 
@@ -66,7 +62,8 @@ void load_plugins(struct plugin_requests *req)
 	else min_sz += (PpayloadSz+DEFAULT_PLOAD_SIZE); 
       }
       if (list->cfg.data_type & PIPE_TYPE_EXTRAS) min_sz += PextrasSz; 
-      
+      if (list->cfg.data_type & PIPE_TYPE_BGP) min_sz += PbgpSz; 
+
       /* If nothing is supplied, let's hint some working default values */
       if (list->cfg.pcap_savefile && !list->cfg.pipe_size && !list->cfg.buffer_size) {
         list->cfg.pipe_size = 4096000; /* 4Mb */
@@ -152,6 +149,7 @@ void load_plugins(struct plugin_requests *req)
       if (list->cfg.data_type & PIPE_TYPE_METADATA) chptr->clean_func = pkt_data_clean;
       if (list->cfg.data_type & PIPE_TYPE_PAYLOAD) chptr->clean_func = pkt_payload_clean;
       if (list->cfg.data_type & PIPE_TYPE_EXTRAS) chptr->clean_func = pkt_extras_clean;
+      if (list->cfg.data_type & PIPE_TYPE_BGP) chptr->clean_func = pkt_bgp_clean;
 
       /* sets nfprobe ID */
       if (list->type.id == PLUGIN_ID_NFPROBE) {
@@ -194,13 +192,11 @@ void exec_plugins(struct packet_ptrs *pptrs)
   char *bptr;
   int index;
 
-#if defined ENABLE_THREADS
-  pthread_mutex_lock(channels_list_mutex);
-#endif
   for (index = 0; channels_list[index].aggregation; index++) {
     if (evaluate_filters(&channels_list[index].agg_filter, pptrs->packet_ptr, pptrs->pkthdr) &&
-        (!channels_list[index].tag_filter.num || !evaluate_tags(&channels_list[index].tag_filter, pptrs->tag)) && 
-	pptrs->tag_dist && !check_shadow_status(pptrs, &channels_list[index])) {
+        !evaluate_tags(&channels_list[index].tag_filter, pptrs->tag) && 
+        !evaluate_tags(&channels_list[index].tag2_filter, pptrs->tag2) && 
+	!check_shadow_status(pptrs, &channels_list[index])) {
       /* arranging buffer: supported primitives + packet total length */
 reprocess:
       channels_list[index].reprocess = FALSE;
@@ -266,9 +262,6 @@ reprocess:
       }
     }
   }
-#if defined ENABLE_THREADS
-  pthread_mutex_unlock(channels_list_mutex);
-#endif
 }
 
 struct channels_list_entry *insert_pipe_channel(struct configuration *cfg, int pipe)
@@ -292,6 +285,7 @@ struct channels_list_entry *insert_pipe_channel(struct configuration *cfg, int p
 	else chptr->s.sf = &take_simple_random_skip;
       } 
       memcpy(&chptr->tag_filter, &cfg->ptf, sizeof(struct pretag_filter));
+      memcpy(&chptr->tag2_filter, &cfg->pt2f, sizeof(struct pretag_filter));
       chptr->buf = 0;
       chptr->bufptr = chptr->buf;
       chptr->bufend = cfg->buffer_size-sizeof(struct ch_buf_hdr);
@@ -465,7 +459,7 @@ pm_counter_t take_simple_systematic_skip(pm_counter_t mean)
    FALSE: Discard it!
 */
 
-int evaluate_tags(struct pretag_filter *filter, u_int16_t tag)
+int evaluate_tags(struct pretag_filter *filter, pm_id_t tag)
 {
   int index;
 
@@ -540,11 +534,9 @@ void fill_pipe_buffer()
 int check_shadow_status(struct packet_ptrs *pptrs, struct channels_list_entry *mychptr)
 {
   if (pptrs->shadow) {
-    if (pptrs->tag) {
-      if (mychptr->aggregation & COUNT_ID) return FALSE;
-      else return TRUE;
-    }
-    else TRUE;
+    if (pptrs->tag && mychptr->aggregation & COUNT_ID) return FALSE;
+    else if (pptrs->tag2 && mychptr->aggregation & COUNT_ID2) return FALSE;
+    else return TRUE;
   } 
   else return FALSE;
 }
@@ -605,4 +597,11 @@ int pkt_extras_clean(void *pextras)
   memset(pextras, 0, PdataSz+PextrasSz);
 
   return PdataSz+PextrasSz;
+}
+
+int pkt_bgp_clean(void *pbgp)
+{
+  memset(pbgp, 0, PdataSz+PbgpSz);
+
+  return PdataSz+PbgpSz;
 }

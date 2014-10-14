@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -472,7 +472,7 @@ int MY_evaluate_history(int primitive)
 
 int MY_evaluate_primitives(int primitive)
 {
-  u_int32_t what_to_count = 0;
+  u_int64_t what_to_count = 0;
   short int assume_custom_table = FALSE;
 
   if (lh.sql_optimize_clauses) {

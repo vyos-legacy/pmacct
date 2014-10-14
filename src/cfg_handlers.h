@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -38,6 +38,9 @@ EXT int cfg_key_aggregate_filter(char *, char *, char *);
 EXT int cfg_key_pcap_filter(char *, char *, char *);
 EXT int cfg_key_interface(char *, char *, char *);
 EXT int cfg_key_interface_wait(char *, char *, char *);
+EXT int cfg_key_files_umask(char *, char *, char *);
+EXT int cfg_key_files_uid(char *, char *, char *);
+EXT int cfg_key_files_gid(char *, char *, char *);
 EXT int cfg_key_savefile_wait(char *, char *, char *);
 EXT int cfg_key_promisc(char *, char *, char *);
 EXT int cfg_key_imt_path(char *, char *, char *);
@@ -49,6 +52,7 @@ EXT int cfg_key_sql_db(char *, char *, char *);
 EXT int cfg_key_sql_table(char *, char *, char *);
 EXT int cfg_key_sql_table_schema(char *, char *, char *);
 EXT int cfg_key_sql_table_version(char *, char *, char *);
+EXT int cfg_key_sql_table_type(char *, char *, char *);
 EXT int cfg_key_sql_host(char *, char *, char *);
 EXT int cfg_key_sql_data(char *, char *, char *);
 EXT int cfg_key_sql_user(char *, char *, char *);
@@ -88,6 +92,7 @@ EXT int cfg_key_nfacctd_allow_file(char *, char *, char *);
 EXT int cfg_key_nfacctd_time_secs(char *, char *, char *);
 EXT int cfg_key_nfacctd_time_new(char *, char *, char *);
 EXT int cfg_key_nfacctd_as_new(char *, char *, char *);
+EXT int cfg_key_nfacctd_net(char *, char *, char *);
 EXT int cfg_key_nfacctd_disable_checks(char *, char *, char *);
 EXT int cfg_key_nfacctd_mcast_groups(char *, char *, char *);
 EXT int cfg_key_nfacctd_sql_log(char *, char *, char *);
@@ -97,11 +102,13 @@ EXT int cfg_key_pmacctd_flow_buffer_size(char *, char *, char *);
 EXT int cfg_key_pmacctd_flow_buffer_buckets(char *, char *, char *);
 EXT int cfg_key_pmacctd_conntrack_buffer_size(char *, char *, char *);
 EXT int cfg_key_pmacctd_flow_lifetime(char *, char *, char *);
+EXT int cfg_key_pmacctd_ext_sampling_rate(char *, char *, char *);
 EXT int cfg_key_sfacctd_renormalize(char *, char *, char *);
 EXT int cfg_key_pcap_savefile(char *, char *, char *);
 EXT int cfg_key_pre_tag_map(char *, char *, char *);
 EXT int cfg_key_pre_tag_map_entries(char *, char *, char *);
 EXT int cfg_key_pre_tag_filter(char *, char *, char *);
+EXT int cfg_key_pre_tag2_filter(char *, char *, char *);
 EXT int cfg_key_post_tag(char *, char *, char *);
 EXT int cfg_key_sampling_rate(char *, char *, char *);
 EXT int cfg_key_classifiers(char *, char *, char *);
@@ -113,10 +120,37 @@ EXT int cfg_key_nfprobe_maxflows(char *, char *, char *);
 EXT int cfg_key_nfprobe_receiver(char *, char *, char *);
 EXT int cfg_key_nfprobe_version(char *, char *, char *);
 EXT int cfg_key_nfprobe_engine(char *, char *, char *);
+EXT int cfg_key_nfprobe_peer_as(char *, char *, char *);
 EXT int cfg_key_sfprobe_receiver(char *, char *, char *);
 EXT int cfg_key_sfprobe_agentip(char *, char *, char *);
 EXT int cfg_key_sfprobe_agentsubid(char *, char *, char *);
-EXT int cfg_key_flow_handling_threads(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_msglog(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_max_peers(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_ip(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_port(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_allow_file(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_aspath_radius(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_stdcomm_pattern(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_extcomm_pattern(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_stdcomm_pattern_to_asn(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_peer_src_as_type(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_src_std_comm_type(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_src_ext_comm_type(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_src_as_path_type(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_src_local_pref_type(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_src_med_type(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_peer_as_skip_subas(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_peer_src_as_map(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_src_local_pref_map(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_src_med_map(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_is_symmetric_map(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_to_agent_map(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_follow_default(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_follow_nexthop(char *, char *, char *);
+EXT int cfg_key_nfacctd_bgp_neighbors_file(char *, char *, char *);
+EXT int cfg_key_uacctd_group(char *, char *, char *);
+EXT int cfg_key_uacctd_nl_size(char *, char *, char *);
 
 EXT void parse_time(char *, char *, int *, int *);
 #undef EXT

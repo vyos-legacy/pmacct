@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -27,13 +27,18 @@
 #include "crc32.c"
 
 /* functions */
-struct acc *search_accounting_structure(struct pkt_primitives *addr)
+struct acc *search_accounting_structure(struct pkt_primitives *addr, struct pkt_bgp_primitives *pbgp)
 {
   struct acc *elem_acc;
   unsigned int hash, pos;
   unsigned int pp_size = sizeof(struct pkt_primitives); 
+  unsigned int pb_size = sizeof(struct pkt_bgp_primitives);
 
   hash = cache_crc32((unsigned char *)addr, pp_size);
+  /* XXX: to be optimized? */
+  if (PbgpSz) {
+    if (pbgp) hash ^= cache_crc32((unsigned char *)pbgp, pb_size);
+  }
   pos = hash % config.buckets;
 
   Log(LOG_DEBUG, "DEBUG ( %s/%s ): Selecting bucket %u.\n", config.name, config.type, pos);
@@ -43,7 +48,8 @@ struct acc *search_accounting_structure(struct pkt_primitives *addr)
   
   while (elem_acc) {
     if (elem_acc->signature == hash) {
-      if (!memcmp(&elem_acc->primitives, addr, sizeof(struct pkt_primitives))) return elem_acc;
+      if (compare_accounting_structure(elem_acc, addr, pbgp) == 0) return elem_acc;
+      // if (!memcmp(&elem_acc->primitives, addr, sizeof(struct pkt_primitives))) return elem_acc;
     }
     elem_acc = elem_acc->next;
   } 
@@ -51,8 +57,27 @@ struct acc *search_accounting_structure(struct pkt_primitives *addr)
   return NULL;
 }
 
+int compare_accounting_structure(struct acc *elem, struct pkt_primitives *data, struct pkt_bgp_primitives *pbgp)
+{
+  int res_data = TRUE, res_bgp = TRUE; 
 
-void insert_accounting_structure(struct pkt_data *data)
+  res_data = memcmp(&elem->primitives, data, sizeof(struct pkt_primitives));
+
+  /* XXX: to be optimized? */
+  if (PbgpSz) {
+    if (elem->cbgp) {
+      struct pkt_bgp_primitives tmp_pbgp;
+
+      cache_to_pkt_bgp_primitives(&tmp_pbgp, elem->cbgp);
+      res_bgp = memcmp(&tmp_pbgp, pbgp, sizeof(struct pkt_bgp_primitives));
+    }
+  }
+  else res_bgp = FALSE;
+
+  return res_data | res_bgp;
+}
+
+void insert_accounting_structure(struct pkt_data *data, struct pkt_bgp_primitives *pbgp)
 {
   struct pkt_primitives *addr = &data->primitives;
   struct acc *elem_acc;
@@ -60,6 +85,8 @@ void insert_accounting_structure(struct pkt_data *data)
   int solved = FALSE;
   unsigned int hash, pos;
   unsigned int pp_size = sizeof(struct pkt_primitives);
+  unsigned int pb_size = sizeof(struct pkt_bgp_primitives);
+  unsigned int cb_size = sizeof(struct cache_bgp_primitives);
 
   /* We are classifing packets. We have a non-zero bytes accumulator (ba)
      and a non-zero class. Before accounting ba to this class, we have to
@@ -68,7 +95,7 @@ void insert_accounting_structure(struct pkt_data *data)
     pm_class_t lclass = data->primitives.class;
 
     data->primitives.class = 0;
-    elem_acc = search_accounting_structure(&data->primitives);
+    elem_acc = search_accounting_structure(&data->primitives, pbgp);
     data->primitives.class = lclass;
 
     /* We can assign the flow to a new class only if we are able to subtract
@@ -91,6 +118,10 @@ void insert_accounting_structure(struct pkt_data *data)
   elem = a;
 
   hash = cache_crc32((unsigned char *)addr, pp_size);
+  /* XXX: to be optimized? */
+  if (PbgpSz) {
+    if (pbgp) hash ^= cache_crc32((unsigned char *)pbgp, pb_size);
+  }
   pos = hash % config.buckets;
       
   Log(LOG_DEBUG, "DEBUG ( %s/%s ): Selecting bucket %u.\n", config.name, config.type, pos);
@@ -101,7 +132,8 @@ void insert_accounting_structure(struct pkt_data *data)
   if (lru_elem_ptr[pos]) {
     elem_acc = lru_elem_ptr[pos];
     if (elem_acc->signature == hash) {
-      if (memcmp(&elem_acc->primitives, addr, sizeof(struct pkt_primitives)) == 0) {
+      if (compare_accounting_structure(elem_acc, addr, pbgp) == 0) { 
+      // if (memcmp(&elem_acc->primitives, addr, sizeof(struct pkt_primitives)) == 0) {
         if (elem_acc->reset_flag) reset_counters(elem_acc);
         elem_acc->packet_counter += data->pkt_num;
         elem_acc->flow_counter += data->flo_num;
@@ -122,7 +154,8 @@ void insert_accounting_structure(struct pkt_data *data)
 
   while (solved == FALSE) {
     if (elem_acc->signature == hash) {
-      if (memcmp(&elem_acc->primitives, addr, sizeof(struct pkt_primitives)) == 0) {
+      if (compare_accounting_structure(elem_acc, addr, pbgp) == 0) {
+      // if (memcmp(&elem_acc->primitives, addr, sizeof(struct pkt_primitives)) == 0) {
         if (elem_acc->reset_flag) reset_counters(elem_acc);
         elem_acc->packet_counter += data->pkt_num;
         elem_acc->flow_counter += data->flo_num;
@@ -140,6 +173,23 @@ void insert_accounting_structure(struct pkt_data *data)
     if (!elem_acc->bytes_counter && !elem_acc->packet_counter) { /* hmmm */
       if (elem_acc->reset_flag) elem_acc->reset_flag = FALSE; 
       memcpy(&elem_acc->primitives, addr, sizeof(struct pkt_primitives));
+
+      /* XXX: to be optimized? */
+      if (PbgpSz) {
+	if (elem_acc->cbgp) {
+	  if (elem_acc->cbgp->std_comms) free(elem_acc->cbgp->std_comms);
+	  if (elem_acc->cbgp->ext_comms) free(elem_acc->cbgp->ext_comms);
+	  if (elem_acc->cbgp->as_path) free(elem_acc->cbgp->as_path);
+	  if (elem_acc->cbgp->src_std_comms) free(elem_acc->cbgp->src_std_comms);
+	  if (elem_acc->cbgp->src_ext_comms) free(elem_acc->cbgp->src_ext_comms);
+	  if (elem_acc->cbgp->src_as_path) free(elem_acc->cbgp->src_as_path);
+	  free(elem_acc->cbgp);
+	}
+	elem_acc->cbgp = (struct cache_bgp_primitives *) malloc(cb_size);
+	memset(elem_acc->cbgp, 0, cb_size);
+        pkt_to_cache_bgp_primitives(elem_acc->cbgp, pbgp, config.what_to_count);
+      }
+
       elem_acc->packet_counter += data->pkt_num;
       elem_acc->flow_counter += data->flo_num;
       elem_acc->bytes_counter += data->pkt_len;
@@ -190,6 +240,15 @@ void insert_accounting_structure(struct pkt_data *data)
       elem_acc->next = (struct acc *) new_elem;
       elem_acc = (struct acc *) new_elem;
       memcpy(&elem_acc->primitives, addr, sizeof(struct pkt_primitives));
+
+      /* XXX: to be optimized? */
+      if (PbgpSz) {
+        elem_acc->cbgp = (struct cache_bgp_primitives *) malloc(cb_size);
+        memset(elem_acc->cbgp, 0, cb_size);
+        pkt_to_cache_bgp_primitives(elem_acc->cbgp, pbgp, config.what_to_count);
+      }
+      else elem_acc->cbgp = NULL;
+
       elem_acc->packet_counter += data->pkt_num;
       elem_acc->flow_counter += data->flo_num;
       elem_acc->bytes_counter += data->pkt_len;

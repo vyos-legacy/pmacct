@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
 */
 
 /*
@@ -28,9 +28,7 @@
 #include "pretag_handlers.h"
 #include "pretag-data.h"
 
-int pre_tag_map_allocated = FALSE;
-
-void load_id_file(int acct_type, char *filename, struct id_table *t, struct plugin_requests *req)
+void load_id_file(int acct_type, char *filename, struct id_table *t, struct plugin_requests *req, int *map_allocated)
 {
   struct id_table tmp;
   struct id_entry *ptr, *ptr2;
@@ -43,11 +41,13 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
   int v6_num = 0;
 #endif
 
+  if (!map_allocated) return;
+
   /* parsing engine vars */
   char *start, *key = NULL, *value = NULL;
   int len;
 
-  Log(LOG_INFO, "INFO ( default/core ): Trying to reload pre tag map\n") ;
+  Log(LOG_INFO, "INFO ( default/core ): Trying to (re)load map: %s\n", filename);
 
   memset(&st, 0, sizeof(st));
 
@@ -55,16 +55,16 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 
   if (filename) {
     if ((file = fopen(filename, "r")) == NULL) {
-      Log(LOG_ERR, "ERROR: Pre-Tagging map '%s' not found.\n", filename);
+      Log(LOG_ERR, "ERROR: map '%s' not found.\n", filename);
       goto handle_error;
     }
 
     sz = sizeof(struct id_entry)*config.pre_tag_map_entries;
 
-    if (!pre_tag_map_allocated) {
+    if (*map_allocated == 0) {
       memset(t, 0, sizeof(struct id_table));
       t->e = (struct id_entry *) malloc(sz);
-      pre_tag_map_allocated = TRUE;
+      *map_allocated = TRUE;
     }
     else {
       ptr = t->e ;
@@ -82,7 +82,10 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
     /* first stage: reading Agent ID file and arranging it in a temporary memory table */
     while (!feof(file)) {
       tot_lines++;
-      if (tmp.num >= config.pre_tag_map_entries) break; /* XXX: we shouldn't exit silently */
+      if (tmp.num >= config.pre_tag_map_entries) {
+	Log(LOG_WARNING, "WARN ( default/core ): map '%s' cut to the first %u entries. Number of entries can be configured via 'pre_tag_map_etries'.\n", filename, config.pre_tag_map_entries);
+	break;
+      }
       memset(buf, 0, SRVBUFLEN);
       if (fgets(buf, SRVBUFLEN, file)) {
         if (!iscomment(buf) && !isblankline(buf)) {
@@ -93,7 +96,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 
 	    /* resetting the entry and enforcing defaults */
             memset(&tmp.e[tmp.num], 0, sizeof(struct id_entry));
-	    tmp.e[tmp.num].ret = TRUE;
+	    tmp.e[tmp.num].ret = FALSE;
 
             err = FALSE; key = NULL; value = NULL;
             start = buf;
@@ -125,28 +128,67 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
               if (key && value) {
                 int dindex; /* dictionary index */
 
-                for (dindex = 0; strcmp(map_dictionary[dindex].key, ""); dindex++) {
-                  if (!strcmp(map_dictionary[dindex].key, key)) {
-                    err = (*map_dictionary[dindex].func)(filename, &tmp.e[tmp.num], value, req);
+		/* Processing of source BGP-related primitives kept consistent;
+		   This can indeed be split as required in future */
+		if (acct_type == MAP_BGP_PEER_AS_SRC || acct_type == MAP_BGP_SRC_LOCAL_PREF ||
+		    acct_type == MAP_BGP_SRC_MED || acct_type == MAP_BGP_IS_SYMMETRIC) {
+                  for (dindex = 0; strcmp(bpas_map_dictionary[dindex].key, ""); dindex++) {
+                    if (!strcmp(bpas_map_dictionary[dindex].key, key)) {
+                      err = (*bpas_map_dictionary[dindex].func)(filename, &tmp.e[tmp.num], value, req, acct_type);
+                      break;
+                    }
+                    else err = E_NOTFOUND; /* key not found */
+                  }
+                  if (err) {
+                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s ): unknown key '%s' at line %d. Ignored.\n", filename, key, tot_lines);
+                    else Log(LOG_ERR, "Line %d ignored.\n", tot_lines);
                     break;
                   }
-                  else err = E_NOTFOUND; /* key not found */
-                }
-                if (err) {
-                  if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s ): unknown key '%s' at line %d. Ignored.\n", filename, key, tot_lines);
-                  else Log(LOG_ERR, "Line %d ignored.\n", tot_lines);
-                  break; 
-                }
-                key = NULL; value = NULL;
+                  key = NULL; value = NULL;
+		}
+		else if (acct_type == MAP_BGP_TO_XFLOW_AGENT) {
+                  for (dindex = 0; strcmp(bta_map_dictionary[dindex].key, ""); dindex++) {
+                    if (!strcmp(bta_map_dictionary[dindex].key, key)) {
+                      err = (*bta_map_dictionary[dindex].func)(filename, &tmp.e[tmp.num], value, req, acct_type);
+                      break;
+                    }
+                    else err = E_NOTFOUND; /* key not found */
+                  }
+                  if (err) {
+                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s ): unknown key '%s' at line %d. Ignored.\n", filename, key, tot_lines);
+                    else Log(LOG_ERR, "Line %d ignored.\n", tot_lines);
+                    break;
+                  }
+                  key = NULL; value = NULL;
+		}
+		else {
+                  for (dindex = 0; strcmp(tag_map_dictionary[dindex].key, ""); dindex++) {
+                    if (!strcmp(tag_map_dictionary[dindex].key, key)) {
+                      err = (*tag_map_dictionary[dindex].func)(filename, &tmp.e[tmp.num], value, req, acct_type);
+                      break;
+                    }
+                    else err = E_NOTFOUND; /* key not found */
+                  }
+                  if (err) {
+                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s ): unknown key '%s' at line %d. Ignored.\n", filename, key, tot_lines);
+                    else Log(LOG_ERR, "Line %d ignored.\n", tot_lines);
+                    break; 
+                  }
+                  key = NULL; value = NULL;
+		}
               }
             }
             /* verifying errors and required fields */
 	    if (acct_type == ACCT_NF || acct_type == ACCT_SF) {
-              if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].agent_ip.a.family) {
+	      if (tmp.e[tmp.num].id && tmp.e[tmp.num].id2) 
+		 Log(LOG_ERR, "ERROR ( %s ): 'id' and 'id2' are mutual exclusive at line: %d.\n", filename, tot_lines);
+              else if (!err && (tmp.e[tmp.num].id || tmp.e[tmp.num].id2) && tmp.e[tmp.num].agent_ip.a.family) {
                 int j;
 
                 for (j = 0; tmp.e[tmp.num].func[j]; j++);
-                tmp.e[tmp.num].func[j] = pretag_id_handler;
+                if (tmp.e[tmp.num].id) tmp.e[tmp.num].func[j] = pretag_id_handler;
+                else if (tmp.e[tmp.num].id2) tmp.e[tmp.num].func[j] = pretag_id2_handler;
+
 	        if (tmp.e[tmp.num].agent_ip.a.family == AF_INET) v4_num++;
 #if defined ENABLE_IPV6
 	        else if (tmp.e[tmp.num].agent_ip.a.family == AF_INET6) v6_num++;
@@ -155,21 +197,55 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
               }
 	      /* if any required field is missing and other errors have been signalled
 	         before we will trap an error message */
-	      else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.a.family) && !err)
+	      else if (((!tmp.e[tmp.num].id && !tmp.e[tmp.num].id2) || !tmp.e[tmp.num].agent_ip.a.family) && !err)
 	        Log(LOG_ERR, "ERROR ( %s ): required key missing at line: %d. Required keys are: 'id', 'ip'.\n", filename, tot_lines); 
 	    }
 	    else if (acct_type == ACCT_PM) {
-	      if (tmp.e[tmp.num].agent_ip.a.family)
+	      if (tmp.e[tmp.num].id && tmp.e[tmp.num].id2)
+                 Log(LOG_ERR, "ERROR ( %s ): 'id' and 'id2' are mutual exclusive at line: %d.\n", filename, tot_lines);
+	      else if (tmp.e[tmp.num].agent_ip.a.family)
 		Log(LOG_ERR, "ERROR ( %s ): key 'ip' not applicable here. Invalid line: %d.\n", filename, tot_lines);
-	      else if (!err && tmp.e[tmp.num].id) {
+	      else if (!err && (tmp.e[tmp.num].id || tmp.e[tmp.num].id2)) {
                 int j;
 
 		for (j = 0; tmp.e[tmp.num].func[j]; j++);
 		tmp.e[tmp.num].agent_ip.a.family = AF_INET; /* we emulate a dummy '0.0.0.0' IPv4 address */
-		tmp.e[tmp.num].func[j] = pretag_id_handler;
+		if (tmp.e[tmp.num].id) tmp.e[tmp.num].func[j] = pretag_id_handler;
+		else if (tmp.e[tmp.num].id2) tmp.e[tmp.num].func[j] = pretag_id2_handler;
 		v4_num++; tmp.num++;
 	      } 
 	    }
+	    else if (acct_type == MAP_BGP_PEER_AS_SRC || acct_type == MAP_BGP_SRC_LOCAL_PREF ||
+		     acct_type == MAP_BGP_SRC_MED || acct_type == MAP_BGP_IS_SYMMETRIC) {
+              if (!err && (tmp.e[tmp.num].id || tmp.e[tmp.num].flags) && tmp.e[tmp.num].agent_ip.a.family) {
+                int j;
+
+                for (j = 0; tmp.e[tmp.num].func[j]; j++);
+                tmp.e[tmp.num].func[j] = pretag_id_handler;
+                if (tmp.e[tmp.num].agent_ip.a.family == AF_INET) v4_num++;
+#if defined ENABLE_IPV6
+                else if (tmp.e[tmp.num].agent_ip.a.family == AF_INET6) v6_num++;
+#endif
+                tmp.num++;
+              }
+              else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.a.family) && !err)
+                Log(LOG_ERR, "ERROR ( %s ): required key missing at line: %d. Required keys are: 'id', 'ip'.\n", filename, tot_lines);
+	    }
+            else if (acct_type == MAP_BGP_TO_XFLOW_AGENT) {
+              if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].agent_ip.a.family) {
+                int j;
+
+                for (j = 0; tmp.e[tmp.num].func[j]; j++);
+                tmp.e[tmp.num].func[j] = pretag_id_handler;
+                if (tmp.e[tmp.num].agent_ip.a.family == AF_INET) v4_num++;
+#if defined ENABLE_IPV6
+                else if (tmp.e[tmp.num].agent_ip.a.family == AF_INET6) v6_num++;
+#endif
+                tmp.num++;
+              }
+              else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.a.family) && !err)
+                Log(LOG_ERR, "ERROR ( %s ): required key missing at line: %d. Required keys are: 'id', 'ip'.\n", filename, tot_lines);
+            }
           }
           else Log(LOG_ERR, "ERROR ( %s ): malformed line: %d. Ignored.\n", filename, tot_lines);
         }
@@ -257,14 +333,14 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
   }
 
   free(tmp.e) ;
-  Log(LOG_INFO, "INFO ( default/core ): Pre tag map successfully reloaded.\n") ;
+  Log(LOG_INFO, "INFO ( default/core ): map '%s' successfully (re)loaded.\n", filename);
 
   return;
 
   handle_error:
-  free(tmp.e) ;
+  if (*map_allocated && tmp.e) free(tmp.e) ;
   if (t->timestamp) {
-    Log(LOG_WARNING, "WARN: Rolling back the old Pre-Tagging Map.\n");
+    Log(LOG_WARNING, "WARN: Rolling back the old map '%s'.\n", filename);
 
     /* we update the timestamp to avoid loops */
     stat(filename, &st);

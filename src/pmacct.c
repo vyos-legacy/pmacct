@@ -36,8 +36,8 @@ void write_class_table_header();
 char *extract_token(char **, int);
 int CHECK_Q_TYPE(int);
 int check_data_sizes(struct query_header *, struct pkt_data *);
-void client_counters_merge_sort(struct pkt_data *, int, int, int);
-void client_counters_merge(struct pkt_data *, int, int, int, int);
+void client_counters_merge_sort(void *, int, int, int, int);
+void client_counters_merge(void *, int, int, int, int, int);
 
 /* functions */
 int CHECK_Q_TYPE(int type)
@@ -62,7 +62,7 @@ void usage_client(char *prog)
   printf("  -S\tSum counters instead of returning a single counter for each request (applies to -N)\n");
   printf("  -M\t[matching data[';' ... ]] | ['file:'[filename]] \n\tMatch primitives; print formatted table (requires -c)\n");
   printf("  -a\tDisplay all table fields (even those currently unused)\n");
-  printf("  -c\t[ src_mac | dst_mac | vlan | src_host | dst_host | src_port | dst_port | tos | proto | \n\t src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag | flows | \n\t class ] \n\tSelect primitives to match (required by -N and -M)\n");
+  printf("  -c\t[ src_mac | dst_mac | vlan | src_host | dst_host | src_port | dst_port | tos | proto | \n\t src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | sum_port | tag | tag2 | flows | \n\t class | std_comm | ext_comm | as_path | peer_src_ip | peer_dst_ip | peer_src_as | peer_dst_as | \n\t src_as_path | src_std_comm | src_ext_comm | src_local_pref | src_med | is_symmetric ] \n\tSelect primitives to match (required by -N and -M)\n");
   printf("  -T\t[bytes|packets|flows] \n\tOutput top N statistics (applies to -M and -s)\n");
   printf("  -e\tClear statistics\n");
   printf("  -r\tReset counters (applies to -N and -M)\n");
@@ -113,16 +113,37 @@ void print_ex_options_error()
   exit(1);
 }
 
-void write_stats_header(u_int32_t what_to_count, u_int8_t have_wtc)
+void write_stats_header(u_int64_t what_to_count, u_int8_t have_wtc)
 {
   if (!have_wtc) {
-    printf("ID     ");
+    printf("TAG         ");
+    printf("TAG2        ");
     printf("CLASS             ");
+#if defined HAVE_L2
     printf("SRC_MAC            ");
     printf("DST_MAC            ");
     printf("VLAN   ");
-    printf("SRC_AS  ");
-    printf("DST_AS  "); 
+#endif
+    printf("SRC_AS      ");
+    printf("DST_AS      "); 
+    printf("BGP_COMMS                ");
+    printf("SRC_BGP_COMMS            ");
+    printf("AS_PATH                  ");
+    printf("SRC_AS_PATH              ");
+    printf("PREF     ");
+    printf("SRC_PREF ");
+    printf("MED     ");
+    printf("SRC_MED ");
+    printf("SYM  ");
+    printf("PEER_SRC_AS ");
+    printf("PEER_DST_AS ");
+#if defined ENABLE_IPV6
+    printf("PEER_SRC_IP                                    ");
+    printf("PEER_DST_IP                                    ");
+#else
+    printf("PEER_SRC_IP      ");
+    printf("PEER_DST_IP      ");
+#endif
 #if defined ENABLE_IPV6
     printf("SRC_IP                                         ");
     printf("DST_IP                                         ");
@@ -146,15 +167,36 @@ void write_stats_header(u_int32_t what_to_count, u_int8_t have_wtc)
 #endif
   }
   else {
-    if (what_to_count & COUNT_ID) printf("ID     ");
+    if (what_to_count & COUNT_ID) printf("TAG         ");
+    if (what_to_count & COUNT_ID2) printf("TAG2        ");
     if (what_to_count & COUNT_CLASS) printf("CLASS             ");
 #if defined HAVE_L2
     if (what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) printf("SRC_MAC            "); 
     if (what_to_count & COUNT_DST_MAC) printf("DST_MAC            "); 
     if (what_to_count & COUNT_VLAN) printf("VLAN   ");
 #endif
-    if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("SRC_AS  ");
-    if (what_to_count & COUNT_DST_AS) printf("DST_AS  "); 
+    if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("SRC_AS      ");
+    if (what_to_count & COUNT_DST_AS) printf("DST_AS      "); 
+    if (what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM))
+      printf("BGP_COMMS                ");
+    if (what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM))
+      printf("SRC_BGP_COMMS            ");
+    if (what_to_count & COUNT_AS_PATH) printf("AS_PATH                  ");
+    if (what_to_count & COUNT_SRC_AS_PATH) printf("SRC_AS_PATH              ");
+    if (what_to_count & COUNT_LOCAL_PREF) printf("PREF     ");
+    if (what_to_count & COUNT_SRC_LOCAL_PREF) printf("SRC_PREF ");
+    if (what_to_count & COUNT_MED) printf("MED     ");
+    if (what_to_count & COUNT_SRC_MED) printf("SRC_MED ");
+    if (what_to_count & COUNT_IS_SYMMETRIC) printf("SYM  ");
+    if (what_to_count & COUNT_PEER_SRC_AS) printf("PEER_SRC_AS ");
+    if (what_to_count & COUNT_PEER_DST_AS) printf("PEER_DST_AS ");
+#if defined ENABLE_IPV6
+    if (what_to_count & COUNT_PEER_SRC_IP) printf("PEER_SRC_IP                                    ");
+    if (what_to_count & COUNT_PEER_DST_IP) printf("PEER_DST_IP                                    ");
+#else
+    if (what_to_count & COUNT_PEER_SRC_IP) printf("PEER_SRC_IP      ");
+    if (what_to_count & COUNT_PEER_DST_IP) printf("PEER_DST_IP      ");
+#endif
 #if defined ENABLE_IPV6
     if (what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET)) printf("SRC_IP                                         "); 
     if (what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET)) printf("SRC_IP                                         ");
@@ -229,12 +271,15 @@ int main(int argc,char **argv)
   struct bucket_desc *bd;
   struct query_header q; 
   struct pkt_primitives empty_addr;
+  struct pkt_bgp_primitives empty_pbgp;
   struct query_entry request;
   struct stripped_class *class_table = NULL;
+  struct pkt_bgp_primitives *pbgp = NULL;
   char clibuf[clibufsz], *bufptr;
   unsigned char *largebuf, *elem, *ct;
   char ethernet_address[18], ip_address[INET6_ADDRSTRLEN];
   char path[128], file[128], password[9];
+  char *as_path, empty_aspath[] = "^$", *bgp_comm;
   int sd, buflen, unpacked, printed;
   int counter=0, ct_idx=0, ct_num=0;
 
@@ -242,7 +287,7 @@ int main(int argc,char **argv)
   char match_string[LARGEBUFLEN], *match_string_token, *match_string_ptr;
   char count[128], *count_token[N_PRIMITIVES], *count_ptr;
   int count_index = 0, match_string_index = 0, index = 0;
-  u_int32_t count_token_int[N_PRIMITIVES];
+  u_int64_t count_token_int[N_PRIMITIVES];
   
   /* getopt() stuff */
   extern char *optarg;
@@ -250,11 +295,15 @@ int main(int argc,char **argv)
   int errflag, cp, want_stats, want_erase, want_reset, want_class_table; 
   int want_status, want_mrtg, want_counter, want_match, want_all_fields;
   int which_counter, topN_counter, fetch_from_file, sum_counters, num_counters;
-  u_int32_t what_to_count, have_wtc, tmpnum;
+  u_int64_t what_to_count, have_wtc;
+  u_int32_t tmpnum;
+
+  int PbgpSz = FALSE;
 
   /* Administrativia */
   memset(&q, 0, sizeof(struct query_header));
   memset(&empty_addr, 0, sizeof(struct pkt_primitives));
+  memset(&empty_pbgp, 0, sizeof(struct pkt_bgp_primitives));
   memset(count, 0, sizeof(count));
   memset(password, 0, sizeof(password)); 
 
@@ -378,11 +427,76 @@ int main(int argc,char **argv)
 	  count_token_int[count_index] = COUNT_ID;
 	  what_to_count |= COUNT_ID;
 	}
+        else if (!strcmp(count_token[count_index], "tag2")) {
+          count_token_int[count_index] = COUNT_ID2;
+          what_to_count |= COUNT_ID2;
+        }
         else if (!strcmp(count_token[count_index], "class")) {
           count_token_int[count_index] = COUNT_CLASS;
           what_to_count |= COUNT_CLASS;
         }
+        else if (!strcmp(count_token[count_index], "std_comm")) {
+          count_token_int[count_index] = COUNT_STD_COMM;
+          what_to_count |= COUNT_STD_COMM;
+        }
+        else if (!strcmp(count_token[count_index], "src_std_comm")) {
+          count_token_int[count_index] = COUNT_SRC_STD_COMM;
+          what_to_count |= COUNT_SRC_STD_COMM;
+        }
+        else if (!strcmp(count_token[count_index], "ext_comm")) {
+          count_token_int[count_index] = COUNT_EXT_COMM;
+          what_to_count |= COUNT_EXT_COMM;
+        }
+        else if (!strcmp(count_token[count_index], "src_ext_comm")) {
+          count_token_int[count_index] = COUNT_SRC_EXT_COMM;
+          what_to_count |= COUNT_SRC_EXT_COMM;
+        }
+        else if (!strcmp(count_token[count_index], "as_path")) {
+          count_token_int[count_index] = COUNT_AS_PATH;
+          what_to_count |= COUNT_AS_PATH;
+        }
+        else if (!strcmp(count_token[count_index], "src_as_path")) {
+          count_token_int[count_index] = COUNT_SRC_AS_PATH;
+          what_to_count |= COUNT_SRC_AS_PATH;
+        }
+        else if (!strcmp(count_token[count_index], "local_pref")) {
+          count_token_int[count_index] = COUNT_LOCAL_PREF;
+          what_to_count |= COUNT_LOCAL_PREF;
+        }
+        else if (!strcmp(count_token[count_index], "src_local_pref")) {
+          count_token_int[count_index] = COUNT_SRC_LOCAL_PREF;
+          what_to_count |= COUNT_SRC_LOCAL_PREF;
+	}
+        else if (!strcmp(count_token[count_index], "med")) {
+          count_token_int[count_index] = COUNT_MED;
+          what_to_count |= COUNT_MED;
+        }
+        else if (!strcmp(count_token[count_index], "src_med")) {
+          count_token_int[count_index] = COUNT_SRC_MED;
+          what_to_count |= COUNT_SRC_MED;
+        }
+	else if (!strcmp(count_token[count_index], "is_symmetric")) {
+	  count_token_int[count_index] = COUNT_IS_SYMMETRIC;
+	  what_to_count |= COUNT_IS_SYMMETRIC;
+	}
+        else if (!strcmp(count_token[count_index], "peer_src_as")) {
+          count_token_int[count_index] = COUNT_PEER_SRC_AS;
+          what_to_count |= COUNT_PEER_SRC_AS;
+        }
+        else if (!strcmp(count_token[count_index], "peer_dst_as")) {
+          count_token_int[count_index] = COUNT_PEER_DST_AS;
+          what_to_count |= COUNT_PEER_DST_AS;
+        }
+        else if (!strcmp(count_token[count_index], "peer_src_ip")) {
+          count_token_int[count_index] = COUNT_PEER_SRC_IP;
+          what_to_count |= COUNT_PEER_SRC_IP;
+        }
+        else if (!strcmp(count_token[count_index], "peer_dst_ip")) {
+          count_token_int[count_index] = COUNT_PEER_DST_IP;
+          what_to_count |= COUNT_PEER_DST_IP;
+        }
         else printf("WARN: ignoring unknown aggregation method: %s.\n", count_token[count_index]);
+	what_to_count |= COUNT_COUNTERS; /* we always count counters ;-) */
 	count_index++;
       }
       break;
@@ -499,6 +613,18 @@ int main(int argc,char **argv)
     }
   }
 
+  /* Sanitizing the aggregation method */ 
+  if (what_to_count) {
+    if (what_to_count & COUNT_STD_COMM && what_to_count & COUNT_EXT_COMM) {
+      printf("ERROR: The use of STANDARD and EXTENDED BGP communitities is mutual exclusive.\n");
+      exit(1);
+    }
+    if (what_to_count & COUNT_SRC_STD_COMM && what_to_count & COUNT_SRC_EXT_COMM) {
+      printf("ERROR: The use of STANDARD and EXTENDED BGP communitities is mutual exclusive.\n");
+      exit(1);
+    }
+  }
+
   memcpy(q.passwd, password, sizeof(password));
 
   /* setting number of entries in _protocols structure */
@@ -585,7 +711,7 @@ int main(int argc,char **argv)
     
     /* 4th step: build queries */
     for (q.num = 0; (q.num < strnum) && (q.num < MAX_QUERIES); q.num++) {
-      u_int32_t entry_wtc = what_to_count;
+      u_int64_t entry_wtc = what_to_count;
 
       match_string_ptr = strings[q.num];
       match_string_index = 0;
@@ -677,27 +803,29 @@ int main(int argc,char **argv)
 	else if (!strcmp(count_token[match_string_index], "none"));
 	else if (!strcmp(count_token[match_string_index], "src_as") ||
 		 !strcmp(count_token[match_string_index], "sum_as")) {
-	  u_int32_t asn32; 
+	  char *endptr;
 
-	  asn32 = atoi(match_string_token);
-	  request.data.src_as = asn32;
+	  request.data.src_as = strtoul(match_string_token, &endptr, 10);
 	}
 	else if (!strcmp(count_token[match_string_index], "dst_as")) {
-	  u_int32_t asn32;
+	  char *endptr;
 
-	  asn32 = atoi(match_string_token);
-	  request.data.dst_as = asn32;
+	  request.data.dst_as = strtoul(match_string_token, &endptr, 10);
 	}
 	else if (!strcmp(count_token[match_string_index], "tag")) {
-	  int value = atoi(match_string_token);
+	  char *endptr = NULL;
+	  u_int32_t value;
 
-	  if ((value < 0) || (value > 65535)) {
-	    printf("WARN: 'tag' has to be in the range 0-65535.\n");
-	    exit(1);
-	  }
-
+	  value = strtoul(match_string_token, &endptr, 10);
 	  request.data.id = value; 
 	}
+        else if (!strcmp(count_token[match_string_index], "tag2")) {
+          char *endptr = NULL;
+          u_int32_t value;
+
+          value = strtoul(match_string_token, &endptr, 10);
+          request.data.id2 = value;
+        }
         else if (!strcmp(count_token[match_string_index], "class")) {
 	  struct query_header qhdr;
 	  char sclass[MAX_PROTOCOL_LEN];
@@ -741,6 +869,125 @@ int main(int argc,char **argv)
 	    }
 	    else request.data.class = value;
 	  }
+        }
+        else if (!strcmp(count_token[match_string_index], "std_comm")) {
+	  if (!strcmp(match_string_token, "0"))
+	    memset(request.pbgp.std_comms, 0, MAX_BGP_STD_COMMS);
+	  else {
+            strlcpy(request.pbgp.std_comms, match_string_token, MAX_BGP_STD_COMMS);
+	    bgp_comm = request.pbgp.std_comms;
+	    while (bgp_comm) {
+	      bgp_comm = strchr(request.pbgp.std_comms, '_');
+	      if (bgp_comm) *bgp_comm = ' ';
+	    }
+	  }
+	}
+        else if (!strcmp(count_token[match_string_index], "src_std_comm")) {
+          if (!strcmp(match_string_token, "0"))
+            memset(request.pbgp.src_std_comms, 0, MAX_BGP_STD_COMMS);
+          else {
+            strlcpy(request.pbgp.src_std_comms, match_string_token, MAX_BGP_STD_COMMS);
+            bgp_comm = request.pbgp.src_std_comms;
+            while (bgp_comm) {
+              bgp_comm = strchr(request.pbgp.src_std_comms, '_');
+              if (bgp_comm) *bgp_comm = ' ';
+            }
+          }
+        }
+        else if (!strcmp(count_token[match_string_index], "ext_comm")) {
+          if (!strcmp(match_string_token, "0"))
+            memset(request.pbgp.ext_comms, 0, MAX_BGP_EXT_COMMS);
+          else {
+            strlcpy(request.pbgp.ext_comms, match_string_token, MAX_BGP_EXT_COMMS);
+            bgp_comm = request.pbgp.ext_comms;
+            while (bgp_comm) {
+              bgp_comm = strchr(request.pbgp.ext_comms, '_');
+              if (bgp_comm) *bgp_comm = ' ';
+            }
+	  }
+	}
+        else if (!strcmp(count_token[match_string_index], "src_ext_comm")) {
+          if (!strcmp(match_string_token, "0"))
+            memset(request.pbgp.src_ext_comms, 0, MAX_BGP_EXT_COMMS);
+          else {
+            strlcpy(request.pbgp.src_ext_comms, match_string_token, MAX_BGP_EXT_COMMS);
+            bgp_comm = request.pbgp.src_ext_comms;
+            while (bgp_comm) {
+              bgp_comm = strchr(request.pbgp.src_ext_comms, '_');
+              if (bgp_comm) *bgp_comm = ' ';
+            }
+          }
+        }
+        else if (!strcmp(count_token[match_string_index], "as_path")) {
+	  if (!strcmp(match_string_token, "^$"))
+	    memset(request.pbgp.as_path, 0, MAX_BGP_ASPATH);
+	  else {
+            strlcpy(request.pbgp.as_path, match_string_token, MAX_BGP_ASPATH);
+            as_path = request.pbgp.as_path;
+            while (as_path) {
+              as_path = strchr(request.pbgp.as_path, '_');
+              if (as_path) *as_path = ' ';
+            }
+	  }
+	}
+        else if (!strcmp(count_token[match_string_index], "src_as_path")) {
+          if (!strcmp(match_string_token, "^$"))
+            memset(request.pbgp.src_as_path, 0, MAX_BGP_ASPATH);
+          else {
+            strlcpy(request.pbgp.src_as_path, match_string_token, MAX_BGP_ASPATH);
+            as_path = request.pbgp.src_as_path;
+            while (as_path) {
+              as_path = strchr(request.pbgp.src_as_path, '_');
+              if (as_path) *as_path = ' ';
+            }
+          }
+        }
+        else if (!strcmp(count_token[match_string_index], "local_pref")) {
+	  char *endptr;
+
+          request.pbgp.local_pref = strtoul(match_string_token, &endptr, 10);
+	}
+        else if (!strcmp(count_token[match_string_index], "src_local_pref")) {
+          char *endptr;
+
+          request.pbgp.src_local_pref = strtoul(match_string_token, &endptr, 10);
+        }
+        else if (!strcmp(count_token[match_string_index], "med")) {
+	  char *endptr;
+
+          request.pbgp.med = strtoul(match_string_token, &endptr, 10);
+	}
+        else if (!strcmp(count_token[match_string_index], "src_med")) {
+          char *endptr;
+
+          request.pbgp.src_med = strtoul(match_string_token, &endptr, 10);
+        }
+	else if (!strcmp(count_token[match_string_index], "is_symmetric")) {
+	  char *endptr;
+
+	  request.pbgp.is_symmetric = strtoul(match_string_token, &endptr, 10);
+	}
+        else if (!strcmp(count_token[match_string_index], "peer_src_as")) {
+          char *endptr;
+
+          request.pbgp.peer_src_as = strtoul(match_string_token, &endptr, 10);
+        }
+        else if (!strcmp(count_token[match_string_index], "peer_dst_as")) {
+          char *endptr;
+
+          request.pbgp.peer_dst_as = strtoul(match_string_token, &endptr, 10);
+        }
+        else if (!strcmp(count_token[match_string_index], "peer_src_ip")) {
+          if (!str_to_addr(match_string_token, &request.pbgp.peer_src_ip)) {
+            printf("ERROR: peer_src_ip: Invalid IP address: '%s'\n", match_string_token);
+            exit(1);
+          }
+        }
+        else if (!strcmp(count_token[match_string_index], "peer_dst_ip")) {
+          if (!str_to_addr(match_string_token, &request.pbgp.peer_dst_ip)) {
+            printf("ERROR: peer_dst_ip: Invalid IP address: '%s'\n", match_string_token);
+            exit(1);
+          }
         }
         else printf("WARN: ignoring unknown aggregation method: '%s'.\n", *count_token);
         match_string_index++;
@@ -796,18 +1043,44 @@ int main(int argc,char **argv)
       }
     }
 
+    if (what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
+                         COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
+			 COUNT_SRC_AS_PATH|COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_MED|
+			 COUNT_SRC_LOCAL_PREF|COUNT_IS_SYMMETRIC))
+      PbgpSz = TRUE;
+
     write_stats_header(what_to_count, have_wtc);
     elem = largebuf+sizeof(struct query_header);
     unpacked -= sizeof(struct query_header);
 
     acc_elem = (struct pkt_data *) elem;
-    if (topN_counter) client_counters_merge_sort(acc_elem, 0, unpacked/sizeof(struct pkt_data), topN_counter);
+    if (topN_counter) {
+      int num, size;
+ 
+      if (PbgpSz) {
+	num = unpacked/(sizeof(struct pkt_data)+sizeof(struct pkt_bgp_primitives));
+	size = sizeof(struct pkt_data)+sizeof(struct pkt_bgp_primitives);
+      }
+      else {
+	num = unpacked/sizeof(struct pkt_data);
+	size = sizeof(struct pkt_data);
+      }
+
+      client_counters_merge_sort((void *)acc_elem, 0, num, size, topN_counter);
+    }
 
     while (printed < unpacked) {
       acc_elem = (struct pkt_data *) elem;
-      if (memcmp(&acc_elem, &empty_addr, sizeof(struct pkt_primitives)) != 0) {
+
+      if (PbgpSz) pbgp = (struct pkt_bgp_primitives *) ((u_char *)elem+sizeof(struct pkt_data)); 
+      else pbgp = &empty_pbgp;
+
+      if (memcmp(&acc_elem, &empty_addr, sizeof(struct pkt_primitives)) != 0 || 
+	  memcmp(pbgp, &empty_pbgp, sizeof(struct pkt_bgp_primitives)) != 0) {
         if (!have_wtc || (what_to_count & COUNT_ID))
-	  printf("%-5d  ", acc_elem->primitives.id);
+	  printf("%-10u  ", acc_elem->primitives.id);
+        if (!have_wtc || (what_to_count & COUNT_ID2))
+	  printf("%-10u  ", acc_elem->primitives.id2);
         if (!have_wtc || (what_to_count & COUNT_CLASS))
           printf("%-16s  ", (acc_elem->primitives.class == 0 || acc_elem->primitives.class > ct_idx ||
 		!class_table[acc_elem->primitives.class-1].id) ? "unknown" : class_table[acc_elem->primitives.class-1].protocol);
@@ -827,29 +1100,158 @@ int main(int argc,char **argv)
         }
 #endif
 	if (!have_wtc || (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS))) {
-          printf("%-5d   ", acc_elem->primitives.src_as);
+          printf("%-10d  ", acc_elem->primitives.src_as);
         }
 
 	if (!have_wtc || (what_to_count & COUNT_DST_AS)) {
-          printf("%-5d   ", acc_elem->primitives.dst_as);
+          printf("%-10d  ", acc_elem->primitives.dst_as);
+        }
+
+	/* Slightly special "!have_wtc" handling due to standard and
+	   extended BGP communities being mutual exclusive */
+	if ((!have_wtc && !(what_to_count & COUNT_EXT_COMM)) || (what_to_count & COUNT_STD_COMM)) {
+	  bgp_comm = pbgp->std_comms;
+	  while (bgp_comm) {
+	    bgp_comm = strchr(pbgp->std_comms, ' ');
+	    if (bgp_comm) *bgp_comm = '_';
+	  }
+          if (strlen(pbgp->std_comms))
+	    printf("%-22s   ", pbgp->std_comms);
+	  else
+	    printf("%-22u   ", 0);
+        }
+
+	if ((!have_wtc && !(what_to_count & COUNT_SRC_EXT_COMM)) || (what_to_count & COUNT_SRC_STD_COMM)) {
+	  bgp_comm = pbgp->src_std_comms;
+	  while (bgp_comm) {
+	    bgp_comm = strchr(pbgp->src_std_comms, ' ');
+	    if (bgp_comm) *bgp_comm = '_';
+	  }
+          if (strlen(pbgp->src_std_comms))
+	    printf("%-22s   ", pbgp->src_std_comms);
+	  else
+	    printf("%-22u   ", 0);
+        }
+
+        if (what_to_count & COUNT_EXT_COMM) {
+          bgp_comm = pbgp->ext_comms;
+          while (bgp_comm) {
+            bgp_comm = strchr(pbgp->ext_comms, ' ');
+            if (bgp_comm) *bgp_comm = '_';
+          }
+          if (strlen(pbgp->ext_comms))
+	    printf("%-22s   ", pbgp->ext_comms);
+	  else
+	    printf("%-22u   ", 0);
+        }
+
+        if (what_to_count & COUNT_SRC_EXT_COMM) {
+          bgp_comm = pbgp->src_ext_comms;
+          while (bgp_comm) {
+            bgp_comm = strchr(pbgp->src_ext_comms, ' ');
+            if (bgp_comm) *bgp_comm = '_';
+          }
+          if (strlen(pbgp->src_ext_comms))
+            printf("%-22s   ", pbgp->src_ext_comms);
+          else
+            printf("%-22u   ", 0);
+        }
+
+        if (!have_wtc || (what_to_count & COUNT_AS_PATH)) {
+	  as_path = pbgp->as_path;
+	  while (as_path) {
+	    as_path = strchr(pbgp->as_path, ' ');
+	    if (as_path) *as_path = '_';
+	  }
+          if (strlen(pbgp->as_path))
+	    printf("%-22s   ", pbgp->as_path);
+	  else
+	    printf("%-22s   ", empty_aspath); 
+        }
+
+        if (!have_wtc || (what_to_count & COUNT_SRC_AS_PATH)) {
+	  as_path = pbgp->src_as_path;
+	  while (as_path) {
+	    as_path = strchr(pbgp->src_as_path, ' ');
+	    if (as_path) *as_path = '_';
+	  }
+          if (strlen(pbgp->src_as_path))
+	    printf("%-22s   ", pbgp->src_as_path);
+	  else
+	    printf("%-22s   ", empty_aspath); 
+        }
+
+        if (!have_wtc || (what_to_count & COUNT_LOCAL_PREF)) {
+          printf("%-7d  ", pbgp->local_pref);
+        }
+
+        if (!have_wtc || (what_to_count & COUNT_SRC_LOCAL_PREF)) {
+          printf("%-7d  ", pbgp->src_local_pref);
+        }
+
+        if (!have_wtc || (what_to_count & COUNT_MED)) {
+          printf("%-6d  ", pbgp->med);
+        }
+
+        if (!have_wtc || (what_to_count & COUNT_SRC_MED)) {
+          printf("%-6d  ", pbgp->src_med);
+        }
+
+	if (!have_wtc || (what_to_count & COUNT_IS_SYMMETRIC)) {
+	  printf("%-3d  ", pbgp->is_symmetric);
+	}
+
+        if (!have_wtc || (what_to_count & COUNT_PEER_SRC_AS)) {
+          printf("%-10d  ", pbgp->peer_src_as);
+        }
+
+        if (!have_wtc || (what_to_count & COUNT_PEER_DST_AS)) {
+          printf("%-10d  ", pbgp->peer_dst_as);
+        }
+
+        if (!have_wtc || (what_to_count & COUNT_PEER_SRC_IP)) {
+          addr_to_str(ip_address, &pbgp->peer_src_ip);
+
+#if defined ENABLE_IPV6
+          if (strlen(ip_address)) printf("%-45s  ", ip_address);
+          else printf("%-45u  ", 0);
+#else
+          if (strlen(ip_address)) printf("%-15s  ", ip_address);
+          else printf("%-15u  ", 0);
+#endif
+        }
+
+        if (!have_wtc || (what_to_count & COUNT_PEER_DST_IP)) {
+          addr_to_str(ip_address, &pbgp->peer_dst_ip);
+#if defined ENABLE_IPV6
+          if (strlen(ip_address)) printf("%-45s  ", ip_address);
+	  else printf("%-45u  ", 0);
+#else
+          if (strlen(ip_address)) printf("%-15s  ", ip_address);
+	  else printf("%-15u  ", 0);
+#endif
         }
 
 	if (!have_wtc || (what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST|
 					   COUNT_SRC_NET|COUNT_SUM_NET))) {
 	  addr_to_str(ip_address, &acc_elem->primitives.src_ip);
 #if defined ENABLE_IPV6
-	  printf("%-45s  ", ip_address);
+	  if (strlen(ip_address)) printf("%-45s  ", ip_address);
+	  else printf("%-45u  ", 0);
 #else
-	  printf("%-15s  ", ip_address);
+	  if (strlen(ip_address)) printf("%-15s  ", ip_address);
+	  else printf("%-15u  ", 0);
 #endif
 	}
 
 	if (!have_wtc || (what_to_count & (COUNT_DST_HOST|COUNT_DST_NET))) {
 	  addr_to_str(ip_address, &acc_elem->primitives.dst_ip);
 #if defined ENABLE_IPV6
-	  printf("%-45s  ", ip_address);
+	  if (strlen(ip_address)) printf("%-45s  ", ip_address);
+	  else printf("%-45u  ", 0);
 #else
-	  printf("%-15s  ", ip_address);
+	  if (strlen(ip_address)) printf("%-15s  ", ip_address);
+	  else printf("%-15u  ", 0);
 #endif
 	}
 
@@ -888,8 +1290,14 @@ int main(int argc,char **argv)
 #endif
         counter++;
       }
-      elem += sizeof(struct pkt_data);
-      printed += sizeof(struct pkt_data);
+      if (PbgpSz) {
+	elem += (sizeof(struct pkt_data)+sizeof(struct pkt_bgp_primitives));
+	printed += (sizeof(struct pkt_data)+sizeof(struct pkt_bgp_primitives));
+      }
+      else {
+	elem += sizeof(struct pkt_data);
+	printed += sizeof(struct pkt_data);
+      }
     }
     printf("\nFor a total of: %d entries\n", counter);
   }
@@ -1066,7 +1474,7 @@ int check_data_sizes(struct query_header *qh, struct pkt_data *acc_elem)
 }
 
 /* sort the (sub)array v from start to end */
-void client_counters_merge_sort(struct pkt_data *table, int start, int end, int order)
+void client_counters_merge_sort(void *table, int start, int end, int size, int order)
 {
   int middle;
 
@@ -1077,23 +1485,24 @@ void client_counters_merge_sort(struct pkt_data *table, int start, int end, int 
   middle = (start+end)/2;
 
   /* sort the subarray from start..middle */
-  client_counters_merge_sort(table, start, middle, order);
+  client_counters_merge_sort(table, start, middle, size, order);
 
   /* sort the subarray from middle..end */
-  client_counters_merge_sort(table, middle, end, order);
+  client_counters_merge_sort(table, middle, end, size, order);
 
   /* merge the two sorted halves */
-  client_counters_merge(table, start, middle, end, order);
+  client_counters_merge(table, start, middle, end, size, order);
 }
 
 /*
    merge the subarray v[start..middle] with v[middle..end], placing the
    result back into v.
 */
-void client_counters_merge(struct pkt_data *table, int start, int middle, int end, int order)
+void client_counters_merge(void *table, int start, int middle, int end, int size, int order)
 {
-  struct pkt_data *v1, *v2;
-  int  v1_n, v2_n, v1_index, v2_index, i, s = sizeof(struct pkt_data);
+  void *v1, *v2;
+  int  v1_n, v2_n, v1_index, v2_index, i, s = size;
+  struct pkt_data data1, data2;
 
   v1_n = middle-start;
   v2_n = end-middle;
@@ -1103,8 +1512,12 @@ void client_counters_merge(struct pkt_data *table, int start, int middle, int en
 
   if ((!v1) || (!v2)) printf("ERROR: Memory sold out while sorting statistics.\n");
 
-  for (i=0; i<v1_n; i++) memcpy(&v1[i], &table[start+i], s);
-  for (i=0; i<v2_n; i++) memcpy(&v2[i], &table[middle+i], s);
+  for (i=0; i<v1_n; i++) {
+    memcpy(v1+(i*s), table+((start+i)*s), s);
+  }
+  for (i=0; i<v2_n; i++) {
+    memcpy(v2+(i*s), table+((middle+i)*s), s);
+  }
 
   v1_index = 0;
   v2_index = 0;
@@ -1113,31 +1526,70 @@ void client_counters_merge(struct pkt_data *table, int start, int middle, int en
   if (order == 1) { /* bytes */ 
     for (i=0; (v1_index < v1_n) && (v2_index < v2_n); i++) {
       /* current v1 element less than current v2 element? */
-      if (v1[v1_index].pkt_len < v2[v2_index].pkt_len) memcpy(&table[start+i], &v2[v2_index++], s);
-      else if (v1[v1_index].pkt_len == v2[v2_index].pkt_len) memcpy(&table[start+i], &v2[v2_index++], s);
-      else memcpy(&table[start+i], &v1[v1_index++], s);
+      memcpy(&data1, v1+(v1_index*s), sizeof(data1));
+      memcpy(&data2, v2+(v2_index*s), sizeof(data2));
+      if (data1.pkt_len < data2.pkt_len) {
+	memcpy(table+((start+i)*s), v2+(v2_index*s), s);
+	v2_index++;
+      }
+      else if (data1.pkt_len == data2.pkt_len) {
+	memcpy(table+((start+i)*s), v2+(v2_index*s), s);
+	v2_index++;
+      }
+      else {
+	memcpy(table+((start+i)*s), v1+(v1_index*s), s);
+	v1_index++;
+      }
     }
   }
   else if (order == 2) { /* packets */
     for (i=0; (v1_index < v1_n) && (v2_index < v2_n); i++) {
       /* current v1 element less than current v2 element? */
-      if (v1[v1_index].pkt_num < v2[v2_index].pkt_num) memcpy(&table[start+i], &v2[v2_index++], s);
-      else if (v1[v1_index].pkt_num == v2[v2_index].pkt_num) memcpy(&table[start+i], &v2[v2_index++], s);
-      else memcpy(&table[start+i], &v1[v1_index++], s);
+      memcpy(&data1, v1+(v1_index*s), sizeof(data1));
+      memcpy(&data2, v2+(v2_index*s), sizeof(data2));
+      if (data1.pkt_num < data2.pkt_num) {
+	memcpy(table+((start+i)*s), v2+(v2_index*s), s); 
+	v2_index++;
+      }
+      else if (data1.pkt_num == data2.pkt_num) {
+        memcpy(table+((start+i)*s), v2+(v2_index*s), s);
+        v2_index++;
+      }
+      else {
+	memcpy(table+((start+i)*s), v1+(v1_index*s), s);
+        v1_index++;
+      }
     }
   }
   else if (order == 3) { /* flows */
     for (i=0; (v1_index < v1_n) && (v2_index < v2_n); i++) {
       /* current v1 element less than current v2 element? */
-      if (v1[v1_index].flo_num < v2[v2_index].flo_num) memcpy(&table[start+i], &v2[v2_index++], s);
-      else if (v1[v1_index].flo_num == v2[v2_index].flo_num) memcpy(&table[start+i], &v2[v2_index++], s);
-      else memcpy(&table[start+i], &v1[v1_index++], s);
+      memcpy(&data1, v1+(v1_index*s), sizeof(data1));
+      memcpy(&data2, v2+(v2_index*s), sizeof(data2));
+      if (data1.flo_num < data2.flo_num) {
+        memcpy(table+((start+i)*s), v2+(v2_index*s), s);
+        v2_index++;
+      }
+      else if (data1.flo_num == data2.flo_num) {
+        memcpy(table+((start+i)*s), v2+(v2_index*s), s);
+        v2_index++;
+      }
+      else {
+        memcpy(table+((start+i)*s), v1+(v1_index*s), s);
+        v1_index++;
+      }
     }
   }
 
   /* clean up; either v1 or v2 may have stuff left in it */
-  for (; v1_index < v1_n; i++) memcpy(&table[start+i], &v1[v1_index++], s);
-  for (; v2_index < v2_n; i++) memcpy(&table[start+i], &v2[v2_index++], s);
+  for (; v1_index < v1_n; i++) {
+    memcpy(table+((start+i)*s), v1+(v1_index*s), s);
+    v1_index++;
+  }
+  for (; v2_index < v2_n; i++) {
+    memcpy(table+((start+i)*s), v2+(v2_index*s), s);
+    v2_index++;
+  }
 
   free(v1);
   free(v2);

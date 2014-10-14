@@ -330,10 +330,15 @@ FILE *open_logfile(char *filename)
   FILE *file = NULL;
   struct tm *tmnow;
   time_t now;
+  uid_t owner = -1;
+  gid_t group = -1;
 
+  if (config.files_uid) owner = config.files_uid;
+  if (config.files_gid) group = config.files_gid;
 
   file = fopen(filename, "a"); 
   if (file) {
+    chown(filename, owner, group);
     if (file_lock(fileno(file))) {
       Log(LOG_ALERT, "ALERT: Unable to obtain lock for logfile '%s'.\n", filename);
       file = NULL;
@@ -359,11 +364,17 @@ void write_pid_file(char *filename)
 {
   FILE *file;
   char pid[10];
+  uid_t owner = -1;
+  gid_t group = -1;
 
   unlink(filename); 
+
+  if (config.files_uid) owner = config.files_uid;
+  if (config.files_gid) group = config.files_gid;
     
   file = fopen(filename,"w");
   if (file) {
+    chown(filename, owner, group);
     if (file_lock(fileno(file))) {
       Log(LOG_ALERT, "ALERT: Unable to obtain lock for pidfile '%s'.\n", filename);
       return;
@@ -385,6 +396,8 @@ void write_pid_file_plugin(char *filename, char *type, char *name)
   int len = strlen(filename) + strlen(type) + strlen(name) + 3;
   FILE *file;
   char *fname, pid[10], minus[] = "-";
+  uid_t owner = -1;
+  gid_t group = -1;
 
   fname = malloc(len);
   memset(fname, 0, sizeof(fname));
@@ -397,8 +410,12 @@ void write_pid_file_plugin(char *filename, char *type, char *name)
   config.pidfile = fname;
   unlink(fname);
 
+  if (config.files_uid) owner = config.files_uid;
+  if (config.files_gid) group = config.files_gid;
+
   file = fopen(fname,"w");
   if (file) {
+    chown(fname, owner, group);
     if (file_lock(fileno(file))) {
       Log(LOG_ALERT, "ALERT: Unable to obtain lock of '%s'.\n", fname);
       return;
@@ -572,15 +589,21 @@ void lower_string(char *string)
   }
 }
 
-void evaluate_sums(u_int32_t *wtc, char *name, char *type)
+void evaluate_sums(u_int64_t *wtc, char *name, char *type)
 {
   int tag = FALSE;
+  int tag2 = FALSE;
   int class = FALSE;
   int flows = FALSE;
 
   if (*wtc & COUNT_ID) {
     *wtc ^= COUNT_ID;
     tag = TRUE;
+  }
+
+  if (*wtc & COUNT_ID2) {
+    *wtc ^= COUNT_ID2;
+    tag2 = TRUE;
   }
 
   if (*wtc & COUNT_CLASS) {
@@ -626,6 +649,7 @@ void evaluate_sums(u_int32_t *wtc, char *name, char *type)
   }
 
   if (tag) *wtc |= COUNT_ID;
+  if (tag2) *wtc |= COUNT_ID2;
   if (class) *wtc |= COUNT_CLASS;
   if (flows) *wtc |= COUNT_FLOWS;
 }
@@ -679,12 +703,16 @@ int read_SQLquery_from_file(char *path, char *buf, int size)
   }
   
   fread(buf, size, 1, f);
+  fclose(f);
+  
   ptr = strrchr(buf, ';');
   if (!ptr) {
     Log(LOG_ERR, "ERROR: missing trailing ';' in SQL query read from %s.\n", path);
     return(0); 
   } 
   else *ptr = '\0';
+  
+  return (int)*ptr-(int)*buf;
 } 
 
 void stick_bosbit(u_char *label)
@@ -749,12 +777,20 @@ void reset_tag_status(struct packet_ptrs_vector *pptrsv)
   pptrsv->vlan4.tag = FALSE;
   pptrsv->mpls4.tag = FALSE;
   pptrsv->vlanmpls4.tag = FALSE;
+  pptrsv->v4.tag2 = FALSE;
+  pptrsv->vlan4.tag2 = FALSE;
+  pptrsv->mpls4.tag2 = FALSE;
+  pptrsv->vlanmpls4.tag2 = FALSE;
 
 #if defined ENABLE_IPV6
   pptrsv->v6.tag = FALSE;
   pptrsv->vlan6.tag = FALSE;
   pptrsv->mpls6.tag = FALSE;
   pptrsv->vlanmpls6.tag = FALSE;
+  pptrsv->v6.tag2 = FALSE;
+  pptrsv->vlan6.tag2 = FALSE;
+  pptrsv->mpls6.tag2 = FALSE;
+  pptrsv->vlanmpls6.tag2 = FALSE;
 #endif
 }
 
@@ -773,61 +809,10 @@ void reset_shadow_status(struct packet_ptrs_vector *pptrsv)
 #endif
 }
 
-void reset_tagdist_status(struct packet_ptrs_vector *pptrsv)
-{
-  pptrsv->v4.tag_dist = TRUE;
-  pptrsv->vlan4.tag_dist = TRUE;
-  pptrsv->mpls4.tag_dist = TRUE;
-  pptrsv->vlanmpls4.tag_dist = TRUE;
-
-#if defined ENABLE_IPV6
-  pptrsv->v6.tag_dist = TRUE;
-  pptrsv->vlan6.tag_dist = TRUE;
-  pptrsv->mpls6.tag_dist = TRUE;
-  pptrsv->vlanmpls6.tag_dist = TRUE;
-#endif
-}
-
 void set_shadow_status(struct packet_ptrs *pptrs)
 {
   pptrs->shadow = TRUE;
 }
-
-#if 0
-
-Fields denoted by X will have their content modified
-
-From network.h
-
-  struct packet_ptrs {
-D   struct pcap_pkthdr *pkthdr; /* ptr to header structure passed by libpcap */
-    u_char *f_agent; /* ptr to flow export agent */
-    u_char *f_header; /* ptr to NetFlow packet header */
-    u_char *f_data; /* ptr to NetFlow data */
-    u_char *f_tpl; /* ptr to NetFlow V9 template */
-    u_char *f_status; /* ptr to status table entry */
-    u_char *idtable; /* ptr to pretag table map */
-D   u_char *packet_ptr; /* ptr to the whole packet */
-    u_char *mac_ptr; /* ptr to mac addresses */
-    u_int16_t l3_proto; /* layer-3 protocol: IPv4, IPv6 */
-    int (*l3_handler)(register struct packet_ptrs *); /* layer-3 protocol handler */
-    u_int16_t l4_proto; /* layer-4 protocol */
-    u_int16_t tag; /* pre tag id */
-    u_int16_t pf; /* pending fragments or packets */
-    u_int8_t new_flow; /* pmacctd flows: part of a new flow ? */
-    u_int8_t tcp_flags; /* pmacctd flows: TCP packet flags; URG, PUSH filtered out */
-    u_char *vlan_ptr; /* ptr to vlan id */
-    u_char *mpls_ptr; /* ptr to base MPLS label */
-X   u_char *iph_ptr; /* ptr to ip header */
-X   u_char *tlh_ptr; /* ptr to transport level protocol header */
-X   u_char *payload_ptr; /* classifiers: ptr to packet payload */
-    pm_class_t class; /* classifiers: class id */
-    struct class_st cst; /* classifiers: class status */
-    u_int8_t shadow; /* 0=the packet is being distributed for the 1st time
-            1=the packet is being distributed for the 2nd+ time */
-    u_int8_t tag_dist; /* tagged packet: 0=do not distribute the packet; 1=distribute it */
-  };
-#endif
 
 struct packet_ptrs *copy_packet_ptrs(struct packet_ptrs *pptrs)
 {
@@ -901,3 +886,106 @@ void stop_timer(struct mytimer *t, const char *format, ...)
   fprintf(stderr, "TIMER:%s:%d\n", msg, (t->t1.tv_sec - t->t0.tv_sec) * 1000000 + (t->t1.tv_usec - t->t0.tv_usec));
 }
 #endif
+
+void evaluate_bgp_aspath_radius(char *path, int len, int radius)
+{
+  int count, idx;
+
+  for (idx = 0, count = 0; idx < len; idx++) {
+    if (path[idx] == ' ') count++;
+    if (count == radius) {
+      path[idx] = '\0';
+      memset(&path[idx+1], 0, len-strlen(path)); 
+      break;
+    }
+  }
+}
+
+void copy_stdcomm_to_asn(char *stdcomm, as_t *asn, int is_origin)
+{
+  char *delim, *delim2;
+  char *p1, *p2;
+
+  if (!stdcomm || !strlen(stdcomm) || (delim = strchr(stdcomm, ':')) == NULL) return; 
+
+  delim2 = strchr(stdcomm, ',');
+  *delim = '\0';
+  if (delim2) *delim2 = '\0';
+  p1 = stdcomm;
+  p2 = delim+1;
+
+  if (is_origin) *asn = atoi(p2); 
+  else *asn = atoi(p1);
+}
+
+void *Malloc(unsigned int size)
+{
+  unsigned char *obj;
+
+  obj = (unsigned char *) malloc(size);
+  if (!obj) {
+    sbrk(size);
+    obj = (unsigned char *) malloc(size);
+    if (!obj) {
+      Log(LOG_ERR, "ERROR ( %s/%s ): Unable to grab enough memory (requested: %u bytes). Exiting ...\n",
+      config.name, config.type, size);
+      exit_plugin(1);
+    }
+  }
+
+  return obj;
+}
+
+void load_allow_file(char *filename, struct hosts_table *t)
+{
+  FILE *file;
+  char buf[SRVBUFLEN];
+  int index = 0;
+
+  if (filename) {
+    if ((file = fopen(filename, "r")) == NULL) {
+      Log(LOG_ERR, "ERROR ( default/core ): allow file '%s' not found\n", filename);
+      exit(1);
+    }
+
+    memset(t->table, 0, sizeof(t->table));
+    while (!feof(file)) {
+      if (index >= MAX_MAP_ENTRIES) break; /* XXX: we shouldn't exit silently */
+      memset(buf, 0, SRVBUFLEN);
+      if (fgets(buf, SRVBUFLEN, file)) {
+        if (!sanitize_buf(buf)) {
+          if (str_to_addr(buf, &t->table[index])) index++;
+          else Log(LOG_WARNING, "WARN ( default/core ): 'nfacctd_allow_file': Bad IP address '%s'. Ignored.\n", buf);
+        }
+      }
+    }
+    t->num = index;
+
+    /* Set to -1 to distinguish between no map and empty map conditions */ 
+    if (!t->num) t->num = -1;
+
+    fclose(file);
+  }
+}
+
+int check_allow(struct hosts_table *allow, struct sockaddr *sa)
+{
+  int index;
+
+  for (index = 0; index < allow->num; index++) {
+    if (((struct sockaddr *)sa)->sa_family == allow->table[index].family) {
+      if (allow->table[index].family == AF_INET) {
+        if (((struct sockaddr_in *)sa)->sin_addr.s_addr == allow->table[index].address.ipv4.s_addr)
+          return TRUE;
+      }
+#if defined ENABLE_IPV6
+      else if (allow->table[index].family == AF_INET6) {
+        if (!ip6_addr_cmp(&(((struct sockaddr_in6 *)sa)->sin6_addr), &allow->table[index].address.ipv6))
+          return TRUE;
+      }
+#endif
+    }
+  }
+
+  return FALSE;
+}

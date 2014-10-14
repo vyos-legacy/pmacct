@@ -1,6 +1,6 @@
-# /*
+/*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2008 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2009 by Paolo Lucente
 */
 
 /*
@@ -54,7 +54,7 @@ struct networks_table {
 struct networks_table_entry {
   u_int32_t net;
   u_int32_t mask;
-  u_int32_t as;
+  as_t as;
   struct networks_table childs_table;
 };
 
@@ -67,7 +67,7 @@ struct networks6_cache_entry {
 struct networks6_table_entry {
   u_int32_t net[4];
   u_int32_t mask[4];
-  u_int32_t as;
+  as_t as;
   struct networks_table childs_table;
 };
 #endif
@@ -95,8 +95,8 @@ EXT void search_src_net(struct networks_table *, struct networks_cache *, struct
 EXT void search_dst_net(struct networks_table *, struct networks_cache *, struct pkt_primitives *); 
 EXT void search_src_as(struct networks_table *, struct networks_cache *, struct pkt_primitives *); 
 EXT void search_dst_as(struct networks_table *, struct networks_cache *, struct pkt_primitives *); 
-EXT u_int16_t search_pretag_src_as(struct networks_table *, struct networks_cache *, struct packet_ptrs *);
-EXT u_int16_t search_pretag_dst_as(struct networks_table *, struct networks_cache *, struct packet_ptrs *);
+EXT as_t search_pretag_src_as(struct networks_table *, struct networks_cache *, struct packet_ptrs *);
+EXT as_t search_pretag_dst_as(struct networks_table *, struct networks_cache *, struct packet_ptrs *);
 EXT void drop_src_host(struct networks_table *, struct networks_cache *, struct pkt_primitives *); 
 EXT void drop_dst_host(struct networks_table *, struct networks_cache *, struct pkt_primitives *); 
 
@@ -128,8 +128,10 @@ EXT unsigned int networks_cache_hash6(void *);
 EXT struct networks_table nt;
 EXT struct networks_cache nc;
 EXT struct networks_table_entry dummy_entry;
+EXT int default_route_in_networks4_table;
 
 #if defined ENABLE_IPV6
 EXT struct networks6_table_entry dummy_entry6;
+EXT int default_route_in_networks6_table;
 #endif
 #undef EXT

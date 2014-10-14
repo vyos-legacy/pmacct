@@ -243,7 +243,7 @@ static void init_agent(SflSp *sp)
   sp->sampler = sfl_agent_getSampler(sp->agent, &dsi);
 }
 
-
+#define NF_AS_BGP 2
 /*_________________---------------------------__________________
   _________________       readPacket          __________________
   -----------------___________________________------------------
@@ -315,8 +315,14 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
       // the local interface index should be filled in as the special
       // value 0x3FFFFFFF, which is defined in the sFlow spec as
       // an "internal" interface.
-      fs.input = (direction == SFL_DIRECTION_IN) ? sp->ifIndex : 0x3FFFFFFF;
-      fs.output = (direction == SFL_DIRECTION_IN) ? 0x3FFFFFFF : sp->ifIndex;
+      if (!hdr->ifindex_in && !hdr->ifindex_out) {
+        fs.input = (direction == SFL_DIRECTION_IN) ? sp->ifIndex : 0x3FFFFFFF;
+        fs.output = (direction == SFL_DIRECTION_IN) ? 0x3FFFFFFF : sp->ifIndex;
+      }
+      else {
+        fs.input = (hdr->ifindex_in) ? hdr->ifindex_in : 0x3FFFFFFF;
+        fs.output = (hdr->ifindex_out) ? hdr->ifindex_out : 0x3FFFFFFF;
+      }
       
       memset(&hdrElem, 0, sizeof(hdrElem));
 
@@ -348,10 +354,11 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
 	SFLADD_ELEMENT(&fs, &classHdrElem);
       }
 
-      if (config.what_to_count & COUNT_ID) {
+      if (config.what_to_count & (COUNT_ID|COUNT_ID2)) {
         memset(&tagHdrElem, 0, sizeof(tagHdrElem));
         tagHdrElem.tag = SFLFLOW_EX_TAG;
         tagHdrElem.flowType.tag.tag = hdr->tag;
+        tagHdrElem.flowType.tag.tag2 = hdr->tag2;
         SFLADD_ELEMENT(&fs, &tagHdrElem);
       }
 
@@ -360,7 +367,7 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
          informations; we will fill in only infos pertaining
 	 to src and dst ASNs
       */
-      if (config.networks_file) {
+      if (config.networks_file || config.nfacctd_as == NF_AS_BGP) {
 	memset(&gatewayHdrElem, 0, sizeof(gatewayHdrElem));
 	memset(&as_path_segment, 0, sizeof(as_path_segment));
 	gatewayHdrElem.tag = SFLFLOW_EX_GATEWAY;
@@ -412,6 +419,7 @@ static void process_config_options(SflSp *sp)
   if (config.sfprobe_agentsubid) sp->agentSubId = config.sfprobe_agentsubid;
   if (config.sfprobe_receiver) parse_receiver(config.sfprobe_receiver, &sp->collectorIP, &sp->collectorPort);
   if (config.sampling_rate) sp->samplingRate = config.sampling_rate;
+  else if (config.ext_sampling_rate) sp->samplingRate = config.ext_sampling_rate;
 }
 
 /*_________________---------------------------__________________

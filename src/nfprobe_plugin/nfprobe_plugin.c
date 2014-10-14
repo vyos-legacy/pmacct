@@ -264,8 +264,8 @@ void handle_hostbyteorder_packet(struct pkt_data *data)
 #endif
   data->primitives.src_port = htons(data->primitives.src_port); 
   data->primitives.dst_port = htons(data->primitives.dst_port); 
-  data->primitives.src_as = htons(data->primitives.src_as); 
-  data->primitives.dst_as = htons(data->primitives.dst_as); 
+  data->primitives.src_as = htonl(data->primitives.src_as); 
+  data->primitives.dst_as = htonl(data->primitives.dst_as); 
 }
 
 /* Fill in transport-layer (tcp/udp) portions of flow record */
@@ -309,6 +309,8 @@ l2_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *extra
   flow->vlan = p->vlan_id;
   flow->mpls_label[ndx] = extras->mpls_top_label;
 #endif
+  flow->ifindex[ndx] = extras->ifindex_in;
+  flow->ifindex[ndx ^ 1] = extras->ifindex_out;
 
   return (0);
 }
@@ -343,7 +345,8 @@ ipv4_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *ext
   flow->packets[ndx] = data->pkt_num;
   flow->flows[ndx] = data->flo_num;
   flow->class = p->class;
-  flow->tag = p->id;
+  flow->tag[ndx] = p->id;
+  flow->tag2[ndx] = p->id2;
 
   *isfrag = 0;
 
@@ -375,7 +378,8 @@ ipv6_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *ext
   flow->packets[ndx] = data->pkt_num; 
   flow->flows[ndx] = data->flo_num;
   flow->class = p->class;
-  flow->tag = p->id;
+  flow->tag[ndx] = p->id;
+  flow->tag2[ndx] = p->id2;
 
   *isfrag = 0;
 
@@ -553,7 +557,10 @@ process_packet(struct FLOWTRACK *ft, struct pkt_data *data, struct pkt_extras *e
     flow->tcp_flags[1] |= tmp.tcp_flags[1];
     flow->tos[1] = tmp.tos[1]; // XXX
     if (!flow->class) flow->class = tmp.class;
-    if (!flow->tag) flow->tag = tmp.tag;
+    if (!flow->tag[0]) flow->tag[0] = tmp.tag[0];
+    if (!flow->tag[1]) flow->tag[1] = tmp.tag[1];
+    if (!flow->tag2[0]) flow->tag2[0] = tmp.tag2[0];
+    if (!flow->tag2[1]) flow->tag2[1] = tmp.tag2[1];
   }
 	
   memcpy(&flow->flow_last, received_time, sizeof(flow->flow_last));
@@ -1392,6 +1399,7 @@ read_data:
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
       while (((struct ch_buf_hdr *)pipebuf)->num) {
+
 	if (config.networks_file) {
 	  memcpy(&dummy.primitives.src_ip, &data->primitives.src_ip, HostAddrSz);
 	  memcpy(&dummy.primitives.dst_ip, &data->primitives.dst_ip, HostAddrSz);

@@ -22,13 +22,13 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow1.c,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ */
+/* $Id: netflow1.c,v 1.2 2009/11/29 13:45:52 paolo Exp $ */
 
 #include "common.h"
 #include "treetype.h"
 #include "nfprobe_plugin.h"
 
-RCSID("$Id: netflow1.c,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $");
+RCSID("$Id: netflow1.c,v 1.2 2009/11/29 13:45:52 paolo Exp $");
 
 /*
  * This is the Cisco Netflow(tm) version 1 packet format
@@ -112,6 +112,8 @@ send_netflow_v1(struct FLOW **flows, int num_flows, int nfsock,
 			flw->dest_ip = flows[i]->addr[1].v4.s_addr;
 			flw->src_port = flows[i]->port[0];
 			flw->dest_port = flows[i]->port[1];
+                        flw->if_index_in = htons(flows[i]->ifindex[0]);
+                        flw->if_index_out = htons(flows[i]->ifindex[1]);
 			flw->flow_packets = htonl(flows[i]->packets[0]);
 			flw->flow_octets = htonl(flows[i]->octets[0]);
 			flw->flow_start =
@@ -134,6 +136,8 @@ send_netflow_v1(struct FLOW **flows, int num_flows, int nfsock,
 			flw->dest_ip = flows[i]->addr[0].v4.s_addr;
 			flw->src_port = flows[i]->port[1];
 			flw->dest_port = flows[i]->port[0];
+                        flw->if_index_in = htons(flows[i]->ifindex[1]);
+                        flw->if_index_out = htons(flows[i]->ifindex[0]);
 			flw->flow_packets = htonl(flows[i]->packets[1]);
 			flw->flow_octets = htonl(flows[i]->octets[1]);
 			flw->flow_start =
