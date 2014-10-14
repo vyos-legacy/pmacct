@@ -1,4 +1,4 @@
-/* @(#) $Header: /home/repo-0.12/pmacct/include/ip6.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ (LBL) */
+/* @(#) $Header: /home/repo-0.14/pmacct/include/ip6.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ (LBL) */
 /*	$NetBSD: ip6.h,v 1.9 2000/07/13 05:34:21 itojun Exp $	*/
 /*	$KAME: ip6.h,v 1.9 2000/07/02 21:01:32 itojun Exp $	*/
 

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
 */
 
 /*
@@ -83,6 +83,14 @@ void count_cos_handler(const struct db_cache *cache_elem, const struct insert_da
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->primitives.cos);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->primitives.cos);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_etype_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->primitives.etype);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->primitives.etype);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
@@ -238,10 +246,13 @@ void count_src_med_handler(const struct db_cache *cache_elem, const struct inser
   *ptr_values += strlen(*ptr_values);
 }
 
-void count_is_symmetric_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+void count_mpls_vpn_rd_handler(const struct db_cache *cache_elem, const struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
-  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->cbgp->is_symmetric);
-  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->cbgp->is_symmetric);
+  char ptr[SRVBUFLEN];
+
+  bgp_rd2str(ptr, &cache_elem->cbgp->mpls_vpn_rd);
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ptr);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }

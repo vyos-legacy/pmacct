@@ -1,9 +1,14 @@
+/*
+    pmacct (Promiscuous mode IP Accounting package)
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+*/
+
 /* 
  * Definitions for BGP packet disassembly structures and routine
  *
  * Baselined from:
  *
- * $Id: bgp_packet.h,v 1.2 2010/06/30 11:08:05 paolo Exp $
+ * $Id: bgp_packet.h,v 1.4 2012/04/10 14:53:21 paolo Exp $
  *
  * Wireshark - Network traffic analyzer
  * By Gerald Combs <gerald@wireshark.org>
@@ -58,7 +63,8 @@
 #define SAFI_MULTICAST            2
 #define SAFI_UNICAST_MULTICAST    3
 #define SAFI_MPLS_LABEL           4
-#define SAFI_MAX                  5
+#define SAFI_MPLS_VPN             128
+#define SAFI_MAX                  129
 
 struct bgp_header {
     u_int8_t bgpo_marker[BGP_MARKER_SIZE];

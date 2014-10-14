@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
 */
 
 /*
@@ -188,10 +188,12 @@ search_smp_if_status_table(struct xflow_status_entry_sampling *sentry, u_int32_t
 }
 
 struct xflow_status_entry_sampling *
-search_smp_id_status_table(struct xflow_status_entry_sampling *sentry, u_int8_t sampler_id)
+search_smp_id_status_table(struct xflow_status_entry_sampling *sentry, u_int16_t sampler_id, u_int8_t return_unequal)
 {
+  /* Match a samplerID or, if samplerID within a data record is zero and no match was
+     possible, then return the last samplerID defined -- last part is C7600 workaround */
   while (sentry) {
-    if (sentry->sampler_id == sampler_id) return sentry;
+    if (sentry->sampler_id == sampler_id || (return_unequal && !sampler_id && !sentry->next)) return sentry;
     sentry = sentry->next;
   }
 

@@ -1,4 +1,11 @@
 /*
+    pmacct (Promiscuous mode IP Accounting package)
+    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+*/
+
+/*
+ * Originally based on softflowd which is:
+ *
  * Copyright 2002 Damien Miller <djm@mindrot.org> All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -88,6 +95,7 @@ static const struct NETFLOW_SENDER nf[] = {
 	{ 5, send_netflow_v5, 0 },
 	{ 1, send_netflow_v1, 0 },
 	{ 9, send_netflow_v9, 1 },
+	{ 10, send_netflow_v9, 1 },
 	{ -1, NULL, 0 },
 };
 
@@ -1003,8 +1011,8 @@ static void flow_cb(u_char *user_data, struct pkt_data *data, struct pkt_extras 
   struct CB_CTXT *cb_ctxt = (struct CB_CTXT *)user_data;
   struct timeval tv;
 
-  tv.tv_sec = data->time_start;
-  tv.tv_usec = 0; /* XXX */ 
+  tv.tv_sec = data->time_start.tv_sec;
+  tv.tv_usec = data->time_start.tv_usec; 
   if (process_packet(cb_ctxt->ft, data, extras, &tv) == PP_MALLOC_FAIL) cb_ctxt->fatal = 1;
 }
 
@@ -1288,6 +1296,11 @@ void nfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   recollect_pipe_memory(ptr);
   pm_setproctitle("%s [%s]", "Netflow Probe Plugin", config.name);
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
+  if (config.logfile) {
+    fclose(config.logfile_fd);
+    config.logfile_fd = open_logfile(config.logfile);
+  }
+
   Log(LOG_INFO, "INFO ( %s/%s ): NetFlow probe plugin is originally based on softflowd 0.9.7 software, Copyright 2002 Damien Miller <djm@mindrot.org> All rights reserved.\n",
 		  config.name, config.type);
 
@@ -1491,8 +1504,18 @@ expiry_check:
        * expire flows based on time - instead we only 
        * expire flows when the flow table is full. 
        */
-      if (check_expired(&flowtrack, &target, capfile == NULL ? CE_EXPIRE_NORMAL : CE_EXPIRE_FORCED, engine_type, engine_id) < 0)
+      if (check_expired(&flowtrack, &target, capfile == NULL ? CE_EXPIRE_NORMAL : CE_EXPIRE_FORCED, engine_type, engine_id) < 0) {
 	Log(LOG_WARNING, "WARN ( %s/%s ): Unable to export flows.\n", config.name, config.type);
+
+	/* Let's try to sleep a bit and re-open the NetFlow send socket */
+	if (dest.ss_family != 0) {
+	  sleep(5);
+	  target.fd = connsock(&dest, dest_len, hoplimit);
+
+	  Log(LOG_INFO, "INFO ( %s/%s ): Exporting flows to [%s]:%s\n",
+			config.name, config.type, dest_addr, dest_serv);
+	}
+      }
 	
       /*
        * If we are over max_flows, force-expire the oldest 
