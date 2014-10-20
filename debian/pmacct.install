@@ -1,0 +1,5 @@
+debian/pmacctd.conf etc/pmacct
+debian/sfacctd.conf etc/pmacct
+debian/nfacctd.conf etc/pmacct
+debian/uacctd.conf  etc/pmacct
+

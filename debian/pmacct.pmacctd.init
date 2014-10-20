@@ -1,14 +1,14 @@
 #!/bin/sh
 
 ### BEGIN INIT INFO
-# Provides:             nfacctd
+# Provides:             pmacctd
 # Required-Start:       $network $syslog $remote_fs
 # Required-Stop:        $network $syslog $remote_fs
 # Should-Start:         postgresql mysql
 # Should-Stop:          postgresql mysql
 # Default-Start:        2 3 4 5
 # Default-Stop:         0 1 6
-# Short-Description:    netflow accounting daemon
+# Short-Description:    promiscuous mode accounting daemon
 ### END INIT INFO
 
 # Author: Bernd Zeimetz <bzed@debian.org>
@@ -17,12 +17,12 @@
 
 PATH=/sbin:/usr/sbin:/bin:/usr/bin
 DESC="promiscuous mode accounting daemon"
-NAME=nfacctd
-DAEMON=/usr/sbin/nfacctd
+NAME=pmacctd
+DAEMON=/usr/sbin/pmacctd
 DAEMON_OPTS=""
 PIDFILE=/var/run/$NAME.pid
 SCRIPTNAME=/etc/init.d/$NAME
-NFACCTD_CONF=/etc/pmacct/nfacctd.conf
+PMACCTD_CONF=/etc/pmacct/pmacctd.conf
 
 # Exit if the package is not installed
 [ -x "$DAEMON" ] || exit 0
@@ -50,7 +50,7 @@ do_start()
 	start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON --test > /dev/null \
 		|| return 1
 	start-stop-daemon --start --quiet --pidfile $PIDFILE --exec $DAEMON -- \
-                -F $PIDFILE -f "$NFACCTD_CONF" -D \
+                -F $PIDFILE -f "$PMACCTD_CONF" -D \
 		$DAEMON_OPTS \
 		|| return 2
 }

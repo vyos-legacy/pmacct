@@ -1,0 +1,10 @@
+[Unit]
+Description=ulog accounting daemon
+After=network.target
+
+[Service]
+EnvironmentFile=-/etc/default/uacctd
+ExecStart=/usr/sbin/uacctd -f ${PMACCTD_CONF} $DAEMON_OPTS
+
+[Install]
+WantedBy=multi-user.target

@@ -1,17 +1,7 @@
-# Defaults for uacct initscript
-# sourced by /etc/init.d/uacct
-# installed at /etc/default/uacct by the maintainer scripts
-
-#
-# This is a POSIX shell fragment
-#
+# Defaults for uacct initscript and systemd service
 
 # Location of the configuration file
-PMACCTD_CONF=/etc/uacct/uacctd.conf
-
-# List of interfaces to start accounting on.
-# See /usr/share/doc/uacct/README.Debian for details.
-INTERFACES=""
+UACCTD_CONF=/etc/pmacct/uacctd.conf
 
 # Additional options that are passed to uacctd
 DAEMON_OPTS=""

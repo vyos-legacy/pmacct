@@ -1,0 +1,10 @@
+[Unit]
+Description=netflow accounting daemon
+After=network.target
+
+[Service]
+EnvironmentFile=-/etc/default/nfacctd
+ExecStart=/usr/sbin/nfacctd -f ${PMACCTD_CONF} $DAEMON_OPTS
+
+[Install]
+WantedBy=multi-user.target

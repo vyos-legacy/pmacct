@@ -1,0 +1,10 @@
+[Unit]
+Description=sflow accounting daemon
+After=network.target
+
+[Service]
+EnvironmentFile=-/etc/default/sfacctd
+ExecStart=/usr/sbin/sfacctd -f ${PMACCTD_CONF} $DAEMON_OPTS
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+pmacct (1.5.0-1) unstable; urgency=high
+
+  * With the packaging of the new major upstream release the all init
+    scripts were reworked and various bugs being fixed.
+
+  * Most important change for pmacctd users: Specifying multiple interfaces
+    does not work anymore without manually copying / editing the
+    defaults file and init scripts. Although this feature was nice
+    to have, supporting it in systemd is rather hard (but possible,
+    patches welcome!) and implementing it properly in an init script is
+    also error-prone.
+    The init script and defaults file were renamed from pmacct to pmacctd
+    as it was supposed to be done some years ago already.
+
+ -- Bernd Zeimetz <bzed@debian.org>  Mon, 20 Oct 2014 21:16:32 +0200

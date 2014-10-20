@@ -1,0 +1,10 @@
+[Unit]
+Description=promiscuous mode accounting daemon
+After=network.target
+
+[Service]
+EnvironmentFile=-/etc/default/pmacctd
+ExecStart=/usr/sbin/pmacctd -f ${PMACCTD_CONF} $DAEMON_OPTS
+
+[Install]
+WantedBy=multi-user.target

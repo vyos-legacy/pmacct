@@ -1,0 +1,17 @@
+#!/bin/sh
+
+set -e
+if dpkg-maintscript-helper supports mv_conffile; then
+    dpkg-maintscript-helper mv_conffile \
+        /etc/init.d/pmacct \
+        /etc/init.d/pmacctd \
+        1.5.0-1~~ pmacct -- "$@"
+
+    dpkg-maintscript-helper mv_conffile \
+        /etc/default/pmacct \
+        /etc/default/pmacctd \
+        1.5.0-1~~ pmacct -- "$@"
+fi
+
+#DEBHELPER#
+
