@@ -15,7 +15,10 @@ override_dh_auto_configure:
 		--enable-v4-mapped \
 		--enable-64bit \
 		--enable-threads \
-		--enable-ulog
+		--enable-ulog \
+		--enable-jansson \
+		--enable-geoip \
+		--enable-rabbitmq
 
 
 override_dh_installinit:
