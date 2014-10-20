@@ -1,3 +1,30 @@
+pmacct (1.5.0-1) unstable; urgency=medium
+
+  * [79b10bef] Merge tag 'upstream/1.5.0'
+    Upstream version 1.5.0 (Closes: #764513)
+    Ships with a fixed pgsql schema (Closes: #705093)
+  * [4a16aa64] Add build-dependencies for new plugins.
+    libgeoip-dev, librabbitmq-dev, libjansson-dev
+  * [c5bbcc25] New package maintainer.
+    Thanks a lot to Jamie Wilkinson for taking care
+    of the package until now!
+  * [878069c5] Enable v4 mapped sockets.
+  * [38d9fb95] Refurbish packaging.
+    use debhelper compat level 9, make default files compatible to systemd,
+    install uacctd.conf into /etc/pmacct. Reqork and fix all init scripts.
+    Add systemd service files.
+    All systemd services and init scripts are disabled by default as all
+    daemons need a proper configuration to work.
+    Closes: #686337
+    Closes: #725983
+  * [b64b7e55] Enable build with rabbitmq, jansson and geoip.
+  * [cb44cd73] Add patch to fix format-security error in src/log.c
+  * [ddb23c73] Fix and update documentation.
+  * [a73fa63e] Run add the systemd sequence to dh.
+  * [5c9f3380] Call dh_systemd_enable with --no-enable.
+
+ -- Bernd Zeimetz <bzed@debian.org>  Mon, 20 Oct 2014 23:37:21 +0200
+
 pmacct (0.14.0-1.1) unstable; urgency=low
 
   * Non-maintainer upload.
