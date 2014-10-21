@@ -3,6 +3,12 @@
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
+DEB_HOST_ARCH_OS = $(shell dpkg-architecture -qDEB_HOST_ARCH_OS)
+
+ifeq ($(DEB_HOST_ARCH_OS),linux)
+    extra_confflags += --enable-ulog
+endif
+
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
@@ -15,10 +21,10 @@ override_dh_auto_configure:
 		--enable-v4-mapped \
 		--enable-64bit \
 		--enable-threads \
-		--enable-ulog \
 		--enable-jansson \
 		--enable-geoip \
-		--enable-rabbitmq
+		--enable-rabbitmq \
+		$(extra_confflags)
 
 
 override_dh_installinit:
