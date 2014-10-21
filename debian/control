@@ -15,6 +15,9 @@ Build-Depends: debhelper (>= 9),
  autotools-dev,
  dh-systemd
 Standards-Version: 3.9.6
+Homepage: http://www.pmacct.net/
+Vcs-Git: https://github.com/bzed/pkg-pmacct.git
+Vcs-Browser: https://github.com/bzed/pkg-pmacct
 
 Package: pmacct
 Architecture: any
