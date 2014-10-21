@@ -1,3 +1,9 @@
+pmacct (1.5.0-2) unstable; urgency=medium
+
+  * [5ede5bde] Build with ulog support on linux only.
+
+ -- Bernd Zeimetz <bzed@debian.org>  Tue, 21 Oct 2014 11:30:12 +0200
+
 pmacct (1.5.0-1) unstable; urgency=medium
 
   * [79b10bef] Merge tag 'upstream/1.5.0'
