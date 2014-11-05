@@ -1,3 +1,15 @@
+pmacct (1.5.0-3) unstable; urgency=medium
+
+  * [e9cf7671] Add Homepage and Vcs information.
+  * [3783d4a2] Fix dpkg dependency for easy backporting.
+  * [7090c1cc] Fix systemd service files.
+    - Read the appropriate config file
+    - Use Type=forking to make upgrades easier.
+    Thanks to Malcolm Scott (Closes: #767977)
+  * [9cc618e2] Add ${misc:Depends} to Depends.
+
+ -- Bernd Zeimetz <bzed@debian.org>  Wed, 05 Nov 2014 18:27:55 +0100
+
 pmacct (1.5.0-2) unstable; urgency=medium
 
   * [5ede5bde] Build with ulog support on linux only.
