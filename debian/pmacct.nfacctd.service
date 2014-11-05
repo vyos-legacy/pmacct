@@ -3,8 +3,9 @@ Description=netflow accounting daemon
 After=network.target
 
 [Service]
+Type=forking
 EnvironmentFile=-/etc/default/nfacctd
-ExecStart=/usr/sbin/nfacctd -f ${PMACCTD_CONF} $DAEMON_OPTS
+ExecStart=/usr/sbin/nfacctd -f ${NFACCTD_CONF} $DAEMON_OPTS
 
 [Install]
 WantedBy=multi-user.target

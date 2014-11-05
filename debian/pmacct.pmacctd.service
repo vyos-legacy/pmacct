@@ -3,6 +3,7 @@ Description=promiscuous mode accounting daemon
 After=network.target
 
 [Service]
+Type=forking
 EnvironmentFile=-/etc/default/pmacctd
 ExecStart=/usr/sbin/pmacctd -f ${PMACCTD_CONF} $DAEMON_OPTS
 
