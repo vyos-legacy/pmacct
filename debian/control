@@ -21,7 +21,7 @@ Vcs-Browser: https://github.com/bzed/pkg-pmacct
 
 Package: pmacct
 Architecture: any
-Depends: ${shlibs:Depends}, net-tools [linux-any] | freebsd-net-tools [kfreebsd-any], psmisc, lsb-base (>= 3.2-14)
+Depends: ${shlibs:Depends}, net-tools [linux-any] | freebsd-net-tools [kfreebsd-any], psmisc, lsb-base (>= 3.2-14), ${misc:Depends}
 Pre-Depends: dpkg (>= 1.15.8)
 Description: promiscuous mode traffic accountant
  pmacct is a tool designed to gather traffic information (bytes and number
