@@ -1,7 +1,7 @@
 Source: pmacct
 Section: net
 Priority: optional
-Maintainer: Vyatta Package Maintainers <maintainers@vyatta.com>
+Maintainer: VyOS Package Maintainers <maintainers@vyos.net>
 Build-Depends: debhelper (>= 5), zlib1g-dev, libpcap0.8-dev
 Standards-Version: 3.7.2
 
