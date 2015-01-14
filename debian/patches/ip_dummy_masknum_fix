@@ -1,0 +1,37 @@
+Taken from upstream
+
+commit dff5ca21847d799759de27e8fd080e1f7a04cc30
+Author: paolo <paolo>
+Date:   Tue Jan 13 13:43:24 2015 +0000
+
+    * fix, net_aggr.c: identification of dummy entry now based on masknum only.
+      Thanks to Bernd Zeimetz for his support resolving the issue.
+
+--- a/src/net_aggr.c
++++ b/src/net_aggr.c
+@@ -1,6 +1,6 @@
+ /*
+     pmacct (Promiscuous mode IP Accounting package)
+-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
++    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+ */
+ 
+ /*
+@@ -464,7 +464,7 @@ struct networks_table_entry *binsearch(s
+ 
+   ret = networks_cache_search(nc, &addr); 
+   if (ret) {
+-    if (!ret->mask && ret->masknum) return NULL; /* dummy entry identification */
++    if (ret->masknum == 255) return NULL; /* dummy entry identification */
+     else return ret;
+   }
+ 
+@@ -1792,7 +1792,7 @@ struct networks6_table_entry *binsearch6
+   
+   ret = networks_cache_search6(nc, addr);
+   if (ret) {
+-    if (!ret->mask && ret->masknum) return NULL; /* dummy entry identification */
++    if (ret->masknum == 255) return NULL; /* dummy entry identification */
+     else return ret;
+   }
+ 
