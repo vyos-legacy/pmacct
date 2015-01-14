@@ -1,3 +1,10 @@
+pmacct (1.5.0-4) unstable; urgency=medium
+
+  * [d7df1811] Fix identification of dummy entry.
+    Upstream commit dff5ca21847d799759de27e8fd080e1f7a04cc30 (Closes: #775330)
+
+ -- Bernd Zeimetz <bzed@debian.org>  Wed, 14 Jan 2015 10:42:30 +0100
+
 pmacct (1.5.0-3) unstable; urgency=medium
 
   * [e9cf7671] Add Homepage and Vcs information.
