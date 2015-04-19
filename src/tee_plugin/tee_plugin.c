@@ -248,10 +248,18 @@ void Tee_send(struct pkt_msg *msg, struct sockaddr *target, int fd)
 
   if (!config.tee_transparent) {
     if (send(fd, msg->payload, msg->len, 0) == -1) {
+      struct host_addr a;
+      u_char agent_addr[50];
+      u_int16_t agent_port;
+
+      sa_to_addr((struct sockaddr *)msg, &a, &agent_port);
+      addr_to_str(agent_addr, &a);
+
       sa_to_addr((struct sockaddr *)target, &r, &recv_port);
       addr_to_str(recv_addr, &r);
 
-      Log(LOG_ERR, "ERROR ( %s/%s ): send() to [%s] failed (%s)\n", config.name, config.type, recv_addr, strerror(errno));
+      Log(LOG_ERR, "ERROR ( %s/%s ): send() from [%s:%u] seqno [%u] to [%s] failed (%s)\n",
+			config.name, config.type, agent_addr, agent_port, msg->seqno, recv_addr, strerror(errno));
     }
   }
   else {
@@ -289,7 +297,13 @@ void Tee_send(struct pkt_msg *msg, struct sockaddr *target, int fd)
         i4h->ip_vhl = 4;
         i4h->ip_vhl <<= 4;
         i4h->ip_vhl |= (IP4HdrSz/4);
-        i4h->ip_tos = 0;
+
+	if (config.nfprobe_ipprec) {
+	  int opt = config.nfprobe_ipprec << 5;
+          i4h->ip_tos = opt;
+	}
+	else i4h->ip_tos = 0;
+
 #if !defined BSD
         i4h->ip_len = htons(IP4HdrSz+UDPHdrSz+msg->len);
 #else
@@ -320,10 +334,18 @@ void Tee_send(struct pkt_msg *msg, struct sockaddr *target, int fd)
       memcpy(buf_ptr, msg->payload, msg->len);
 
       if (send(fd, tee_send_buf, IP4HdrSz+UDPHdrSz+msg->len, 0) == -1) {
+        struct host_addr a;
+        u_char agent_addr[50];
+        u_int16_t agent_port;
+
+        sa_to_addr((struct sockaddr *)msg, &a, &agent_port);
+        addr_to_str(agent_addr, &a);
+
 	sa_to_addr((struct sockaddr *)target, &r, &recv_port);
 	addr_to_str(recv_addr, &r);
 
-        Log(LOG_ERR, "ERROR ( %s/%s ): raw send() to [%s] failed (%s)\n", config.name, config.type, recv_addr, strerror(errno));
+        Log(LOG_ERR, "ERROR ( %s/%s ): raw send() from [%s:%u] seqno [%u] to [%s] failed (%s)\n",
+			config.name, config.type, agent_addr, agent_port, msg->seqno, recv_addr, strerror(errno));
       }
     }
     else {
@@ -408,6 +430,14 @@ int Tee_prepare_sock(struct sockaddr *addr, socklen_t len)
       exit_plugin(1);
     }
 
+    if (config.nfprobe_ipprec) {
+      int opt = config.nfprobe_ipprec << 5;
+      int rc;
+
+      rc = setsockopt(s, IPPROTO_IP, IP_TOS, &opt, sizeof(opt));
+      if (rc < 0) Log(LOG_WARNING, "WARN ( %s/%s ): setsockopt() failed for IP_TOS: %s\n", config.name, config.type, strerror(errno));
+    }
+
     if (ret && bind(s, (struct sockaddr *) &ssource_ip, sizeof(ssource_ip)) == -1)
       Log(LOG_ERR, "ERROR ( %s/%s ): bind() error: %s\n", config.name, config.type, strerror(errno));
   }
@@ -419,12 +449,26 @@ int Tee_prepare_sock(struct sockaddr *addr, socklen_t len)
       exit_plugin(1);
     }
 
+
 #if defined BSD
     setsockopt(s, IPPROTO_IP, IP_HDRINCL, &hincl, sizeof(hincl));
 #endif
   }
 
-  /* XXX: SNDBUF tuning? */
+  if (config.tee_pipe_size) {
+    int l = sizeof(config.tee_pipe_size);
+    u_int64_t saved = 0, obtained = 0;
+    
+    getsockopt(s, SOL_SOCKET, SO_SNDBUF, &saved, &l);
+    Setsocksize(s, SOL_SOCKET, SO_SNDBUF, &config.tee_pipe_size, sizeof(config.tee_pipe_size));
+    getsockopt(s, SOL_SOCKET, SO_SNDBUF, &obtained, &l);
+  
+    if (obtained < saved) {
+      Setsocksize(s, SOL_SOCKET, SO_SNDBUF, &saved, l);
+      getsockopt(s, SOL_SOCKET, SO_SNDBUF, &obtained, &l);
+    }
+    Log(LOG_INFO, "INFO ( %s/%s ): tee_pipe_size: obtained=%u target=%u.\n", config.name, config.type, obtained, config.tee_pipe_size);
+  }
 
   if (connect(s, (struct sockaddr *)addr, len) == -1) {
     Log(LOG_ERR, "ERROR ( %s/%s ): connect() error: %s\n", config.name, config.type, strerror(errno));

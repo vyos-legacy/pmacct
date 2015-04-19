@@ -38,7 +38,8 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct ports_table pt;
   unsigned char *pipebuf;
   struct pollfd pfd;
-  time_t t, now;
+  struct insert_data idata;
+  time_t t;
   int timeout, ret, num; 
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
@@ -61,6 +62,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   P_set_signals();
   P_init_default_values();
+  P_config_checks();
   pipebuf = (unsigned char *) Malloc(config.buffer_size);
   memset(pipebuf, 0, config.buffer_size);
 
@@ -96,6 +98,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     }
   }
   
+  memset(&idata, 0, sizeof(idata));
   memset(&prim_ptrs, 0, sizeof(prim_ptrs));
   set_primptrs_funcs(&extras);
 
@@ -103,21 +106,18 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   pfd.events = POLLIN;
   setnonblocking(pipe_fd);
 
-  now = time(NULL);
+  idata.now = time(NULL);
 
   /* print_refresh time init: deadline */
-  refresh_deadline = now; 
-  t = roundoff_time(refresh_deadline, config.sql_history_roundoff);
-  while ((t+config.sql_refresh_time) < refresh_deadline) t += config.sql_refresh_time;
-  refresh_deadline = t;
-  refresh_deadline += config.sql_refresh_time; /* it's a deadline not a basetime */
+  refresh_deadline = idata.now; 
+  P_init_refresh_deadline(&refresh_deadline);
 
   if (config.sql_history) {
     basetime_init = P_init_historical_acct;
     basetime_eval = P_eval_historical_acct;
     basetime_cmp = P_cmp_historical_acct;
 
-    (*basetime_init)(now);
+    (*basetime_init)(idata.now);
   }
 
   /* setting number of entries in _protocols structure */
@@ -141,10 +141,10 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       if (ret < 0) goto poll_again;
     }
 
-    now = time(NULL);
+    idata.now = time(NULL);
 
     if (config.sql_history) {
-      while (now > (basetime.tv_sec + timeslot)) {
+      while (idata.now > (basetime.tv_sec + timeslot)) {
 	new_basetime.tv_sec = basetime.tv_sec;
         basetime.tv_sec += timeslot;
         if (config.sql_history == COUNT_MONTHLY)
@@ -193,7 +193,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       rg->ptr += bufsz;
 
       /* lazy refresh time handling */ 
-      if (now > refresh_deadline) P_cache_handle_flush_event(&pt);
+      if (idata.now > refresh_deadline) P_cache_handle_flush_event(&pt);
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
@@ -214,7 +214,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           evaluate_pkt_len_distrib(data);
 
         prim_ptrs.data = data;
-        (*insert_func)(&prim_ptrs);
+        (*insert_func)(&prim_ptrs, &idata);
 
 	((struct ch_buf_hdr *)pipebuf)->num--;
         if (((struct ch_buf_hdr *)pipebuf)->num) {
@@ -526,13 +526,50 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
         bson_append_string(bson_elem, "mpls_vpn_rd", rd_str);
       }
   
-      if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET)) {
-        addr_to_str(src_host, &data->src_ip);
-        bson_append_string(bson_elem, "ip_src", src_host);
+      if (!config.tmp_net_own_field) {
+        if (config.what_to_count & COUNT_SRC_HOST) {
+          addr_to_str(src_host, &data->src_ip);
+          bson_append_string(bson_elem, "ip_src", src_host);
+        }
+
+        if (config.what_to_count & COUNT_SRC_NET) {
+          addr_to_str(src_host, &data->src_net);
+          bson_append_string(bson_elem, "ip_src", src_host);
+        }
       }
-      if (config.what_to_count & (COUNT_DST_HOST|COUNT_DST_NET)) {
-        addr_to_str(dst_host, &data->dst_ip);
-        bson_append_string(bson_elem, "ip_dst", dst_host);
+      else {
+        if (config.what_to_count & COUNT_SRC_HOST) {
+          addr_to_str(src_host, &data->src_ip);
+          bson_append_string(bson_elem, "ip_src", src_host);
+        }
+
+        if (config.what_to_count & COUNT_SRC_NET) {
+          addr_to_str(src_host, &data->src_net);
+          bson_append_string(bson_elem, "net_src", src_host);
+        }
+      }
+
+      if (!config.tmp_net_own_field) {
+        if (config.what_to_count & COUNT_DST_HOST) {
+          addr_to_str(dst_host, &data->dst_ip);
+          bson_append_string(bson_elem, "ip_dst", dst_host);
+        }
+
+        if (config.what_to_count & COUNT_DST_NET) {
+          addr_to_str(dst_host, &data->dst_net);
+          bson_append_string(bson_elem, "ip_dst", dst_host);
+        }
+      }
+      else {
+        if (config.what_to_count & COUNT_DST_HOST) {
+          addr_to_str(dst_host, &data->dst_ip);
+          bson_append_string(bson_elem, "ip_dst", dst_host);
+        }
+
+        if (config.what_to_count & COUNT_DST_NET) {
+          addr_to_str(dst_host, &data->dst_net);
+          bson_append_string(bson_elem, "net_dst", dst_host);
+        }
       }
   
       if (config.what_to_count & COUNT_SRC_NMASK) bson_append_int(bson_elem, "mask_src", data->src_nmask);
@@ -602,6 +639,18 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
         if (pnat->timestamp_end.tv_usec) bdate += (pnat->timestamp_end.tv_usec/1000);
 
         bson_append_date(bson_elem, "timestamp_end", bdate);
+      }
+
+      if (config.nfacctd_stitching && queue[j]->stitch) {
+        bson_date_t bdate_min, bdate_max;
+
+        bdate_min = 1000*queue[j]->stitch->timestamp_min.tv_sec;
+        if (queue[j]->stitch->timestamp_min.tv_usec) bdate_min += (queue[j]->stitch->timestamp_min.tv_usec/1000);
+        bson_append_date(bson_elem, "timestamp_min", bdate_min);
+
+        bdate_max = 1000*queue[j]->stitch->timestamp_max.tv_sec;
+        if (queue[j]->stitch->timestamp_max.tv_usec) bdate_max += (queue[j]->stitch->timestamp_max.tv_usec/1000);
+        bson_append_date(bson_elem, "timestamp_max", bdate_max);
       }
   
       /* all custom primitives printed here */

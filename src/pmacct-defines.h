@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -24,7 +24,7 @@
 #define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:uRVa"
 #define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:O:uwWL:RVa"
 #define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:v:o:O:uRg:L:Va"
-#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:O:E:uDVU"
+#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:O:E:uDVUoi"
 #define N_PRIMITIVES 57
 #define N_FUNCS 10 
 #define MAX_N_PLUGINS 32
@@ -74,13 +74,13 @@
 #define PRIMITIVE_DESC_LEN	64
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.5.0"
-#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, uacctd 1.5.0"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.5.0"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 1.5.0"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 1.5.0"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.5.0"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.5.0"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.5.1"
+#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, uacctd 1.5.1"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.5.1"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 1.5.1"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 1.5.1"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.5.1"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.5.1"
 #define PMACCT_COMPILE_ARGS COMPILE_ARGS
 #ifndef TRUE
 #define TRUE 1
@@ -303,6 +303,7 @@
 #define WANT_PKT_LEN_DISTRIB_TABLE	0x00000080
 #define WANT_LOCK_OP			0x00000100
 #define WANT_CUSTOM_PRIMITIVES_TABLE	0x00000200
+#define WANT_ERASE_LAST_TSTAMP		0x00000400
 
 #define PIPE_TYPE_METADATA	0x00000001
 #define PIPE_TYPE_PAYLOAD	0x00000002
@@ -343,6 +344,9 @@
 #define CUSTOM_PRIMITIVE_TYPE_IP	4
 #define CUSTOM_PRIMITIVE_TYPE_MAC	5
 #define CUSTOM_PRIMITIVE_TYPE_RAW	6
+
+#define FUNC_TYPE_BGP	1
+#define FUNC_TYPE_BMP	2
 
 typedef u_int32_t pm_class_t;
 typedef u_int64_t pm_id_t;

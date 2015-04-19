@@ -1367,6 +1367,8 @@ void NF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
       memcpy(&pdata->primitives.vlan_id, pptrs->f_data+tpl->tpl[NF9_IN_VLAN].off, MIN(tpl->tpl[NF9_IN_VLAN].len, 2));
     else if (tpl->tpl[NF9_OUT_VLAN].len)
       memcpy(&pdata->primitives.vlan_id, pptrs->f_data+tpl->tpl[NF9_OUT_VLAN].off, MIN(tpl->tpl[NF9_OUT_VLAN].len, 2));
+    else if (tpl->tpl[NF9_DOT1QVLANID].len)
+      memcpy(&pdata->primitives.vlan_id, pptrs->f_data+tpl->tpl[NF9_DOT1QVLANID].off, MIN(tpl->tpl[NF9_DOT1QVLANID].len, 2));
 
     pdata->primitives.vlan_id = ntohs(pdata->primitives.vlan_id);
     break;
@@ -1377,6 +1379,20 @@ void NF_vlan_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
 
 void NF_cos_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch(hdr->version) {
+  case 10:
+  case 9:
+    if (tpl->tpl[NF9_DOT1QPRIORITY].len)
+      memcpy(&pdata->primitives.cos, pptrs->f_data+tpl->tpl[NF9_DOT1QPRIORITY].off, MIN(tpl->tpl[NF9_DOT1QPRIORITY].len, 1));
+
+    break;
+  default:
+    break;
+  }
 }
 
 void NF_etype_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
@@ -1406,7 +1422,6 @@ void NF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
-  u_int8_t src_mask = 0;
 
   switch(hdr->version) {
   case 10:
@@ -1427,7 +1442,7 @@ void NF_src_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
 	memcpy(&pdata->primitives.src_ip.address.ipv6, pptrs->f_data+tpl->tpl[NF9_IPV6_SRC_ADDR].off, MIN(tpl->tpl[NF9_IPV6_SRC_ADDR].len, 16));
         pdata->primitives.src_ip.family = AF_INET6;
       }
-      if (tpl->tpl[NF9_IPV6_SRC_PREFIX].len) {
+      else if (tpl->tpl[NF9_IPV6_SRC_PREFIX].len) {
 	memcpy(&pdata->primitives.src_ip.address.ipv6, pptrs->f_data+tpl->tpl[NF9_IPV6_SRC_PREFIX].off, MIN(tpl->tpl[NF9_IPV6_SRC_PREFIX].len, 16));
         pdata->primitives.src_ip.family = AF_INET6;
       }
@@ -1482,7 +1497,6 @@ void NF_dst_host_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
-  u_int8_t dst_mask = 0;
 
   switch(hdr->version) {
   case 10:
@@ -2616,6 +2630,10 @@ void NF_in_iface_handler(struct channels_list_entry *chptr, struct packet_ptrs *
       memcpy(&iface32, pptrs->f_data+tpl->tpl[NF9_INPUT_SNMP].off, 4);
       pdata->primitives.ifindex_in = ntohl(iface32);
     }
+    else if (tpl->tpl[NF9_INPUT_PHYSINT].len == 4) {
+      memcpy(&iface32, pptrs->f_data+tpl->tpl[NF9_INPUT_PHYSINT].off, 4);
+      pdata->primitives.ifindex_in = ntohl(iface32);
+    }
     break;
   case 8:
     switch(hdr->aggregation) {
@@ -2690,6 +2708,10 @@ void NF_out_iface_handler(struct channels_list_entry *chptr, struct packet_ptrs 
       memcpy(&iface32, pptrs->f_data+tpl->tpl[NF9_OUTPUT_SNMP].off, 4);
       pdata->primitives.ifindex_out = ntohl(iface32);
     }
+    else if (tpl->tpl[NF9_OUTPUT_PHYSINT].len == 4) {
+      memcpy(&iface32, pptrs->f_data+tpl->tpl[NF9_OUTPUT_PHYSINT].off, 4);
+      pdata->primitives.ifindex_out = ntohl(iface32);
+    }
     break;
   case 8:
     switch(hdr->aggregation) {
@@ -2762,6 +2784,7 @@ void NF_sampling_rate_handler(struct channels_list_entry *chptr, struct packet_p
   u_int16_t t16 = 0;
   u_int32_t sampler_id = 0, sample_pool = 0, t32 = 0;
   u_int8_t t8 = 0;
+  u_int64_t t64 = 0;
 
   if (config.sfacctd_renormalize) {
     pdata->primitives.sampling_rate = 1; /* already renormalized */
@@ -2788,7 +2811,7 @@ void NF_sampling_rate_handler(struct channels_list_entry *chptr, struct packet_p
     switch (hdr->version) {
     case 10:
     case 9:
-      if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len) {
+      if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len || tpl->tpl[NF9_SELECTOR_ID].len == 8) {
         if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len == 1) {
           memcpy(&t8, pptrs->f_data+tpl->tpl[NF9_FLOW_SAMPLER_ID].off, 1);
           sampler_id = t8;
@@ -2800,6 +2823,10 @@ void NF_sampling_rate_handler(struct channels_list_entry *chptr, struct packet_p
         else if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len == 4) {
           memcpy(&t32, pptrs->f_data+tpl->tpl[NF9_FLOW_SAMPLER_ID].off, 4);
           sampler_id = ntohl(t32);
+        }
+        else if (tpl->tpl[NF9_SELECTOR_ID].len == 8) {
+          memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_SELECTOR_ID].off, 8);
+          sampler_id = pm_ntohll(t64); /* XXX: sampler_id to be moved to 64 bit */
         }
 
         if (entry) {
@@ -3408,13 +3435,14 @@ void NF_counters_renormalize_handler(struct channels_list_entry *chptr, struct p
   u_int16_t t16 = 0;
   u_int32_t sampler_id = 0, sample_pool = 0, t32 = 0;
   u_int8_t t8 = 0;
+  u_int64_t t64 = 0;
 
   if (pptrs->renormalized) return;
 
   switch (hdr->version) {
   case 10:
   case 9:
-    if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len) {
+    if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len || tpl->tpl[NF9_SELECTOR_ID].len == 8) {
       if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len == 1) {
         memcpy(&t8, pptrs->f_data+tpl->tpl[NF9_FLOW_SAMPLER_ID].off, 1);
         sampler_id = t8;
@@ -3426,6 +3454,10 @@ void NF_counters_renormalize_handler(struct channels_list_entry *chptr, struct p
       else if (tpl->tpl[NF9_FLOW_SAMPLER_ID].len == 4) {
         memcpy(&t32, pptrs->f_data+tpl->tpl[NF9_FLOW_SAMPLER_ID].off, 4);
         sampler_id = ntohl(t32);
+      }
+      else if (tpl->tpl[NF9_SELECTOR_ID].len == 8) {
+        memcpy(&t64, pptrs->f_data+tpl->tpl[NF9_SELECTOR_ID].off, 8);
+        sampler_id = pm_ntohll(t64); /* XXX: sampler_id to be moved to 64 bit */
       }
 
       if (entry) {
@@ -3467,6 +3499,23 @@ void NF_counters_renormalize_handler(struct channels_list_entry *chptr, struct p
 
       pptrs->renormalized = TRUE;
     }
+    /* case of no SAMPLER_ID, ALU & IPFIX */
+    else {
+      if (entry) {
+        sentry = search_smp_id_status_table(entry->sampling, 0, TRUE);
+        if (!sentry && pptrs->f_status_g) {
+          entry = (struct xflow_status_entry *) pptrs->f_status_g;
+          sentry = search_smp_id_status_table(entry->sampling, 0, FALSE);
+        }
+      }
+      if (sentry) {
+        pdata->pkt_len = pdata->pkt_len * sentry->sample_pool;
+        pdata->pkt_num = pdata->pkt_num * sentry->sample_pool;
+
+        pptrs->renormalized = TRUE;
+      }
+    }
+
     break;
   case 5:
     hdr5 = (struct struct_header_v5 *) pptrs->f_header;
@@ -4310,12 +4359,24 @@ void SF_bgp_peer_src_as_fromext_handler(struct channels_list_entry *chptr, struc
 #if defined WITH_GEOIP
 void geoip_init()
 {
-  if (config.geoip_ipv4_file && !config.geoip_ipv4) 
+  if (config.geoip_ipv4_file && !config.geoip_ipv4) { 
     config.geoip_ipv4 = GeoIP_open(config.geoip_ipv4_file, (GEOIP_MEMORY_CACHE|GEOIP_CHECK_CACHE));
 
+    if (!config.geoip_ipv4 && !log_notification_isset(log_notifications.geoip_ipv4_file_null)) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): geoip_ipv4_file database can't be loaded.\n", config.name, config.type);
+      log_notification_set(&log_notifications.geoip_ipv4_file_null);
+    }
+  }
+
 #if defined ENABLE_IPV6
-  if (config.geoip_ipv6_file && !config.geoip_ipv6) 
+  if (config.geoip_ipv6_file && !config.geoip_ipv6) {
     config.geoip_ipv6 = GeoIP_open(config.geoip_ipv6_file, (GEOIP_MEMORY_CACHE|GEOIP_CHECK_CACHE));
+
+    if (!config.geoip_ipv6 && !log_notification_isset(log_notifications.geoip_ipv6_file_null)) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): geoip_ipv6_file database can't be loaded.\n", config.name, config.type);
+      log_notification_set(&log_notifications.geoip_ipv6_file_null);
+    }
+  }
 #endif
 }
 
@@ -4324,6 +4385,8 @@ void src_host_country_handler(struct channels_list_entry *chptr, struct packet_p
   struct pkt_data *pdata = (struct pkt_data *) *data;
 
   geoip_init();
+  pdata->primitives.src_ip_country = 0;
+
   if (config.geoip_ipv4) {
     if (pptrs->l3_proto == ETHERTYPE_IP)
       pdata->primitives.src_ip_country = GeoIP_id_by_ipnum(config.geoip_ipv4, ntohl(((struct my_iphdr *) pptrs->iph_ptr)->ip_src.s_addr));
@@ -4341,6 +4404,8 @@ void dst_host_country_handler(struct channels_list_entry *chptr, struct packet_p
   struct pkt_data *pdata = (struct pkt_data *) *data;
 
   geoip_init();
+  pdata->primitives.dst_ip_country = 0;
+
   if (config.geoip_ipv4) {
     if (pptrs->l3_proto == ETHERTYPE_IP)
       pdata->primitives.dst_ip_country = GeoIP_id_by_ipnum(config.geoip_ipv4, ntohl(((struct my_iphdr *) pptrs->iph_ptr)->ip_dst.s_addr));

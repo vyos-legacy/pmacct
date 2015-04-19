@@ -90,6 +90,19 @@ void P_init_default_values()
   set_preprocess_funcs(config.sql_preprocess, &prep, PREP_DICT_PRINT);
 }
 
+void P_config_checks()
+{
+  if (config.nfacctd_pro_rating && config.nfacctd_stitching) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): Pro-rating (ie. nfacctd_pro_rating) and stitching (ie. nfacctd_stitching) are mutual exclusive. Exiting.\n", config.name, config.type);
+    goto exit_lane;
+  }
+
+  return;
+
+exit_lane:
+  exit_plugin(1);
+}
+
 unsigned int P_cache_modulo(struct primitives_ptrs *prim_ptrs)
 {
   struct pkt_data *pdata = prim_ptrs->data;
@@ -171,7 +184,7 @@ struct chained_cache *P_cache_search(struct primitives_ptrs *prim_ptrs)
   return NULL;
 }
 
-void P_cache_insert(struct primitives_ptrs *prim_ptrs)
+void P_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata)
 {
   struct pkt_data *data = prim_ptrs->data;
   struct pkt_bgp_primitives *pbgp = prim_ptrs->pbgp;
@@ -376,11 +389,36 @@ void P_cache_insert(struct primitives_ptrs *prim_ptrs)
     cache_ptr->bytes_counter = data->pkt_len;
     cache_ptr->flow_type = data->flow_type;
     cache_ptr->tcp_flags = data->tcp_flags;
+
     if (config.what_to_count & COUNT_CLASS) {
       cache_ptr->bytes_counter += data->cst.ba;
       cache_ptr->packet_counter += data->cst.pa;
       cache_ptr->flow_counter += data->cst.fa;
     }
+
+    if (config.nfacctd_stitching) {
+      if (!cache_ptr->stitch) cache_ptr->stitch = (struct pkt_stitching *) malloc(sizeof(struct pkt_stitching));
+      if (cache_ptr->stitch) {
+	if (data->time_start.tv_sec) {
+	  memcpy(&cache_ptr->stitch->timestamp_min, &data->time_start, sizeof(struct timeval));
+	}
+	else {
+	  cache_ptr->stitch->timestamp_min.tv_sec = idata->now; 
+	  cache_ptr->stitch->timestamp_min.tv_usec = 0;
+	}
+
+	if (data->time_end.tv_sec) {
+	  memcpy(&cache_ptr->stitch->timestamp_max, &data->time_end, sizeof(struct timeval));
+	}
+	else {
+	  cache_ptr->stitch->timestamp_max.tv_sec = idata->now;
+	  cache_ptr->stitch->timestamp_max.tv_usec = 0;
+	}
+      }
+      else Log(LOG_WARNING, "WARN ( %s/%s ): Finished memory for flow stitching.\n", config.name, config.type);
+    }
+    else assert(!cache_ptr->stitch);
+
     cache_ptr->valid = PRINT_CACHE_INUSE;
     cache_ptr->basetime.tv_sec = ibasetime.tv_sec;
     cache_ptr->basetime.tv_usec = ibasetime.tv_usec;
@@ -393,10 +431,23 @@ void P_cache_insert(struct primitives_ptrs *prim_ptrs)
       cache_ptr->bytes_counter += data->pkt_len;
       cache_ptr->flow_type = data->flow_type;
       cache_ptr->tcp_flags |= data->tcp_flags;
+
       if (config.what_to_count & COUNT_CLASS) {
         cache_ptr->bytes_counter += data->cst.ba;
         cache_ptr->packet_counter += data->cst.pa;
         cache_ptr->flow_counter += data->cst.fa;
+      }
+
+      if (config.nfacctd_stitching) {
+	if (cache_ptr->stitch) {
+	  if (data->time_end.tv_sec) {
+	    memcpy(&cache_ptr->stitch->timestamp_max, &data->time_end, sizeof(struct timeval));
+	  }
+	  else {
+	    cache_ptr->stitch->timestamp_max.tv_sec = idata->now;
+	    cache_ptr->stitch->timestamp_max.tv_usec = 0;
+	  }
+	}
       }
     }
     else {
@@ -462,7 +513,7 @@ void P_cache_insert(struct primitives_ptrs *prim_ptrs)
     }
 
     /* try to insert again */
-    (*insert_func)(prim_ptrs);
+    (*insert_func)(prim_ptrs, idata);
   }
 }
 
@@ -559,7 +610,7 @@ void P_cache_handle_flush_event(struct ports_table *pt)
 void P_cache_mark_flush(struct chained_cache *queue[], int index, int exiting)
 {
   struct timeval commit_basetime;
-  int j, local_retired = sql_writers.retired;
+  int j, local_retired = sql_writers.retired, delay = 0;
 
   memset(&commit_basetime, 0, sizeof(commit_basetime));
 
@@ -567,10 +618,16 @@ void P_cache_mark_flush(struct chained_cache *queue[], int index, int exiting)
   if (new_basetime.tv_sec) commit_basetime.tv_sec = new_basetime.tv_sec;
   else commit_basetime.tv_sec = basetime.tv_sec; 
 
+  /* evaluating any delay we may have to introduce */
+  if (config.sql_startup_delay) {
+    if (timeslot) delay = config.sql_startup_delay/timeslot;
+    delay = delay*timeslot;
+  }
+
   /* mark committed entries as such */
   if (!exiting) {
     for (j = 0, pqq_ptr = 0; j < index; j++) {
-      if (commit_basetime.tv_sec < queue[j]->basetime.tv_sec) {
+      if (commit_basetime.tv_sec < (queue[j]->basetime.tv_sec+delay)) {
         pending_queries_queue[pqq_ptr] = queue[j];
         pqq_ptr++;
       }
@@ -629,53 +686,53 @@ struct chained_cache *P_cache_attach_new_node(struct chained_cache *elem)
   else return NULL; /* XXX */
 }
 
-void P_sum_host_insert(struct primitives_ptrs *prim_ptrs)
+void P_sum_host_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata)
 {
   struct pkt_data *data = prim_ptrs->data;
   struct host_addr tmp;
 
   memcpy(&tmp, &data->primitives.dst_ip, HostAddrSz);
   memset(&data->primitives.dst_ip, 0, HostAddrSz);
-  P_cache_insert(prim_ptrs);
+  P_cache_insert(prim_ptrs, idata);
   memcpy(&data->primitives.src_ip, &tmp, HostAddrSz);
-  P_cache_insert(prim_ptrs);
+  P_cache_insert(prim_ptrs, idata);
 }
 
-void P_sum_port_insert(struct primitives_ptrs *prim_ptrs)
+void P_sum_port_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata)
 {
   struct pkt_data *data = prim_ptrs->data;
   u_int16_t port;
 
   port = data->primitives.dst_port;
   data->primitives.dst_port = 0;
-  P_cache_insert(prim_ptrs);
+  P_cache_insert(prim_ptrs, idata);
   data->primitives.src_port = port;
-  P_cache_insert(prim_ptrs);
+  P_cache_insert(prim_ptrs, idata);
 }
 
-void P_sum_as_insert(struct primitives_ptrs *prim_ptrs)
+void P_sum_as_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata)
 {
   struct pkt_data *data = prim_ptrs->data;
   as_t asn;
 
   asn = data->primitives.dst_as;
   data->primitives.dst_as = 0;
-  P_cache_insert(prim_ptrs);
+  P_cache_insert(prim_ptrs, idata);
   data->primitives.src_as = asn;
-  P_cache_insert(prim_ptrs);
+  P_cache_insert(prim_ptrs, idata);
 }
 
 #if defined (HAVE_L2)
-void P_sum_mac_insert(struct primitives_ptrs *prim_ptrs)
+void P_sum_mac_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata)
 {
   struct pkt_data *data = prim_ptrs->data;
   u_char macaddr[ETH_ADDR_LEN];
 
   memcpy(macaddr, &data->primitives.eth_dhost, ETH_ADDR_LEN);
   memset(data->primitives.eth_dhost, 0, ETH_ADDR_LEN);
-  P_cache_insert(prim_ptrs);
+  P_cache_insert(prim_ptrs, idata);
   memcpy(&data->primitives.eth_shost, macaddr, ETH_ADDR_LEN);
-  P_cache_insert(prim_ptrs);
+  P_cache_insert(prim_ptrs, idata);
 }
 #endif
 
@@ -742,6 +799,16 @@ void P_init_historical_acct(time_t now)
   basetime.tv_sec = t;
 
   memset(&new_basetime, 0, sizeof(new_basetime));
+}
+
+void P_init_refresh_deadline(time_t *rd)
+{
+  time_t t;
+
+  t = roundoff_time(*rd, config.sql_history_roundoff);
+  while ((t+config.sql_refresh_time) < *rd) t += config.sql_refresh_time;
+  *rd = t;
+  *rd += (config.sql_refresh_time+config.sql_startup_delay); /* it's a deadline not a basetime */
 }
 
 void P_eval_historical_acct(struct timeval *stamp, struct timeval *basetime, time_t timeslot)

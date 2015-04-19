@@ -155,15 +155,15 @@ DESC:		plugins to be enabled. SQL plugins are available only if configured and c
 		Then, directives can be bound to such named plugin as: 'directive[name]: value'.
 		(default: memory) 
 
-KEY:		[ nfacctd_pipe_size | sfacctd_pipe_size | pmacctd_pipe_size ]
-DESC:		Defines the size of the kernel socket used read traffic data. On Linux systems, if
-		this configuration directive is not specified default socket size awarded is defined
-		in /proc/sys/net/core/rmem_default ; the maximum configurable socket size (which can
-		be changed via sysctl) is defined in /proc/sys/net/core/rmem_max instead.
+KEY:		[ nfacctd_pipe_size | sfacctd_pipe_size | pmacctd_pipe_size | tee_pipe_size ]
+DESC:		Defines the size of the kernel socket to read (ie. daemons) and write (ie. tee plugin)
+		traffic data. On Linux systems, if this configuration directive is not specified default
+		socket size awarded is defined in /proc/sys/net/core/[rw]mem_default ; the maximum
+		configurable socket size is defined in /proc/sys/net/core/[rw]mem_max instead.
 
-KEY:            bgp_daemon_pipe_size
-DESC:           Defines the size of the kernel socket used for BGP messaging. On Linux systems, if
-                this configuration directive is not specified default socket size awarded is defined
+KEY:            [ bgp_daemon_pipe_size | bmp_daemon_pipe_size ]
+DESC:           Defines the size of the kernel socket used for BGP and BMP messaging. On Linux systems,
+		if this configuration directive is not specified default socket size awarded is defined
                 in /proc/sys/net/core/rmem_default ; the maximum configurable socket size (which can
                 be changed via sysctl) is defined in /proc/sys/net/core/rmem_max instead.
 
@@ -190,15 +190,16 @@ DESC:		Core process and each of the plugins are run into different processes. To
 		instead. (default: 4MB)
 
 KEY:		plugin_buffer_size 
-DESC:		by defining the transfer buffer size, in bytes, this directive enables bufferization
-		of data transfers between core process and active plugins. It is disabled by default,
+DESC:		by defining the transfer buffer size, in bytes, this directive enables buffering of
+		data transfers between core process and active plugins. It is disabled by default,
 		ie. size of a buffer coincides to the size of a single element to be transferred,
 		giving best feelings while testing out the package with small traffic loads. The
 		value has to be minor/equal to the size defined by 'plugin_pipe_size' and keeping a
 		ratio of 1:1000 among the two is considered good practice. The 'plugin_pipe_size'
 		circular queue is hence partitioned in plugin_buffer_size/plugin_pipe_size slots.
-		Once a slot is filled, it is delivered to the plugin while the circular queue moves
-		to the next buffer element. (default: 0) 
+		Once a buffer is filled, it is delivered to the plugin while the circular queue
+		moves to the next buffer element. (default: 0 [adjusted automatically to the size
+		of a single element to transfer]) 
 
 KEY:            plugin_pipe_backlog
 VALUES:         [0 <= value < 100]
@@ -291,16 +292,24 @@ KEY:		logfile
 DESC:           enables logging to a file (bypassing syslog); expected value is a pathname (default: none,
 		console logging)
 
-KEY:		[ amqp_host | bgp_daemon_msglog_amqp_host | bgp_table_dump_amqp_host ]
+KEY:		[ amqp_host | bgp_daemon_msglog_amqp_host | bgp_table_dump_amqp_host | bmp_dump_amqp_host |
+		  bmp_daemon_msglog_amqp_host ]
 DESC:		defines the AMQP/RabbitMQ server IP (default: localhost).
 
-KEY:		[ amqp_user | bgp_daemon_msglog_amqp_user | bgp_table_dump_amqp_user ]
+KEY:            [ amqp_vhost | bgp_daemon_msglog_amqp_vhost | bgp_table_dump_amqp_vhost | bmp_dump_amqp_vhost |
+		  bmp_daemon_msglog_amqp_vhost ]
+DESC:           defines the AMQP/RabbitMQ server virtual host (default: "/").
+
+KEY:		[ amqp_user | bgp_daemon_msglog_amqp_user | bgp_table_dump_amqp_user | bmp_dump_amqp_user |
+		  bmp_daemon_msglog_amqp_user ]
 DESC:		defines the username to use when connecting to the AMQP/RabbitMQ server (default: guest).
 
-KEY:		[ amqp_passwd | bgp_daemon_msglog_amqp_passwd | bgp_table_dump_amqp_passwd ]
+KEY:		[ amqp_passwd | bgp_daemon_msglog_amqp_passwd | bgp_table_dump_amqp_passwd |
+		  bmp_dump_amqp_passwd | bmp_daemon_msglog_amqp_passwd ]
 DESC:		defines the password to use when connecting to the server (default: guest).
 
-KEY:		[ amqp_routing_key | bgp_daemon_msglog_amqp_routing_key | bgp_table_dump_amqp_routing_key ]
+KEY:		[ amqp_routing_key | bgp_daemon_msglog_amqp_routing_key | bgp_table_dump_amqp_routing_key |
+		  bmp_daemon_msglog_amqp_routing_key | bmp_dump_amqp_routing_key ]
 DESC:		Name of the AMQP routing key to attach to published data. Dynamic names are supported through
                 the use of variables, which are computed at the moment when data is purged to the backend.
 		The list of variables supported by amqp_routing_key:
@@ -313,22 +322,36 @@ DESC:		Name of the AMQP routing key to attach to published data. Dynamic names a
 
                 $post_tag2      Configured value of post_tag2.
 
-		Variables supported by bgp_daemon_msglog_amqp_routing_key, bgp_table_dump_amqp_routing_key:
+		Variables supported by bgp_daemon_msglog_amqp_routing_key, bgp_table_dump_amqp_routing_key,
+		bmp_daemon_msglog_amqp_routing_key, bmp_dump_amqp_routing_key:
 
 		$peer_src_ip    Value of the peer_src_ip primitive of the record being processed.
 
 		(default: amqp_routing_key: acct)
 
-KEY:            [ amqp_exchange | bgp_daemon_msglog_amqp_exchange | bgp_table_dump_amqp_exchange ]
+KEY:            [ amqp_routing_key_rr | bgp_daemon_msglog_amqp_routing_key_rr | bgp_table_dump_amqp_routing_key_rr |
+		  bmp_daemon_msglog_amqp_routing_key_rr | bmp_dump_amqp_routing_key_rr ]
+DESC:           Performs round-robin load-balancing over a set of routing keys. The base name for the
+		routing key is defined by amqp_routing_key. amqp_routing_key_rr accepts a positive int
+		value. If amqp_routing_key is set to 'blabla' and amqp_routing_key_rr to 3 then the AMQP
+		plugin will round robin as follows: message #1 -> blabla_0, message #2 -> blabla_1,
+		message #3 -> blabla_2, message #4 -> blabla_0 and so forth. By default the feature is
+		disabled, meaning all messages are sent to the routing key specified by amqp_routing_key
+		(or the default one, if no amqp_routing_key is specified). (default: 0)
+
+KEY:            [ amqp_exchange | bgp_daemon_msglog_amqp_exchange | bgp_table_dump_amqp_exchange |
+		  bmp_daemon_msglog_amqp_exchange | bmp_dump_amqp_exchange ]
 DESC:           Name of the AMQP exchange to publish data (default: pmacct).
 
-KEY:            [ amqp_exchange_type | bgp_daemon_msglog_amqp_exchange_type |
-		  bgp_table_dump_amqp_exchange_type ]
+KEY:            [ amqp_exchange_type | bgp_daemon_msglog_amqp_exchange_type | 
+		  bgp_table_dump_amqp_exchange_type | bmp_daemon_msglog_amqp_exchange_type |
+		  bmp_dump_amqp_exchange_type ]
 DESC:           Type of the AMQP exchange to publish data. Currently only 'direct' and 'fanout' types are
                 supported (default: direct).
 
 KEY:            [ amqp_persistent_msg | bgp_daemon_msglog_amqp_persistent_msg  |
-		  bgp_table_dump_amqp_persistent_msg ]
+		  bgp_table_dump_amqp_persistent_msg | bmp_daemon_msglog_amqp_persistent_msg |
+		  bmp_dump_amqp_persistent_msg ]
 VALUES:         [ true | false ]
 DESC:           Marks messages as persistent so that a queue content does not get lost if RabbitMQ restarts.
                 Note from RabbitMQ docs: "Marking messages as persistent doesn't fully guarantee that a
@@ -338,11 +361,20 @@ DESC:           Marks messages as persistent so that a queue content does not ge
                 not really written to the disk. The persistence guarantees aren't strong, but it is more
                 than enough for our simple task queue." (default: false).
 
-KEY:		[ amqp_frame_max | bgp_daemon_msglog_amqp_frame_max | bgp_table_dump_frame_max ]
+KEY:		[ amqp_frame_max | bgp_daemon_msglog_amqp_frame_max | bgp_table_dump_frame_max |
+		  bmp_daemon_msglog_amqp_frame_max | bmp_dump_frame_max ]
 DESC:		Defines the maximum size, in bytes, of an AMQP frame on the wire to request of the broker
 		for the connection. 4096 is the minimum size, 2^31-1 is the maximum (default: 131072).
 
-KEY:		bgp_daemon_msglog_amqp_retry
+KEY:            [ amqp_heartbeat_interval | bgp_daemon_msglog_amqp_heartbeat_interval |
+		  bgp_table_dump_heartbeat_interval | bmp_daemon_msglog_amqp_heartbeat_interval |
+		  bmp_dump_heartbeat_interval ]
+DESC:           Defines the heartbeat interval in order to detect general failures of the RabbitMQ server.
+                The value is expected in seconds. By default the heartbeat mechanism is disabled with a
+		value of zero. According to RabbitMQ C API, detection takes place only upon publishing a
+		JSON message, ie. not at login or if idle (default: 0).
+
+KEY:		[ bgp_daemon_msglog_amqp_retry | bmp_daemon_msglog_amqp_retry ]
 DESC:		Defines the interval of time, in seconds, after which a connection to the RabbitMQ server
 		should be retried after a failure is detected. (default: 60).
 
@@ -530,13 +562,25 @@ DESC:		defines the version of the SQL table. SQL table versioning was introduced
 		versioning is 'sql_optimize_clauses' which allows custom mix-and-match of primitives:
 		in such a case you have to build yourself custom SQL schemas and indexes. Check in the
 		'sql/' sub-tree the SQL table profiles which are supported by the pmacct version you are
-		currently using (default: 1)
+		currently using. It is always adviced to explicitely define a sql_table_version in
+		order to predict which primitive will be written to which column. All versioning rules
+		are captured in sql/README.[mysql|sqlite3|pgsql] documents. (default: 1)
 
 KEY:		sql_table_type 
-VALUES		[ bgp ]
-DESC:		optionally combined with "sql_table_version", defines one of the supported SQL table
-		profiles. Currently this directive has to be defined to select one of the default BGP
-		table profiles.
+VALUES		[ original | bgp ]
+DESC:		BGP-related primitives are divided in legacy and non-legacy. Legacy are src_as, dst_as;
+		non-legacy are all the rest. Up to "original" tables v5 src_as and dst_as were written
+		in the same field as src_host and dst_host. From "original" table v6 and if sql_table_type
+		"bgp" is selected, src_as and dst_as are written in their own field (as_src and as_dst
+		respectively). sql_table_type is by default set to "original" and is switched to "bgp"
+		automatically if any non-legacy primitive is in use, ie. peer_dst_ip, as_path, etc. This
+		directive allows to make the selection explicit and/or circumvent default behaviour.
+		Apart from src_as and dst_as, regular table versioning applies to all non-BGP related
+		fields, for example: a) if "sql_table_type: bgp" and "sql_table_version: 1" then the "tag"
+		field will be written in the "agent_id" column whereas; b) if "sql_table_type: bgp" and
+		"sql_table_version: 9" instead, then the "tag" field will be written in the "tag" column.
+		All versioning rules are captured in sql/README.[mysql|sqlite3|pgsql] documents.
+		(default: original).
 
 KEY:		sql_data
 VALUES:		[ typed | unified ]
@@ -577,14 +621,15 @@ DESC:		time interval, in seconds, between consecutive executions of the plugin c
 
 		As doing otherwise can originate unexpected behaviours.
 
-KEY:		sql_startup_delay
-DESC:		defines the time, in seconds, the first SQL cache scan event has to be delayed. This delay
+KEY:		[ sql_startup_delay | print_startup_delay | mongo_startup_delay | amqp_startup_delay ]
+DESC:		defines the time, in seconds, the first cache scan event has to be delayed. This delay
 		is, in turn, propagated to the subsequent scans. It comes useful in two scenarios: a) so 
-		that multiple plugins can use the same 'sql_refresh_time' value, allowing them to spread
-		the writes among the length of the time-bin; b) with NetFlow, to keep original flow start
-		time (nfacctd_time_new: false) while enabling the sql_dont_try_update feature (for RDBMS
-		efficiency purposes); in such a context, sql_startup_delay value should be greater (better
-		>= 2x the value) of the NetFlow active flow timeout. (default: 0)
+		that multiple plugins can use the same refresh time (ie. sql_refresh_time) value, allowing
+		them to spread the writes among the length of the time-bin; b) with NetFlow, when using
+		a RDBMS, to keep original flow start time (nfacctd_time_new: false) while enabling the
+		sql_dont_try_update feature (for RDBMS efficiency purposes); in such a context,
+		sql_startup_delay value should be greater (better >= 2x the value) of the NetFlow active
+		flow timeout. (default: 0)
 
 KEY:		sql_optimize_clauses
 VALUES:		[ true | false ]
@@ -705,13 +750,14 @@ DESC:		If sql_use_copy is true, uses the supplied character as delimiter. This i
 		where the default delimiter is part of any of the supplied strings to be inserted into the
 		database. (default: ',')
 
-KEY:		sql_multi_values
-DESC:		enables the use of multi-values INSERT statements. The value of the directive is intended
-		to be the size (in bytes) of the multi-values buffer. The directive applies only to MySQL
-		and SQLite 3.x plugins. Inserting many rows at the same time is much faster (many times
-		faster in some cases) than using separate single-row INSERT statements. It's adviceable
-		to check the size of this pmacct buffer against the size of the corresponding MySQL buffer
-		(max_allowed_packet). (default: none) 
+KEY:		[ amqp_multi_values | sql_multi_values ]
+DESC:		In SQL plugin, sql_multi_values enables the use of multi-values INSERT statements. The value
+		of the directive is intended to be the size (in bytes) of the multi-values buffer. The directive
+		applies only to MySQL and SQLite 3.x plugins. Inserting many rows at the same time is much
+		faster (many times faster in some cases) than using separate single-row INSERT statements.
+		It's adviceable to check the size of this pmacct buffer against the size of the corresponding
+		MySQL buffer (max_allowed_packet). In AMQP plugin, amqp_multi_values enables similar feature:
+		the value is intended as the amount of elements to pack in each JSON array. (default: 0) 
 
 KEY:		[ sql_trigger_exec | print_trigger_exec | mongo_trigger_exec ]
 DESC:		defines the executable to be launched at fixed time intervals to post-process aggregates;
@@ -888,7 +934,7 @@ DESC:           Defines the print plugin output separator. Value is expected to 
 		cannot be a spacing (if spacing separator is wanted then 'formatted' output should be the
 		natural choice) (default: ','). 
 
-KEY:            [ print_num_protos | sql_num_protos ]
+KEY:            [ print_num_protos | sql_num_protos | amqp_num_protos | mongo_num_protos ]
 VALUES:         [ true | false ]
 DESC:		Defines whether IP protocols (ie. tcp, udp) should be looked up and presented in string format
 		or left numerical. The default is to look protocol names up. (default: false)
@@ -896,11 +942,11 @@ DESC:		Defines whether IP protocols (ie. tcp, udp) should be looked up and prese
 KEY:            sql_num_hosts
 VALUES:         [ true | false ]
 DESC:           Defines whether IP addresses should be left numerical (in network bytes ordering) or converted
-		into human-readable strings. Applies to MySQL and SQLite plugins only and assumes the INET_NTOA()
-		function is defined in the RDBMS (which for MySQL is always the case, while for SQLite it is not
-		by default). Since INET_NTOA() is used, unless redefined to some custom-made variant, this feature
-		works for IPv4 addresses only. The feature is also not compatible with making use of IP prefix
-		labels. Default setting is to convert IP addresses into strings. (default: false)
+		into human-readable strings. Applies to MySQL and SQLite plugins only and assumes the INET_ATON()
+		and INET6_ATON() function are defined in the RDBMS. INET_ATON() is always defined in MySQL whereas
+		INET6_ATON() requires MySQL >= 5.6.3. Bothfunctions are not defined by default in SQLite instead.
+		The feature is not compatible with making use of IP prefix labels. Default setting is to convert
+		IP addresses and prefixes into strings. (default: false)
 
 KEY:		[ nfacctd_port | sfacctd_port ] (-l) [GLOBAL, NO_PMACCTD]
 DESC:		defines the UDP port where to bind nfacctd (nfacctd_port) and sfacctd (sfacctd_port) daemons
@@ -945,6 +991,17 @@ DESC:		if nfacctd_time_new is set to false (default) and historical accounting (
 		100 bytes during t3. (default: false)
 NOTES:          If NetFlow sampling is enabled, it is recommended to have counters renormalization enabled
                 (nfacctd_renormalize set to true).
+
+KEY:            [ nfacctd_stitching | sfacctd_stitching | pmacctd_stitching | uacctd_stitching ]
+VALUES:         [ true | false ]
+DESC:		If set to true adds two new fields, timestamp_min and timestamp_max: given an aggregation
+		method ('aggregate' config directive), timestamp_min is the timestamp of the first element
+		contributing to a certain aggregate, timestamp_max is the timestamp of the last element. In
+		case the export protocol provides time references, ie. NetFlow/IPFIX, these are used; if not
+		the current time (hence time of arrival to the collector) is used instead. The feature is
+		not compatible with pro-rating, ie. nfacctd_pro_rating. Also, the feature is supported on
+		all plugins except the 'memory' one (please get in touch if you have a use-case for it).
+		(default: false)
 
 KEY:            nfacctd_account_options [GLOBAL, NO_PMACCTD]
 VALUES:         [ true | false ]
@@ -997,9 +1054,10 @@ DESC:		defines one or more IPv4/IPv6 multicast groups to be joined by the daemon
 
 KEY:            [ nfacctd_disable_checks | sfacctd_disable_checks ] [GLOBAL, NO_PMACCTD]
 VALUES:         [ true | false ]
-DESC:           both nfacctd and sfacctd check health of incoming NetFlow/sFlow datagrams - actually this is
-		limited to just verifying sequence numbers progression. You may want to disable such feature
-		because of non-standard implementations. By default checks are enabled (default: false)
+DESC:           both nfacctd and sfacctd check health of incoming NetFlow/sFlow datagrams, ie. sequence
+		number checks, protocol version. You may want to disable such feature because of non-
+		standard implementations or multiple protocols (accidentally?) pointed to the same port.
+		By default checks are enabled (default: false)
 
 KEY:		pre_tag_map
 DESC:		full pathname to a file containing tag mappings. Tags can be internal-only (ie. for filtering
@@ -1038,7 +1096,7 @@ VALUES:		[ true | false ]
 DESC:		enables indexing of maps to increase lookup speeds on large maps and/or sustained lookup
 		rates. Indexes are automatically defined basing on structure and content of the map, up to
 		a maximum of 8. Indexing of pre_tag_map, bgp_peer_src_as_map, flows_to_rd_map is supported.
-		Only a sub-set of pre_tag_map fields are supported, including: ip, bgp_nexthop, vlan_id,
+		Only a sub-set of pre_tag_map fields are supported, including: ip, bgp_nexthop, vlan, cvlan,
 		src_mac, mpls_vpn_rd, mpls_pw_id, src_as, dst_as, peer_src_as, peer_dst_as, input, output).
 		Only IP addresses, ie. no IP prefixes, are supported as part of the 'ip' field. Also, negations
 		are not supported (ie. 'in=-216' match all but input interface 216). bgp_agent_map and
@@ -1058,6 +1116,15 @@ DESC:		it expects one or more tags (when multiple tags are supplied, they need t
 		as '6' to the plugin it is bound to) and ranges (ie. '10-20' would send over traffic tagged
 		in the range 10..20) and any combination of these. This directive makes sense if coupled with
 		'pre_tag_map'; it could be used in conjunction with 'aggregate_filter'.
+
+KEY:            pre_tag_label_filter [NO_GLOBAL]
+DESC:		it expects one or more labels (when multiple labels are supplied, they need to be comma
+		separated and a logical OR is used in the evaluation phase) as value and allows to filter
+		aggregates basing upon their label value: only in case of match data is delivered to the
+		plugin. This directive has to be bound to a plugin (that is, it cannot be global). Null
+		label values (ie. unlabelled data) can be matched using the 'null' keyword. Negations are
+		allowed by pre-pending a minus sign to the label value. The use of this directive makes
+		sense if coupled with 'pre_tag_map'.
 
 KEY:            [ post_tag | post_tag2 ] 
 VALUES:         [ 1-2^64-1 ]
@@ -1242,7 +1309,7 @@ DESC:		When applied to [ns]fprobe src_as and dst_as fields are valued with peer-
 		BGP daemon (bgp_daemon). When applied to [ns]facctd instead it uses src_as and dst_as values of
 		the NetFlow/sFlow export to populate peer_src_as and peer_dst_as primitives. (default: false)
 
-KEY:            [ nfprobe_ipprec | sfprobe_ipprec ]
+KEY:            [ nfprobe_ipprec | sfprobe_ipprec | tee_ipprec ]
 DESC:           marks self-originated NetFlow (nfprobe) and sFlow (sfprobe) messages with the supplied IP
 		precedence value. (default: 0)
 
@@ -1280,65 +1347,82 @@ DESC:           statically associates an interface speed to a given sfprobe plug
 
 KEY:		bgp_daemon
 VALUES:		[ true | false ]
-DESC:		enables the skinny BGP daemon thread. This feature requires the package to be supporting multi-
-		threading (--enable-threads). Neighbors are not defined explicitely via a piece of configuration
-		(see bgp_daemon_max_peers directive); also, for security purposes, the daemon doesn't implement
-		outbound BGP UPDATE messages and acts passively (ie. it never establishes a connection to a
-		remote peer but waits for incoming connections); upon receipt of a BGP OPEN message, the local
-		daemon presents itself as belonging to the same AS number and supporting the same (or a subset
-		of the) BGP capabilities as the remote peer; capabilities currently supported are MP-BGP,
-		4-bytes ASNs, ADD-PATH). Per-peer RIBs are maintained basing on the IP address of the peer
-		(and for clarity not its BGP Router-ID). In case of ADD-PATH capability, the correct BGP info
-		is linked to traffic data using BGP next-hop (or IP next-hop if use_ip_next_hop is set to true)
-		as selector among the paths available. (default: false)
+DESC:		enables the skinny BGP daemon thread. Neighbors are not defined explicitely via a piece of
+		configuration (see bgp_daemon_max_peers directive); also, for security purposes, the daemon
+		doesn't implement outbound BGP UPDATE messages and acts passively (ie. it never establishes
+		a connection to a remote peer but waits for incoming connections); upon receipt of a BGP
+		OPEN message, the local daemon presents itself as belonging to the same AS number and
+		supporting the same (or a subset of the) BGP capabilities as the remote peer; capabilities
+		currently supported are MP-BGP, 4-bytes ASNs, ADD-PATH). Per-peer RIBs are maintained basing
+		on the IP address of the peer (and for clarity not its BGP Router-ID). In case of ADD-PATH
+		capability, the correct BGP info is linked to traffic data using BGP next-hop (or IP next-hop
+		if use_ip_next_hop is set to true) as selector among the paths available. (default: false)
 
-KEY:		bgp_daemon_ip
-DESC:		binds the BGP daemon to a specific interface. Expects as value an IPv4 address. The same is
-		used as BGP Router-ID to its peers - otherwise a dumb "1.2.3.4" value is presented. Setting
-		this directive is highly adviced. (default: 0.0.0.0)
+KEY:		bmp_daemon
+VALUES:         [ true | false ]
+DESC:           enables the BMP daemon thread. BMP, BGP Monitoring Protocol, can be used to monitor BGP
+		sessions. The current implementation is based on the draft-ietf-grow-bmp-07 IETF draft.
+		The BMP daemon currently supports BMP events and stats only, ie. initiation, termination, 
+		peer up, peer down and stats reports messages. Route Monitoring is future (upcoming) work
+		but routes can be currently sourced via the BGP daemon thread (best path only or ADD-PATH),
+		making the two daemons complementary. The daemon enables to write BMP messages to files or
+		AMQP queues, real-time (msglog) or at regular time intervals (dump). For further referece
+		see examples in the QUICKSTART document and/or description for the following config keys in
+		this document: bmp_daemon_msglog_file, bmp_daemon_msglog_amqp_routing_key, bmp_dump_file,
+		bmp_dump_amqp_routing_key, bmp_dump_refresh_time). The daemon is a separate thread in the
+		NetFlow (nfacctd) or sFlow (sfacctd) collectors. (default: false) 
 
-KEY:		bgp_daemon_port
-DESC:		binds the BGP daemon to a port different from the standard BGP port: 179/tcp. (default: 179)
+KEY:		[ bgp_daemon_ip | bmp_daemon_ip ]
+DESC:		binds the BGP/BMP daemon to a specific interface. Expects as value an IPv4 address. For the
+		BGP daemon the same is value is presented as BGP Router-ID (read more about the BGP Router-ID
+		selection process at the bgp_daemon_id config directive description). Setting this directive
+		is highly adviced. (default: 0.0.0.0)
 
-KEY:		bgp_daemon_ipprec
-DESC:		marks self-originated BGP messages with the supplied IP precedence value. (default: 0)
+KEY:            bgp_daemon_id
+DESC:		defines the BGP Router-ID to the supplied value. Expected value is an IPv4 address. If this
+		feature is not used or an invalid IP address is supplied, ie. IPv6, the bgp_daemon_ip value
+		is used instead. If also bgp_daemon_ip is not defined or invalid, the BGP Router-ID defaults
+		to "1.2.3.4". (default: 1.2.3.4) 
 
-KEY:		bgp_daemon_max_peers
-DESC:		sets the maximum number of neighbors the BGP daemon can peer to. Upon reaching of the limit,
-		no more BGP sessions can be established. Differently from routers BGP neighbors don't need to
-		be defined explicitely one-by-one rather an upper boundary to the number of neighbors applies.
+KEY:		[ bgp_daemon_port | bmp_daemon_port ] 
+DESC:		binds the BGP/BMP daemon to a port different from the standard port. Default port for BGP is
+		179/tcp; default port for BMP is 1790. (default: BGP 179, BMP 1790)
+
+KEY:		[ bgp_daemon_ipprec | bmp_daemon_ipprec ]
+DESC:		marks self-originated BGP/BMP messages with the supplied IP precedence value. (default: 0)
+
+KEY:		[ bgp_daemon_max_peers | bmp_daemon_max_peers ] 
+DESC:		sets the maximum number of neighbors the BGP/BMP daemon can peer to. Upon reaching of the
+		limit, no more BGP/BMP sessions can be established. BGP/BMP neighbors don't need to be
+		defined explicitely one-by-one rather an upper boundary to the number of neighbors applies.
 		pmacctd, uacctd daemons are limited to only two BGP peers (in a primary/backup fashion, see
 		bgp_agent_map); such hardcoded limit is imposed as the only scenarios supported in conjunction
 		with the BGP daemon are as NetFlow/sFlow probes on-board software routers and firewalls.
 		(default: 10)
 
-KEY:		bgp_daemon_batch_interval
-DESC:		To prevent all BGP peers to contend resources, this defines the time interval, in seconds,
-		between any two BGP peer batches. The first peer in a batch sets the base time, that is the
-		time from which the interval is calculated, for that batch. If bgp_daemon_init_interval or
-		bgp_daemon_init_batch is set to zero, default, initial BGP peer batching is disabled.
-		(default: 0)
+KEY:		[ bgp_daemon_batch_interval | bmp_daemon_batch_interval ]
+DESC:		To prevent all BGP/BMP peers contend resources, this defines the time interval, in seconds,
+		between any two BGP/BMP peer batches. The first peer in a batch sets the base time, that is
+		the time from which the interval is calculated, for that batch. (default: 0)
 
-KEY:		bgp_daemon_batch
-DESC:		To prevent all BGP peers to contend resources, this defines the amount of BGP peers in each
-		batch. If a BGP peer in a batch is replenished (ie. connection drops, is reset, etc.) no
-		new room is made in the current batch (rationale being: be conservative, batch might have
-		been set too big, let's now potentially induce flapping). If bgp_daemon_init_interval or
-		bgp_daemon_init_batch is set to zero, default, initial BGP peer batching is disabled.
-		(default: 0)
+KEY:		[ bgp_daemon_batch | bmp_daemon_batch ]
+DESC:		To prevent all BGP/BMP peers to contend resources, this defines the amount of BGP peers in
+		each batch. If a BGP/BMP peer in a batch is replenished (ie. connection drops, is reset, etc.)
+		no new room is made in the current batch (rationale being: be conservative, batch might have
+		been set too big, let's now potentially induce flapping). (default: 0)
 
-KEY:            bgp_daemon_msglog_file
-DESC:		Enables streamed logging of BGP messages/events. Each log entry features a time reference,
-		BGP peer IP address, event type and a sequence number (to order events when time reference
+KEY:            [ bgp_daemon_msglog_file | bmp_daemon_msglog_file ]
+DESC:		Enables streamed logging of BGP/BMP messages/events. Each log entry features a time reference,
+		BGP/BMP peer IP address, event type and a sequence number (to order events when time reference
 		is not granular enough). BGP UPDATE messages also contain full prefix and BGP attributes
 		information. The list of supported filename variables follows:
 
-                $peer_src_ip    BGP peer IP address.
+                $peer_src_ip    BGP/BMP peer IP address.
 
-KEY:		bgp_daemon_msglog_output
+KEY:		[ bgp_daemon_msglog_output | bmp_daemon_msglog_output ]
 VALUES:         [ json ]
-DESC:		Defines output format for the streamed logging of BGP messages/events. Only JSON format is
-		currently supported and requires compiling against Jansson library (--enable-jansson when
+DESC:		Defines output format for the streamed logging of BGP/BMP messages/events. Only JSON format
+		is currently supported and requires compiling against Jansson library (--enable-jansson when
 		configuring for compiling). (default: json)
 
 KEY:		bgp_aspath_radius
@@ -1479,10 +1563,10 @@ DESC:		writes a list of the BGP neighbors in the established state to the specif
 		per line. This gets particularly useful for automation purposes (ie. auto-discovery of
 		devices to poll via SNMP). (default: none)
 
-KEY:            bgp_daemon_allow_file [GLOBAL]
+KEY:            [ bgp_daemon_allow_file | bmp_daemon_allow_file ] [GLOBAL]
 DESC:           full pathname to a file containing the list of IP addresses (one for each line) allowed
-                to establish a BGP session packets to the BGP thread. Current syntax does not implement
-		network masks but only individual IP addresses. (default: allow all)
+                to establish a BGP/BMP session. Current syntax does not implement network masks but only
+		individual IP addresses. (default: allow all)
 
 KEY:            bgp_daemon_md5_file [GLOBAL]
 DESC:           full pathname to a file containing the BGP peers (IP address only, one for each line)
@@ -1527,10 +1611,11 @@ DESC:		If bgp_table_per_peer_buckets is greater than 1, this parameter allows to
 		Hashing over other fields or field combinations (hashing over BGP next-hop is on the
 		radar) are planned to be supported in future. (default: path_id)
 
-KEY:            bgp_table_dump_file
-DESC:           Enables dump of BGP tables at regular time intervals (bgp_table_dump_refresh_time) into
-		files. Each dump event features a time reference and BGP peer IP address along with full
-		prefix and BGP attributes information. The list of supported filename variables follows:
+KEY:            [ bgp_table_dump_file | bmp_dump_file ] [GLOBAL] 
+DESC:           Enables dump of BGP tables/BMP events at regular time intervals (as defined by, for
+		example, bgp_table_dump_refresh_time) into files. Each dump event features a time
+		reference and BGP/BMP peer IP address along with the rest of BGP/BMP info. The list
+		of supported filename variables follows:
 
                 %d              The day of the month as a decimal number (range 01 to 31).
 
@@ -1552,15 +1637,15 @@ DESC:           Enables dump of BGP tables at regular time intervals (bgp_table_
 
                 $peer_src_ip    BGP peer IP address.
 
-KEY:            bgp_table_dump_output
+KEY:            [ bgp_table_dump_output | bmp_dump_output ] [GLOBAL]
 VALUES:         [ json ]
-DESC:           Defines output format for the dump of BGP tables. Only JSON format is currently
+DESC:           Defines output format for the dump of BGP/BMP tables. Only JSON format is currently
 		supported and requires compiling against Jansson library (--enable-jansson when
 		configuring for compiling). (default: json)
 
-KEY:		bgp_table_dump_refresh_time
-DESC:		Time interval, in seconds, between two consecutive executions of the dump of BGP tables
-		to files. 
+KEY:		bgp_table_dump_refresh_time | bmp_dump_refresh_time ] [GLOBAL]
+DESC:		Time interval, in seconds, between two consecutive executions of the dump of BGP/BMP
+		tables to files. 
 
 KEY:		isis_daemon
 VALUES:		[ true | false ]
@@ -1597,7 +1682,9 @@ DESC:	 	enables IS-IS messages logging: as this can get easily verbose, it is in
 
 KEY:		[ geoip_ipv4_file | geoip_ipv6_file ]
 DESC:		If pmacct is compiled with --enable-geoip, this defines full pathname to the Maxmind GeoIP
-		v1 IPv4/IPv6 database file to use.  
+		Country v1 ( http://dev.maxmind.com/geoip/legacy/install/country/) IPv4/IPv6 database file
+		to use. pmacct, leveraging the Maxmind API, will detect if the file is updated and reload
+		it. 
 
 KEY:		uacctd_group
 DESC:		Sets the Linux Netlink ULOG multicast group to be joined. (default: 1)
@@ -1657,3 +1744,10 @@ DESC:		Defines a list of packet length distributions, comma-separated, which is 
 		exact, ie. "0-499,500-999,1000-1499,1500-9000". The maximum amount of bins that can be
 		defined is 255; packet lengths must be in the range 0-9000; if a length is part of more
 		than a single bin the latest definition wins. 
+
+KEY:		tmp_net_own_field
+VALUES:         [ true | false ]
+DESC:		Writes IP prefixes, src_net and dst_net primitives, to a own/distinct field than the
+		one used for IP addresses, src_host and dst_host primitives. This config directive is
+		meant for pmacct 1.5 only in order to save, default setting, backward compatibility.
+		With the next major release this feature will become default behaviour. (default: false) 

@@ -1,5 +1,5 @@
-pmacct (Promiscuous mode IP Accounting package) v1.5.0
-pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+pmacct (Promiscuous mode IP Accounting package) v1.5.1
+pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 
 Founder:
 
@@ -13,7 +13,7 @@ Package maintainers:
 
 	Marcelo Goes (Gentoo)		<vanquirius@gentoo.org>
 	Ryan Steinmetz (FreeBSD)	<rpsfa@rit.edu>
-	Jamie Wilkinson (Debian)	<jaq@debian.org>
+	Bernd Zeimetz (Debian)		<bzed@debian.org>
    KP Kirchdoerfer (LEAF Bering-uClibc)	<kapeka@users.sourceforge.net> 
 	Peter Nixon (OpenSUSE RPMs)	<listuser@peternixon.net>
 	Viacheslav Dubrovskyi(ALTLinux)	<dubrsl@gmail.com>
@@ -23,6 +23,7 @@ the time:
 
 	Martin Anderberg
 	Sven Anderson
+	David Barroso
 	Joerg Behrens
 	Vincent Bernat
 	Robert Blechinger
@@ -35,6 +36,7 @@ the time:
 	Gianluca Guida
         Elisa Jasinska
 	Wim Kerkhoff
+	Paul Mabey
 	Peter Nixon
 	Karl O. Pinc
 	Vasiliy Ponomarev
@@ -42,6 +44,7 @@ the time:
 	A.O. Prokofiev
 	Edwin Punt
 	Anik Rahman
+	Gabriel Snook
 	Rene Stoutjesdijk
 	Thomas Telkamp
 	Stig Thormodsrud

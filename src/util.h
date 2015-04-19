@@ -91,7 +91,9 @@ EXT int BTA_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t 
 EXT void calc_refresh_timeout(time_t, time_t, int *);
 EXT void calc_refresh_timeout_sec(time_t, time_t, int *);
 EXT int load_tags(char *, struct pretag_filter *, char *);
+EXT int load_labels(char *, struct pretag_label_filter *, char *);
 EXT int evaluate_tags(struct pretag_filter *, pm_id_t);
+EXT int evaluate_labels(struct pretag_label_filter *, pt_label_t *);
 EXT void load_pkt_len_distrib_bins();
 EXT void evaluate_pkt_len_distrib(struct pkt_data *);
 EXT char *write_sep(char *, int *);
@@ -100,7 +102,8 @@ EXT void version_daemon(char *);
 EXT char *compose_json(u_int64_t, u_int64_t, u_int8_t, struct pkt_primitives *,
 		      struct pkt_bgp_primitives *, struct pkt_nat_primitives *,
 		      struct pkt_mpls_primitives *, char *, struct pkt_vlen_hdr_primitives *,
-		      pm_counter_t, pm_counter_t, pm_counter_t, u_int32_t, struct timeval *);
+		      pm_counter_t, pm_counter_t, pm_counter_t, u_int32_t, struct timeval *,
+		      struct pkt_stitching *);
 EXT void compose_timestamp(char *, int, struct timeval *, int);
 EXT void write_and_free_json(FILE *, void *);
 EXT int write_and_free_json_amqp(void *, void *);
