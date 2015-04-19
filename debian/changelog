@@ -1,3 +1,11 @@
+pmacct (1.5.1-1) unstable; urgency=medium
+
+  * [6e864c42] Merge tag 'upstream/1.5.1'
+    Upstream version 1.5.1
+  * [1b51f2d2] Remove patches applied upstream.
+
+ -- Bernd Zeimetz <bzed@debian.org>  Sun, 19 Apr 2015 11:55:00 +0200
+
 pmacct (1.5.0-4) unstable; urgency=medium
 
   * [d7df1811] Fix identification of dummy entry.
