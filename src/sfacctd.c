@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -347,7 +347,7 @@ int main(int argc,char **argv, char **envp)
   if (config.daemon) {
     list = plugins_list;
     while (list) {
-      if (!strcmp(list->type.string, "print")) printf("WARN ( %s/core ): Daemonizing. Hmm, bye bye screen.\n", config.name);
+      if (!strcmp(list->type.string, "print")) printf("INFO ( %s/core ): Daemonizing. Hmm, bye bye screen.\n", config.name);
       list = list->next;
     }
     if (debug || config.debug)
@@ -423,6 +423,13 @@ int main(int argc,char **argv, char **envp)
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	  list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
+        if ((list->cfg.what_to_count & COUNT_SRC_HOST) && (list->cfg.what_to_count & COUNT_SRC_NET) ||
+            (list->cfg.what_to_count & COUNT_DST_HOST) && (list->cfg.what_to_count & COUNT_DST_NET)) {
+          if (!list->cfg.tmp_net_own_field) {
+            Log(LOG_ERR, "ERROR ( %s/%s ): src_host, src_net and dst_host, dst_net are mutually exclusive: set tmp_net_own_field to true. Exiting...\n\n", list->name, list->type.string);
+            exit(1);
+          }
+        }
 	if (list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) {
 	  if (!list->cfg.networks_file && list->cfg.nfacctd_as & NF_AS_NEW) {
 	    Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation was selected but NO 'networks_file' specified. Exiting...\n\n", list->name, list->type.string);
@@ -545,8 +552,10 @@ int main(int argc,char **argv, char **envp)
     Setsocksize(config.sock, SOL_SOCKET, SO_RCVBUF, &config.nfacctd_pipe_size, sizeof(config.nfacctd_pipe_size));
     getsockopt(config.sock, SOL_SOCKET, SO_RCVBUF, &obtained, &l);
 
-    Setsocksize(config.sock, SOL_SOCKET, SO_RCVBUF, &saved, l);
-    getsockopt(config.sock, SOL_SOCKET, SO_RCVBUF, &obtained, &l);
+    if (obtained < saved) {
+      Setsocksize(config.sock, SOL_SOCKET, SO_RCVBUF, &saved, l);
+      getsockopt(config.sock, SOL_SOCKET, SO_RCVBUF, &obtained, &l);
+    }
     Log(LOG_INFO, "INFO ( %s/core ): sfacctd_pipe_size: obtained=%u target=%u.\n", config.name, obtained, config.nfacctd_pipe_size);
   }
 
@@ -658,6 +667,16 @@ int main(int argc,char **argv, char **envp)
     /* Let's give the BGP thread some advantage to create its structures */
     sleep(5);
   }
+
+  /* starting the BMP thread */
+  if (config.nfacctd_bmp) {
+    req.bpf_filter = TRUE;
+
+    nfacctd_bmp_wrapper();
+
+    /* Let's give the BMP thread some advantage to create its structures */
+    sleep(5);
+  }
 #else
   if (config.nfacctd_isis) {
     Log(LOG_ERR, "ERROR ( %s/core ): 'isis_daemon' is available only with threads (--enable-threads). Exiting.\n", config.name);
@@ -666,6 +685,11 @@ int main(int argc,char **argv, char **envp)
 
   if (config.nfacctd_bgp) {
     Log(LOG_ERR, "ERROR ( %s/core ): 'bgp_daemon' is available only with threads (--enable-threads). Exiting.\n", config.name);
+    exit(1);
+  }
+
+  if (config.nfacctd_bmp) {
+    Log(LOG_ERR, "ERROR ( %s/core ): 'bmp_daemon' is available only with threads (--enable-threads). Exiting.\n", config.name);
     exit(1);
   }
 #endif
@@ -934,8 +958,10 @@ int main(int argc,char **argv, char **envp)
 	process_SFv2v4_packet(&spp, &pptrs, &req, (struct sockaddr *) &client);
 	break;
       default:
-	notify_malf_packet(LOG_INFO, "INFO: Discarding unknown packet", (struct sockaddr *) pptrs.v4.f_agent);
-	xflow_tot_bad_datagrams++;
+	if (!config.nfacctd_disable_checks) {
+	  SF_notify_malf_packet(LOG_INFO, "INFO: Discarding unknown packet", (struct sockaddr *) pptrs.v4.f_agent);
+	  xflow_tot_bad_datagrams++;
+	}
 	break;
       }
     }
@@ -981,7 +1007,7 @@ SFv2v4_read_sampleType:
       readv2v4CountersSample(spp);
       break;
     default:
-      notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 sample", (struct sockaddr *) pptrsv->v4.f_agent);
+      SF_notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 sample", (struct sockaddr *) pptrsv->v4.f_agent);
       xflow_tot_bad_datagrams++;
       return; /* unexpected sampleType; aborting packet */
     }
@@ -1031,7 +1057,7 @@ SFv5_read_sampleType:
       goto SFv5_read_sampleType; /* rewind */
       break;
     default:
-      notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v5 sample", (struct sockaddr *) pptrsv->v4.f_agent);
+      SF_notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v5 sample", (struct sockaddr *) pptrsv->v4.f_agent);
       xflow_tot_bad_datagrams++;
       return; /* unexpected sampleType; aborting packet */ 
     }
@@ -1057,8 +1083,10 @@ void process_SF_raw_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
     pptrs->seqno = getData32(spp);
     break;
   default:
-    notify_malf_packet(LOG_INFO, "INFO: Discarding unknown sFlow packet", (struct sockaddr *) pptrs->f_agent);
-    xflow_tot_bad_datagrams++;
+    if (!config.nfacctd_disable_checks) {
+      SF_notify_malf_packet(LOG_INFO, "INFO: Discarding unknown sFlow packet", (struct sockaddr *) pptrs->f_agent);
+      xflow_tot_bad_datagrams++;
+    }
     return;
   }
 
@@ -1111,7 +1139,7 @@ void compute_once()
 #endif
 }
 
-void notify_malf_packet(short int severity, char *ostr, struct sockaddr *sa)
+void SF_notify_malf_packet(short int severity, char *ostr, struct sockaddr *sa)
 {
   struct host_addr a;
   u_char errstr[SRVBUFLEN];
@@ -2052,7 +2080,7 @@ void readv2v4FlowSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, str
   case INMPACKETTYPE_IPV4: readFlowSample_IPv4(sample); break;
   case INMPACKETTYPE_IPV6: readFlowSample_IPv6(sample); break;
   default: 
-    notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 Data Tag", (struct sockaddr *) pptrsv->v4.f_agent);
+    SF_notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 Data Tag", (struct sockaddr *) pptrsv->v4.f_agent);
     xflow_tot_bad_datagrams++;
     break;
   }
@@ -2074,7 +2102,7 @@ void readv2v4FlowSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, str
       case INMEXTENDED_USER: readExtendedUser(sample); break;
       case INMEXTENDED_URL: readExtendedUrl(sample); break;
       default: 
-	notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 Extended Data Tag", (struct sockaddr *) pptrsv->v4.f_agent);
+	SF_notify_malf_packet(LOG_INFO, "INFO: Discarding unknown v2/v4 Extended Data Tag", (struct sockaddr *) pptrsv->v4.f_agent);
 	xflow_tot_bad_datagrams++;
 	break;
       }

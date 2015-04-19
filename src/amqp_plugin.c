@@ -31,6 +31,9 @@
 #include "ip_flow.h"
 #include "classifier.h"
 #include "crc32.c"
+#ifdef WITH_JANSSON
+#include <jansson.h>
+#endif
 
 /* Functions */
 void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr) 
@@ -39,7 +42,8 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct ports_table pt;
   unsigned char *pipebuf;
   struct pollfd pfd;
-  time_t t, now;
+  struct insert_data idata;
+  time_t t;
   int timeout, ret, num; 
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
@@ -62,6 +66,7 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   P_set_signals();
   P_init_default_values();
+  P_config_checks();
   pipebuf = (unsigned char *) Malloc(config.buffer_size);
   memset(pipebuf, 0, config.buffer_size);
 
@@ -69,6 +74,16 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   if (!config.sql_user) config.sql_user = rabbitmq_user;
   if (!config.sql_passwd) config.sql_passwd = rabbitmq_pwd;
+
+  if ((config.sql_table && strchr(config.sql_table, '$')) && config.sql_multi_values) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): dynamic 'amqp_routing_key' is not compatible with 'amqp_multi_values'. Exiting.\n", config.name, config.type);
+    exit_plugin(1);
+  }
+
+  if ((config.sql_table && strchr(config.sql_table, '$')) && config.amqp_routing_key_rr) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): dynamic 'amqp_routing_key' is not compatible with 'amqp_routing_key_rr'. Exiting.\n", config.name, config.type);
+    exit_plugin(1);
+  }
 
   p_amqp_init_host(&amqpp_amqp_host);
   p_amqp_set_user(&amqpp_amqp_host, config.sql_user);
@@ -101,6 +116,7 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     }
   }
   
+  memset(&idata, 0, sizeof(idata));
   memset(&prim_ptrs, 0, sizeof(prim_ptrs));
   set_primptrs_funcs(&extras);
 
@@ -108,21 +124,18 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   pfd.events = POLLIN;
   setnonblocking(pipe_fd);
 
-  now = time(NULL);
+  idata.now = time(NULL);
 
   /* print_refresh time init: deadline */
-  refresh_deadline = now; 
-  t = roundoff_time(refresh_deadline, config.sql_history_roundoff);
-  while ((t+config.sql_refresh_time) < refresh_deadline) t += config.sql_refresh_time;
-  refresh_deadline = t;
-  refresh_deadline += config.sql_refresh_time; /* it's a deadline not a basetime */
+  refresh_deadline = idata.now; 
+  P_init_refresh_deadline(&refresh_deadline);
 
   if (config.sql_history) {
     basetime_init = P_init_historical_acct;
     basetime_eval = P_eval_historical_acct;
     basetime_cmp = P_cmp_historical_acct;
 
-    (*basetime_init)(now);
+    (*basetime_init)(idata.now);
   }
 
   /* setting number of entries in _protocols structure */
@@ -143,10 +156,10 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       if (ret < 0) goto poll_again;
     }
 
-    now = time(NULL);
+    idata.now = time(NULL);
 
     if (config.sql_history) {
-      while (now > (basetime.tv_sec + timeslot)) {
+      while (idata.now > (basetime.tv_sec + timeslot)) {
 	new_basetime.tv_sec = basetime.tv_sec;
         basetime.tv_sec += timeslot;
         if (config.sql_history == COUNT_MONTHLY)
@@ -195,7 +208,7 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       rg->ptr += bufsz;
 
       /* lazy refresh time handling */ 
-      if (now > refresh_deadline) P_cache_handle_flush_event(&pt);
+      if (idata.now > refresh_deadline) P_cache_handle_flush_event(&pt);
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
@@ -216,7 +229,7 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           evaluate_pkt_len_distrib(data);
 
         prim_ptrs.data = data;
-        (*insert_func)(&prim_ptrs);
+        (*insert_func)(&prim_ptrs, &idata);
 
 	((struct ch_buf_hdr *)pipebuf)->num--;
         if (((struct ch_buf_hdr *)pipebuf)->num) {
@@ -246,12 +259,20 @@ void amqp_cache_purge(struct chained_cache *queue[], int index)
   char src_mac[18], dst_mac[18], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN], ip_address[INET6_ADDRSTRLEN];
   char rd_str[SRVBUFLEN], misc_str[SRVBUFLEN], dyn_amqp_routing_key[SRVBUFLEN], *orig_amqp_routing_key = NULL;
   int i, j, stop, batch_idx, is_routing_key_dyn = FALSE, qn = 0, ret, saved_index = index;
+  int mv_num = 0, mv_num_save = 0;
   time_t start, duration;
   pid_t writer_pid = getpid();
+
+#ifdef WITH_JANSSON
+  json_t *array = json_array();
+#endif
 
   /* setting some defaults */
   if (!config.sql_host) config.sql_host = default_amqp_host;
   if (!config.sql_db) config.sql_db = default_amqp_exchange;
+  if (!config.amqp_exchange_type) config.amqp_exchange_type = default_amqp_exchange_type;
+  if (!config.amqp_vhost) config.amqp_vhost = default_amqp_vhost;
+
   if (!config.sql_table) config.sql_table = default_amqp_routing_key;
   else {
     if (strchr(config.sql_table, '$')) {
@@ -260,14 +281,21 @@ void amqp_cache_purge(struct chained_cache *queue[], int index)
       config.sql_table = dyn_amqp_routing_key;
     }
   }
-  if (!config.amqp_exchange_type) config.amqp_exchange_type = default_amqp_exchange_type;
+  if (config.amqp_routing_key_rr) {
+    orig_amqp_routing_key = config.sql_table;
+    config.sql_table = dyn_amqp_routing_key;
+  }
 
   p_amqp_set_exchange(&amqpp_amqp_host, config.sql_db);
   p_amqp_set_routing_key(&amqpp_amqp_host, config.sql_table);
   p_amqp_set_exchange_type(&amqpp_amqp_host, config.amqp_exchange_type);
   p_amqp_set_host(&amqpp_amqp_host, config.sql_host);
+  p_amqp_set_vhost(&amqpp_amqp_host, config.amqp_vhost);
   p_amqp_set_persistent_msg(&amqpp_amqp_host, config.amqp_persistent_msg);
   p_amqp_set_frame_max(&amqpp_amqp_host, config.amqp_frame_max);
+
+  p_amqp_init_routing_key_rr(&amqpp_amqp_host);
+  p_amqp_set_routing_key_rr(&amqpp_amqp_host, config.amqp_routing_key_rr);
 
   empty_pcust = malloc(config.cpptrs.len);
   if (!empty_pcust) {
@@ -315,7 +343,32 @@ void amqp_cache_purge(struct chained_cache *queue[], int index)
     json_str = compose_json(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
                          &queue[j]->primitives, pbgp, pnat, pmpls, pcust, pvlen, queue[j]->bytes_counter,
 			 queue[j]->packet_counter, queue[j]->flow_counter, queue[j]->tcp_flags,
-			 &queue[j]->basetime);
+			 &queue[j]->basetime, queue[j]->stitch);
+
+#ifdef WITH_JANSSON
+    if (json_str && config.sql_multi_values) {
+      json_t *elem = NULL;
+      char *tmp_str = json_str;
+      int do_free = FALSE;
+
+      if (json_array_size(array) >= config.sql_multi_values) {
+	json_str = json_dumps(array, 0);
+	json_array_clear(array);
+        mv_num_save = mv_num;
+        mv_num = 0;
+      }
+      else do_free = TRUE;
+
+      elem = json_loads(tmp_str, 0, NULL);
+      json_array_append_new(array, elem);
+      mv_num++;
+
+      if (do_free) {
+        free(json_str);
+        json_str = NULL;
+      }
+    }
+#endif
 
     if (json_str) {
       if (is_routing_key_dyn) {
@@ -323,13 +376,41 @@ void amqp_cache_purge(struct chained_cache *queue[], int index)
 	p_amqp_set_routing_key(&amqpp_amqp_host, dyn_amqp_routing_key);
       }
 
+      if (config.amqp_routing_key_rr) {
+        p_amqp_handle_routing_key_dyn_rr(dyn_amqp_routing_key, SRVBUFLEN, orig_amqp_routing_key, &amqpp_amqp_host.rk_rr);
+	p_amqp_set_routing_key(&amqpp_amqp_host, dyn_amqp_routing_key);
+      }
+
       ret = p_amqp_publish(&amqpp_amqp_host, json_str);
       free(json_str);
+      json_str = NULL;
 
-      if (!ret) qn++;
+      if (!ret) {
+	if (!config.sql_multi_values) qn++;
+	else qn += mv_num_save;
+      }
       else break;
     }
   }
+
+#ifdef WITH_JANSSON
+  if (config.sql_multi_values && json_array_size(array)) {
+    char *json_str;
+
+    json_str = json_dumps(array, 0);
+    json_array_clear(array);
+    json_decref(array);
+
+    if (json_str) {
+      /* no handling of dyn routing keys here: not compatible */
+      ret = p_amqp_publish(&amqpp_amqp_host, json_str);
+      free(json_str);
+      json_str = NULL;
+
+      if (!ret) qn += mv_num;
+    }
+  }
+#endif
 
   p_amqp_close(&amqpp_amqp_host, FALSE);
 

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -142,6 +142,9 @@ struct configuration {
   char *amqp_exchange_type;
   int amqp_persistent_msg;
   u_int32_t amqp_frame_max;
+  u_int32_t amqp_heartbeat_interval;
+  char *amqp_vhost;
+  int amqp_routing_key_rr;
   int print_cache_entries;
   int print_markers;
   int print_output;
@@ -155,6 +158,7 @@ struct configuration {
   int nfacctd_time;
   int nfacctd_pro_rating;
   int nfacctd_account_options;
+  int nfacctd_stitching;
   u_int32_t nfacctd_as;
   u_int32_t nfacctd_net;
   u_int64_t nfacctd_pipe_size;
@@ -164,15 +168,19 @@ struct configuration {
   int nfacctd_bgp_msglog_output;
   char *nfacctd_bgp_msglog_file;
   char *nfacctd_bgp_msglog_amqp_host;
+  char *nfacctd_bgp_msglog_amqp_vhost;
   char *nfacctd_bgp_msglog_amqp_user;
   char *nfacctd_bgp_msglog_amqp_passwd;
   char *nfacctd_bgp_msglog_amqp_exchange;
   char *nfacctd_bgp_msglog_amqp_exchange_type;
   char *nfacctd_bgp_msglog_amqp_routing_key;
+  int nfacctd_bgp_msglog_amqp_routing_key_rr;
   int nfacctd_bgp_msglog_amqp_persistent_msg;
   u_int32_t nfacctd_bgp_msglog_amqp_frame_max;
+  u_int32_t nfacctd_bgp_msglog_amqp_heartbeat_interval;
   int nfacctd_bgp_msglog_amqp_retry;
   char *nfacctd_bgp_ip;
+  char *nfacctd_bgp_id;
   int nfacctd_bgp_port;
   u_int64_t nfacctd_bgp_pipe_size;
   int nfacctd_bgp_ipprec;
@@ -208,13 +216,59 @@ struct configuration {
   char *bgp_table_dump_file;
   int bgp_table_dump_refresh_time;
   char *bgp_table_dump_amqp_host;
+  char *bgp_table_dump_amqp_vhost;
   char *bgp_table_dump_amqp_user;
   char *bgp_table_dump_amqp_passwd;
   char *bgp_table_dump_amqp_exchange;
   char *bgp_table_dump_amqp_exchange_type;
   char *bgp_table_dump_amqp_routing_key;
+  int bgp_table_dump_amqp_routing_key_rr;
   int bgp_table_dump_amqp_persistent_msg;
   u_int32_t bgp_table_dump_amqp_frame_max;
+  u_int32_t bgp_table_dump_amqp_heartbeat_interval;
+  int bmp_sock;
+  int nfacctd_bmp;
+  char *nfacctd_bmp_ip;
+  int nfacctd_bmp_port;
+  u_int64_t nfacctd_bmp_pipe_size;
+  int nfacctd_bmp_max_peers;
+  char *nfacctd_bmp_allow_file;
+  int nfacctd_bmp_ipprec;
+  int nfacctd_bmp_batch;
+  int nfacctd_bmp_batch_interval;
+  char *nfacctd_bmp_neighbors_file;
+  int nfacctd_bmp_msglog_output;
+  char *nfacctd_bmp_msglog_file;
+  char *nfacctd_bmp_msglog_amqp_host;
+  char *nfacctd_bmp_msglog_amqp_vhost;
+  char *nfacctd_bmp_msglog_amqp_user;
+  char *nfacctd_bmp_msglog_amqp_passwd;
+  char *nfacctd_bmp_msglog_amqp_exchange;
+  char *nfacctd_bmp_msglog_amqp_exchange_type;
+  char *nfacctd_bmp_msglog_amqp_routing_key;
+  int nfacctd_bmp_msglog_amqp_routing_key_rr;
+  int nfacctd_bmp_msglog_amqp_persistent_msg;
+  u_int32_t nfacctd_bmp_msglog_amqp_frame_max;
+  u_int32_t nfacctd_bmp_msglog_amqp_heartbeat_interval;
+  int nfacctd_bmp_msglog_amqp_retry;
+  int bmp_table_peer_buckets;
+  int bmp_table_per_peer_buckets;
+  int bmp_table_attr_hash_buckets;
+  int bmp_table_per_peer_hash;
+  int bmp_dump_output;
+  char *bmp_dump_file;
+  int bmp_dump_refresh_time;
+  char *bmp_dump_amqp_host;
+  char *bmp_dump_amqp_vhost;
+  char *bmp_dump_amqp_user;
+  char *bmp_dump_amqp_passwd;
+  char *bmp_dump_amqp_exchange;
+  char *bmp_dump_amqp_exchange_type;
+  char *bmp_dump_amqp_routing_key;
+  int bmp_dump_amqp_routing_key_rr;
+  int bmp_dump_amqp_persistent_msg;
+  u_int32_t bmp_dump_amqp_frame_max;
+  u_int32_t bmp_dump_amqp_heartbeat_interval;
   int nfacctd_isis;
   char *nfacctd_isis_ip;
   char *nfacctd_isis_net;
@@ -255,6 +309,7 @@ struct configuration {
   struct bpf_program *bpfp_a_table[AGG_FILTER_ENTRIES];
   struct pretag_filter ptf;
   struct pretag_filter pt2f;
+  struct pretag_label_filter ptlf;
   int maps_refresh;
   int maps_index;
   int maps_entries;
@@ -296,6 +351,7 @@ struct configuration {
   int tee_max_receivers;
   int tee_max_receiver_pools;
   char *tee_receivers;
+  u_int64_t tee_pipe_size;
   int uacctd_group;
   int uacctd_nl_size;
   char *tunnel0;
@@ -303,6 +359,7 @@ struct configuration {
   char *pkt_len_distrib_bins[MAX_PKT_LEN_DISTRIB_BINS];
   u_int16_t pkt_len_distrib_bins_lookup[ETHER_JUMBO_MTU+1];
   int use_ip_next_hop;
+  int tmp_net_own_field;
 };
 
 struct plugin_type_entry {

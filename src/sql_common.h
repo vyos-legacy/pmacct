@@ -133,6 +133,7 @@ struct db_cache {
   u_int8_t prep_valid;
   unsigned int signature;
   u_int8_t chained;
+  struct pkt_stitching *stitch;
   struct db_cache *prev;
   struct db_cache *next;
   time_t start_tag;	/* time: first packet received */
@@ -224,8 +225,10 @@ EXT void count_vlan_handler(const struct db_cache *, struct insert_data *, int, 
 EXT void count_cos_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_etype_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_src_host_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_src_net_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_src_as_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_dst_host_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_dst_net_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_dst_as_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_std_comm_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_ext_comm_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
@@ -274,6 +277,12 @@ EXT void count_timestamp_start_residual_handler(const struct db_cache *, struct 
 EXT void count_timestamp_end_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void PG_copy_count_timestamp_end_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_timestamp_end_residual_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_timestamp_min_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void PG_copy_count_timestamp_min_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_timestamp_min_residual_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_timestamp_max_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void PG_copy_count_timestamp_max_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_timestamp_max_residual_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_custom_primitives_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void fake_mac_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void fake_host_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
@@ -281,6 +290,16 @@ EXT void fake_as_handler(const struct db_cache *, struct insert_data *, int, cha
 EXT void fake_comms_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void fake_as_path_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void fake_mpls_vpn_rd_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+
+EXT void count_src_host_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_dst_host_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_src_net_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_dst_net_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_peer_src_ip_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_peer_dst_ip_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_post_nat_src_ip_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_post_nat_dst_ip_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void fake_host_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 
 #if defined WITH_GEOIP
 EXT void count_src_host_country_handler(const struct db_cache *, struct insert_data *, int, char **, char **);

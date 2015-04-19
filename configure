@@ -759,7 +759,7 @@ fi
 
 PACKAGE=pmacctd
 
-VERSION=1.5.0
+VERSION=1.5.1
 
 if test "`cd $srcdir && pwd`" != "`pwd`" && test -f $srcdir/config.status; then
   { echo "configure: error: source directory already configured; run "make distclean" there first" 1>&2; exit 1; }
@@ -2929,7 +2929,7 @@ EOF
 else
   echo "$ac_t""no" 1>&6
 { echo "configure: error: 
-        ERROR: missing MongoDB library. Refer to: http://api.mongodb.org/c/
+        ERROR: missing MongoDB library (0.8 version). Refer to: http://api.mongodb.org/c/ 
       " 1>&2; exit 1; }
 fi
 
@@ -4653,7 +4653,7 @@ case "$host_os" in
     ;;
 esac
 
-SERVER_LIBS="-lnfprobe_plugin -Lnfprobe_plugin/ -lsfprobe_plugin -Lsfprobe_plugin/ -lbgp -Lbgp/ -ltee_plugin -Ltee_plugin/ -lisis -Lisis/"
+SERVER_LIBS="-lnfprobe_plugin -Lnfprobe_plugin/ -lsfprobe_plugin -Lsfprobe_plugin/ -lbgp -Lbgp/ -ltee_plugin -Ltee_plugin/ -lisis -Lisis/ -lbmp -Lbmp/"
 
 echo "
 PLATFORM ..... : `uname -m`
@@ -4793,7 +4793,8 @@ ac_given_INSTALL="$INSTALL"
 trap 'rm -fr `echo " Makefile \
 	    src/Makefile src/nfprobe_plugin/Makefile \
 	    src/sfprobe_plugin/Makefile src/bgp/Makefile \
-	    src/tee_plugin/Makefile src/isis/Makefile " | sed "s/:[^ ]*//g"` conftest*; exit 1' 1 2 15
+	    src/tee_plugin/Makefile src/isis/Makefile \
+	    src/bmp/Makefile " | sed "s/:[^ ]*//g"` conftest*; exit 1' 1 2 15
 EOF
 cat >> $CONFIG_STATUS <<EOF
 
@@ -4888,7 +4889,8 @@ cat >> $CONFIG_STATUS <<EOF
 CONFIG_FILES=\${CONFIG_FILES-"Makefile \
 	    src/Makefile src/nfprobe_plugin/Makefile \
 	    src/sfprobe_plugin/Makefile src/bgp/Makefile \
-	    src/tee_plugin/Makefile src/isis/Makefile "}
+	    src/tee_plugin/Makefile src/isis/Makefile \
+	    src/bmp/Makefile "}
 EOF
 cat >> $CONFIG_STATUS <<\EOF
 for ac_file in .. $CONFIG_FILES; do if test "x$ac_file" != x..; then

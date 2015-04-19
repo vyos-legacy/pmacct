@@ -1535,6 +1535,30 @@ int load_tags(char *filename, struct pretag_filter *filter, char *value_ptr)
   return changes;
 }
 
+int load_labels(char *filename, struct pretag_label_filter *filter, char *value_ptr)
+{
+  char *count_token, *value;
+  int changes = 0;
+  u_int8_t neg = 0;
+
+  if (!filter || !value_ptr) return changes;
+
+  filter->num = 0;
+
+  while ((count_token = extract_token(&value_ptr, ',')) && changes < MAX_PRETAG_MAP_ENTRIES/4) {
+    neg = pt_check_neg(&count_token, NULL);
+    value = count_token;
+
+    filter->table[filter->num].neg = neg;
+    filter->table[filter->num].v = value;
+    filter->table[filter->num].len = strlen(value);
+    filter->num++;
+    changes++;
+  }
+
+  return changes;
+}
+
 /* return value:
    TRUE: We want it!
    FALSE: Discard it!
@@ -1549,6 +1573,24 @@ int evaluate_tags(struct pretag_filter *filter, pm_id_t tag)
   for (index = 0; index < filter->num; index++) {
     if (filter->table[index].n <= tag && filter->table[index].r >= tag) return (FALSE | filter->table[index].neg);
     else if (filter->table[index].neg) return FALSE;
+  }
+
+  return TRUE;
+}
+
+int evaluate_labels(struct pretag_label_filter *filter, pt_label_t *label)
+{
+  char null_label[] = "null";
+  int index;
+
+  if (filter->num == 0) return FALSE; /* no entries in the filter array: tag filtering disabled */
+  if (!label->val) label->val = null_label; 
+
+  for (index = 0; index < filter->num; index++) {
+    if (!memcmp(filter->table[index].v, label->val, filter->table[index].len)) return (FALSE | filter->table[index].neg);
+    else {
+      if (filter->table[index].neg) return FALSE;
+    }
   }
 
   return TRUE;
@@ -1632,7 +1674,8 @@ void version_daemon(char *header)
 char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
 		  struct pkt_bgp_primitives *pbgp, struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
 		  char *pcust, struct pkt_vlen_hdr_primitives *pvlen, pm_counter_t bytes_counter,
-		  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime)
+		  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime,
+		  struct pkt_stitching *stitch)
 {
   char src_mac[18], dst_mac[18], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN], ip_address[INET6_ADDRSTRLEN];
   char rd_str[SRVBUFLEN], misc_str[SRVBUFLEN], *as_path, *bgp_comm, empty_string[] = "", *tmpbuf = NULL, *label_ptr;
@@ -1877,16 +1920,32 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
     json_decref(kv);
   }
 
-  if (wtc & (COUNT_SRC_HOST|COUNT_SRC_NET)) {
+  if (wtc & COUNT_SRC_HOST) {
     addr_to_str(src_host, &pbase->src_ip);
     kv = json_pack("{ss}", "ip_src", src_host);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
-  if (wtc & (COUNT_DST_HOST|COUNT_DST_NET)) {
+  if (wtc & COUNT_SRC_NET) {
+    addr_to_str(src_host, &pbase->src_net);
+    if (!config.tmp_net_own_field) kv = json_pack("{ss}", "ip_src", src_host);
+    else kv = json_pack("{ss}", "net_src", src_host);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+
+  if (wtc & COUNT_DST_HOST) {
     addr_to_str(dst_host, &pbase->dst_ip);
     kv = json_pack("{ss}", "ip_dst", dst_host);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+
+  if (wtc & COUNT_DST_NET) {
+    addr_to_str(dst_host, &pbase->dst_net);
+    if (!config.tmp_net_own_field) kv = json_pack("{ss}", "ip_dst", dst_host);
+    else kv = json_pack("{ss}", "net_dst", dst_host);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -2031,6 +2090,18 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
     json_decref(kv);
   }
 
+  if (config.nfacctd_stitching && stitch) {
+    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_min, TRUE);
+    kv = json_pack("{ss}", "timestamp_min", tstamp_str);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+
+    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_max, TRUE);
+    kv = json_pack("{ss}", "timestamp_max", tstamp_str);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+
   /* all custom primitives printed here */
   {
     int cp_idx;
@@ -2115,6 +2186,7 @@ void write_and_free_json(FILE *f, void *obj)
 #ifdef WITH_RABBITMQ
 int write_and_free_json_amqp(void *amqp_log, void *obj)
 {
+  char *orig_amqp_routing_key = NULL, dyn_amqp_routing_key[SRVBUFLEN];
   struct p_amqp_host *alog = (struct p_amqp_host *) amqp_log;
   int ret;
 
@@ -2125,8 +2197,17 @@ int write_and_free_json_amqp(void *amqp_log, void *obj)
   json_decref(json_obj);
 
   if (tmpbuf) {
+
+    if (alog->rk_rr.max) {
+      orig_amqp_routing_key = p_amqp_get_routing_key(alog);
+      p_amqp_handle_routing_key_dyn_rr(dyn_amqp_routing_key, SRVBUFLEN, orig_amqp_routing_key, &alog->rk_rr);
+      p_amqp_set_routing_key(alog, dyn_amqp_routing_key);
+    }
+
     ret = p_amqp_publish(alog, tmpbuf);
     free(tmpbuf);
+
+    if (alog->rk_rr.max) p_amqp_set_routing_key(alog, orig_amqp_routing_key);
   }
 
   return ret;
@@ -2136,7 +2217,8 @@ int write_and_free_json_amqp(void *amqp_log, void *obj)
 char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
                   struct pkt_bgp_primitives *pbgp, struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
 		  char *pcust, struct pkt_vlen_hdr_primitives *pvlen, pm_counter_t bytes_counter,
-		  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime)
+		  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime,
+		  struct pkt_stitching *stitch)
 {
   if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): compose_json(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
 

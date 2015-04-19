@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -19,6 +19,7 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
+#include "bgp_hash.h"
 #include "bgp_prefix.h"
 #include "bgp_packet.h"
 #include "bgp_table.h"
@@ -99,6 +100,7 @@ struct bgp_peer {
   time_t last_keepalive;
   struct host_addr id;
   struct host_addr addr;
+  char addr_str[INET6_ADDRSTRLEN];
   u_int16_t tcp_port;
   u_int8_t cap_mp;
   char *cap_4as;
@@ -106,6 +108,7 @@ struct bgp_peer {
   u_int32_t msglen;
   struct bgp_peer_buf buf;
   struct bgp_peer_log *log;
+  void *bmp_se; /* struct bmp_dump_se_ll */
 };
 
 struct bgp_nlri {
@@ -178,7 +181,7 @@ EXT struct bgp_attr *bgp_attr_intern(struct bgp_attr *);
 EXT void bgp_attr_unintern (struct bgp_attr *);
 EXT void *bgp_attr_hash_alloc (void *);
 EXT int bgp_peer_init(struct bgp_peer *);
-EXT void bgp_peer_close(struct bgp_peer *);
+EXT void bgp_peer_close(struct bgp_peer *, int);
 EXT void bgp_peer_info_delete(struct bgp_peer *);
 EXT int bgp_attr_munge_as4path(struct bgp_peer *, struct bgp_attr *, struct aspath *);
 EXT void load_comm_patterns(char **, char **, char **);
@@ -194,7 +197,7 @@ EXT u_int32_t bgp_route_info_modulo_pathid(struct bgp_peer *, path_id_t *);
 
 EXT unsigned int attrhash_key_make(void *);
 EXT int attrhash_cmp(const void *, const void *);
-EXT void attrhash_init();
+EXT void attrhash_init(struct hash **);
 
 EXT void cache_to_pkt_bgp_primitives(struct pkt_bgp_primitives *, struct cache_bgp_primitives *);
 EXT void pkt_to_cache_bgp_primitives(struct cache_bgp_primitives *, struct pkt_bgp_primitives *, pm_cfgreg_t);

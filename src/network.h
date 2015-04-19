@@ -260,6 +260,7 @@ struct my_gtphdr_v1 {
 typedef u_int32_t as_t;
 typedef u_int16_t as16_t;
 
+#define RD_LEN		8
 #define RD_TYPE_AS      0
 #define RD_TYPE_IP      1
 #define RD_TYPE_AS4     2
@@ -407,6 +408,8 @@ struct pkt_primitives {
 #endif
   struct host_addr src_ip;
   struct host_addr dst_ip;
+  struct host_addr src_net;
+  struct host_addr dst_net;
   u_int8_t src_nmask;
   u_int8_t dst_nmask;
   as_t src_as;
@@ -484,6 +487,11 @@ struct pkt_msg {
   pm_id_t tag;
   pm_id_t tag2;
   u_int16_t pad;
+};
+
+struct pkt_stitching {
+  struct timeval timestamp_min;
+  struct timeval timestamp_max;
 };
 
 /* START: BGP section */

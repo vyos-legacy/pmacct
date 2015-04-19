@@ -70,7 +70,7 @@ CHAR fields because making use of IP prefix labels, transparently to pmacct.
 - Aggregation primitives to SQL schema mapping:
   Aggregation primitive => SQL table field
   * tag => agent_id (BIGINT NOT NULL DEFAULT 0)
-    - tag => tag (BIGINT NOT NULL DEFAULT 0, if sql_table_version >= 9)
+    - or tag => tag (BIGINT NOT NULL DEFAULT 0, if sql_table_version >= 9)
   * tag2 => tag2 (BIGINT NOT NULL DEFAULT 0, see README.tag2)
   * label => label (VARCHAR(255) NOT NULL DEFAULT ' ', see README.label)
   * src_as => as_src (BIGINT NOT NULL DEFAULT 0)
@@ -109,7 +109,9 @@ CHAR fields because making use of IP prefix labels, transparently to pmacct.
   * src_host => ip_src (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
   * dst_host => ip_dst (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
   * src_net => ip_src (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+    - or src_net => net_src (same definition, if tmp_net_own_field: true)
   * dst_net => ip_dst (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+    - or dst_net => net_dst (same definition, if tmp_net_own_field: true)
   * src_port => port_src (INT NOT NULL DEFAULT 0)
   * dst_port => port_dst (INT NOT NULL DEFAULT 0)
   * tcpflags => tcp_flags (SMALLINT NOT NULL DEFAULT 0)
@@ -129,6 +131,12 @@ CHAR fields because making use of IP prefix labels, transparently to pmacct.
   * timestamp_end => timestamp_end, timestamp_end_residual:
     - timestamp_end timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', see README.timestamp)
     - timestamp_end_residual INT NOT NULL DEFAULT 0, see README.timestamp)
+  * timestamp_min => timestamp_min, timestamp_min_residual:
+    - timestamp_min timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', see README.timestamp)
+    - timestamp_min_residual INT NOT NULL DEFAULT 0, see README.timestamp)
+  * timestamp_max => timestamp_max, timestamp_max_residual:
+    - timestamp_max timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', see README.timestamp)
+    - timestamp_max_residual INT NOT NULL DEFAULT 0, see README.timestamp)
 
 - If not using COPY statements (sql_use_copy, sql_dont_try_update both enabled)
   'packets' and 'bytes' counters need to be defined as part of the SQL schema

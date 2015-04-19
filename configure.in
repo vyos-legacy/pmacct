@@ -1,8 +1,8 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl configuration file for pmacct 
 
-AC_INIT([src/pmacctd.c], [1.5.0], [paolo@pmacct.net])
-AM_INIT_AUTOMAKE([pmacctd], [1.5.0])
+AC_INIT([src/pmacctd.c], [1.5.1], [paolo@pmacct.net])
+AM_INIT_AUTOMAKE([pmacctd], [1.5.1])
 AC_PREFIX_DEFAULT([/usr/local])
 
 COMPILE_ARGS="${ac_configure_args}"
@@ -788,7 +788,7 @@ dnl USING_SQL="yes"
 
     if test x"$MONGODBLIBFOUND" = x""; then
       AC_CHECK_LIB([mongoc], [mongo_connect], [], [AC_MSG_ERROR([
-        ERROR: missing MongoDB library. Refer to: http://api.mongodb.org/c/
+        ERROR: missing MongoDB library (0.8 version). Refer to: http://api.mongodb.org/c/ 
       ])])
     else 
       LIBS="${LIBS} -lmongoc"
@@ -1380,7 +1380,7 @@ case "$host_os" in
     ;;
 esac
 
-SERVER_LIBS="-lnfprobe_plugin -Lnfprobe_plugin/ -lsfprobe_plugin -Lsfprobe_plugin/ -lbgp -Lbgp/ -ltee_plugin -Ltee_plugin/ -lisis -Lisis/"
+SERVER_LIBS="-lnfprobe_plugin -Lnfprobe_plugin/ -lsfprobe_plugin -Lsfprobe_plugin/ -lbgp -Lbgp/ -ltee_plugin -Ltee_plugin/ -lisis -Lisis/ -lbmp -Lbmp/"
 
 echo "
 PLATFORM ..... : `uname -m`
@@ -1407,4 +1407,5 @@ AC_SUBST([SERVER_LIBS])
 AC_OUTPUT([ Makefile \
 	    src/Makefile src/nfprobe_plugin/Makefile \
 	    src/sfprobe_plugin/Makefile src/bgp/Makefile \
-	    src/tee_plugin/Makefile src/isis/Makefile ])
+	    src/tee_plugin/Makefile src/isis/Makefile \
+	    src/bmp/Makefile ])

@@ -107,6 +107,17 @@ void count_src_host_handler(const struct db_cache *cache_elem, struct insert_dat
   *ptr_values += strlen(*ptr_values);
 }
 
+void count_src_net_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char ptr[INET6_ADDRSTRLEN];
+
+  addr_to_str(ptr, &cache_elem->primitives.src_net);
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
 void count_src_as_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->primitives.src_as);
@@ -120,6 +131,17 @@ void count_dst_host_handler(const struct db_cache *cache_elem, struct insert_dat
   char ptr[INET6_ADDRSTRLEN];
 
   addr_to_str(ptr, &cache_elem->primitives.dst_ip);
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_dst_net_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char ptr[INET6_ADDRSTRLEN];
+
+  addr_to_str(ptr, &cache_elem->primitives.dst_net);
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, ptr);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, ptr);
   *ptr_where += strlen(*ptr_where);
@@ -326,6 +348,66 @@ void count_timestamp_end_residual_handler(const struct db_cache *cache_elem, str
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->pnat->timestamp_end.tv_usec);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->pnat->timestamp_end.tv_usec);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void PG_copy_count_timestamp_min_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  static char time_str[LONGSRVBUFLEN];
+  struct tm *tme;
+
+  tme = localtime(&cache_elem->stitch->timestamp_min.tv_sec);
+  strftime(time_str, LONGSRVBUFLEN, "%Y-%m-%d %H:%M:%S", tme);
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->stitch->timestamp_min.tv_sec); // dummy
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, time_str);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_timestamp_min_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->stitch->timestamp_min.tv_sec);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->stitch->timestamp_min.tv_sec);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_timestamp_min_residual_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->stitch->timestamp_min.tv_usec);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->stitch->timestamp_min.tv_usec);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void PG_copy_count_timestamp_max_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  static char time_str[LONGSRVBUFLEN];
+  struct tm *tme;
+
+  tme = localtime(&cache_elem->stitch->timestamp_max.tv_sec);
+  strftime(time_str, LONGSRVBUFLEN, "%Y-%m-%d %H:%M:%S", tme);
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->stitch->timestamp_max.tv_sec); // dummy
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, time_str);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_timestamp_max_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->stitch->timestamp_max.tv_sec);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->stitch->timestamp_max.tv_sec);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_timestamp_max_residual_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->stitch->timestamp_max.tv_usec);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->stitch->timestamp_max.tv_usec);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
@@ -686,6 +768,161 @@ void fake_as_path_handler(const struct db_cache *cache_elem, struct insert_data 
 {
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, fake_as_path);
   snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, fake_as_path);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_src_host_aton_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *aton = NULL, aton_v4[] = "INET_ATON", aton_v6[] = "INET6_ATON", aton_null[] = " "; 
+  char ptr[INET6_ADDRSTRLEN];
+
+  addr_to_str(ptr, &cache_elem->primitives.src_ip);
+  if (cache_elem->primitives.src_ip.family == AF_INET) aton = aton_v4;
+#if defined ENABLE_IPV6
+  else if (cache_elem->primitives.src_ip.family == AF_INET6) aton = aton_v6;
+#endif
+  else aton = aton_null;
+  
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, aton, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, aton, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_dst_host_aton_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *aton = NULL, aton_v4[] = "INET_ATON", aton_v6[] = "INET6_ATON", aton_null[] = " ";
+  char ptr[INET6_ADDRSTRLEN];
+
+  addr_to_str(ptr, &cache_elem->primitives.dst_ip);
+  if (cache_elem->primitives.dst_ip.family == AF_INET) aton = aton_v4;
+#if defined ENABLE_IPV6
+  else if (cache_elem->primitives.dst_ip.family == AF_INET6) aton = aton_v6;
+#endif
+  else aton = aton_null;
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, aton, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, aton, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_src_net_aton_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *aton = NULL, aton_v4[] = "INET_ATON", aton_v6[] = "INET6_ATON", aton_null[] = " ";
+  char ptr[INET6_ADDRSTRLEN];
+
+  addr_to_str(ptr, &cache_elem->primitives.src_net);
+  if (cache_elem->primitives.src_net.family == AF_INET) aton = aton_v4;
+#if defined ENABLE_IPV6
+  else if (cache_elem->primitives.src_net.family == AF_INET6) aton = aton_v6;
+#endif
+  else aton = aton_null;
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, aton, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, aton, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_dst_net_aton_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *aton = NULL, aton_v4[] = "INET_ATON", aton_v6[] = "INET6_ATON", aton_null[] = " ";
+  char ptr[INET6_ADDRSTRLEN];
+
+  addr_to_str(ptr, &cache_elem->primitives.dst_net);
+  if (cache_elem->primitives.dst_net.family == AF_INET) aton = aton_v4;
+#if defined ENABLE_IPV6
+  else if (cache_elem->primitives.dst_net.family == AF_INET6) aton = aton_v6;
+#endif
+  else aton = aton_null;
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, aton, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, aton, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_peer_src_ip_aton_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *aton = NULL, aton_v4[] = "INET_ATON", aton_v6[] = "INET6_ATON", aton_null[] = " ";
+  char ptr[INET6_ADDRSTRLEN];
+
+  addr_to_str(ptr, &cache_elem->cbgp->peer_src_ip);
+  if (cache_elem->cbgp->peer_src_ip.family == AF_INET) aton = aton_v4;
+#if defined ENABLE_IPV6
+  else if (cache_elem->cbgp->peer_src_ip.family == AF_INET6) aton = aton_v6;
+#endif
+  else aton = aton_null;
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, aton, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, aton, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_peer_dst_ip_aton_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *aton = NULL, aton_v4[] = "INET_ATON", aton_v6[] = "INET6_ATON", aton_null[] = " ";
+  char ptr[INET6_ADDRSTRLEN];
+
+  addr_to_str(ptr, &cache_elem->cbgp->peer_dst_ip);
+  if (cache_elem->cbgp->peer_dst_ip.family == AF_INET) aton = aton_v4;
+#if defined ENABLE_IPV6
+  else if (cache_elem->cbgp->peer_dst_ip.family == AF_INET6) aton = aton_v6;
+#endif
+  else aton = aton_null;
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, aton, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, aton, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_post_nat_src_ip_aton_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *aton = NULL, aton_v4[] = "INET_ATON", aton_v6[] = "INET6_ATON", aton_null[] = " ";
+  char ptr[INET6_ADDRSTRLEN];
+
+  addr_to_str(ptr, &cache_elem->pnat->post_nat_src_ip);
+  if (cache_elem->pnat->post_nat_src_ip.family == AF_INET) aton = aton_v4;
+#if defined ENABLE_IPV6
+  else if (cache_elem->pnat->post_nat_src_ip.family == AF_INET6) aton = aton_v6;
+#endif
+  else aton = aton_null;
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, aton, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, aton, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_post_nat_dst_ip_aton_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *aton = NULL, aton_v4[] = "INET_ATON", aton_v6[] = "INET6_ATON", aton_null[] = " ";
+  char ptr[INET6_ADDRSTRLEN];
+
+  addr_to_str(ptr, &cache_elem->pnat->post_nat_dst_ip);
+  if (cache_elem->pnat->post_nat_dst_ip.family == AF_INET) aton = aton_v4;
+#if defined ENABLE_IPV6
+  else if (cache_elem->pnat->post_nat_dst_ip.family == AF_INET6) aton = aton_v6;
+#endif
+  else aton = aton_null;
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, aton, ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, aton, ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void fake_host_aton_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *aton = NULL, aton_v4[] = "INET_ATON", aton_v6[] = "INET6_ATON";
+
+  aton = aton_v4;
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, aton, fake_host);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, aton, fake_host);
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }

@@ -1,5 +1,5 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2003-2013 by Paolo Lucente
+pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 
 
 TABLE OF CONTENTS:
@@ -17,9 +17,11 @@ XI.	Quickstart guide to setup a sFlow agent/probe
 XII.	Quickstart guide to setup the BGP daemon
 XIII.	Quickstart guide to setup a NetFlow/sFlow replicator
 XIV.	Quickstart guide to setup the IS-IS daemon
-XV.	Running the print plugin to write to flat-files
-XVI.	Quickstart guide to setup GeoIP lookups
-XVII.	Using pmacct as traffic/event logger
+XV.     Quickstart guide to setup the BMP daemon
+XVI.	Running the print plugin to write to flat-files
+XVII.	Quickstart guide to setup GeoIP lookups
+XVIII.	Using pmacct as traffic/event logger
+XIX.	Notes on how to troubleshoot
 
 
 I. Plugins included with pmacct distribution
@@ -39,7 +41,8 @@ plugins. Here is a list of plugins included in the official pmacct distribution:
 'mongodb': a working MongoDB installation can be used for data storage. It is
 	   required to install the MongoDB API C driver.
 'amqp':    data is sent to a RabbitMQ message exchange, running AMQP protocol,
-	   for delivery to consumer applications or tools.
+	   for delivery to consumer applications or tools. Popular consumers
+	   are ElasticSearch, Cassandra and CouchDB.
 
 
 II. Configuring pmacct for compilation and installing
@@ -252,8 +255,9 @@ mongo_refresh_time: 300
 mongo_table: pmacct.acct
 ...
 
-MongoDB release >= 2.2.0 is recommended. Installation of the MongoDB C driver is
-required.
+MongoDB release >= 2.2.0 is recommended. Installation of the MongoDB C driver 0.8,
+also referred as legacy, is required. Version 0.9 of the driver is not supported
+yet. The driver can be downloaded from http://api.mongodb.org/c/ . 
  
 
 IV. Running the libpcap-based daemon (pmacctd) 
@@ -391,6 +395,50 @@ sql_history: 10m
 sql_history_roundoff: mh
 sql_table_version: 4
 ! ...
+
+Va. NetFlow daemon & accounting NetFlow v9/IPFIX options 
+NetFlow v9/IPFIX can send option records other than flow ones, typically used to send
+to a collector mappings among interface SNMP ifIndexes to interface names or VRF ID's
+to VRF names. nfacctd_account_options enables accounting of option records then these
+should be split from regular flow records. Below is a sample config:
+
+nfacctd_time_new: true
+nfacctd_account_options: true
+!
+plugins: print[data], print[data_options]
+!
+pre_tag_filter[data]: 100
+aggregate[data]: peer_src_ip, in_iface, out_iface, tos, vrf_id_ingress, vrf_id_egress
+print_refresh_time[data]: 300
+print_history[data]: 300
+print_history_roundoff[data]: m
+print_output_file_append[data]: true
+print_output_file[data]: /path/to/flow_%s
+print_output[data]: csv
+!
+pre_tag_filter[data_options]: 200
+aggregate[data_options]: vrf_id_ingress, vrf_name
+print_refresh_time[data_options]: 300
+print_history[data_options]: 300
+print_history_roundoff[data_options]: m
+print_output_file_append[data_options]: true
+print_output_file[data_options]: /path/to/options_%s
+print_output[data_options]: event_csv
+!
+aggregate_primitives: /path/to/primitives.lst
+pre_tag_map: /path/to/pretag.map
+refresh_maps: true
+
+Below is the referenced pretag.map:
+
+set_tag=100     ip=0.0.0.0/0    sample_type=flow
+set_tag=200     ip=0.0.0.0/0    sample_type=option
+
+Below is the referenced primitives.lst:
+
+name=vrf_id_ingress     field_type=234  len=4   semantics=u_int
+name=vrf_id_egress      field_type=235  len=4   semantics=u_int
+name=vrf_name           field_type=236  len=32  semantics=str
 
 VI. Running the ULOG-based daemon (uacctd)
 All examples about pmacctd are also valid for uacctd with the exception of directives
@@ -1054,6 +1102,7 @@ tee_receivers[b]: /path/to/tee_receivers_b.lst
 !
 plugin_buffer_size: 10240
 plugin_pipe_size: 1024000
+nfacctd_pipe_size: 1024000
 
 An example of content of a tee_receivers map, ie. /path/to/tee_receivers_a.lst,
 is as follows ('id' is the pool ID and 'ip' a comma-separated list of receivers
@@ -1147,7 +1196,53 @@ router isis
 !
 
 
-XV. Running the print plugin to write to flat-files
+XV. Quickstart guide to setup the BMP daemon
+The BMP daemon thread is introduced in pmacct 1.5.1. The implementation is
+based on the draft-ietf-grow-bmp-07 IETF document. To quote the document:
+"BMP is intended to provide a more convenient interface for obtaining route
+views for research purpose than the screen-scraping approach in common use
+today. The design goals are to keep BMP simple, useful, easily implemented,
+and minimally service-affecting.". The BMP daemon currently supports BMP
+events and stats only, ie. initiation, termination, peer up, peer down and
+stats reports messages. Route Monitoring is future (upcoming) work but routes
+can be currently sourced via the BGP daemon thread (best path only or ADD-PATH),
+making the two daemons complementary. The daemon enables to write BMP messages
+to files or AMQP queues, real-time (msglog) or at regular time intervals (dump).
+
+Following a simple example on how to configure nfacctd to enable the BMP daemon
+to a) log, in real-time, BGP stats and events received via BMP to a text-file
+(bmp_daemon_msglog_file) and b) dump the same (ie. BGP stats and events received
+via BMP) to a text-file and at regular time intervals (bmp_dump_refresh_time,
+bmp_dump_file):
+
+bmp_daemon: true
+!
+bmp_daemon_msglog_file: /path/to/bmp-$peer_src_ip.log
+!
+bmp_dump_file: /path/to/bmp-$peer_src_ip-%H%M.dump
+bmp_dump_refresh_time: 60
+
+Following is an example how a Cisco router running IOS should be configured
+in order to export BMP data to a collector:
+
+router bgp 64512
+ bmp server 1
+  address X.X.X.X port-number 1790
+  initial-delay 60
+  failure-retry-delay 60
+  flapping-delay 60
+  stats-reporting-period 60
+  activate
+ exit-bmp-server-mode
+ !
+ neighbor Y.Y.Y.Y remote-as 64513
+ neighbor Y.Y.Y.Y bmp-activate all
+ neighbor Z.Z.Z.Z remote-as 64514
+ neighbor Z.Z.Z.Z bmp-activate all
+
+Any equivalent examples using IOS-XR or JunOS are much welcome.
+ 
+XVI. Running the print plugin to write to flat-files
 Print plugin was originally conceived to display data on standard output; with
 pmacct 0.14 a new 'print_output_file' configuration directive is introduced to
 allow the plugin to write to flat-files aswell. Dynamic filenames are supported.
@@ -1192,7 +1287,7 @@ print_history_roundoff: m
 print_output_file_append: true 
 
 
-XVI. Quickstart guide to setup GeoIP lookups
+XVII. Quickstart guide to setup GeoIP lookups
 From pmacct 0.14.2 it is possible to perform GeoIP country lookups against a
 Maxmind library database - and as a result of that two new traffic aggregation
 primitives have been added to the set: src_host_country and dst_host_country. 
@@ -1217,7 +1312,7 @@ counties, metro areas, zip codes, etc.) are not yet supported: should you be
 interested into any of these, please get in touch.  
 
 
-XVII. Using pmacct as traffic/event logger
+XVIII. Using pmacct as traffic/event logger
 pmacct was originally conceived as a traffic aggregator. From pmacct 0.14.3 
 it is now possible to use pmacct as a traffic/event logger, such development
 being fostered particularly by the use of NetFlow/IPFIX as generic transport,
@@ -1308,3 +1403,53 @@ set_tag=10      ip=B.B.B.B	sample_type=flow
 set_tag=20      ip=B.B.B.B	sample_type=event
 !
 ! ...
+
+
+XIX.  Notes on how to troubleshoot
+This chapter will hopefully build up to the point of providing a taxonomy of
+popular cases to troubleshoot by daemon and what to do. Although that is the
+plan, the current format is sparse notes.  
+
+a) In case of crashes of an any process, regardless if predictable or not, the
+advice is to run the daemon with "ulimit -c unlimited" so to generate a core
+dump. The file is placed in the directory where the daemon is started so it
+is good to take care of that. The core file along with the crashing executable
+and configuration should be made available to pmacct developers for further
+inspection. Optionally, ie. if the issue can be easily reproduced, the daemon
+can be re-configured for compiling with the --debug flag so to produce extra
+info suitable for troubleshooting.
+
+b) If nfacctd or sfacctd is in use and the symptom is no output data, check: 1)
+with tcpdump, ie. "tcpdump -i <interface> -n port <sfacctd/nfacctd listening
+port>", that packets are arriving. Optionally wireshark/tshark can be used,
+in conjunction with decoders (cflow for NetFlow/IPFIX and sflow for sFlow) to
+briefly validate packets are consistent; 2) firewall settings, ie. "iptables
+-L -n" on Linux: even though tcpdump sees packets hitting the listening port,
+in normal kernel operations the filtering happens after the raw socket used
+by cpdump is serviced; 3) especially in case of copy/paste of configs or if
+using a config from a production system in lab, disable or double-check values
+for internal buffering: if set too high they will retain data internally to
+the daemon. 
+
+c) A NetFlow/sFlow packet capture in libpcap format suitable for replay can
+be produced with tcpdump, ie. "tcpdump -i <interface> -n -s 0 -w <output file>
+port <sfacctd/nfacctd listening port>". The output file can be replayed in
+lab with tcpreplay. Before replaying, L2/L3 must be adjusted to reflect the
+lab environment; this can be done with the tcprewrite tool of the tcpreplay
+package, ie.: "tcprewrite --enet-smac=<src MAC address> --enet-dmac=<dst MAC
+address> -S <src IP address rewrite> -D <dst IP address rewrite> --fixcsum
+--infile=<input file, ie. output from tcpdump> --outfile=<output file>". Then
+the output file from tcprewrite can be supplied to tcpreplay for the actual
+replay, ie.: "tcpreplay -i <output interface> -x <speed multiplicator> <input
+file>". 
+
+d) Buffering is often an element to tune. While buffering internal to pmacct, 
+plugin_buffer_size and plugin_buffer_size, return warning messages in case of
+data loss, buffering between pmacct and the kernel is more tricky (often it is
+outside control of the application), ie. nfacctd_pipe_size and equivalents. Two
+commands useful to check this kind of buffering on Linux systems are: 1) "cat
+/proc/net/udp" ensuring that "drops" value is not increasing and 2) "netstat
+-s" ensuring, under the section UDP, that errors are not increasing (since this
+command returns system-wide counters, counter-check is: stop the pmacct daemon
+running and, granted the counter was increasing, verify it does not increase
+anymore).

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -1024,6 +1024,31 @@ int PT_map_src_mac_handler(char *filename, struct id_entry *e, char *value, stru
   return FALSE;
 }
 
+int PT_map_dst_mac_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  int x = 0;
+
+  e->dst_mac.neg = pt_check_neg(&value, &((struct id_table *) req->key_value_table)->flags);
+
+  if (string_etheraddr(value, &e->dst_mac.a)) {
+    Log(LOG_ERR, "ERROR ( %s ): Bad destination MAC address '%s'. ", filename, value);
+    return TRUE;
+  }
+
+  for (x = 0; e->func[x]; x++) {
+    if (e->func_type[x] == PRETAG_DST_MAC) {
+      Log(LOG_ERR, "ERROR ( %s ): Multiple 'dst_mac' clauses part of the same statement. ", filename);
+      return TRUE;
+    }
+  }
+
+  if (config.acct_type == ACCT_NF) e->func[x] = pretag_dst_mac_handler;
+  else if (config.acct_type == ACCT_SF) e->func[x] = SF_pretag_dst_mac_handler;
+  if (e->func[x]) e->func_type[x] = PRETAG_DST_MAC;
+
+  return FALSE;
+}
+
 int PT_map_vlan_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int tmp, x = 0;
@@ -1051,6 +1076,32 @@ int PT_map_vlan_id_handler(char *filename, struct id_entry *e, char *value, stru
   return FALSE;
 }
 
+int PT_map_post_cvlan_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  int tmp, x = 0;
+
+  e->post_cvlan_id.neg = pt_check_neg(&value, &((struct id_table *) req->key_value_table)->flags);
+
+  tmp = atoi(value);
+  if (tmp < 0 || tmp > 4096) {
+    Log(LOG_ERR, "ERROR ( %s ): 'post_cvlan' need to be in the following range: 0 > value > 4096. ", filename);
+    return TRUE;
+  }
+  e->post_cvlan_id.n = tmp;
+
+  for (x = 0; e->func[x]; x++) {
+    if (e->func_type[x] == PRETAG_CVLAN_ID) {
+      Log(LOG_ERR, "ERROR ( %s ): Multiple 'post_cvlan' clauses part of the same statement. ", filename);
+      return TRUE;
+    }
+  }
+
+  if (config.acct_type == ACCT_NF) e->func[x] = pretag_post_cvlan_id_handler;
+  /* else if (config.acct_type == ACCT_SF) e->func[x] = SF_pretag_vlan_id_handler; */
+  if (e->func[x]) e->func_type[x] = PRETAG_CVLAN_ID;
+
+  return FALSE;
+}
 
 int PT_map_set_tos_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
@@ -1175,6 +1226,10 @@ int pretag_input_handler(struct packet_ptrs *pptrs, void *unused, void *e)
       if (!memcmp(&input32, pptrs->f_data+tpl->tpl[NF9_INPUT_SNMP].off, tpl->tpl[NF9_INPUT_SNMP].len))
 	return (FALSE | neg);
     }
+    else if (tpl->tpl[NF9_INPUT_PHYSINT].len == 4) {
+      if (!memcmp(&input32, pptrs->f_data+tpl->tpl[NF9_INPUT_PHYSINT].off, tpl->tpl[NF9_INPUT_PHYSINT].len))
+        return (FALSE | neg);
+    }
     else return (TRUE ^ neg);
   case 8: 
     switch(hdr->aggregation) {
@@ -1236,6 +1291,10 @@ int pretag_output_handler(struct packet_ptrs *pptrs, void *unused, void *e)
     else if (tpl->tpl[NF9_OUTPUT_SNMP].len == 4) {
       if (!memcmp(&output32, pptrs->f_data+tpl->tpl[NF9_OUTPUT_SNMP].off, tpl->tpl[NF9_OUTPUT_SNMP].len))
 	return (FALSE | neg);
+    }
+    else if (tpl->tpl[NF9_OUTPUT_PHYSINT].len == 4) {
+      if (!memcmp(&output32, pptrs->f_data+tpl->tpl[NF9_OUTPUT_PHYSINT].off, tpl->tpl[NF9_OUTPUT_PHYSINT].len))
+        return (FALSE | neg);
     }
     else return (TRUE ^ neg);
   case 8:
@@ -1842,7 +1901,7 @@ int pretag_direction_handler(struct packet_ptrs *pptrs, void *unused, void *e)
   struct id_entry *entry = e;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
-  u_int16_t direction = 0;
+  u_int8_t direction = 0;
 
   switch (hdr->version) {
   case 10:
@@ -1881,15 +1940,17 @@ int pretag_mpls_pw_id_handler(struct packet_ptrs *pptrs, void *unused, void *e)
   struct id_entry *entry = e;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_int32_t tmp32 = 0, mpls_pw_id = 0;;
 
   switch (hdr->version) {
   case 10:
   case 9:
     if (tpl->tpl[NF9_PSEUDOWIREID].len) {
-      if (!memcmp(&entry->mpls_pw_id.n, pptrs->f_data+tpl->tpl[NF9_PSEUDOWIREID].off, 4))
-        return (FALSE | entry->mpls_pw_id.neg);
-      else return (TRUE ^ entry->mpls_pw_id.neg);
-    }
+      memcpy(&tmp32, pptrs->f_data+tpl->tpl[NF9_PSEUDOWIREID].off, 4);
+      mpls_pw_id = ntohl(tmp32);
+    } 
+    if (entry->mpls_pw_id.n == mpls_pw_id) return (FALSE | entry->mpls_pw_id.neg);
+    else return (TRUE ^ entry->mpls_pw_id.neg);
   default:
     return TRUE; /* this field does not exist: condition is always true */
   }
@@ -1914,21 +1975,65 @@ int pretag_src_mac_handler(struct packet_ptrs *pptrs, void *unused, void *e)
   }
 }
 
+int pretag_dst_mac_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+
+  switch (hdr->version) {
+  case 10:
+  case 9:
+    if (tpl->tpl[NF9_IN_DST_MAC].len) {
+      if (!memcmp(&entry->dst_mac.a, pptrs->f_data+tpl->tpl[NF9_IN_DST_MAC].off, MIN(tpl->tpl[NF9_IN_DST_MAC].len, 6)))
+        return (FALSE | entry->dst_mac.neg);
+      else return (TRUE ^ entry->dst_mac.neg);
+    }
+  default:
+    return TRUE; /* this field does not exist: condition is always true */
+  }
+}
+
 int pretag_vlan_id_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 {
   struct id_entry *entry = e;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
-  u_int16_t vlan_id = 0;
+  u_int16_t tmp16 = 0, vlan_id = 0;
 
   switch (hdr->version) {
   case 10:
   case 9:
     if (tpl->tpl[NF9_IN_VLAN].len) {
-      memcpy(&vlan_id, pptrs->f_data+tpl->tpl[NF9_IN_VLAN].off, MIN(tpl->tpl[NF9_IN_VLAN].len, 2));
+      memcpy(&tmp16, pptrs->f_data+tpl->tpl[NF9_IN_VLAN].off, MIN(tpl->tpl[NF9_IN_VLAN].len, 2));
     }
+    else if (tpl->tpl[NF9_DOT1QVLANID].len) {
+      memcpy(&tmp16, pptrs->f_data+tpl->tpl[NF9_DOT1QVLANID].off, MIN(tpl->tpl[NF9_DOT1QVLANID].len, 2));
+    }
+    vlan_id = ntohs(tmp16);
     if (entry->vlan_id.n == vlan_id) return (FALSE | entry->vlan_id.neg);
     else return (TRUE ^ entry->vlan_id.neg);
+  default:
+    return TRUE; /* this field does not exist: condition is always true */
+  }
+}
+
+int pretag_post_cvlan_id_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_int16_t tmp16 = 0, post_cvlan_id = 0;
+
+  switch (hdr->version) {
+  case 10:
+  case 9:
+    if (tpl->tpl[NF9_POST_DOT1QCVLANID].len) {
+      memcpy(&tmp16, pptrs->f_data+tpl->tpl[NF9_POST_DOT1QCVLANID].off, MIN(tpl->tpl[NF9_POST_DOT1QCVLANID].len, 2));
+    }
+    post_cvlan_id = ntohs(tmp16);
+    if (entry->post_cvlan_id.n == post_cvlan_id) return (FALSE | entry->post_cvlan_id.neg);
+    else return (TRUE ^ entry->post_cvlan_id.neg);
   default:
     return TRUE; /* this field does not exist: condition is always true */
   }
@@ -2129,6 +2234,15 @@ int SF_pretag_src_mac_handler(struct packet_ptrs *pptrs, void *unused, void *e)
 
   if (!memcmp(entry->src_mac.a, sample->eth_src, ETH_ADDR_LEN)) return (FALSE | entry->src_mac.neg);
   else return (TRUE ^ entry->src_mac.neg);
+}
+
+int SF_pretag_dst_mac_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+
+  if (!memcmp(entry->dst_mac.a, sample->eth_dst, ETH_ADDR_LEN)) return (FALSE | entry->dst_mac.neg);
+  else return (TRUE ^ entry->dst_mac.neg);
 }
 
 int SF_pretag_vlan_id_handler(struct packet_ptrs *pptrs, void *unused, void *e)
@@ -2685,6 +2799,17 @@ int PT_map_index_entries_src_mac_handler(struct id_entry *e, void *src)
   return FALSE;
 }
 
+int PT_map_index_entries_dst_mac_handler(struct id_entry *e, void *src)
+{
+  struct id_entry *src_e = (struct id_entry *) src;
+
+  if (!e || !src_e) return TRUE;
+
+  memcpy(&e->dst_mac, &src_e->dst_mac, sizeof(pt_etheraddr_t));
+
+  return FALSE;
+}
+
 int PT_map_index_entries_vlan_id_handler(struct id_entry *e, void *src)
 {
   struct id_entry *src_e = (struct id_entry *) src;
@@ -2692,6 +2817,17 @@ int PT_map_index_entries_vlan_id_handler(struct id_entry *e, void *src)
   if (!e || !src_e) return TRUE; 
 
   memcpy(&e->vlan_id, &src_e->vlan_id, sizeof(pt_uint16_t));
+
+  return FALSE;
+}
+
+int PT_map_index_entries_post_cvlan_id_handler(struct id_entry *e, void *src)
+{
+  struct id_entry *src_e = (struct id_entry *) src;
+
+  if (!e || !src_e) return TRUE;
+
+  memcpy(&e->post_cvlan_id, &src_e->post_cvlan_id, sizeof(pt_uint16_t));
 
   return FALSE;
 }
@@ -2745,6 +2881,10 @@ int PT_map_index_fdata_input_handler(struct id_entry *e, void *src)
         memcpy(&iface32, pptrs->f_data+tpl->tpl[NF9_INPUT_SNMP].off, 4);
         e->input.n = ntohl(iface32);
       }
+      else if (tpl->tpl[NF9_INPUT_PHYSINT].len == 4) {
+        memcpy(&iface32, pptrs->f_data+tpl->tpl[NF9_INPUT_PHYSINT].off, 4);
+        e->input.n = ntohl(iface32);
+      }
       break; 
     case 8:
       /* unsupported */
@@ -2783,6 +2923,10 @@ int PT_map_index_fdata_output_handler(struct id_entry *e, void *src)
       }
       else if (tpl->tpl[NF9_OUTPUT_SNMP].len == 4) {
         memcpy(&iface32, pptrs->f_data+tpl->tpl[NF9_OUTPUT_SNMP].off, 4);
+        e->output.n = ntohl(iface32);
+      }
+      else if (tpl->tpl[NF9_OUTPUT_PHYSINT].len == 4) {
+        memcpy(&iface32, pptrs->f_data+tpl->tpl[NF9_OUTPUT_PHYSINT].off, 4);
         e->output.n = ntohl(iface32);
       }
       break;
@@ -3128,13 +3272,15 @@ int PT_map_index_fdata_mpls_pw_id_handler(struct id_entry *e, void *src)
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
   struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
   SFSample *sample = (SFSample *) pptrs->f_data;
+  u_int32_t tmp32 = 0;
 
   if (config.acct_type == ACCT_NF) {
     switch (hdr->version) {
     case 10:
     case 9:
       if (tpl->tpl[NF9_PSEUDOWIREID].len) {
-        memcpy(&e->mpls_pw_id.n, pptrs->f_data+tpl->tpl[NF9_PSEUDOWIREID].off, 4);
+        memcpy(&tmp32, pptrs->f_data+tpl->tpl[NF9_PSEUDOWIREID].off, 4);
+	e->mpls_pw_id.n = ntohl(tmp32);
       }
     }
   }
@@ -3194,7 +3340,7 @@ int PT_map_index_fdata_src_mac_handler(struct id_entry *e, void *src)
   return FALSE;
 }
 
-int PT_map_index_fdata_vlan_id_handler(struct id_entry *e, void *src)
+int PT_map_index_fdata_dst_mac_handler(struct id_entry *e, void *src)
 {
   struct packet_ptrs *pptrs = (struct packet_ptrs *) src;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
@@ -3205,14 +3351,65 @@ int PT_map_index_fdata_vlan_id_handler(struct id_entry *e, void *src)
     switch (hdr->version) {
     case 10:
     case 9:
-      if (tpl->tpl[NF9_IN_VLAN].len) {
-        memcpy(&e->vlan_id.n, pptrs->f_data+tpl->tpl[NF9_IN_VLAN].off, MIN(tpl->tpl[NF9_IN_VLAN].len, 2));
+      if (tpl->tpl[NF9_IN_DST_MAC].len) {
+        memcpy(&e->dst_mac.a, pptrs->f_data+tpl->tpl[NF9_IN_DST_MAC].off, MIN(tpl->tpl[NF9_IN_DST_MAC].len, 6));
       }
+    }
+  }
+  else if (config.acct_type == ACCT_SF) {
+    memcpy(&e->dst_mac.a, sample->eth_dst, ETH_ADDR_LEN);
+  }
+  else return TRUE;
+
+  return FALSE;
+}
+
+int PT_map_index_fdata_vlan_id_handler(struct id_entry *e, void *src)
+{
+  struct packet_ptrs *pptrs = (struct packet_ptrs *) src;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  SFSample *sample = (SFSample *) pptrs->f_data;
+  u_int16_t tmp16 = 0;
+
+  if (config.acct_type == ACCT_NF) {
+    switch (hdr->version) {
+    case 10:
+    case 9:
+      if (tpl->tpl[NF9_IN_VLAN].len) {
+        memcpy(&tmp16, pptrs->f_data+tpl->tpl[NF9_IN_VLAN].off, MIN(tpl->tpl[NF9_IN_VLAN].len, 2));
+      }
+      else if (tpl->tpl[NF9_DOT1QVLANID].len) {
+        memcpy(&tmp16, pptrs->f_data+tpl->tpl[NF9_DOT1QVLANID].off, MIN(tpl->tpl[NF9_DOT1QVLANID].len, 2));
+      }
+      e->vlan_id.n = ntohs(tmp16);
     }
   }
   else if (config.acct_type == ACCT_SF) {
     if (sample->in_vlan) e->vlan_id.n = sample->in_vlan;
     else if (sample->out_vlan) e->vlan_id.n = sample->out_vlan;
+  }
+  else return TRUE;
+
+  return FALSE;
+}
+
+int PT_map_index_fdata_post_cvlan_id_handler(struct id_entry *e, void *src)
+{
+  struct packet_ptrs *pptrs = (struct packet_ptrs *) src;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_int16_t tmp16 = 0;
+
+  if (config.acct_type == ACCT_NF) {
+    switch (hdr->version) {
+    case 10:
+    case 9:
+      if (tpl->tpl[NF9_POST_DOT1QCVLANID].len) {
+        memcpy(&tmp16, pptrs->f_data+tpl->tpl[NF9_POST_DOT1QCVLANID].off, MIN(tpl->tpl[NF9_POST_DOT1QCVLANID].len, 2));
+	e->post_cvlan_id.n = ntohs(tmp16);
+      }
+    }
   }
   else return TRUE;
 
