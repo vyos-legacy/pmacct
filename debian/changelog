@@ -1,3 +1,9 @@
+pmacct (0.14.0+vyos2+lithium3) unstable; urgency=low
+
+  * pmacct: update dh_gencontrol with new development build flag
+
+ -- Alex Harpin <development@landsofshadow.co.uk>  Sun, 14 Jun 2015 13:08:32 +0100
+ 
 pmacct (0.14.0+vyos2+lithium2) unstable; urgency=low
 
   * Update maintainer address
