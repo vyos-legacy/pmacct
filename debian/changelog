@@ -1,3 +1,11 @@
+pmacct (1.5.1-2) unstable; urgency=medium
+
+  * [cdc038b5] Remove ulog support / uacctd.
+    Ulog was removed from the kernel.
+    Thanks to Chris West (Closes: #790090)
+
+ -- Bernd Zeimetz <bzed@debian.org>  Sat, 27 Jun 2015 12:01:35 +0200
+
 pmacct (1.5.1-1) unstable; urgency=medium
 
   * [6e864c42] Merge tag 'upstream/1.5.1'
