@@ -1,3 +1,12 @@
+pmacct (1.5.2-1) unstable; urgency=medium
+
+  * [290e9b2] Merge tag 'upstream/1.5.2'
+    Upstream version 1.5.2
+    The new upstream version also builds fine against the new
+    librabbitmq4. (Closes: #806245)
+
+ -- Bernd Zeimetz <bzed@debian.org>  Wed, 25 Nov 2015 21:25:32 +0100
+
 pmacct (1.5.1-2) unstable; urgency=medium
 
   * [cdc038b5] Remove ulog support / uacctd.
