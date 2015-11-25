@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2013 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -172,9 +172,18 @@ EXT void sampling_handler(struct channels_list_entry *, struct packet_ptrs *, ch
 EXT void sfprobe_sampling_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 
 #if defined (WITH_GEOIP)
-EXT void geoip_init();
-EXT void src_host_country_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
-EXT void dst_host_country_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void pm_geoip_init();
+EXT void src_host_country_geoip_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void dst_host_country_geoip_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+#endif
+
+#if defined (WITH_GEOIPV2)
+EXT void pm_geoipv2_init();
+EXT void pm_geoipv2_close();
+EXT void src_host_geoipv2_lookup_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void dst_host_geoipv2_lookup_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void src_host_country_geoipv2_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
+EXT void dst_host_country_geoipv2_handler(struct channels_list_entry *, struct packet_ptrs *, char **);
 #endif
 
 EXT int evaluate_lm_method(struct packet_ptrs *, u_int8_t, u_int32_t, u_int32_t);

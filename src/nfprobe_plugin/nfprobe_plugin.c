@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -504,6 +504,7 @@ ipv6_to_flowrec(struct FLOW *flow, struct primitives_ptrs *prim_ptrs, int *isfra
   flow->bgp_next_hop[ndx].v6 = extras->bgp_next_hop.address.ipv6;
   flow->mask[ndx] = p->src_nmask;
   flow->mask[ndx ^ 1] = p->dst_nmask;
+  flow->protocol = p->proto;
   flow->octets[ndx] = data->pkt_len;
   flow->packets[ndx] = data->pkt_num; 
   flow->flows[ndx] = data->flo_num;
@@ -1149,9 +1150,10 @@ connsock(struct sockaddr_storage *addr, socklen_t len, int hoplimit)
   }
 
   if (config.pipe_size) {
-    int rc;
+    int rc, value;
 
-    rc = Setsocksize(s, SOL_SOCKET, SO_SNDBUF, &config.pipe_size, sizeof(config.pipe_size));
+    value = MIN(config.pipe_size, INT_MAX); 
+    rc = Setsocksize(s, SOL_SOCKET, SO_SNDBUF, &value, sizeof(value));
     if (rc < 0) Log(LOG_WARNING, "WARN ( %s/%s ): setsockopt() failed for SOL_SNDBUF: %s\n", config.name, config.type, strerror(errno));
   }
 
@@ -1400,6 +1402,14 @@ void nfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     config.logfile_fd = open_logfile(config.logfile, "a");
   }
 
+  if (config.proc_priority) {
+    int ret;
+
+    ret = setpriority(PRIO_PROCESS, 0, config.proc_priority);
+    if (ret) Log(LOG_WARNING, "WARN ( %s/%s ): proc_priority failed (errno: %d)\n", config.name, config.type, errno);
+    else Log(LOG_INFO, "INFO ( %s/%s ): proc_priority set to %d\n", config.name, config.type, getpriority(PRIO_PROCESS, 0));
+  }
+
   Log(LOG_INFO, "INFO ( %s/%s ): NetFlow probe plugin is originally based on softflowd 0.9.7 software, Copyright 2002 Damien Miller <djm@mindrot.org> All rights reserved.\n",
 		  config.name, config.type);
 
@@ -1566,6 +1576,7 @@ read_data:
       rg->ptr += bufsz;
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received seq=%u num_entries=%u\n", config.name, config.type, seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
         for (num = 0; primptrs_funcs[num]; num++)

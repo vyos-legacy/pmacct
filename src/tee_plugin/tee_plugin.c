@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -48,6 +48,18 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   recollect_pipe_memory(ptr);
   pm_setproctitle("%s [%s]", "Tee Plugin", config.name);
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
+  if (config.logfile) {
+    fclose(config.logfile_fd);
+    config.logfile_fd = open_logfile(config.logfile, "a");
+  }
+
+  if (config.proc_priority) {
+    int ret;
+
+    ret = setpriority(PRIO_PROCESS, 0, config.proc_priority);
+    if (ret) Log(LOG_WARNING, "WARN ( %s/%s ): proc_priority failed (errno: %d)\n", config.name, config.type, errno);
+    else Log(LOG_INFO, "INFO ( %s/%s ): proc_priority set to %d\n", config.name, config.type, getpriority(PRIO_PROCESS, 0));
+  }
 
   /* signal handling */
   signal(SIGINT, Tee_exit_now);
@@ -190,6 +202,7 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       rg->ptr += bufsz;
 
       msg = (struct pkt_msg *) (pipebuf+sizeof(struct ch_buf_hdr));
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received seq=%u num_entries=%u\n", config.name, config.type, seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
 	for (pool_idx = 0; pool_idx < receivers.num; pool_idx++) {
@@ -197,12 +210,12 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	    if (!receivers.pools[pool_idx].balance.func) {
 	      for (recv_idx = 0; recv_idx < receivers.pools[pool_idx].num; recv_idx++) {
 	        target = &receivers.pools[pool_idx].receivers[recv_idx];
-	        Tee_send(msg, &target->dest, target->fd);
+	        Tee_send(msg, (struct sockaddr *) &target->dest, target->fd);
 	      }
 	    }
 	    else {
 	      target = receivers.pools[pool_idx].balance.func(&receivers.pools[pool_idx], msg);
-	      Tee_send(msg, &target->dest, target->fd);
+	      Tee_send(msg, (struct sockaddr *) &target->dest, target->fd);
 	    }
 	  }
 	}
@@ -383,30 +396,34 @@ void Tee_destroy_recvs()
 void Tee_init_socks()
 {
   struct tee_receiver *target = NULL;
+  struct sockaddr *sa;
   int pool_idx, recv_idx, err;
   char dest_addr[256], dest_serv[256];
 
   for (pool_idx = 0; pool_idx < receivers.num; pool_idx++) {
     for (recv_idx = 0; recv_idx < receivers.pools[pool_idx].num; recv_idx++) {
       target = &receivers.pools[pool_idx].receivers[recv_idx];
+      sa = (struct sockaddr *) &target->dest;
 
-      if (target->dest.sa_family != 0) {
-        if ((err = getnameinfo((struct sockaddr *) &target->dest,
-            target->dest_len, dest_addr, sizeof(dest_addr),
+      if (sa->sa_family != 0) {
+        if ((err = getnameinfo(sa, target->dest_len, dest_addr, sizeof(dest_addr),
             dest_serv, sizeof(dest_serv), NI_NUMERICHOST)) == -1) {
           Log(LOG_ERR, "ERROR ( %s/%s ): getnameinfo: %d\n", config.name, config.type, err);
           exit_plugin(1);
         }
       }
 
-      target->fd = Tee_prepare_sock(&target->dest, target->dest_len);
+      target->fd = Tee_prepare_sock((struct sockaddr *) &target->dest, target->dest_len);
 
       if (config.debug) {
-        u_char recv_addr[50];
+	struct host_addr recv_addr;
+        u_char recv_addr_str[INET6_ADDRSTRLEN];
+	u_int16_t recv_port;
 
-        addr_to_str(recv_addr, &target->dest);
+	sa_to_addr(&target->dest, &recv_addr, &recv_port); 
+        addr_to_str(recv_addr_str, &recv_addr);
         Log(LOG_DEBUG, "DEBUG ( %s/%s ): pool ID: %u :: receiver: %s :: fd: %d.\n",
-                config.name, config.type, receivers.pools[pool_idx].id, recv_addr, target->fd);
+                config.name, config.type, receivers.pools[pool_idx].id, recv_addr_str, target->fd);
       }
     }
   }
@@ -418,11 +435,15 @@ int Tee_prepare_sock(struct sockaddr *addr, socklen_t len)
 
   if (!config.tee_transparent) {
     struct host_addr source_ip;
+#if defined ENABLE_IPV6
+    struct sockaddr_storage ssource_ip;
+#else
     struct sockaddr ssource_ip;
+#endif
 
     if (config.nfprobe_source_ip) {
       ret = str_to_addr(config.nfprobe_source_ip, &source_ip);
-      addr_to_sa(&ssource_ip, &source_ip, 0);
+      addr_to_sa((struct sockaddr *) &ssource_ip, &source_ip, 0);
     }
 
     if ((s = socket(addr->sa_family, SOCK_DGRAM, 0)) == -1) {
@@ -457,7 +478,7 @@ int Tee_prepare_sock(struct sockaddr *addr, socklen_t len)
 
   if (config.tee_pipe_size) {
     int l = sizeof(config.tee_pipe_size);
-    u_int64_t saved = 0, obtained = 0;
+    int saved = 0, obtained = 0;
     
     getsockopt(s, SOL_SOCKET, SO_SNDBUF, &saved, &l);
     Setsocksize(s, SOL_SOCKET, SO_SNDBUF, &config.tee_pipe_size, sizeof(config.tee_pipe_size));
@@ -467,7 +488,7 @@ int Tee_prepare_sock(struct sockaddr *addr, socklen_t len)
       Setsocksize(s, SOL_SOCKET, SO_SNDBUF, &saved, l);
       getsockopt(s, SOL_SOCKET, SO_SNDBUF, &obtained, &l);
     }
-    Log(LOG_INFO, "INFO ( %s/%s ): tee_pipe_size: obtained=%u target=%u.\n", config.name, config.type, obtained, config.tee_pipe_size);
+    Log(LOG_INFO, "INFO ( %s/%s ): tee_pipe_size: obtained=%d target=%d.\n", config.name, config.type, obtained, config.tee_pipe_size);
   }
 
   if (connect(s, (struct sockaddr *)addr, len) == -1) {
@@ -483,6 +504,8 @@ int Tee_parse_hostport(const char *s, struct sockaddr *addr, socklen_t *len)
   char *orig, *host, *port;
   struct addrinfo hints, *res;
   int herr;
+
+  memset(&hints, '\0', sizeof(hints));
 
   if ((host = orig = strdup(s)) == NULL) {
     Log(LOG_ERR, "ERROR ( %s/%s ): Tee_parse_hostport() out of memory. Exiting ..\n", config.name, config.type);
@@ -500,9 +523,9 @@ int Tee_parse_hostport(const char *s, struct sockaddr *addr, socklen_t *len)
   if (*host == '[' && *(port - 2) == ']') {
     host++;
     *(port - 2) = '\0';
+    hints.ai_family = AF_INET6;
   }
 
-  memset(&hints, '\0', sizeof(hints));
   hints.ai_socktype = SOCK_DGRAM;
 
   /* Validations */

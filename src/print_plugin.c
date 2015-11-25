@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -40,9 +40,10 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct pollfd pfd;
   struct insert_data idata;
   time_t t;
-  int timeout, ret, num, is_event;
+  int timeout, refresh_timeout, amqp_timeout, ret, num, is_event;
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
+  struct plugins_list_entry *plugin_data = ((struct channels_list_entry *)ptr)->plugin;
   int datasize = ((struct channels_list_entry *)ptr)->datasize;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
   struct networks_file_data nfd;
@@ -55,6 +56,10 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct extra_primitives extras;
   struct primitives_ptrs prim_ptrs;
   char *dataptr;
+
+#ifdef WITH_RABBITMQ
+  struct p_amqp_host *amqp_host = &((struct channels_list_entry *)ptr)->amqp_host;
+#endif
 
   memcpy(&config, cfgptr, sizeof(struct configuration));
   memcpy(&extras, &((struct channels_list_entry *)ptr)->extras, sizeof(struct extra_primitives));
@@ -73,7 +78,7 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   else if (config.print_output & PRINT_OUTPUT_EVENT)
     is_event = TRUE;
 
-  timeout = config.sql_refresh_time*1000;
+  refresh_timeout = config.sql_refresh_time*1000;
 
   /* setting function pointers */
   if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET))
@@ -106,9 +111,14 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   memset(&prim_ptrs, 0, sizeof(prim_ptrs));
   set_primptrs_funcs(&extras);
 
-  pfd.fd = pipe_fd;
-  pfd.events = POLLIN;
-  setnonblocking(pipe_fd);
+  if (config.pipe_amqp) {
+    plugin_pipe_amqp_compile_check();
+#ifdef WITH_RABBITMQ
+    pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
+    amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+#endif
+  }
+  else setnonblocking(pipe_fd);
 
   idata.now = time(NULL);
 
@@ -148,8 +158,12 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   for(;;) {
     poll_again:
     status->wakeup = TRUE;
-    calc_refresh_timeout(refresh_deadline, idata.now, &timeout);
-    ret = poll(&pfd, 1, timeout);
+    calc_refresh_timeout(refresh_deadline, idata.now, &refresh_timeout);
+    
+    pfd.fd = pipe_fd;
+    pfd.events = POLLIN;
+    timeout = MIN(refresh_timeout, (amqp_timeout ? amqp_timeout : INT_MAX));
+    ret = poll(&pfd, (pfd.fd == ERR ? 0 : 1), timeout);
 
     if (ret <= 0) {
       if (getppid() == 1) {
@@ -171,50 +185,72 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
     }
 
+#ifdef WITH_RABBITMQ
+    if (config.pipe_amqp && pipe_fd == ERR) {
+      if (timeout == amqp_timeout) {
+        pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
+        amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+      }
+      else amqp_timeout = plugin_pipe_amqp_calc_poll_timeout_diff(amqp_host, idata.now); 
+    }
+#endif
+
     switch (ret) {
     case 0: /* timeout */
-      P_cache_handle_flush_event(&pt);
+      if (timeout == refresh_timeout) P_cache_handle_flush_event(&pt);
       break;
     default: /* we received data */
       read_data:
-      if (!pollagain) {
-        seq++;
-        seq %= MAX_SEQNUM;
-        if (seq == 0) rg_err_count = FALSE;
-      }
-      else {
-        if ((ret = read(pipe_fd, &rgptr, sizeof(rgptr))) == 0) 
-	  exit_plugin(1); /* we exit silently; something happened at the write end */
-      }
-
-      if ((rg->ptr + bufsz) > rg->end) rg->ptr = rg->base;
-
-      if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
+      if (!config.pipe_amqp) {
         if (!pollagain) {
-          pollagain = TRUE;
-          goto poll_again;
+          seq++;
+          seq %= MAX_SEQNUM;
+          if (seq == 0) rg_err_count = FALSE;
         }
         else {
-          rg_err_count++;
-          if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-            Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
-            Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
-            Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
-            Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
-            Log(LOG_ERR, "- increase system maximum socket size.\n\n");
-          }
-          seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
+          if ((ret = read(pipe_fd, &rgptr, sizeof(rgptr))) == 0) 
+	    exit_plugin(1); /* we exit silently; something happened at the write end */
         }
-      }
 
-      pollagain = FALSE;
-      memcpy(pipebuf, rg->ptr, bufsz);
-      rg->ptr += bufsz;
+        if ((rg->ptr + bufsz) > rg->end) rg->ptr = rg->base;
+
+        if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
+          if (!pollagain) {
+            pollagain = TRUE;
+            goto poll_again;
+          }
+          else {
+            rg_err_count++;
+            if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
+              Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
+              Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
+              Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
+              Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
+              Log(LOG_ERR, "- increase system maximum socket size.\n\n");
+            }
+            seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
+          }
+        }
+
+        pollagain = FALSE;
+        memcpy(pipebuf, rg->ptr, bufsz);
+        rg->ptr += bufsz;
+      }
+#ifdef WITH_RABBITMQ
+      else {
+        ret = p_amqp_consume_binary(amqp_host, pipebuf, config.buffer_size);
+	if (ret) pipe_fd = ERR;
+
+	seq = ((struct ch_buf_hdr *)pipebuf)->seq;
+	amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+      }
+#endif
 
       /* lazy refresh time handling */ 
       if (idata.now > refresh_deadline) P_cache_handle_flush_event(&pt);
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received seq=%u num_entries=%u\n", config.name, config.type, seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
 	for (num = 0; primptrs_funcs[num]; num++)
@@ -243,7 +279,8 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           data = (struct pkt_data *) dataptr;
 	}
       }
-      goto read_data;
+
+      if (!config.pipe_amqp) goto read_data;
     }
   }
 }
@@ -272,7 +309,11 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   struct pkt_data dummy_data, elem_dummy_data;
   pid_t writer_pid = getpid();
 
-  if (!index) return;
+  if (!index) {
+    Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - START (PID: %u) ***\n", config.name, config.type, writer_pid);
+    Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - END (PID: %u, QN: 0/0, ET: 0) ***\n", config.name, config.type, writer_pid);
+    return;
+  }
 
   empty_pcust = malloc(config.cpptrs.len);
   if (!empty_pcust) {
@@ -387,7 +428,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
         if (config.what_to_count & COUNT_TAG2) fprintf(f, "%-10llu  ", data->tag2);
         if (config.what_to_count & COUNT_CLASS) fprintf(f, "%-16s  ", ((data->class && class[(data->class)-1].id) ? class[(data->class)-1].protocol : "unknown" ));
   #if defined (HAVE_L2)
-        if (config.what_to_count & COUNT_SRC_MAC) {
+        if (config.what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
           etheraddr_string(data->eth_shost, src_mac);
   	if (strlen(src_mac))
             fprintf(f, "%-17s  ", src_mac);
@@ -405,7 +446,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
         if (config.what_to_count & COUNT_COS) fprintf(f, "%-2u  ", data->cos); 
         if (config.what_to_count & COUNT_ETHERTYPE) fprintf(f, "%-5x  ", data->etype); 
   #endif
-        if (config.what_to_count & COUNT_SRC_AS) fprintf(f, "%-10u  ", data->src_as); 
+        if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) fprintf(f, "%-10u  ", data->src_as); 
         if (config.what_to_count & COUNT_DST_AS) fprintf(f, "%-10u  ", data->dst_as); 
   
         if (config.what_to_count & COUNT_STD_COMM) { 
@@ -532,7 +573,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
             fprintf(f, "%-18s  ", empty_rd);
         }
   
-        if (config.what_to_count & COUNT_SRC_HOST) {
+        if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST)) {
           addr_to_str(src_host, &data->src_ip);
   #if defined ENABLE_IPV6
   	if (strlen(src_host))
@@ -547,7 +588,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   #endif
         }
 
-        if (config.what_to_count & COUNT_SRC_NET) {
+        if (config.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) {
           addr_to_str(src_host, &data->src_net);
   #if defined ENABLE_IPV6
         if (strlen(src_host))
@@ -594,20 +635,26 @@ void P_cache_purge(struct chained_cache *queue[], int index)
 
         if (config.what_to_count & COUNT_SRC_NMASK) fprintf(f, "%-3u       ", data->src_nmask);
         if (config.what_to_count & COUNT_DST_NMASK) fprintf(f, "%-3u       ", data->dst_nmask);
-        if (config.what_to_count & COUNT_SRC_PORT) fprintf(f, "%-5u     ", data->src_port);
+        if (config.what_to_count & (COUNT_SRC_PORT|COUNT_SUM_PORT)) fprintf(f, "%-5u     ", data->src_port);
         if (config.what_to_count & COUNT_DST_PORT) fprintf(f, "%-5u     ", data->dst_port);
         if (config.what_to_count & COUNT_TCPFLAGS) fprintf(f, "%-3u        ", queue[j]->tcp_flags);
   
         if (config.what_to_count & COUNT_IP_PROTO) {
-          if (!config.num_protos) fprintf(f, "%-10s  ", _protocols[data->proto].name);
-          else  fprintf(f, "%-10d  ", _protocols[data->proto].number);
+          if (!config.num_protos && (data->proto < protocols_number))
+	    fprintf(f, "%-10s  ", _protocols[data->proto].name);
+          else
+	    fprintf(f, "%-10d  ", data->proto);
         }
   
         if (config.what_to_count & COUNT_IP_TOS) fprintf(f, "%-3u    ", data->tos);
   
   #if defined WITH_GEOIP
-        if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "%-5s       ", GeoIP_code_by_id(data->src_ip_country));
-        if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "%-5s       ", GeoIP_code_by_id(data->dst_ip_country));
+        if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "%-5s       ", GeoIP_code_by_id(data->src_ip_country.id));
+        if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "%-5s       ", GeoIP_code_by_id(data->dst_ip_country.id));
+  #endif
+  #if defined WITH_GEOIPV2
+        if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "%-5s       ", data->src_ip_country.str);
+        if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "%-5s       ", data->dst_ip_country.str);
   #endif
   
         if (config.what_to_count_2 & COUNT_SAMPLING_RATE) fprintf(f, "%-7u       ", data->sampling_rate);
@@ -664,10 +711,16 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           time_t time1;
           struct tm *time2;
   
-          time1 = pnat->timestamp_start.tv_sec;
-          time2 = localtime(&time1);
-          strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
-          snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, pnat->timestamp_start.tv_usec);
+          if (config.sql_history_since_epoch) {
+	    snprintf(buf2, SRVBUFLEN, "%u.%u", pnat->timestamp_start.tv_sec, pnat->timestamp_start.tv_usec);
+	  }
+	  else {
+            time1 = pnat->timestamp_start.tv_sec;
+            time2 = localtime(&time1);
+            strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+            snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, pnat->timestamp_start.tv_usec);
+	  }
+
           fprintf(f, "%-30s ", buf2);
         }
   
@@ -676,10 +729,16 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           time_t time1;
           struct tm *time2;
         
-          time1 = pnat->timestamp_end.tv_sec;
-          time2 = localtime(&time1);
-          strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
-          snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, pnat->timestamp_end.tv_usec);
+          if (config.sql_history_since_epoch) {
+            snprintf(buf2, SRVBUFLEN, "%u.%u", pnat->timestamp_end.tv_sec, pnat->timestamp_end.tv_usec);
+          }
+          else {
+            time1 = pnat->timestamp_end.tv_sec;
+            time2 = localtime(&time1);
+            strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+            snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, pnat->timestamp_end.tv_usec);
+	  }
+
           fprintf(f, "%-30s ", buf2);
         }
 
@@ -688,17 +747,26 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           time_t time1;
           struct tm *time2;
 
-          time1 = queue[j]->stitch->timestamp_min.tv_sec;
-          time2 = localtime(&time1);
-          strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
-          snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, queue[j]->stitch->timestamp_min.tv_usec);
-          fprintf(f, "%-30s ", buf2);
+          if (config.sql_history_since_epoch) {
+            snprintf(buf2, SRVBUFLEN, "%u.%u", queue[j]->stitch->timestamp_min.tv_sec, queue[j]->stitch->timestamp_min.tv_usec);
+            fprintf(f, "%-30s ", buf2);
 
-          time1 = queue[j]->stitch->timestamp_max.tv_sec;
-          time2 = localtime(&time1);
-          strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
-          snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, queue[j]->stitch->timestamp_max.tv_usec);
-          fprintf(f, "%-30s ", buf2);
+            snprintf(buf2, SRVBUFLEN, "%u.%u", queue[j]->stitch->timestamp_max.tv_sec, queue[j]->stitch->timestamp_max.tv_usec);
+            fprintf(f, "%-30s ", buf2);
+          }
+          else {
+	    time1 = queue[j]->stitch->timestamp_min.tv_sec;
+            time2 = localtime(&time1);
+            strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+            snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, queue[j]->stitch->timestamp_min.tv_usec);
+            fprintf(f, "%-30s ", buf2);
+
+            time1 = queue[j]->stitch->timestamp_max.tv_sec;
+            time2 = localtime(&time1);
+            strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+            snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, queue[j]->stitch->timestamp_max.tv_usec);
+            fprintf(f, "%-30s ", buf2);
+	  }
         }
 
         /* all custom primitives printed here */
@@ -742,7 +810,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
 	if (config.what_to_count_2 & COUNT_LABEL) P_fprintf_csv_label(f, pvlen, COUNT_INT_LABEL, write_sep(sep, &count), empty_string);
         if (config.what_to_count & COUNT_CLASS) fprintf(f, "%s%s", write_sep(sep, &count), ((data->class && class[(data->class)-1].id) ? class[(data->class)-1].protocol : "unknown" ));
   #if defined (HAVE_L2)
-        if (config.what_to_count & COUNT_SRC_MAC) {
+        if (config.what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
           etheraddr_string(data->eth_shost, src_mac);
           fprintf(f, "%s%s", write_sep(sep, &count), src_mac);
         }
@@ -754,7 +822,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
         if (config.what_to_count & COUNT_COS) fprintf(f, "%s%u", write_sep(sep, &count), data->cos); 
         if (config.what_to_count & COUNT_ETHERTYPE) fprintf(f, "%s%x", write_sep(sep, &count), data->etype); 
   #endif
-        if (config.what_to_count & COUNT_SRC_AS) fprintf(f, "%s%u", write_sep(sep, &count), data->src_as); 
+        if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) fprintf(f, "%s%u", write_sep(sep, &count), data->src_as); 
         if (config.what_to_count & COUNT_DST_AS) fprintf(f, "%s%u", write_sep(sep, &count), data->dst_as); 
   
         if (config.what_to_count & COUNT_STD_COMM) {
@@ -860,11 +928,11 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           fprintf(f, "%s%s", write_sep(sep, &count), rd_str);
         }
   
-        if (config.what_to_count & COUNT_SRC_HOST) {
+        if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST)) {
           addr_to_str(src_host, &data->src_ip);
           fprintf(f, "%s%s", write_sep(sep, &count), src_host);
         }
-        if (config.what_to_count & COUNT_SRC_NET) {
+        if (config.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) {
           addr_to_str(src_host, &data->src_net);
           fprintf(f, "%s%s", write_sep(sep, &count), src_host);
         }
@@ -880,20 +948,26 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   
         if (config.what_to_count & COUNT_SRC_NMASK) fprintf(f, "%s%u", write_sep(sep, &count), data->src_nmask);
         if (config.what_to_count & COUNT_DST_NMASK) fprintf(f, "%s%u", write_sep(sep, &count), data->dst_nmask);
-        if (config.what_to_count & COUNT_SRC_PORT) fprintf(f, "%s%u", write_sep(sep, &count), data->src_port);
+        if (config.what_to_count & (COUNT_SRC_PORT|COUNT_SUM_PORT)) fprintf(f, "%s%u", write_sep(sep, &count), data->src_port);
         if (config.what_to_count & COUNT_DST_PORT) fprintf(f, "%s%u", write_sep(sep, &count), data->dst_port);
         if (config.what_to_count & COUNT_TCPFLAGS) fprintf(f, "%s%u", write_sep(sep, &count), queue[j]->tcp_flags);
   
         if (config.what_to_count & COUNT_IP_PROTO) {
-          if (!config.num_protos) fprintf(f, "%s%s", write_sep(sep, &count), _protocols[data->proto].name);
-          else fprintf(f, "%s%d", write_sep(sep, &count), _protocols[data->proto].number);
+          if (!config.num_protos && (data->proto < protocols_number))
+	    fprintf(f, "%s%s", write_sep(sep, &count), _protocols[data->proto].name);
+          else
+	    fprintf(f, "%s%d", write_sep(sep, &count), data->proto);
         }
   
         if (config.what_to_count & COUNT_IP_TOS) fprintf(f, "%s%u", write_sep(sep, &count), data->tos);
   
   #if defined WITH_GEOIP
-        if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "%s%s", write_sep(sep, &count), GeoIP_code_by_id(data->src_ip_country));
-        if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "%s%s", write_sep(sep, &count), GeoIP_code_by_id(data->dst_ip_country));
+        if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "%s%s", write_sep(sep, &count), GeoIP_code_by_id(data->src_ip_country.id));
+        if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "%s%s", write_sep(sep, &count), GeoIP_code_by_id(data->dst_ip_country.id));
+  #endif
+  #if defined WITH_GEOIPV2
+        if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "%s%s", write_sep(sep, &count), data->src_ip_country.str);
+        if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "%s%s", write_sep(sep, &count), data->dst_ip_country.str);
   #endif
   
         if (config.what_to_count_2 & COUNT_SAMPLING_RATE) fprintf(f, "%s%u", write_sep(sep, &count), data->sampling_rate);
@@ -920,10 +994,16 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           time_t time1;
           struct tm *time2;
  
-          time1 = pnat->timestamp_start.tv_sec;
-          time2 = localtime(&time1);
-          strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
-          snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, pnat->timestamp_start.tv_usec);
+          if (config.sql_history_since_epoch) {
+            snprintf(buf2, SRVBUFLEN, "%u.%u", pnat->timestamp_start.tv_sec, pnat->timestamp_start.tv_usec);
+          }
+          else {
+            time1 = pnat->timestamp_start.tv_sec;
+            time2 = localtime(&time1);
+            strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+            snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, pnat->timestamp_start.tv_usec);
+	  }
+
           fprintf(f, "%s%s", write_sep(sep, &count), buf2);
         }
   
@@ -932,10 +1012,16 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           time_t time1;
           struct tm *time2;
   
-          time1 = pnat->timestamp_end.tv_sec;
-          time2 = localtime(&time1);
-          strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
-          snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, pnat->timestamp_end.tv_usec);
+          if (config.sql_history_since_epoch) {
+            snprintf(buf2, SRVBUFLEN, "%u.%u", pnat->timestamp_end.tv_sec, pnat->timestamp_end.tv_usec);
+          }
+          else {
+            time1 = pnat->timestamp_end.tv_sec;
+            time2 = localtime(&time1);
+            strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+            snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, pnat->timestamp_end.tv_usec);
+	  }
+
           fprintf(f, "%s%s", write_sep(sep, &count), buf2);
         }
 
@@ -944,17 +1030,26 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           time_t time1;
           struct tm *time2;
 
-          time1 = queue[j]->stitch->timestamp_min.tv_sec;
-          time2 = localtime(&time1);
-          strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
-          snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, queue[j]->stitch->timestamp_min.tv_usec);
-          fprintf(f, "%s%s", write_sep(sep, &count), buf2);
+          if (config.sql_history_since_epoch) {
+            snprintf(buf2, SRVBUFLEN, "%u.%u", queue[j]->stitch->timestamp_min.tv_sec, queue[j]->stitch->timestamp_min.tv_usec);
+	    fprintf(f, "%s%s", write_sep(sep, &count), buf2);
 
-          time1 = queue[j]->stitch->timestamp_max.tv_sec;
-          time2 = localtime(&time1);
-          strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
-          snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, queue[j]->stitch->timestamp_max.tv_usec);
-          fprintf(f, "%s%s", write_sep(sep, &count), buf2);
+            snprintf(buf2, SRVBUFLEN, "%u.%u", queue[j]->stitch->timestamp_max.tv_sec, queue[j]->stitch->timestamp_max.tv_usec);
+	    fprintf(f, "%s%s", write_sep(sep, &count), buf2);
+          }
+	  else {
+            time1 = queue[j]->stitch->timestamp_min.tv_sec;
+            time2 = localtime(&time1);
+            strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+            snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, queue[j]->stitch->timestamp_min.tv_usec);
+            fprintf(f, "%s%s", write_sep(sep, &count), buf2);
+
+            time1 = queue[j]->stitch->timestamp_max.tv_sec;
+            time2 = localtime(&time1);
+            strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+            snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, queue[j]->stitch->timestamp_max.tv_usec);
+            fprintf(f, "%s%s", write_sep(sep, &count), buf2);
+	  }
         }
   
         /* all custom primitives printed here */
@@ -1029,13 +1124,13 @@ void P_write_stats_header_formatted(FILE *f, int is_event)
   if (config.what_to_count & COUNT_TAG2) fprintf(f, "TAG2        ");
   if (config.what_to_count & COUNT_CLASS) fprintf(f, "CLASS             ");
 #if defined HAVE_L2
-  if (config.what_to_count & COUNT_SRC_MAC) fprintf(f, "SRC_MAC            ");
+  if (config.what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) fprintf(f, "SRC_MAC            ");
   if (config.what_to_count & COUNT_DST_MAC) fprintf(f, "DST_MAC            ");
   if (config.what_to_count & COUNT_VLAN) fprintf(f, "VLAN   ");
   if (config.what_to_count & COUNT_COS) fprintf(f, "COS ");
   if (config.what_to_count & COUNT_ETHERTYPE) fprintf(f, "ETYPE  ");
 #endif
-  if (config.what_to_count & COUNT_SRC_AS) fprintf(f, "SRC_AS      ");
+  if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) fprintf(f, "SRC_AS      ");
   if (config.what_to_count & COUNT_DST_AS) fprintf(f, "DST_AS      ");
   if (config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM)) fprintf(f, "COMMS                    ");
   if (config.what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM)) fprintf(f, "SRC_COMMS                ");
@@ -1055,33 +1150,35 @@ void P_write_stats_header_formatted(FILE *f, int is_event)
   if (!config.tmp_net_own_field) {
 #if defined ENABLE_IPV6
     if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET)) fprintf(f, "SRC_IP                                         ");
+    if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET)) fprintf(f, "SRC_IP                                         ");
     if (config.what_to_count & (COUNT_DST_HOST|COUNT_DST_NET)) fprintf(f, "DST_IP                                         ");
 #else
     if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET)) fprintf(f, "SRC_IP           ");
+    if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET)) fprintf(f, "SRC_IP           ");
     if (config.what_to_count & (COUNT_DST_HOST|COUNT_DST_NET)) fprintf(f, "DST_IP           ");
 #endif
   } 
   else {
 #if defined ENABLE_IPV6
-    if (config.what_to_count & COUNT_SRC_HOST) fprintf(f, "SRC_IP                                         ");
-    if (config.what_to_count & COUNT_SRC_NET) fprintf(f, "SRC_NET                                        ");
+    if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST)) fprintf(f, "SRC_IP                                         ");
+    if (config.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) fprintf(f, "SRC_NET                                        ");
     if (config.what_to_count & COUNT_DST_HOST) fprintf(f, "DST_IP                                         ");
     if (config.what_to_count & COUNT_DST_NET) fprintf(f, "DST_NET                                        ");
 #else
-    if (config.what_to_count & COUNT_SRC_HOST) fprintf(f, "SRC_IP           ");
-    if (config.what_to_count & COUNT_SRC_NET) fprintf(f, "SRC_NET          ");
+    if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST)) fprintf(f, "SRC_IP           ");
+    if (config.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) fprintf(f, "SRC_NET          ");
     if (config.what_to_count & COUNT_DST_HOST) fprintf(f, "DST_IP           ");
     if (config.what_to_count & COUNT_DST_NET) fprintf(f, "DST_NET          ");
 #endif
   }
   if (config.what_to_count & COUNT_SRC_NMASK) fprintf(f, "SRC_MASK  ");
   if (config.what_to_count & COUNT_DST_NMASK) fprintf(f, "DST_MASK  ");
-  if (config.what_to_count & COUNT_SRC_PORT) fprintf(f, "SRC_PORT  ");
+  if (config.what_to_count & (COUNT_SRC_PORT|COUNT_SUM_PORT)) fprintf(f, "SRC_PORT  ");
   if (config.what_to_count & COUNT_DST_PORT) fprintf(f, "DST_PORT  ");
   if (config.what_to_count & COUNT_TCPFLAGS) fprintf(f, "TCP_FLAGS  ");
   if (config.what_to_count & COUNT_IP_PROTO) fprintf(f, "PROTOCOL    ");
   if (config.what_to_count & COUNT_IP_TOS) fprintf(f, "TOS    ");
-#if defined WITH_GEOIP
+#if defined (WITH_GEOIP) || (WITH_GEOIPV2)
   if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "SH_COUNTRY  ");
   if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "DH_COUNTRY  ");
 #endif
@@ -1142,13 +1239,13 @@ void P_write_stats_header_csv(FILE *f, int is_event)
   if (config.what_to_count_2 & COUNT_LABEL) fprintf(f, "%sLABEL", write_sep(sep, &count));
   if (config.what_to_count & COUNT_CLASS) fprintf(f, "%sCLASS", write_sep(sep, &count));
 #if defined HAVE_L2
-  if (config.what_to_count & COUNT_SRC_MAC) fprintf(f, "%sSRC_MAC", write_sep(sep, &count));
+  if (config.what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) fprintf(f, "%sSRC_MAC", write_sep(sep, &count));
   if (config.what_to_count & COUNT_DST_MAC) fprintf(f, "%sDST_MAC", write_sep(sep, &count));
   if (config.what_to_count & COUNT_VLAN) fprintf(f, "%sVLAN", write_sep(sep, &count));
   if (config.what_to_count & COUNT_COS) fprintf(f, "%sCOS", write_sep(sep, &count));
   if (config.what_to_count & COUNT_ETHERTYPE) fprintf(f, "%sETYPE", write_sep(sep, &count));
 #endif
-  if (config.what_to_count & COUNT_SRC_AS) fprintf(f, "%sSRC_AS", write_sep(sep, &count));
+  if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) fprintf(f, "%sSRC_AS", write_sep(sep, &count));
   if (config.what_to_count & COUNT_DST_AS) fprintf(f, "%sDST_AS", write_sep(sep, &count));
   if (config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM)) fprintf(f, "%sCOMMS", write_sep(sep, &count));
   if (config.what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM)) fprintf(f, "%sSRC_COMMS", write_sep(sep, &count));
@@ -1167,22 +1264,23 @@ void P_write_stats_header_csv(FILE *f, int is_event)
   if (config.what_to_count & COUNT_MPLS_VPN_RD) fprintf(f, "%sMPLS_VPN_RD", write_sep(sep, &count));
   if (!config.tmp_net_own_field) {
     if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SRC_NET)) fprintf(f, "%sSRC_IP", write_sep(sep, &count));
+    if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET)) fprintf(f, "%sSRC_IP", write_sep(sep, &count));
     if (config.what_to_count & (COUNT_DST_HOST|COUNT_DST_NET)) fprintf(f, "%sDST_IP", write_sep(sep, &count));
   }
   else {
-    if (config.what_to_count & COUNT_SRC_HOST) fprintf(f, "%sSRC_IP", write_sep(sep, &count));
-    if (config.what_to_count & COUNT_SRC_NET) fprintf(f, "%sSRC_NET", write_sep(sep, &count));
+    if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST)) fprintf(f, "%sSRC_IP", write_sep(sep, &count));
+    if (config.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) fprintf(f, "%sSRC_NET", write_sep(sep, &count));
     if (config.what_to_count & COUNT_DST_HOST) fprintf(f, "%sDST_IP", write_sep(sep, &count));
     if (config.what_to_count & COUNT_DST_NET) fprintf(f, "%sDST_NET", write_sep(sep, &count));
   }
   if (config.what_to_count & COUNT_SRC_NMASK) fprintf(f, "%sSRC_MASK", write_sep(sep, &count));
   if (config.what_to_count & COUNT_DST_NMASK) fprintf(f, "%sDST_MASK", write_sep(sep, &count));
-  if (config.what_to_count & COUNT_SRC_PORT) fprintf(f, "%sSRC_PORT", write_sep(sep, &count));
+  if (config.what_to_count & (COUNT_SRC_PORT|COUNT_SUM_PORT)) fprintf(f, "%sSRC_PORT", write_sep(sep, &count));
   if (config.what_to_count & COUNT_DST_PORT) fprintf(f, "%sDST_PORT", write_sep(sep, &count));
   if (config.what_to_count & COUNT_TCPFLAGS) fprintf(f, "%sTCP_FLAGS", write_sep(sep, &count));
   if (config.what_to_count & COUNT_IP_PROTO) fprintf(f, "%sPROTOCOL", write_sep(sep, &count));
   if (config.what_to_count & COUNT_IP_TOS) fprintf(f, "%sTOS", write_sep(sep, &count));
-#if defined WITH_GEOIP
+#if defined (WITH_GEOIP) || defined (WITH_GEOIPV2)
   if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "%sSH_COUNTRY", write_sep(sep, &count));
   if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "%sDH_COUNTRY", write_sep(sep, &count));
 #endif

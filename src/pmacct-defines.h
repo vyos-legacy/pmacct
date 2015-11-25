@@ -24,7 +24,7 @@
 #define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:uRVa"
 #define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:O:uwWL:RVa"
 #define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:v:o:O:uRg:L:Va"
-#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:O:E:uDVUoi"
+#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:O:E:uDVUoiI"
 #define N_PRIMITIVES 57
 #define N_FUNCS 10 
 #define MAX_N_PLUGINS 32
@@ -41,6 +41,7 @@
 #define UINT64T_THRESHOLD 18446744073709551360ULL
 #define INT64T_THRESHOLD 9223372036854775807ULL
 #define PM_VARIABLE_LENGTH 65535
+#define PM_COUNTRY_T_STRLEN 4
 #ifndef UINT8_MAX
 #define UINT8_MAX (255U)
 #endif
@@ -74,13 +75,13 @@
 #define PRIMITIVE_DESC_LEN	64
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.5.1"
-#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, uacctd 1.5.1"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.5.1"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 1.5.1"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 1.5.1"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.5.1"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.5.1"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.5.2"
+#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, uacctd 1.5.2"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.5.2"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 1.5.2"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 1.5.2"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.5.2"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.5.2"
 #define PMACCT_COMPILE_ARGS COMPILE_ARGS
 #ifndef TRUE
 #define TRUE 1
@@ -345,13 +346,20 @@
 #define CUSTOM_PRIMITIVE_TYPE_MAC	5
 #define CUSTOM_PRIMITIVE_TYPE_RAW	6
 
-#define FUNC_TYPE_BGP	1
-#define FUNC_TYPE_BMP	2
+#define FUNC_TYPE_BGP			1
+#define FUNC_TYPE_BMP			2
+#define FUNC_TYPE_SFLOW_COUNTER		3
 
 typedef u_int32_t pm_class_t;
 typedef u_int64_t pm_id_t;
-typedef u_int32_t pm_country_t;
 typedef u_int64_t pm_cfgreg_t;
+
+typedef struct {
+  union {
+    u_int32_t id;
+    char str[PM_COUNTRY_T_STRLEN];
+  };
+} pm_country_t;
 
 typedef struct {
   pm_cfgreg_t type;

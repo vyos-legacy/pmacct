@@ -59,6 +59,7 @@
 #include <sys/select.h>
 #include <signal.h>
 #include <syslog.h>
+#include <sys/resource.h>
 
 #include <sys/mman.h>
 #if !defined (MAP_ANONYMOUS)
@@ -72,6 +73,12 @@
 
 #if defined (WITH_GEOIP)
 #include <GeoIP.h>
+#if defined (WITH_GEOIPV2)
+#error "--enable-geoip and --enable-geoipv2 are mutually exclusive"
+#endif
+#endif
+#if defined (WITH_GEOIPV2)
+#include <maxminddb.h>
 #endif
 
 #include "pmacct-build.h"
@@ -317,14 +324,17 @@ EXT void set_index_pkt_ptrs(struct packet_ptrs *);
 #define EXT
 #endif
 EXT struct host_addr mcast_groups[MAX_MCAST_GROUPS];
-EXT int reload_map, reload_map_exec_plugins;
+EXT int reload_map, reload_map_exec_plugins, reload_geoipv2_file;
 EXT int reload_map_bgp_thread, reload_log_bgp_thread, reload_log_bmp_thread;
+EXT int reload_log_sf_cnt;
 EXT int data_plugins, tee_plugins;
 EXT struct timeval reload_map_tstamp;
 EXT struct child_ctl sql_writers;
 #undef EXT
 
+#ifndef HAVE_STRLCPY
 size_t strlcpy(char *, const char *, size_t);
+#endif
 
 /* global variables */
 pcap_t *glob_pcapt;

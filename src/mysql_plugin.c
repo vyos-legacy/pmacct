@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -37,10 +37,11 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct pollfd pfd;
   struct insert_data idata;
   time_t refresh_deadline;
-  int timeout;
+  int timeout, refresh_timeout, amqp_timeout;
   int ret, num;
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
+  struct plugins_list_entry *plugin_data = ((struct channels_list_entry *)ptr)->plugin;
   int datasize = ((struct channels_list_entry *)ptr)->datasize;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
   struct networks_file_data nfd;
@@ -52,6 +53,10 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   struct extra_primitives extras;
   struct primitives_ptrs prim_ptrs;
+
+#ifdef WITH_RABBITMQ
+  struct p_amqp_host *amqp_host = &((struct channels_list_entry *)ptr)->amqp_host;
+#endif
 
   memcpy(&config, cfgptr, sizeof(struct configuration));
   memcpy(&extras, &((struct channels_list_entry *)ptr)->extras, sizeof(struct extra_primitives));
@@ -79,10 +84,18 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   sql_init_maps(&extras, &prim_ptrs, &nt, &nc, &pt);
   sql_init_global_buffers();
-  sql_init_pipe(&pfd, pipe_fd);
   sql_init_historical_acct(idata.now, &idata);
   sql_init_triggers(idata.now, &idata);
   sql_init_refresh_deadline(&refresh_deadline);
+
+  if (config.pipe_amqp) {
+    plugin_pipe_amqp_compile_check();
+#ifdef WITH_RABBITMQ
+    pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
+    amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+#endif
+  }
+  else setnonblocking(pipe_fd);
 
   /* setting number of entries in _protocols structure */
   while (_protocols[protocols_number].number != -1) protocols_number++;
@@ -104,8 +117,12 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   for(;;) {
     poll_again:
     status->wakeup = TRUE;
-    calc_refresh_timeout(refresh_deadline, idata.now, &timeout);
-    ret = poll(&pfd, 1, timeout);
+    calc_refresh_timeout(refresh_deadline, idata.now, &refresh_timeout);
+
+    pfd.fd = pipe_fd;
+    pfd.events = POLLIN;
+    timeout = MIN(refresh_timeout, (amqp_timeout ? amqp_timeout : INT_MAX));
+    ret = poll(&pfd, (pfd.fd == ERR ? 0 : 1), timeout);
 
     if (ret <= 0) {
       if (getppid() == 1) {
@@ -131,6 +148,16 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
     }
 
+#ifdef WITH_RABBITMQ
+    if (config.pipe_amqp && pipe_fd == ERR) {
+      if (timeout == amqp_timeout) {
+        pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
+        amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+      }
+      else amqp_timeout = plugin_pipe_amqp_calc_poll_timeout_diff(amqp_host, idata.now);
+    }
+#endif
+
     switch (ret) {
     case 0: /* timeout */
       if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, &idata, FALSE);
@@ -138,40 +165,51 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       break;
     default: /* we received data */
       read_data:
-      if (!pollagain) {
-        seq++;
-        seq %= MAX_SEQNUM;
-	if (seq == 0) rg_err_count = FALSE;
-	idata.now = time(NULL); 
-      }
-      else {
-        if ((ret = read(pipe_fd, &rgptr, sizeof(rgptr))) == 0) 
-	  exit_plugin(1); /* we exit silently; something happened at the write end */
-      }
-
-      if ((rg->ptr + bufsz) > rg->end) rg->ptr = rg->base;
-
-      if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
-	if (!pollagain) {
-	  pollagain = TRUE;
-	  goto poll_again;
+      if (!config.pipe_amqp) {
+        if (!pollagain) {
+          seq++;
+          seq %= MAX_SEQNUM;
+	  if (seq == 0) rg_err_count = FALSE;
+	  idata.now = time(NULL); 
         }
-	else {
-	  rg_err_count++;
-	  if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-            Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
-            Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
-            Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
-            Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
-            Log(LOG_ERR, "- increase system maximum socket size.\n\n");
-	  }
-          seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
-	}
-      }
+        else {
+          if ((ret = read(pipe_fd, &rgptr, sizeof(rgptr))) == 0) 
+	    exit_plugin(1); /* we exit silently; something happened at the write end */
+        }
 
-      pollagain = FALSE;
-      memcpy(pipebuf, rg->ptr, bufsz);
-      rg->ptr += bufsz;
+        if ((rg->ptr + bufsz) > rg->end) rg->ptr = rg->base;
+
+        if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
+	  if (!pollagain) {
+	    pollagain = TRUE;
+	    goto poll_again;
+          }
+	  else {
+	    rg_err_count++;
+	    if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
+              Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
+              Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
+              Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
+              Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
+              Log(LOG_ERR, "- increase system maximum socket size.\n\n");
+	    }
+            seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
+	  }
+        }
+
+        pollagain = FALSE;
+        memcpy(pipebuf, rg->ptr, bufsz);
+        rg->ptr += bufsz;
+      }
+#ifdef WITH_RABBITMQ
+      else {
+        ret = p_amqp_consume_binary(amqp_host, pipebuf, config.buffer_size);
+        if (ret) pipe_fd = ERR;
+
+        seq = ((struct ch_buf_hdr *)pipebuf)->seq;
+        amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+      }
+#endif
 
       /* lazy sql refresh handling */ 
       if (idata.now > refresh_deadline) {
@@ -190,6 +228,7 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received seq=%u num_entries=%u\n", config.name, config.type, seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
         for (num = 0; primptrs_funcs[num]; num++)
@@ -218,7 +257,8 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           data = (struct pkt_data *) dataptr;
 	}
       }
-      goto read_data;
+
+      if (!config.pipe_amqp) goto read_data;
     }
   }
 }
@@ -388,7 +428,11 @@ void MY_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
   struct pkt_data dummy_data;
   pid_t writer_pid = getpid();
 
-  if (!index) return;
+  if (!index) {
+    Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - START (PID: %u) ***\n", config.name, config.type, writer_pid);
+    Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - END (PID: %u, QN: 0/0, ET: 0) ***\n", config.name, config.type, writer_pid);
+    return;
+  }
 
   bed.lf = &lf;
   memset(&lf, 0, sizeof(struct logfile));

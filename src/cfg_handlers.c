@@ -263,6 +263,27 @@ int cfg_key_proc_name(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_proc_priority(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.proc_priority = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.proc_priority = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_snaplen(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1706,6 +1727,167 @@ int cfg_key_plugin_pipe_backlog(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_plugin_pipe_amqp(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.pipe_amqp = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.pipe_amqp = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_plugin_pipe_amqp_user(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.pipe_amqp_user = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.pipe_amqp_user = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_plugin_pipe_amqp_passwd(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.pipe_amqp_passwd = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.pipe_amqp_passwd = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_plugin_pipe_amqp_exchange(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.pipe_amqp_exchange = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.pipe_amqp_exchange = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_plugin_pipe_amqp_host(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.pipe_amqp_host = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.pipe_amqp_host = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_plugin_pipe_amqp_vhost(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.pipe_amqp_vhost = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.pipe_amqp_vhost = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_plugin_pipe_amqp_routing_key(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.pipe_amqp_routing_key = value_ptr;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.pipe_amqp_routing_key = value_ptr;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_plugin_pipe_amqp_retry(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value <= 0) {
+    Log(LOG_ERR, "WARN ( %s ): 'plugin_pipe_amqp_retry' has to be > 0.\n", filename);
+    return ERR;
+  }
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.pipe_amqp_retry = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.pipe_amqp_retry = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
 int cfg_key_nfacctd_pipe_size(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -1713,8 +1895,8 @@ int cfg_key_nfacctd_pipe_size(char *filename, char *name, char *value_ptr)
   char *endptr;
 
   value = strtoull(value_ptr, &endptr, 10);
-  if (value <= 0) {
-    Log(LOG_WARNING, "WARN ( %s ): '[nf|sf|pm]acctd_pipe_size' has to be > 0.\n", filename);
+  if (!value || value > INT_MAX) {
+    Log(LOG_WARNING, "WARN ( %s ): '[nf|sf|pm]acctd_pipe_size' has to be > 0 and <= INT_MAX.\n", filename);
     return ERR;
   }
 
@@ -1789,8 +1971,8 @@ int cfg_key_nfacctd_bgp_pipe_size(char *filename, char *name, char *value_ptr)
   char *endptr;
 
   value = strtoull(value_ptr, &endptr, 10);
-  if (value <= 0) {
-    Log(LOG_WARNING, "WARN ( %s ): 'bgp_daemon_pipe_size' has to be > 0.\n", filename);
+  if (!value || value > INT_MAX) {
+    Log(LOG_WARNING, "WARN ( %s ): 'bgp_daemon_pipe_size' has to be > 0 and <= INT_MAX.\n", filename);
     return ERR;
   }
 
@@ -1887,6 +2069,28 @@ int cfg_key_networks_file_filter(char *filename, char *name, char *value_ptr)
     for (; list; list = list->next) {
       if (!strcmp(name, list->name)) {
         list->cfg.networks_file_filter = value;
+        changes++;
+        break;
+      }
+    }
+  }
+
+  return changes;
+}
+
+int cfg_key_networks_file_no_lpm(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = parse_truefalse(value_ptr);
+  if (value < 0) return ERR;
+
+  if (!name) for (; list; list = list->next, changes++) list->cfg.networks_file_no_lpm = value;
+  else {
+    for (; list; list = list->next) {
+      if (!strcmp(name, list->name)) {
+        list->cfg.networks_file_no_lpm = value;
         changes++;
         break;
       }
@@ -2489,7 +2693,8 @@ int cfg_key_nfacctd_bgp_peer_src_as_type(char *filename, char *name, char *value
   else if (!strncmp(value_ptr, "sflow", strlen("sflow"))) value = BGP_SRC_PRIMITIVES_KEEP;
   else if (!strncmp(value_ptr, "map", strlen("map"))) value = BGP_SRC_PRIMITIVES_MAP;
   else if (!strncmp(value_ptr, "bgp", strlen("bgp"))) value = BGP_SRC_PRIMITIVES_BGP;
-  else if (!strncmp(value_ptr, "fallback", strlen("fallback"))) {
+  else if (!strncmp(value_ptr, "fallback", strlen("fallback")) ||
+	   !strncmp(value_ptr, "longest", strlen("longest"))) {
     value = BGP_SRC_PRIMITIVES_KEEP;
     value |= BGP_SRC_PRIMITIVES_BGP;
   }
@@ -2918,8 +3123,8 @@ int cfg_key_nfacctd_bmp_pipe_size(char *filename, char *name, char *value_ptr)
   char *endptr;
 
   value = strtoull(value_ptr, &endptr, 10);
-  if (value <= 0) {
-    Log(LOG_WARNING, "WARN ( %s ): 'bmp_daemon_pipe_size' has to be > 0.\n", filename);
+  if (!value || value > INT_MAX) {
+    Log(LOG_WARNING, "WARN ( %s ): 'bmp_daemon_pipe_size' has to be > 0 and <= INT_MAX.\n", filename);
     return ERR;
   }
 
@@ -3741,6 +3946,42 @@ int cfg_key_sfacctd_renormalize(char *filename, char *name, char *value_ptr)
   return changes;
 }
 
+int cfg_key_sfacctd_counter_file(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.sfacctd_counter_file = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'sfacctd_counter_file'. Globalized.\n", filename);
+
+  return changes;
+}
+
+int cfg_key_sfacctd_counter_output(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  lower_string(value_ptr);
+  if (!strcmp(value_ptr, "json")) {
+#ifdef WITH_JANSSON
+    value = PRINT_OUTPUT_JSON;
+#else
+    value = PRINT_OUTPUT_JSON;
+    Log(LOG_WARNING, "WARN ( %s ): sfacctd_counter_output set to json but will produce no output (missing --enable-jansson).\n", filename);
+#endif
+  }
+  else {
+    Log(LOG_WARNING, "WARN ( %s ): Invalid sfacctd_counter_output value '%s'\n", filename, value_ptr);
+    return ERR;
+  }
+
+  for (; list; list = list->next, changes++) list->cfg.sfacctd_counter_output = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'sfacctd_counter_output'. Globalized.\n", filename);
+
+  return changes;
+}
+
 int cfg_key_pcap_savefile(char *filename, char *name, char *value_ptr)
 {
   struct plugins_list_entry *list = plugins_list;
@@ -3764,8 +4005,9 @@ int cfg_key_nfacctd_as_new(char *filename, char *name, char *value_ptr)
     value = NF_AS_NEW;
   else if (!strcmp(value_ptr, "bgp"))
     value = NF_AS_BGP;
-  else if (!strcmp(value_ptr, "fallback")) {
+  else if (!strcmp(value_ptr, "fallback") || !strcmp(value_ptr, "longest")) {
     value = NF_AS_FALLBACK;
+
     if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) { 
       value |= NF_AS_KEEP;
       value |= NF_AS_BGP;
@@ -3801,8 +4043,9 @@ int cfg_key_nfacctd_net(char *filename, char *name, char *value_ptr)
     value = NF_NET_BGP;
   else if (!strcmp(value_ptr, "igp"))
     value = NF_NET_IGP;
-  else if (!strcmp(value_ptr, "fallback")) {
+  else if (!strcmp(value_ptr, "fallback") || !strcmp(value_ptr, "longest")) {
     value = NF_NET_FALLBACK;
+
     if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) {
       value |= NF_NET_KEEP;
       value |= NF_NET_BGP;
@@ -4345,8 +4588,8 @@ int cfg_key_tee_pipe_size(char *filename, char *name, char *value_ptr)
   char *endptr;
 
   value = strtoull(value_ptr, &endptr, 10);
-  if (value <= 0) {
-    Log(LOG_WARNING, "WARN ( %s ): 'tee_pipe_size' has to be > 0.\n", filename);
+  if (!value || value > INT_MAX) {
+    Log(LOG_WARNING, "WARN ( %s ): 'tee_pipe_size' has to be > 0 and <= INT_MAX.\n", filename);
     return ERR;
   }
 
@@ -4465,6 +4708,7 @@ int cfg_key_geoip_ipv4_file(char *filename, char *name, char *value_ptr)
   int changes = 0;
 
   for (; list; list = list->next, changes++) list->cfg.geoip_ipv4_file = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'geoip_ipv4_file'. Globalized.\n", filename);
 
   return changes;
 }
@@ -4476,10 +4720,24 @@ int cfg_key_geoip_ipv6_file(char *filename, char *name, char *value_ptr)
   int changes = 0;
 
   for (; list; list = list->next, changes++) list->cfg.geoip_ipv6_file = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'geoip_ipv6_file'. Globalized.\n", filename);
 
   return changes;
 }
 #endif
+#endif
+
+#if defined WITH_GEOIPV2
+int cfg_key_geoipv2_file(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int changes = 0;
+
+  for (; list; list = list->next, changes++) list->cfg.geoipv2_file = value_ptr;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'geoipv2_file'. Globalized.\n", filename);
+
+  return changes;
+}
 #endif
 
 int cfg_key_pkt_len_distrib_bins(char *filename, char *name, char *value_ptr)
@@ -4940,6 +5198,23 @@ int cfg_key_tmp_net_own_field(char *filename, char *name, char *value_ptr)
       }
     }
   }
+
+  return changes;
+}
+
+int cfg_key_thread_stack(char *filename, char *name, char *value_ptr)
+{
+  struct plugins_list_entry *list = plugins_list;
+  int value, changes = 0;
+
+  value = atoi(value_ptr);
+  if (value <= 0) {
+    Log(LOG_ERR, "WARN ( %s ): 'thread_stack' has to be > 0.\n", filename);
+    return ERR;
+  }
+
+  for (; list; list = list->next, changes++) list->cfg.thread_stack = value;
+  if (name) Log(LOG_WARNING, "WARN ( %s ): plugin name not supported for key 'thread_stack'. Globalized.\n", filename);
 
   return changes;
 }

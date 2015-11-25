@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2013 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -298,6 +298,63 @@ int host_addr_mask_sa_cmp(struct host_addr *a1, struct host_mask *m1, struct soc
 #endif
 
   return -1;
+}
+
+/*
+ * raw_to_sa() converts a supported family address into a sockaddr 
+ * structure 
+ */
+unsigned int raw_to_sa(struct sockaddr *sa, char *src, u_int8_t v4v6)
+{
+  struct sockaddr_in *sa4 = (struct sockaddr_in *)sa;
+#if defined ENABLE_IPV6
+  struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)sa;
+#endif
+
+  if (v4v6 == AF_INET) {
+    sa->sa_family = AF_INET;
+    memcpy(&sa4->sin_addr.s_addr, src, 4);
+    sa4->sin_port = 0;
+    return sizeof(struct sockaddr_in);
+  }
+#if defined ENABLE_IPV6
+  if (v4v6 == AF_INET6) {
+    sa->sa_family = AF_INET6;
+    ip6_addr_cpy(&sa6->sin6_addr, src);
+    sa6->sin6_port = 0;
+    return sizeof(struct sockaddr_in6);
+  }
+#endif
+
+  memset(sa, 0, sizeof(struct sockaddr));
+  return 0;
+}
+
+/*
+ * sa_to_str() converts a supported family addres into a string
+ * 'str' length is not checked and assumed to be INET6_ADDRSTRLEN 
+ */
+unsigned int sa_to_str(char *str, const struct sockaddr *sa)
+{
+  struct sockaddr_in *sa4 = (struct sockaddr_in *)sa;
+#if defined ENABLE_IPV6
+  struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)sa;
+#endif
+
+  if (sa->sa_family == AF_INET) {
+    inet_ntop(AF_INET, &sa4->sin_addr.s_addr, str, INET6_ADDRSTRLEN);
+    return sa->sa_family;
+  }
+#if defined ENABLE_IPV6
+  if (sa->sa_family == AF_INET6) {
+    inet_ntop(AF_INET6, &sa6->sin6_addr, str, INET6_ADDRSTRLEN);
+    return sa->sa_family;
+  }
+#endif
+
+  memset(str, 0, INET6_ADDRSTRLEN);
+
+  return 0;
 }
 
 /*

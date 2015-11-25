@@ -1,3 +1,29 @@
+/*  
+    pmacct (Promiscuous mode IP Accounting package)
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+*/
+
+/*
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+*/
+
+/* 
+    much of the sflow v2/v4/v5 definitions are based on sFlow toolkit 3.8 and
+    later which is Copyright (C) InMon Corporation 2001 ALL RIGHTS RESERVED
+*/
+
 /* defines */
 #define DEFAULT_SFACCTD_PORT 6343 
 #define SFLOW_MIN_MSG_SIZE 200 
@@ -43,9 +69,13 @@ typedef struct _SFSample {
   u_int32_t ds_class;
   u_int32_t ds_index;
 
+  /* generic interface counter sample */
+  SFLIf_counters ifCounters;
+
   /* sample stream info */
-  u_int32_t sysUpTime;		/* XXX: suffers cleanup */
-  u_int32_t sequenceNo;		/* XXX: suffers cleanup */
+  u_int32_t sysUpTime;
+  u_int32_t sequenceNo;
+  u_int32_t cntSequenceNo;
   u_int32_t sampledPacketSize;
   u_int32_t samplesGenerated;
   u_int32_t meanSkipCount;
@@ -234,6 +264,7 @@ EXT int SF_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *
 
 EXT u_int32_t getData32(SFSample *);
 EXT u_int32_t getData32_nobswap(SFSample *);
+EXT u_int64_t getData64(SFSample *);
 EXT u_int32_t getAddress(SFSample *, SFLAddress *);
 EXT void skipBytes(SFSample *, int);
 EXT int lengthCheck(SFSample *, u_char *, int);
@@ -273,8 +304,24 @@ EXT void readFlowSample_ethernet(SFSample *);
 EXT void readFlowSample_IPv4(SFSample *);
 EXT void readFlowSample_IPv6(SFSample *);
 
+EXT int sf_cnt_log_msg(struct bgp_peer *, SFSample *, u_int32_t, char *, int, u_int32_t);
+EXT int readCounters_generic(struct bgp_peer *, SFSample *, char *, int, void *);
+EXT int readCounters_ethernet(struct bgp_peer *, SFSample *, char *, int, void *);
+EXT int readCounters_vlan(struct bgp_peer *, SFSample *, char *, int, void *);
+
 EXT char *sfv245_check_status(SFSample *spp, struct sockaddr *);
+EXT void sfv245_check_counter_log_init(struct packet_ptrs *);
 
 EXT void usage_daemon(char *);
 EXT void compute_once();
+
+/* global variables */
+EXT struct bgp_peer_log *sf_cnt_log;
+EXT u_int64_t sf_cnt_log_seq;
+EXT struct timeval sf_cnt_log_tstamp;
+EXT char sf_cnt_log_tstamp_str[SRVBUFLEN];
+
+EXT struct host_addr debug_a;
+EXT u_char debug_agent_addr[50];
+EXT u_int16_t debug_agent_port;
 #undef EXT

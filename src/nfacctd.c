@@ -92,7 +92,7 @@ int main(int argc,char **argv, char **envp)
   struct packet_ptrs_vector pptrs;
   char config_file[SRVBUFLEN];
   unsigned char netflow_packet[NETFLOW_MSG_SIZE];
-  int logf, rc, yes=1, allowed;
+  int logf, rc, yes=1, no=0, allowed;
   struct host_addr addr;
   struct hosts_table allow;
   struct id_table bpas_table;
@@ -149,6 +149,7 @@ int main(int argc,char **argv, char **envp)
   /* a bunch of default definitions */ 
   have_num_memory_pools = FALSE;
   reload_map = FALSE;
+  reload_geoipv2_file = FALSE;
   sampling_map_allocated = FALSE;
   bpas_map_allocated = FALSE;
   blp_map_allocated = FALSE;
@@ -368,6 +369,14 @@ int main(int argc,char **argv, char **envp)
     }
   }
 
+  if (config.proc_priority) {
+    int ret;
+
+    ret = setpriority(PRIO_PROCESS, 0, config.proc_priority);
+    if (ret) Log(LOG_WARNING, "WARN ( %s/core ): proc_priority failed (errno: %d)\n", config.name, errno); 
+    else Log(LOG_INFO, "INFO ( %s/core ): proc_priority set to %d\n", config.name, getpriority(PRIO_PROCESS, 0));
+  }
+
   if (strlen(config_file)) {
     char canonical_path[PATH_MAX], *canonical_path_ptr;
 
@@ -478,7 +487,7 @@ int main(int argc,char **argv, char **envp)
   /* If no IP address is supplied, let's set our default
      behaviour: IPv4 address, INADDR_ANY, port 2100 */
   if (!config.nfacctd_port) config.nfacctd_port = DEFAULT_NFACCTD_PORT;
-#if (defined ENABLE_IPV6 && defined V4_MAPPED)
+#if (defined ENABLE_IPV6)
   if (!config.nfacctd_ip) {
     struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)&server;
 
@@ -509,7 +518,7 @@ int main(int argc,char **argv, char **envp)
   /* socket creation */
   config.sock = socket(((struct sockaddr *)&server)->sa_family, SOCK_DGRAM, 0);
   if (config.sock < 0) {
-#if (defined ENABLE_IPV6 && defined V4_MAPPED)
+#if (defined ENABLE_IPV6)
     /* retry with IPv4 */
     if (!config.nfacctd_ip) {
       struct sockaddr_in *sa4 = (struct sockaddr_in *)&server;
@@ -533,9 +542,14 @@ int main(int argc,char **argv, char **envp)
   rc = setsockopt(config.sock, SOL_SOCKET, SO_REUSEADDR, (char *)&yes, sizeof(yes));
   if (rc < 0) Log(LOG_ERR, "WARN ( %s/core ): setsockopt() failed for SO_REUSEADDR.\n", config.name);
 
+#if (defined ENABLE_IPV6) && (defined IPV6_BINDV6ONLY)
+  rc = setsockopt(config.sock, IPPROTO_IPV6, IPV6_BINDV6ONLY, (char *) &no, (socklen_t) sizeof(no));
+  if (rc < 0) Log(LOG_ERR, "WARN ( %s/core ): setsockopt() failed for IPV6_BINDV6ONLY.\n", config.name);
+#endif
+
   if (config.nfacctd_pipe_size) {
     int l = sizeof(config.nfacctd_pipe_size);
-    u_int64_t saved = 0, obtained = 0;
+    int saved = 0, obtained = 0;
 
     getsockopt(config.sock, SOL_SOCKET, SO_RCVBUF, &saved, &l);
     Setsocksize(config.sock, SOL_SOCKET, SO_RCVBUF, &config.nfacctd_pipe_size, sizeof(config.nfacctd_pipe_size));
@@ -545,7 +559,7 @@ int main(int argc,char **argv, char **envp)
       Setsocksize(config.sock, SOL_SOCKET, SO_RCVBUF, &saved, l);
       getsockopt(config.sock, SOL_SOCKET, SO_RCVBUF, &obtained, &l);
     }
-    Log(LOG_INFO, "INFO ( %s/core ): nfacctd_pipe_size: obtained=%u target=%u.\n", config.name, obtained, config.nfacctd_pipe_size);
+    Log(LOG_INFO, "INFO ( %s/core ): nfacctd_pipe_size: obtained=%d target=%d.\n", config.name, obtained, config.nfacctd_pipe_size);
   }
 
   /* Multicast: memberships handling */
@@ -691,6 +705,12 @@ int main(int argc,char **argv, char **envp)
 
 #if defined WITH_GEOIP
   if (config.geoip_ipv4_file || config.geoip_ipv6_file) {
+    req.bpf_filter = TRUE;
+  }
+#endif
+
+#if defined WITH_GEOIPV2
+  if (config.geoipv2_file) {
     req.bpf_filter = TRUE;
   }
 #endif
@@ -907,7 +927,7 @@ int main(int argc,char **argv, char **envp)
       ((struct struct_header_v5 *)netflow_packet)->version = ntohs(((struct struct_header_v5 *)netflow_packet)->version);
       reset_tag_label_status(&pptrs);
       reset_shadow_status(&pptrs);
-    
+
       switch(((struct struct_header_v5 *)netflow_packet)->version) {
       case 1:
 	process_v1_packet(netflow_packet, ret, &pptrs.v4, &req);
@@ -1016,6 +1036,14 @@ void process_v5_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs *pp
   pptrs->flow_type = NF9_FTYPE_TRAFFIC;
 
   if ((count <= V5_MAXFLOWS) && ((count*NfDataV5Sz)+NfHdrV5Sz == len)) {
+    if (config.debug) {
+      sa_to_addr((struct sockaddr *)pptrs->f_agent, &debug_a, &debug_agent_port);
+      addr_to_str(debug_agent_addr, &debug_a);
+
+      Log(LOG_DEBUG, "DEBUG ( %s/core ): Received NetFlow packet from [%s:%u] version [%u] seqno [%u]\n",
+                        config.name, debug_agent_addr, debug_agent_port, 5, ntohl(((struct struct_header_v5 *)pkt)->flow_sequence));
+    }
+
     while (count) {
       reset_net_status(pptrs);
       pptrs->f_data = (unsigned char *) exp_v5;
@@ -1195,6 +1223,14 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
     FlowSeq = ntohl(hdr_v10->flow_sequence);
   }
 
+  if (config.debug) {
+    sa_to_addr((struct sockaddr *)pptrs->f_agent, &debug_a, &debug_agent_port);
+    addr_to_str(debug_agent_addr, &debug_a);
+
+    Log(LOG_DEBUG, "DEBUG ( %s/core ): Received NetFlow/IPFIX packet from [%s:%u] version [%u] seqno [%u]\n",
+			config.name, debug_agent_addr, debug_agent_port, version, FlowSeq);
+  }
+
   if (len < HdrSz) {
     notify_malf_packet(LOG_INFO, "INFO: discarding short NetFlow v9/IPFIX packet", (struct sockaddr *) pptrsv->v4.f_agent, 0);
     xflow_tot_bad_datagrams++;
@@ -1297,15 +1333,11 @@ void process_v9_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_vec
 
     tpl = find_template(data_hdr->flow_id, pptrs, fid, SourceId);
     if (!tpl) {
-      struct host_addr a;
-      u_char agent_addr[50];
-      u_int16_t agent_port;
-
-      sa_to_addr((struct sockaddr *)pptrs->f_agent, &a, &agent_port);
-      addr_to_str(agent_addr, &a);
+      sa_to_addr((struct sockaddr *)pptrs->f_agent, &debug_a, &debug_agent_port);
+      addr_to_str(debug_agent_addr, &debug_a);
 
       Log(LOG_DEBUG, "DEBUG ( %s/core ): Discarded NetFlow v9/IPFIX packet (R: unknown template %u [%s:%u])\n",
-		config.name, fid, agent_addr, SourceId);
+		config.name, fid, debug_agent_addr, SourceId);
       pkt += flowsetlen-NfDataHdrV9Sz;
       off += flowsetlen;
     }
@@ -2067,15 +2099,11 @@ void process_raw_packet(unsigned char *pkt, u_int16_t len, struct packet_ptrs_ve
   }
 
   if (config.debug) {
-    struct host_addr a;
-    u_char agent_addr[50];
-    u_int16_t agent_port;
+    sa_to_addr((struct sockaddr *)pptrs->f_agent, &debug_a, &debug_agent_port);
+    addr_to_str(debug_agent_addr, &debug_a);
 
-    sa_to_addr((struct sockaddr *)pptrs->f_agent, &a, &agent_port);
-    addr_to_str(agent_addr, &a);
-
-    Log(LOG_DEBUG, "DEBUG ( %s/core ): Received NetFlow packet from [%s:%u] version [%u] seqno [%u]\n",
-			config.name, agent_addr, agent_port, nfv, pptrsv->v4.seqno);
+    Log(LOG_DEBUG, "DEBUG ( %s/core ): Received NetFlow/IPFIX packet from [%s:%u] version [%u] seqno [%u]\n",
+			config.name, debug_agent_addr, debug_agent_port, nfv, pptrsv->v4.seqno);
   }
 
   exec_plugins(pptrs, req);
