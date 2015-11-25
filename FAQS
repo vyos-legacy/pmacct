@@ -59,10 +59,9 @@ A: pmacct was not originally meant to log network traffic at packet/micro-flow l
    logging support to the more traditional traffic accounting part.
 
 
-Q7: When using pmacctd, i feel a high CPU usage: i see the process getting a great
-    share of the CPU. How to reduce it ?  
-A: Granted that the CPU in use for accounting purposes is somewhat 'compatible' with
-   the amount of traffic it has to process, it's possible to reduce the CPU share by
+Q7: I see my daemon taking much CPU cycles; is there a way to reduce the load?
+A: CPU cycles are proportional to the amount of traffic (packets, flows, samples) that
+   the daemon receives; in case of pmacctd it's possible to reduce the CPU share by
    avoiding unnecessary copies of data, also optimizing and buffering the necessary
    ones. Kernel-to-userspace copies are critical and hence the first to be optimized;
    for this purpose you may look at the following solutions: 
@@ -79,8 +78,11 @@ A: Granted that the CPU in use for accounting purposes is somewhat 'compatible' 
    recompilation (with "options DEVICE_POLLING"), and a polling-aware NIC. Linux kernel
    2.6.x also supports device polling. 
 
-   Then also look at internal buffering which is applicable to all the daemons. Look
-   up plugin_buffer_size and plugin_pipe_size directives in the CONFIG-KEYS document.
+   Internal buffering can also help and, contrary to the previous tecniques, applies
+   to all daemons. Buffering is enabled with the plugin_buffer_size directive; buffers
+   can then be queued and distributed with a choice of an home-grown circolar queue
+   implementation (plugin_pipe_size) or a RabbitMQ broker (plugin_pipe_amqp). Check
+   CONFIG-KEYS and QUICKSTART for more information. 
 
 
 Q8: I want to to account both inbound and outbound traffic of my network, with an host
@@ -316,5 +318,19 @@ A: It means you can't receive packets on an IPv4 address and transparently repli
    an  IPv4-mapped IPv6 address is still technically an IPv6 address hence on servers
    running IPv4 and IPv6 it is good practice to explicitely define also the receiving
    IP address (nfacctd_ip), if IPv4 is used.
+
+
+Q21: I've enabled IPv6 support in pmacct with --enable-ipv6. Even though the daemon
+     binds to the "::" address, i don't receive NetFlow/IPFIX/sFlow/BGP data sent via
+     IPv4, why?
+
+A: Binding to a "::" address (ie. no [sn]facctd_ip specified when pmacct is compiled
+   with --enable-ipv6) should allow to receive both IPv4 and IPv6 senders. IPv4 ones
+   should be reportd in 'netstat' as IPv4-mapped IPv6 addresses. Linux has a kernel
+   switch to enable/disable the functionality and its status can be checked via the
+   /proc/sys/net/ipv6/bindv6only . Historically the default has been '0'. It appears
+   over time some distributions have changed the default to be '1'. If you experience
+   this issue on Linux, please check your kernel setting.
+   
 
 /* EOF */

@@ -538,6 +538,7 @@ struct data_hdr_v9 {
 /* ... */
 #define NF9_DOT1QVLANID			243
 #define NF9_DOT1QPRIORITY		244
+#define NF9_DOT1QCVLANID		245
 /* ... */
 #define NF9_PSEUDOWIREID		249
 /* ... */
@@ -549,6 +550,8 @@ struct data_hdr_v9 {
 /* ... */
 #define NF9_OBSERVATION_TIME_SEC	322
 #define NF9_OBSERVATION_TIME_MSEC	323
+/* ... */
+#define NF9_LAYER2OCTETDELTACOUNT	352
 /* ... */
 #define NF9_ASA_XLATE_IPV4_SRC_ADDR	40001
 #define NF9_ASA_XLATE_IPV4_DST_ADDR	40002
@@ -772,6 +775,10 @@ EXT char *nfv9_check_status(struct packet_ptrs *, u_int32_t, u_int32_t, u_int32_
 
 EXT struct template_cache tpl_cache;
 EXT struct v8_handler_entry v8_handlers[15];
+
+EXT struct host_addr debug_a;
+EXT u_char debug_agent_addr[50];
+EXT u_int16_t debug_agent_port;
 #undef EXT
 
 #if (!defined __NFV9_TEMPLATE_C)

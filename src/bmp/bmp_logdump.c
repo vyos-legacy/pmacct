@@ -36,10 +36,16 @@
 
 int bmp_log_msg(struct bgp_peer *peer, struct bmp_data *bdata, void *log_data, char *event_type, int output, int log_type)
 {
-  int ret = 0, amqp_ret = 0;
+  int ret = 0, amqp_ret = 0, etype = BGP_LOGDUMP_ET_NONE;
+
+  if (!peer || !bdata || !event_type) return ret;
+
+  if (!strcmp(event_type, "dump")) etype = BGP_LOGDUMP_ET_DUMP;
+  else if (!strcmp(event_type, "log")) etype = BGP_LOGDUMP_ET_LOG;
 
 #ifdef WITH_RABBITMQ
-  if (config.nfacctd_bmp_msglog_amqp_routing_key || config.bmp_dump_amqp_routing_key)
+  if ((config.nfacctd_bmp_msglog_amqp_routing_key && etype == BGP_LOGDUMP_ET_LOG) ||
+      (config.bmp_dump_amqp_routing_key && etype == BGP_LOGDUMP_ET_DUMP))
     p_amqp_set_routing_key(peer->log->amqp_host, peer->log->filename);
 #endif
 
@@ -53,14 +59,14 @@ int bmp_log_msg(struct bgp_peer *peer, struct bmp_data *bdata, void *log_data, c
     json_decref(kv);
 
     /* no need for seq for "dump" event_type */
-    if (strcmp(event_type, "dump")) {
+    if (etype == BGP_LOGDUMP_ET_LOG) {
       kv = json_pack("{sI}", "seq", bmp_log_seq);
       json_object_update_missing(obj, kv);
       json_decref(kv);
       bgp_peer_log_seq_increment(&bmp_log_seq);
     }
 
-    compose_timestamp(tstamp_str, SRVBUFLEN, &bdata->tstamp, TRUE);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &bdata->tstamp, TRUE, config.sql_history_since_epoch);
     kv = json_pack("{ss}", "timestamp", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
@@ -89,11 +95,13 @@ int bmp_log_msg(struct bgp_peer *peer, struct bmp_data *bdata, void *log_data, c
       break;
     }
 
-    if (config.nfacctd_bmp_msglog_file || config.bmp_dump_file)
+    if ((config.nfacctd_bmp_msglog_file && etype == BGP_LOGDUMP_ET_LOG) ||
+	(config.bmp_dump_file && etype == BGP_LOGDUMP_ET_DUMP))
       write_and_free_json(peer->log->fd, obj);
 
 #ifdef WITH_RABBITMQ
-    if (config.nfacctd_bmp_msglog_amqp_routing_key || config.bmp_dump_amqp_routing_key) {
+    if ((config.nfacctd_bmp_msglog_amqp_routing_key && etype == BGP_LOGDUMP_ET_LOG) ||
+	(config.bmp_dump_amqp_routing_key && etype == BGP_LOGDUMP_ET_DUMP)) {
       amqp_ret = write_and_free_json_amqp(peer->log->amqp_host, obj);
       p_amqp_unset_routing_key(peer->log->amqp_host);
     }
@@ -459,7 +467,7 @@ void bmp_handle_dump_event()
 #ifdef WITH_RABBITMQ
     if (config.bmp_dump_amqp_routing_key) {
       bmp_dump_init_amqp_host();
-      ret = p_amqp_connect(&bmp_dump_amqp_host);
+      ret = p_amqp_connect_to_publish(&bmp_dump_amqp_host);
       if (ret) exit(ret);
     }
 #endif
@@ -534,7 +542,7 @@ void bmp_handle_dump_event()
  
 	saved_peer = peer;
         strlcpy(last_filename, current_filename, SRVBUFLEN);
-        bgp_peer_dump_close(peer, config.bmp_dump_output, FUNC_TYPE_BMP);
+        bgp_peer_dump_close(peer, NULL, config.bmp_dump_output, FUNC_TYPE_BMP);
         tables_num++;
       }
     }
@@ -579,6 +587,7 @@ void bmp_daemon_msglog_init_amqp_host()
   if (!config.nfacctd_bmp_msglog_amqp_exchange_type) config.nfacctd_bmp_msglog_amqp_exchange_type = default_amqp_exchange_type;
   if (!config.nfacctd_bmp_msglog_amqp_host) config.nfacctd_bmp_msglog_amqp_host = default_amqp_host;
   if (!config.nfacctd_bmp_msglog_amqp_vhost) config.nfacctd_bmp_msglog_amqp_vhost = default_amqp_vhost;
+  if (!config.nfacctd_bmp_msglog_amqp_retry) config.nfacctd_bmp_msglog_amqp_retry = AMQP_DEFAULT_RETRY;
 
   p_amqp_set_user(&bmp_daemon_msglog_amqp_host, config.nfacctd_bmp_msglog_amqp_user);
   p_amqp_set_passwd(&bmp_daemon_msglog_amqp_host, config.nfacctd_bmp_msglog_amqp_passwd);
@@ -588,7 +597,9 @@ void bmp_daemon_msglog_init_amqp_host()
   p_amqp_set_vhost(&bmp_daemon_msglog_amqp_host, config.nfacctd_bmp_msglog_amqp_vhost);
   p_amqp_set_persistent_msg(&bmp_daemon_msglog_amqp_host, config.nfacctd_bmp_msglog_amqp_persistent_msg);
   p_amqp_set_frame_max(&bmp_daemon_msglog_amqp_host, config.nfacctd_bmp_msglog_amqp_frame_max);
+  p_amqp_set_content_type_json(&bmp_daemon_msglog_amqp_host);
   p_amqp_set_heartbeat_interval(&bmp_daemon_msglog_amqp_host, config.nfacctd_bmp_msglog_amqp_heartbeat_interval);
+  p_amqp_set_retry_interval(&bmp_daemon_msglog_amqp_host, config.nfacctd_bmp_msglog_amqp_retry);
 }
 #else
 void bmp_daemon_msglog_init_amqp_host()
@@ -616,6 +627,7 @@ void bmp_dump_init_amqp_host()
   p_amqp_set_vhost(&bmp_dump_amqp_host, config.bmp_dump_amqp_vhost);
   p_amqp_set_persistent_msg(&bmp_dump_amqp_host, config.bmp_dump_amqp_persistent_msg);
   p_amqp_set_frame_max(&bmp_dump_amqp_host, config.bmp_dump_amqp_frame_max);
+  p_amqp_set_content_type_json(&bmp_dump_amqp_host);
   p_amqp_set_heartbeat_interval(&bmp_dump_amqp_host, config.bmp_dump_amqp_heartbeat_interval);
 }
 #else

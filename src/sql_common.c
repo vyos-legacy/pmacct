@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -93,6 +93,10 @@ void sql_init_global_buffers()
   memset(&lru_head, 0, sizeof(lru_head));
   lru_tail = &lru_head;
 
+  Log(LOG_INFO, "INFO ( %s/%s ): cache entries=%u base cache memory=%u bytes\n", config.name, config.type,
+        config.sql_cache_entries, ((config.sql_cache_entries * sizeof(struct db_cache)) +
+	(2 * (qq_size * sizeof(struct db_cache *)))));
+
   pipebuf = (unsigned char *) malloc(config.buffer_size);
   cache = (struct db_cache *) malloc(config.sql_cache_entries*sizeof(struct db_cache));
   queries_queue = (struct db_cache **) malloc(qq_size*sizeof(struct db_cache *));
@@ -114,6 +118,14 @@ void sql_init_global_buffers()
    check */ 
 void sql_init_default_values(struct extra_primitives *extras)
 {
+  if (config.proc_priority) {
+    int ret;
+
+    ret = setpriority(PRIO_PROCESS, 0, config.proc_priority);
+    if (ret) Log(LOG_WARNING, "WARN ( %s/%s ): proc_priority failed (errno: %d)\n", config.name, config.type, errno);
+    else Log(LOG_INFO, "INFO ( %s/%s ): proc_priority set to %d\n", config.name, config.type, getpriority(PRIO_PROCESS, 0));
+  }
+
   if ( (config.what_to_count & COUNT_CLASS ||
 	config.what_to_count & COUNT_TCPFLAGS ||
 	extras->off_pkt_bgp_primitives) &&
@@ -261,13 +273,6 @@ void sql_init_refresh_deadline(time_t *rd)
   while ((t+config.sql_refresh_time) < *rd) t += config.sql_refresh_time;
   *rd = t;
   *rd += (config.sql_refresh_time+config.sql_startup_delay); /* it's a deadline not a basetime */
-}
-
-void sql_init_pipe(struct pollfd *pollfd, int fd)
-{
-  pollfd->fd = fd;
-  pollfd->events = POLLIN;
-  setnonblocking(fd);
 }
 
 struct template_entry *sql_init_logfile_template(struct template_header *hdr)
@@ -1241,7 +1246,7 @@ int sql_evaluate_primitives(int primitive)
     if (config.what_to_count & COUNT_SRC_NMASK) what_to_count |= COUNT_SRC_NMASK;
     if (config.what_to_count & COUNT_DST_NMASK) what_to_count |= COUNT_DST_NMASK;
 
-#if defined WITH_GEOIP
+#if defined (WITH_GEOIP) || (WITH_GEOIPV2)
     if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) what_to_count_2 |= COUNT_SRC_HOST_COUNTRY;
     if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) what_to_count_2 |= COUNT_DST_HOST_COUNTRY;
 #endif
@@ -2110,7 +2115,7 @@ int sql_evaluate_primitives(int primitive)
     }
   }
 
-#if defined WITH_GEOIP
+#if defined (WITH_GEOIP) || (WITH_GEOIPV2)
   if (what_to_count_2 & COUNT_SRC_HOST_COUNTRY) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));

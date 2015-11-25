@@ -82,6 +82,7 @@ struct configuration {
   char *type;
   int type_id;
   char *proc_name;
+  int proc_priority;
   int sock;
   int bgp_sock;
   int acct_type; 
@@ -89,6 +90,14 @@ struct configuration {
   u_int64_t pipe_size;
   u_int64_t buffer_size;
   int pipe_backlog;
+  int pipe_amqp;
+  char *pipe_amqp_host;
+  char *pipe_amqp_vhost;
+  char *pipe_amqp_user;
+  char *pipe_amqp_passwd;
+  char *pipe_amqp_exchange;
+  char *pipe_amqp_routing_key;
+  int pipe_amqp_retry;
   int files_umask;
   int files_uid;
   int files_gid;
@@ -161,8 +170,11 @@ struct configuration {
   int nfacctd_stitching;
   u_int32_t nfacctd_as;
   u_int32_t nfacctd_net;
-  u_int64_t nfacctd_pipe_size;
+  int nfacctd_pipe_size;
   int sfacctd_renormalize;
+  int sfacctd_counter_output;
+  char *sfacctd_counter_file;
+  int sfacctd_counter_max_nodes;
   int nfacctd_disable_checks;
   int nfacctd_bgp;
   int nfacctd_bgp_msglog_output;
@@ -182,7 +194,7 @@ struct configuration {
   char *nfacctd_bgp_ip;
   char *nfacctd_bgp_id;
   int nfacctd_bgp_port;
-  u_int64_t nfacctd_bgp_pipe_size;
+  int nfacctd_bgp_pipe_size;
   int nfacctd_bgp_ipprec;
   char *nfacctd_bgp_allow_file;
   int nfacctd_bgp_max_peers;
@@ -230,7 +242,7 @@ struct configuration {
   int nfacctd_bmp;
   char *nfacctd_bmp_ip;
   int nfacctd_bmp_port;
-  u_int64_t nfacctd_bmp_pipe_size;
+  int nfacctd_bmp_pipe_size;
   int nfacctd_bmp_max_peers;
   char *nfacctd_bmp_allow_file;
   int nfacctd_bmp_ipprec;
@@ -285,6 +297,10 @@ struct configuration {
   GeoIP *geoip_ipv6;
 #endif
 #endif
+  char *geoipv2_file;
+#if defined WITH_GEOIPV2
+  MMDB_s geoipv2_db;
+#endif
   int promisc; /* pcap_open_live() promisc parameter */
   char *clbuf; /* pcap filter */
   char *pcap_savefile;
@@ -302,6 +318,7 @@ struct configuration {
   int networks_mask;
   char *networks_file;
   int networks_file_filter;
+  int networks_file_no_lpm;
   int networks_cache_entries;
   char *ports_file;
   char *a_filter;
@@ -351,7 +368,7 @@ struct configuration {
   int tee_max_receivers;
   int tee_max_receiver_pools;
   char *tee_receivers;
-  u_int64_t tee_pipe_size;
+  int tee_pipe_size;
   int uacctd_group;
   int uacctd_nl_size;
   char *tunnel0;
@@ -360,22 +377,7 @@ struct configuration {
   u_int16_t pkt_len_distrib_bins_lookup[ETHER_JUMBO_MTU+1];
   int use_ip_next_hop;
   int tmp_net_own_field;
-};
-
-struct plugin_type_entry {
-  int id;
-  char string[10];
-  void (*func)(int, struct configuration *, void *);
-};
-
-struct plugins_list_entry {
-  int id;
-  pid_t pid;
-  char name[SRVBUFLEN];
-  struct configuration cfg;
-  int pipe[2];
-  struct plugin_type_entry type;
-  struct plugins_list_entry *next;
+  int thread_stack;
 };
 
 /* prototypes */ 

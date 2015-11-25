@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -33,13 +33,14 @@
 /* load_plugins() starts plugin processes; creates pipes
    and handles them inserting in channels_list structure */
 
-/* when not using map_shared, 'pipe_size' is the size of
-   the pipe created with socketpair(); when map_shared is
-   enabled, it refers to the size of the shared memory
-   area */
+/* no AMQP: when not using map_shared, 'pipe_size' is the size of the pipe
+   created with socketpair(); when map_shared is enabled, it refers to the
+   size of the shared memory area */
 void load_plugins(struct plugin_requests *req)
 {
-  u_int64_t snd_buflen = 0, rcv_buflen = 0, socklen = 0, target_buflen = 0;
+  u_int64_t buf_pipe_ratio_sz = 0, pipe_idx = 0;
+  int snd_buflen = 0, rcv_buflen = 0, socklen = 0, target_buflen = 0, ret;
+
   int nfprobe_id = 0, min_sz = 0;
   struct plugins_list_entry *list = plugins_list;
   int l = sizeof(list->cfg.pipe_size), offset = 0;
@@ -79,48 +80,67 @@ void load_plugins(struct plugin_requests *req)
 	}
       }
 
-      /* creating communication channel */
-      socketpair(AF_UNIX, SOCK_DGRAM, 0, list->pipe);
-
       /* some validations */
       if (list->cfg.pipe_size < min_sz) list->cfg.pipe_size = min_sz;
       if (list->cfg.buffer_size < min_sz) list->cfg.buffer_size = min_sz;
       if (list->cfg.buffer_size > list->cfg.pipe_size) list->cfg.buffer_size = list->cfg.pipe_size;
-
-      /* checking SO_RCVBUF and SO_SNDBUF values; if different we take the smaller one */
-      getsockopt(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &rcv_buflen, &l);
-      getsockopt(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &snd_buflen, &l);
-      socklen = (rcv_buflen < snd_buflen) ? rcv_buflen : snd_buflen;
 
       /*  if required let's align plugin_buffer_size to  4 bytes boundary */
 #if NEED_ALIGN
       while (list->cfg.buffer_size % 4 != 0) list->cfg.buffer_size--;
 #endif
 
-      target_buflen = (list->cfg.pipe_size/list->cfg.buffer_size)*sizeof(char *);
-      if (target_buflen > socklen) {
-	Setsocksize(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &target_buflen, l);
-	Setsocksize(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &target_buflen, l);
-      }
+      if (!list->cfg.pipe_amqp) {
+        /* creating communication channel */
+        socketpair(AF_UNIX, SOCK_DGRAM, 0, list->pipe);
 
-      getsockopt(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &rcv_buflen, &l);
-      getsockopt(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &snd_buflen, &l);
-      if (rcv_buflen < snd_buflen) snd_buflen = rcv_buflen;
+        /* checking SO_RCVBUF and SO_SNDBUF values; if different we take the smaller one */
+        getsockopt(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &rcv_buflen, &l);
+        getsockopt(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &snd_buflen, &l);
+        socklen = (rcv_buflen < snd_buflen) ? rcv_buflen : snd_buflen;
 
-      if (snd_buflen < socklen) {
-	Setsocksize(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &socklen, l);
-	Setsocksize(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &socklen, l);
+        buf_pipe_ratio_sz = (list->cfg.pipe_size/list->cfg.buffer_size)*sizeof(char *);
+        if (buf_pipe_ratio_sz > INT_MAX) {
+	  Log(LOG_ERR, "ERROR ( %s/%s ): Current plugin_buffer_size elems per plugin_pipe_size: %d. Max: %d.\nExiting.\n",
+		list->name, list->type.string, (list->cfg.pipe_size/list->cfg.buffer_size), (INT_MAX/sizeof(char *)));
+          exit_all(1);
+        }
+        else target_buflen = buf_pipe_ratio_sz;
+
+        if (target_buflen > socklen) {
+	  Setsocksize(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &target_buflen, l);
+	  Setsocksize(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &target_buflen, l);
+        }
 
         getsockopt(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &rcv_buflen, &l);
         getsockopt(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &snd_buflen, &l);
         if (rcv_buflen < snd_buflen) snd_buflen = rcv_buflen;
-      }
 
-      if (list->cfg.debug || (list->cfg.pipe_size > WARNING_PIPE_SIZE)) {
-	Log(LOG_INFO, "INFO ( %s/%s ): plugin_pipe_size=%llu bytes plugin_buffer_size=%llu bytes\n", 
-	    list->name, list->type.string, list->cfg.pipe_size, list->cfg.buffer_size);
-        Log(LOG_INFO, "INFO ( %s/%s ): ctrl channel: obtained=%llu bytes target=%llu bytes\n",
-	    list->name, list->type.string, snd_buflen, target_buflen);
+        if (snd_buflen < socklen) {
+	  Setsocksize(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &socklen, l);
+	  Setsocksize(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &socklen, l);
+
+          getsockopt(list->pipe[0], SOL_SOCKET, SO_RCVBUF, &rcv_buflen, &l);
+          getsockopt(list->pipe[1], SOL_SOCKET, SO_SNDBUF, &snd_buflen, &l);
+          if (rcv_buflen < snd_buflen) snd_buflen = rcv_buflen;
+        }
+
+        if (list->cfg.debug || (list->cfg.pipe_size > WARNING_PIPE_SIZE)) {
+	  Log(LOG_INFO, "INFO ( %s/%s ): plugin_pipe_size=%llu bytes plugin_buffer_size=%llu bytes\n", 
+		list->name, list->type.string, list->cfg.pipe_size, list->cfg.buffer_size);
+	  if (target_buflen <= snd_buflen) 
+            Log(LOG_INFO, "INFO ( %s/%s ): ctrl channel: obtained=%d bytes target=%d bytes\n",
+		list->name, list->type.string, snd_buflen, target_buflen);
+	  else
+	    /* This should return an error and exit but we fallback to a
+	       warning in order to be backward compatible */
+            Log(LOG_WARNING, "WARN ( %s/%s ): ctrl channel: obtained=%d bytes target=%d bytes\n",
+		list->name, list->type.string, snd_buflen, target_buflen);
+        }
+      }
+      else {
+	pipe_idx++;
+        list->pipe[0] = list->pipe[1] = pipe_idx;
       }
 
       list->cfg.name = list->name;
@@ -203,17 +223,19 @@ void load_plugins(struct plugin_requests *req)
 #endif
 
 #if defined HAVE_MALLOPT
-  mallopt(M_CHECK_ACTION, 0);
+        mallopt(M_CHECK_ACTION, 0);
 #endif
 
 	close(config.sock);
 	close(config.bgp_sock);
-	close(list->pipe[1]);
+	if (!list->cfg.pipe_amqp) close(list->pipe[1]);
 	(*list->type.func)(list->pipe[0], &list->cfg, chptr);
 	exit(0);
       default: /* Parent */
-	close(list->pipe[0]);
-	setnonblocking(list->pipe[1]);
+	if (!list->cfg.pipe_amqp) {
+	  close(list->pipe[0]);
+	  setnonblocking(list->pipe[1]);
+	}
 	break;
       }
 
@@ -259,6 +281,24 @@ void load_plugins(struct plugin_requests *req)
       list = list->next;
     }
   }
+
+  /* AMQP handling, if required */
+#ifdef WITH_RABBITMQ
+  {
+    int ret, index;
+
+    for (index = 0; channels_list[index].aggregation || channels_list[index].aggregation_2; index++) {
+      chptr = &channels_list[index];
+      list = chptr->plugin;
+
+      if (list->cfg.pipe_amqp) {
+        plugin_pipe_amqp_init_host(&chptr->amqp_host, list);
+        ret = p_amqp_connect_to_publish(&chptr->amqp_host);
+        if (ret) plugin_pipe_amqp_sleeper_start(chptr);
+      }
+    }
+  }
+#endif
 }
 
 void exec_plugins(struct packet_ptrs *pptrs, struct plugin_requests *req) 
@@ -267,12 +307,21 @@ void exec_plugins(struct packet_ptrs *pptrs, struct plugin_requests *req)
   pm_id_t saved_tag = 0, saved_tag2 = 0;
   pt_label_t saved_label;
 
-  int num, fixed_size, already_reprocessed = 0;
+  int num, ret, fixed_size, already_reprocessed = 0;
   u_int32_t savedptr;
   char *bptr;
   int index, got_tags = FALSE;
 
   pretag_init_label(&saved_label);
+
+#if defined WITH_GEOIPV2
+  if (reload_geoipv2_file && config.geoipv2_file) {
+    pm_geoipv2_close();
+    pm_geoipv2_init();
+
+    reload_geoipv2_file = FALSE;
+  }
+#endif
 
   for (index = 0; channels_list[index].aggregation || channels_list[index].aggregation_2; index++) {
     struct plugins_list_entry *p = channels_list[index].plugin;
@@ -362,16 +411,39 @@ reprocess:
 	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->seq = channels_list[index].hdr.seq;
 	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->num = channels_list[index].hdr.num;
 
-	if (channels_list[index].status->wakeup) {
-	  channels_list[index].status->backlog++;
+        if (config.debug) {
+	  struct plugins_list_entry *list = channels_list[index].plugin;
+	  Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer released seq=%u num_entries=%u\n", list->name, list->type.string,
+		channels_list[index].hdr.seq, channels_list[index].hdr.num);
+	}
+
+	if (!channels_list[index].plugin->cfg.pipe_amqp) {
+	  if (channels_list[index].status->wakeup) {
+	    channels_list[index].status->backlog++;
 	  
-	  if (channels_list[index].status->backlog > ((channels_list[index].plugin->cfg.pipe_size/channels_list[index].plugin->cfg.buffer_size)*channels_list[index].plugin->cfg.pipe_backlog)/100) {
-	    channels_list[index].status->wakeup = channels_list[index].request;
-            if (write(channels_list[index].pipe, &channels_list[index].rg.ptr, CharPtrSz) != CharPtrSz)
-	      Log(LOG_WARNING, "WARN: Failed during write: %s\n", strerror(errno));
-	    channels_list[index].status->backlog = 0;
+	    if (channels_list[index].status->backlog >
+		((channels_list[index].plugin->cfg.pipe_size/channels_list[index].plugin->cfg.buffer_size)
+		*channels_list[index].plugin->cfg.pipe_backlog)/100) {
+	      channels_list[index].status->wakeup = channels_list[index].request;
+              if (write(channels_list[index].pipe, &channels_list[index].rg.ptr, CharPtrSz) != CharPtrSz) {
+	        struct plugins_list_entry *list = channels_list[index].plugin;
+	        Log(LOG_WARNING, "WARN ( %s/%s ): Failed during write: %s\n", list->name, list->type.string, strerror(errno));
+	      }
+	      channels_list[index].status->backlog = 0;
+	    }
 	  }
 	}
+	/* sending the buffer to the AMQP broker */
+#ifdef WITH_RABBITMQ
+	else {
+	  struct channels_list_entry *chptr = &channels_list[index];
+
+	  plugin_pipe_amqp_sleeper_stop(chptr);
+	  ret = p_amqp_publish_binary(&chptr->amqp_host, chptr->rg.ptr, chptr->bufsize);
+	  if (ret) plugin_pipe_amqp_sleeper_start(chptr);
+	}
+#endif
+
 	channels_list[index].rg.ptr += channels_list[index].bufsize;
 
 	if ((channels_list[index].rg.ptr+channels_list[index].bufsize) > channels_list[index].rg.end)
@@ -446,6 +518,7 @@ struct channels_list_entry *insert_pipe_channel(int plugin_type, struct configur
       chptr->bufptr = chptr->buf;
       chptr->bufend = cfg->buffer_size-sizeof(struct ch_buf_hdr);
 
+      // XXX: no need to map_shared() if using AMQP
       /* +PKT_MSG_SIZE has been introduced as a margin as a
          countermeasure against the reception of malicious NetFlow v9
 	 templates */
@@ -652,20 +725,28 @@ void init_random_seed()
 
 void fill_pipe_buffer()
 {
+  struct channels_list_entry *chptr;
   int index;
 
   for (index = 0; channels_list[index].aggregation || channels_list[index].aggregation_2; index++) {
-    channels_list[index].hdr.seq++;
-    channels_list[index].hdr.seq %= MAX_SEQNUM;
+    chptr = &channels_list[index];
 
-    ((struct ch_buf_hdr *)channels_list[index].rg.ptr)->seq = channels_list[index].hdr.seq;
-    ((struct ch_buf_hdr *)channels_list[index].rg.ptr)->num = channels_list[index].hdr.num;
+    chptr->hdr.seq++;
+    chptr->hdr.seq %= MAX_SEQNUM;
 
-    if (channels_list[index].status->wakeup) {
-      channels_list[index].status->wakeup = channels_list[index].request;
-      if (write(channels_list[index].pipe, &channels_list[index].rg.ptr, CharPtrSz) != CharPtrSz)
-	Log(LOG_WARNING, "WARN: Failed during write: %s\n", strerror(errno));
+    ((struct ch_buf_hdr *)chptr->rg.ptr)->seq = chptr->hdr.seq;
+    ((struct ch_buf_hdr *)chptr->rg.ptr)->num = chptr->hdr.num;
+
+    if (!chptr->plugin->cfg.pipe_amqp) {
+      if (chptr->status->wakeup) {
+        chptr->status->wakeup = chptr->request;
+        if (write(chptr->pipe, &chptr->rg.ptr, CharPtrSz) != CharPtrSz)
+	  Log(LOG_WARNING, "WARN: Failed during write: %s\n", strerror(errno));
+      }
     }
+#ifdef WITH_RABBITMQ
+    else p_amqp_publish_binary(&chptr->amqp_host, chptr->rg.ptr, chptr->bufsize);
+#endif
   }
 }
 
@@ -779,4 +860,162 @@ int pkt_extras_clean(void *pextras, int len)
   memset(pextras, 0, PdataSz+PextrasSz);
 
   return PdataSz+PextrasSz;
+}
+
+#ifdef WITH_RABBITMQ
+char *plugin_pipe_amqp_compose_routing_key(char *name, char *type)
+{
+  char *rk = NULL, sep[] = "-";
+  int len = 0;
+
+  if (!name || !type) return;
+
+  len = strlen(name) + strlen(type) + 2;
+
+  rk = malloc(len);
+  memset(rk, 0, len);
+
+  strncpy(rk, name, len);
+  strncat(rk, sep, (len-strlen(rk)));
+  strncat(rk, type, (len-strlen(rk)));
+
+  return rk;
+}
+
+void plugin_pipe_amqp_init_host(struct p_amqp_host *amqp_host, struct plugins_list_entry *list)
+{
+  int ret;
+
+  if (amqp_host) {
+    char *amqp_rk = plugin_pipe_amqp_compose_routing_key(list->cfg.name, list->cfg.type);
+
+    p_amqp_init_host(amqp_host);
+
+    if (!list->cfg.pipe_amqp_user) list->cfg.pipe_amqp_user = rabbitmq_user;
+    if (!list->cfg.pipe_amqp_passwd) list->cfg.pipe_amqp_passwd = rabbitmq_pwd;
+    if (!list->cfg.pipe_amqp_exchange) list->cfg.pipe_amqp_exchange = default_amqp_exchange;
+    if (!list->cfg.pipe_amqp_host) list->cfg.pipe_amqp_host = default_amqp_host;
+    if (!list->cfg.pipe_amqp_vhost) list->cfg.pipe_amqp_vhost = default_amqp_vhost;
+    if (!list->cfg.pipe_amqp_routing_key) list->cfg.pipe_amqp_routing_key = amqp_rk;
+    if (!list->cfg.pipe_amqp_retry) list->cfg.pipe_amqp_retry = AMQP_DEFAULT_RETRY;
+
+    p_amqp_set_user(amqp_host, list->cfg.pipe_amqp_user);
+    p_amqp_set_passwd(amqp_host, list->cfg.pipe_amqp_passwd);
+    p_amqp_set_exchange(amqp_host, list->cfg.pipe_amqp_exchange);
+    p_amqp_set_host(amqp_host, list->cfg.pipe_amqp_host);
+    p_amqp_set_vhost(amqp_host, list->cfg.pipe_amqp_vhost);
+    p_amqp_set_routing_key(amqp_host, list->cfg.pipe_amqp_routing_key);
+    p_amqp_set_retry_interval(amqp_host, list->cfg.pipe_amqp_retry);
+
+    p_amqp_set_frame_max(amqp_host, list->cfg.buffer_size);
+    p_amqp_set_exchange_type(amqp_host, default_amqp_exchange_type);
+    p_amqp_set_content_type_binary(amqp_host);
+  }
+}
+
+struct plugin_pipe_amqp_sleeper *plugin_pipe_amqp_sleeper_define(struct p_amqp_host *amqp_host, int *flag, struct plugins_list_entry *plugin)
+{
+  struct plugin_pipe_amqp_sleeper *pas;
+  int size = sizeof(struct plugin_pipe_amqp_sleeper);
+
+  if (!amqp_host || !flag) return;
+
+  pas = malloc(size);
+
+  if (pas) {
+    memset(pas, 0, size);
+    pas->amqp_host = amqp_host;
+    pas->plugin = plugin;
+    pas->do_reconnect = flag;
+  }
+  else {
+    Log(LOG_ERR, "ERROR ( %s/%s ): plugin_pipe_amqp_sleeper_define(): malloc() failed\n", plugin->cfg.name, plugin->cfg.type);
+    return NULL;
+  }
+
+  return pas;
+}
+
+void plugin_pipe_amqp_sleeper_free(struct plugin_pipe_amqp_sleeper **pas)
+{
+  if (!pas || !(*pas)) return;
+
+  free((*pas));
+  (*pas) = NULL;
+}
+
+void plugin_pipe_amqp_sleeper_publish_func(struct plugin_pipe_amqp_sleeper *pas)
+{
+  int ret;
+
+  if (!pas || !pas->amqp_host || !pas->plugin || !pas->do_reconnect) return;
+
+sleep_again:
+  sleep(p_amqp_get_retry_interval(pas->amqp_host));
+
+  plugin_pipe_amqp_init_host(pas->amqp_host, pas->plugin);
+  ret = p_amqp_connect_to_publish(pas->amqp_host);
+
+  if (ret) goto sleep_again;
+
+  (*pas->do_reconnect) = TRUE;
+
+  plugin_pipe_amqp_sleeper_free(&pas);
+}
+
+void plugin_pipe_amqp_sleeper_start(struct channels_list_entry *chptr)
+{
+#if defined ENABLE_THREADS
+  if (chptr && !chptr->amqp_host_sleep) {
+    struct plugin_pipe_amqp_sleeper *pas;
+
+    chptr->amqp_host_sleep = allocate_thread_pool(1);
+    assert(chptr->amqp_host_sleep);
+
+    pas = plugin_pipe_amqp_sleeper_define(&chptr->amqp_host, &chptr->amqp_host_reconnect, chptr->plugin);
+    send_to_pool((thread_pool_t *) chptr->amqp_host_sleep, plugin_pipe_amqp_sleeper_publish_func, pas);
+  }
+#endif
+}
+
+void plugin_pipe_amqp_sleeper_stop(struct channels_list_entry *chptr)
+{
+#if defined ENABLE_THREADS
+  if (chptr && chptr->amqp_host_reconnect) {
+    deallocate_thread_pool((thread_pool_t **) &chptr->amqp_host_sleep);
+    chptr->amqp_host_reconnect = FALSE;
+  }
+#endif
+}
+
+int plugin_pipe_amqp_connect_to_consume(struct p_amqp_host *amqp_host, struct plugins_list_entry *plugin_data)
+{
+  plugin_pipe_amqp_init_host(amqp_host, plugin_data);
+  p_amqp_connect_to_consume(amqp_host);
+  return p_amqp_get_sockfd(amqp_host);
+}
+
+int plugin_pipe_amqp_set_poll_timeout(struct p_amqp_host *amqp_host, int pipe_fd)
+{
+  if (pipe_fd == ERR) return (p_amqp_get_retry_interval(amqp_host) * 1000);
+  else return AMQP_LONGLONG_RETRY;
+}
+
+int plugin_pipe_amqp_calc_poll_timeout_diff(struct p_amqp_host *amqp_host, time_t now)
+{
+  int amqp_timeout;
+
+  amqp_timeout = (((p_amqp_get_last_fail(amqp_host) + p_amqp_get_retry_interval(amqp_host)) - now) * 1000);
+  assert(amqp_timeout >= 0);
+
+  return amqp_timeout;
+}
+#endif
+
+void plugin_pipe_amqp_compile_check()
+{
+#ifndef WITH_RABBITMQ
+    Log(LOG_ERR, "ERROR ( %s/%s ): 'plugin_pipe_amqp' requires compiling with --enable-rabbitmq. Exiting ..\n", config.name, config.type);
+    exit_plugin(1);
+#endif
 }

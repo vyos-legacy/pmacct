@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -130,6 +130,7 @@ int main(int argc,char **argv, char **envp)
   /* a bunch of default definitions */ 
   have_num_memory_pools = FALSE;
   reload_map = FALSE;
+  reload_geoipv2_file = FALSE;
   bpas_map_allocated = FALSE;
   blp_map_allocated = FALSE;
   bmed_map_allocated = FALSE;
@@ -368,6 +369,14 @@ int main(int argc,char **argv, char **envp)
       list->cfg.logfile_fd = config.logfile_fd ;
       list = list->next;
     }
+  }
+
+  if (config.proc_priority) {
+    int ret;
+
+    ret = setpriority(PRIO_PROCESS, 0, config.proc_priority);
+    if (ret) Log(LOG_WARNING, "WARN ( %s/core ): proc_priority failed (errno: %d)\n", config.name, errno);
+    else Log(LOG_INFO, "INFO ( %s/core ): proc_priority set to %d\n", config.name, getpriority(PRIO_PROCESS, 0));
   }
 
   if (strlen(config_file)) {
@@ -662,7 +671,7 @@ int main(int argc,char **argv, char **envp)
 #if defined (PCAP_TYPE_linux) || (PCAP_TYPE_snoop)
     Setsocksize(pcap_fileno(device.dev_desc), SOL_SOCKET, SO_RCVBUF, &config.nfacctd_pipe_size, slen);
     getsockopt(pcap_fileno(device.dev_desc), SOL_SOCKET, SO_RCVBUF, &x, &slen);
-    Log(LOG_DEBUG, "DEBUG ( %s/core ): pmacctd_pipe_size: obtained=%u target=%u.\n", config.name, x, config.nfacctd_pipe_size);
+    Log(LOG_DEBUG, "DEBUG ( %s/core ): pmacctd_pipe_size: obtained=%d target=%d.\n", config.name, x, config.nfacctd_pipe_size);
 #endif
   }
 
@@ -800,6 +809,12 @@ int main(int argc,char **argv, char **envp)
 
 #if defined WITH_GEOIP
   if (config.geoip_ipv4_file || config.geoip_ipv6_file) {
+    req.bpf_filter = TRUE;
+  }
+#endif
+
+#if defined WITH_GEOIPV2
+  if (config.geoipv2_file) {
     req.bpf_filter = TRUE;
   }
 #endif

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -48,6 +48,14 @@ void P_init_default_values()
     config.logfile_fd = open_logfile(config.logfile, "a");
   }
 
+  if (config.proc_priority) {
+    int ret;
+
+    ret = setpriority(PRIO_PROCESS, 0, config.proc_priority);
+    if (ret) Log(LOG_WARNING, "WARN ( %s/%s ): proc_priority failed (errno: %d)\n", config.name, config.type, errno);
+    else Log(LOG_INFO, "INFO ( %s/%s ): proc_priority set to %d\n", config.name, config.type, getpriority(PRIO_PROCESS, 0));
+  }
+
   reload_map = FALSE;
 
   basetime_init = NULL;
@@ -71,6 +79,10 @@ void P_init_default_values()
   memset(&sa, 0, sizeof(struct scratch_area));
   sa.num = config.print_cache_entries*AVERAGE_CHAIN_LEN;
   sa.size = sa.num*dbc_size;
+
+  Log(LOG_INFO, "INFO ( %s/%s ): cache entries=%u base cache memory=%u bytes\n", config.name, config.type,
+	config.print_cache_entries, ((config.print_cache_entries * dbc_size) + (2 * ((sa.num +
+	config.print_cache_entries) * sizeof(struct chained_cache *))) + sa.size));
 
   cache = (struct chained_cache *) Malloc(config.print_cache_entries*dbc_size);
   queries_queue = (struct chained_cache **) Malloc((sa.num+config.print_cache_entries)*sizeof(struct chained_cache *));
@@ -559,6 +571,14 @@ void P_cache_insert_pending(struct chained_cache *queue[], int index, struct cha
     }
 
     memcpy(cache_ptr, &container[j], dbc_size); 
+
+    container[j].pbgp = NULL;
+    container[j].pmpls = NULL;
+    container[j].pnat = NULL;
+    container[j].pcust = NULL;
+    container[j].pvlen = NULL;
+    container[j].stitch = NULL;
+
     cache_ptr->valid = PRINT_CACHE_INUSE;
     cache_ptr->next = NULL;
   }
@@ -640,6 +660,14 @@ void P_cache_mark_flush(struct chained_cache *queue[], int index, int exiting)
        in cache. As we copy elements out of the cache we mark entries as free */
     for (j = 0; j < pqq_ptr; j++) {
       memcpy(&pqq_container[j], pending_queries_queue[j], dbc_size);
+
+      pending_queries_queue[j]->pbgp = NULL;
+      pending_queries_queue[j]->pmpls = NULL;
+      pending_queries_queue[j]->pnat = NULL;
+      pending_queries_queue[j]->pcust = NULL;
+      pending_queries_queue[j]->pvlen = NULL;
+      pending_queries_queue[j]->stitch = NULL;
+
       pending_queries_queue[j]->valid = PRINT_CACHE_FREE;
       pending_queries_queue[j] = &pqq_container[j];
     }

@@ -56,7 +56,7 @@ void nfacctd_bmp_wrapper()
 
 void skinny_bmp_daemon()
 {
-  int slen, clen, ret, rc, peers_idx, allowed, yes=1;
+  int slen, clen, ret, rc, peers_idx, allowed, yes=1, no=0;
   char bmp_packet[BMP_MAX_PACKET_SIZE], *bmp_packet_ptr;
   time_t now;
   afi_t afi;
@@ -95,7 +95,7 @@ void skinny_bmp_daemon()
   clen = sizeof(client);
 
   /* socket creation for BMP server: IPv4 only */
-#if (defined ENABLE_IPV6 && defined V4_MAPPED)
+#if (defined ENABLE_IPV6)
   if (!config.nfacctd_bmp_ip) {
     struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *)&server;
 
@@ -155,12 +155,12 @@ void skinny_bmp_daemon()
     if (config.nfacctd_bmp_msglog_amqp_routing_key) {
 #ifdef WITH_RABBITMQ
       bmp_daemon_msglog_init_amqp_host();
-      p_amqp_connect(&bmp_daemon_msglog_amqp_host);
+      p_amqp_connect_to_publish(&bmp_daemon_msglog_amqp_host);
 
       if (!config.nfacctd_bmp_msglog_amqp_retry)
         config.nfacctd_bmp_msglog_amqp_retry = AMQP_DEFAULT_RETRY;
 #else
-      Log(LOG_WARNING, "WARN ( %s/core/BMP ): p_amqp_connect() not possible due to missing --enable-rabbitmq\n", config.name);
+      Log(LOG_WARNING, "WARN ( %s/core/BMP ): p_amqp_connect_to_publish() not possible due to missing --enable-rabbitmq\n", config.name);
 #endif
     }
   }
@@ -180,7 +180,7 @@ void skinny_bmp_daemon()
 
   config.bmp_sock = socket(((struct sockaddr *)&server)->sa_family, SOCK_STREAM, 0);
   if (config.bmp_sock < 0) {
-#if (defined ENABLE_IPV6 && defined V4_MAPPED)
+#if (defined ENABLE_IPV6)
     /* retry with IPv4 */
     if (!config.nfacctd_bmp_ip) {
       struct sockaddr_in *sa4 = (struct sockaddr_in *)&server;
@@ -209,9 +209,14 @@ void skinny_bmp_daemon()
   rc = setsockopt(config.bmp_sock, SOL_SOCKET, SO_REUSEADDR, (char *)&yes, sizeof(yes));
   if (rc < 0) Log(LOG_ERR, "WARN ( %s/core/BMP ): setsockopt() failed for SO_REUSEADDR (errno: %d).\n", config.name, errno);
 
+#if (defined ENABLE_IPV6) && (defined IPV6_BINDV6ONLY)
+  rc = setsockopt(config.bmp_sock, IPPROTO_IPV6, IPV6_BINDV6ONLY, (char *) &no, (socklen_t) sizeof(no));
+  if (rc < 0) Log(LOG_ERR, "WARN ( %s/core ): setsockopt() failed for IPV6_BINDV6ONLY (errno: %d).\n", config.name, errno);
+#endif
+
   if (config.nfacctd_bmp_pipe_size) {
     int l = sizeof(config.nfacctd_bmp_pipe_size);
-    u_int64_t saved = 0, obtained = 0;
+    int saved = 0, obtained = 0;
 
     getsockopt(config.bmp_sock, SOL_SOCKET, SO_RCVBUF, &saved, &l);
     Setsocksize(config.bmp_sock, SOL_SOCKET, SO_RCVBUF, &config.nfacctd_bmp_pipe_size, sizeof(config.nfacctd_bmp_pipe_size));
@@ -219,7 +224,7 @@ void skinny_bmp_daemon()
 
     Setsocksize(config.bmp_sock, SOL_SOCKET, SO_RCVBUF, &saved, l);
     getsockopt(config.bmp_sock, SOL_SOCKET, SO_RCVBUF, &obtained, &l);
-    Log(LOG_INFO, "INFO ( %s/core/BMP ): bmp_daemon_pipe_size: obtained=%u target=%u.\n", config.name, obtained, config.nfacctd_bmp_pipe_size);
+    Log(LOG_INFO, "INFO ( %s/core/BMP ): bmp_daemon_pipe_size: obtained=%d target=%d.\n", config.name, obtained, config.nfacctd_bmp_pipe_size);
   }
 
   rc = bind(config.bmp_sock, (struct sockaddr *) &server, slen);
@@ -344,7 +349,7 @@ void skinny_bmp_daemon()
     if (config.nfacctd_bmp_msglog_file || config.nfacctd_bmp_msglog_amqp_routing_key ||
         config.bmp_dump_file || config.bmp_dump_amqp_routing_key) {
       gettimeofday(&bmp_log_tstamp, NULL);
-      compose_timestamp(bmp_log_tstamp_str, SRVBUFLEN, &bmp_log_tstamp, TRUE);
+      compose_timestamp(bmp_log_tstamp_str, SRVBUFLEN, &bmp_log_tstamp, TRUE, config.sql_history_since_epoch);
 
       if (config.bmp_dump_file || config.bmp_dump_amqp_routing_key) {
         while (bmp_log_tstamp.tv_sec > dump_refresh_deadline) {
@@ -357,9 +362,9 @@ void skinny_bmp_daemon()
       if (config.nfacctd_bmp_msglog_amqp_routing_key) {
         time_t last_fail = p_amqp_get_last_fail(&bmp_daemon_msglog_amqp_host);
 
-        if (last_fail && (last_fail + config.nfacctd_bmp_msglog_amqp_retry < log_tstamp.tv_sec)) {
+        if (last_fail && ((last_fail + p_amqp_get_retry_interval(&bmp_daemon_msglog_amqp_host)) <= log_tstamp.tv_sec)) {
           bmp_daemon_msglog_init_amqp_host();
-          p_amqp_connect(&bmp_daemon_msglog_amqp_host);
+          p_amqp_connect_to_publish(&bmp_daemon_msglog_amqp_host);
         }
       }
 #endif
@@ -802,7 +807,7 @@ void bmp_process_msg_route(char **bmp_packet, u_int32_t *len, struct bgp_peer *p
   /* If no timestamp in BMP then let's generate one */
   if (!bdata.tstamp.tv_sec) gettimeofday(&bdata.tstamp, NULL);
 
-  compose_timestamp(tstamp_str, SRVBUFLEN, &bdata.tstamp, TRUE);
+  compose_timestamp(tstamp_str, SRVBUFLEN, &bdata.tstamp, TRUE, config.sql_history_since_epoch);
   addr_to_str(peer_ip, &bdata.peer_ip);
 
   // XXX: parse BGP UPDATE(s)

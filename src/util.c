@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -26,9 +26,7 @@
 #include "pmacct-data.h"
 #include "ip_flow.h"
 #include "classifier.h"
-#if defined WITH_RABBITMQ
-#include "amqp_common.h"
-#endif
+#include "plugin_hooks.h"
 #ifdef WITH_JANSSON
 #include <jansson.h>
 #endif
@@ -1711,7 +1709,7 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
   }
 
 #if defined (HAVE_L2)
-  if (wtc & COUNT_SRC_MAC) {
+  if (wtc & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
     etheraddr_string(pbase->eth_shost, src_mac);
     kv = json_pack("{ss}", "mac_src", src_mac);
     json_object_update_missing(obj, kv);
@@ -1745,7 +1743,7 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
   }
 #endif
 
-  if (wtc & COUNT_SRC_AS) {
+  if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS)) {
     kv = json_pack("{sI}", "as_src", pbase->src_as);
     json_object_update_missing(obj, kv);
     json_decref(kv);
@@ -1920,14 +1918,14 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
     json_decref(kv);
   }
 
-  if (wtc & COUNT_SRC_HOST) {
+  if (wtc & (COUNT_SRC_HOST|COUNT_SUM_HOST)) {
     addr_to_str(src_host, &pbase->src_ip);
     kv = json_pack("{ss}", "ip_src", src_host);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
-  if (wtc & COUNT_SRC_NET) {
+  if (wtc & (COUNT_SRC_NET|COUNT_SUM_NET)) {
     addr_to_str(src_host, &pbase->src_net);
     if (!config.tmp_net_own_field) kv = json_pack("{ss}", "ip_src", src_host);
     else kv = json_pack("{ss}", "net_src", src_host);
@@ -1962,7 +1960,7 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
     json_decref(kv);
   }
 
-  if (wtc & COUNT_SRC_PORT) {
+  if (wtc & (COUNT_SRC_PORT|COUNT_SUM_PORT)) {
     kv = json_pack("{sI}", "port_src", pbase->src_port);
     json_object_update_missing(obj, kv);
     json_decref(kv);
@@ -1976,8 +1974,8 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
 
 #if defined (WITH_GEOIP)
   if (wtc_2 & COUNT_SRC_HOST_COUNTRY) {
-    if (pbase->src_ip_country > 0)
-      kv = json_pack("{ss}", "country_ip_src", GeoIP_code_by_id(pbase->src_ip_country));
+    if (pbase->src_ip_country.id > 0)
+      kv = json_pack("{ss}", "country_ip_src", GeoIP_code_by_id(pbase->src_ip_country.id));
     else
       kv = json_pack("{ss}", "country_ip_src", empty_string);
 
@@ -1986,8 +1984,8 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
   }
 
   if (wtc_2 & COUNT_DST_HOST_COUNTRY) {
-    if (pbase->dst_ip_country > 0)
-      kv = json_pack("{ss}", "country_ip_dst", GeoIP_code_by_id(pbase->dst_ip_country));
+    if (pbase->dst_ip_country.id > 0)
+      kv = json_pack("{ss}", "country_ip_dst", GeoIP_code_by_id(pbase->dst_ip_country.id));
     else
       kv = json_pack("{ss}", "country_ip_dst", empty_string);
 
@@ -1995,6 +1993,28 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
     json_decref(kv);
   }
 #endif
+#if defined (WITH_GEOIPV2)
+  if (wtc_2 & COUNT_SRC_HOST_COUNTRY) {
+    if (strlen(pbase->src_ip_country.str))
+      kv = json_pack("{ss}", "country_ip_src", pbase->src_ip_country.str);
+    else
+      kv = json_pack("{ss}", "country_ip_src", empty_string);
+
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+
+  if (wtc_2 & COUNT_DST_HOST_COUNTRY) {
+    if (strlen(pbase->dst_ip_country.str))
+      kv = json_pack("{ss}", "country_ip_dst", pbase->dst_ip_country.str);
+    else
+      kv = json_pack("{ss}", "country_ip_dst", empty_string);
+
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+#endif
+
   if (wtc & COUNT_TCPFLAGS) {
     sprintf(misc_str, "%u", tcp_flags);
     kv = json_pack("{ss}", "tcp_flags", misc_str);
@@ -2003,8 +2023,10 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
   }
 
   if (wtc & COUNT_IP_PROTO) {
-    if (!config.num_protos) kv = json_pack("{ss}", "ip_proto", _protocols[pbase->proto].name);
-    else kv = json_pack("{sI}", "ip_proto", _protocols[pbase->proto].number);
+    if (!config.num_protos && (pbase->proto < protocols_number))
+      kv = json_pack("{ss}", "ip_proto", _protocols[pbase->proto].name);
+    else
+      kv = json_pack("{sI}", "ip_proto", pbase->proto);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -2077,26 +2099,26 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
   }
 
   if (wtc_2 & COUNT_TIMESTAMP_START) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_start, TRUE);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_start, TRUE, config.sql_history_since_epoch);
     kv = json_pack("{ss}", "timestamp_start", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_TIMESTAMP_END) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_end, TRUE);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_end, TRUE, config.sql_history_since_epoch);
     kv = json_pack("{ss}", "timestamp_end", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (config.nfacctd_stitching && stitch) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_min, TRUE);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_min, TRUE, config.sql_history_since_epoch);
     kv = json_pack("{ss}", "timestamp_min", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
-    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_max, TRUE);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_max, TRUE, config.sql_history_since_epoch);
     kv = json_pack("{ss}", "timestamp_max", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
@@ -2131,14 +2153,14 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
 
     tv.tv_sec = basetime->tv_sec;
     tv.tv_usec = 0;
-    compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE, config.sql_history_since_epoch);
     kv = json_pack("{ss}", "stamp_inserted", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
     tv.tv_sec = time(NULL);
     tv.tv_usec = 0;
-    compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE, config.sql_history_since_epoch);
     kv = json_pack("{ss}", "stamp_updated", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
@@ -2175,7 +2197,7 @@ void write_and_free_json(FILE *f, void *obj)
 
   tmpbuf = json_dumps(json_obj, 0);
   json_decref(json_obj);
-  
+
   if (tmpbuf) {
     fprintf(f, "%s\n", tmpbuf);
     fflush(f);
@@ -2204,7 +2226,7 @@ int write_and_free_json_amqp(void *amqp_log, void *obj)
       p_amqp_set_routing_key(alog, dyn_amqp_routing_key);
     }
 
-    ret = p_amqp_publish(alog, tmpbuf);
+    ret = p_amqp_publish_string(alog, tmpbuf);
     free(tmpbuf);
 
     if (alog->rk_rr.max) p_amqp_set_routing_key(alog, orig_amqp_routing_key);
@@ -2238,18 +2260,24 @@ int write_and_free_json_amqp(void *amqp_log, void *obj)
 }
 #endif
 
-void compose_timestamp(char *buf, int buflen, struct timeval *tv, int usec)
+void compose_timestamp(char *buf, int buflen, struct timeval *tv, int usec, int since_epoch)
 {
   char tmpbuf[SRVBUFLEN];
   time_t time1;
   struct tm *time2;
 
-  time1 = tv->tv_sec;
-  time2 = localtime(&time1);
-  strftime(tmpbuf, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+  if (config.sql_history_since_epoch) {
+    if (usec) snprintf(buf, buflen, "%u.%u", tv->tv_sec, tv->tv_usec);
+    else snprintf(buf, buflen, "%u", tv->tv_sec);
+  }
+  else {
+    time1 = tv->tv_sec;
+    time2 = localtime(&time1);
+    strftime(tmpbuf, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
 
-  if (usec) snprintf(buf, buflen, "%s.%u", tmpbuf, tv->tv_usec);
-  else snprintf(buf, buflen, "%s", tmpbuf);
+    if (usec) snprintf(buf, buflen, "%s.%u", tmpbuf, tv->tv_usec);
+    else snprintf(buf, buflen, "%s", tmpbuf);
+  }
 }
 
 void print_primitives(int acct_type, char *header)
@@ -2616,11 +2644,11 @@ int print_hex(const u_char *a, u_char *buf, int len)
 
   if (buf[b-1] == '-') {
     buf[b-1] = '\0';
-    return (b-1);
+    return b;
   }
   else {
     buf[b] = '\0';
-    return b;
+    return (b+1);
   }
 }
 

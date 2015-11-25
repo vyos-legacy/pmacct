@@ -26,6 +26,7 @@
 #include "pmacct.h"
 #include "bgp.h"
 #include "../bmp/bmp.h"
+#include "../sfacctd_logdump.h"
 #if defined WITH_RABBITMQ
 #include "amqp_common.h"
 #endif
@@ -38,11 +39,14 @@ int bgp_peer_log_msg(struct bgp_node *route, struct bgp_info *ri, safi_t safi, c
   char log_rk[SRVBUFLEN];
   struct bgp_peer *peer = ri->peer;
   struct bgp_attr *attr = ri->attr;
-  int ret = 0, amqp_ret = 0;
+  int ret = 0, amqp_ret = 0, etype = BGP_LOGDUMP_ET_NONE;
 
+  if (!strcmp(event_type, "dump")) etype = BGP_LOGDUMP_ET_DUMP;
+  else if (!strcmp(event_type, "log")) etype = BGP_LOGDUMP_ET_LOG;
+  
 #ifdef WITH_RABBITMQ
-  if (config.nfacctd_bgp_msglog_amqp_routing_key ||
-      config.bgp_table_dump_amqp_routing_key)
+  if ((config.nfacctd_bgp_msglog_amqp_routing_key && etype == BGP_LOGDUMP_ET_LOG) ||
+      (config.bgp_table_dump_amqp_routing_key && etype == BGP_LOGDUMP_ET_DUMP))
     p_amqp_set_routing_key(peer->log->amqp_host, peer->log->filename);
 #endif
 
@@ -56,7 +60,7 @@ int bgp_peer_log_msg(struct bgp_node *route, struct bgp_info *ri, safi_t safi, c
     char *aspath;
 
     /* no need for seq and timestamp for "dump" event_type */
-    if (strcmp(event_type, "dump")) {
+    if (etype == BGP_LOGDUMP_ET_LOG) {
       kv = json_pack("{sI}", "seq", log_seq);
       json_object_update_missing(obj, kv);
       json_decref(kv);
@@ -135,12 +139,13 @@ int bgp_peer_log_msg(struct bgp_node *route, struct bgp_info *ri, safi_t safi, c
       json_decref(kv);
     }
 
-    if (config.nfacctd_bgp_msglog_file || config.bgp_table_dump_file)
+    if ((config.nfacctd_bgp_msglog_file && etype == BGP_LOGDUMP_ET_LOG) ||
+	(config.bgp_table_dump_file && etype == BGP_LOGDUMP_ET_DUMP))
       write_and_free_json(peer->log->fd, obj);
 
 #ifdef WITH_RABBITMQ
-    if (config.nfacctd_bgp_msglog_amqp_routing_key ||
-	config.bgp_table_dump_amqp_routing_key) {
+    if ((config.nfacctd_bgp_msglog_amqp_routing_key && etype == BGP_LOGDUMP_ET_LOG) ||
+	(config.bgp_table_dump_amqp_routing_key && etype == BGP_LOGDUMP_ET_DUMP)) {
       amqp_ret = write_and_free_json_amqp(peer->log->amqp_host, obj);
       p_amqp_unset_routing_key(peer->log->amqp_host);
     }
@@ -185,9 +190,20 @@ int bgp_peer_log_init(struct bgp_peer *peer, int output, int type)
     ls = &bmp_log_seq;
     bpl = &bmp_peers_log;
   }
+  else if (type == FUNC_TYPE_SFLOW_COUNTER) {
+    file = config.sfacctd_counter_file;
+    amqp_routing_key = NULL; /* AMQP not supported */
+    amqp_routing_key_rr = 0; /* AMQP not supported */
+    max_peers = config.sfacctd_counter_max_nodes;
+
+    pa_str = peer_ip_src;
+    lts = sf_cnt_log_tstamp_str;
+    ls = &sf_cnt_log_seq;
+    bpl = &sf_cnt_log;
+  }
   else return ret;
 
-  if (!(*bpl) || !peer || peer->log) return;
+  if (!(*bpl) || !peer || peer->log) return ret;
 
   if (file)
     bgp_peer_log_dynname(log_filename, SRVBUFLEN, file, peer); 
@@ -298,7 +314,7 @@ int bgp_peer_log_close(struct bgp_peer *peer, int output, int type)
   }
   else return ret;
 
-  if (!peer || peer->log) return;
+  if (!peer || peer->log) return ret;
 
 #ifdef WITH_RABBITMQ
   if (amqp_routing_key)
@@ -411,10 +427,11 @@ int bgp_peer_dump_init(struct bgp_peer *peer, int output, int type)
   int ret = 0, amqp_ret = 0;
 
   /* pointers to BGP or BMP vars */
+  struct timeval *lt;
   char *amqp_routing_key, *file, *pa_str, *lts;
   int amqp_routing_key_rr;
 
-  if (!peer || !peer->log) return;
+  if (!peer || !peer->log) return ret;
 
   if (type == FUNC_TYPE_BGP) {
     amqp_routing_key = config.bgp_table_dump_amqp_routing_key;
@@ -422,6 +439,7 @@ int bgp_peer_dump_init(struct bgp_peer *peer, int output, int type)
     file = config.bgp_table_dump_file;
 
     pa_str = peer_ip_src;
+    lt = &log_tstamp;
     lts = log_tstamp_str; 
   }
   else if (type == FUNC_TYPE_BMP) {
@@ -430,9 +448,13 @@ int bgp_peer_dump_init(struct bgp_peer *peer, int output, int type)
     file = config.bmp_dump_file;
 
     pa_str = bmp_router;
+    lt = &bmp_log_tstamp;
     lts = bmp_log_tstamp_str;
   }
   else return ret;
+
+  gettimeofday(lt, NULL);
+  compose_timestamp(lts, SRVBUFLEN, lt, TRUE, config.sql_history_since_epoch);
 
 #ifdef WITH_RABBITMQ
   if (amqp_routing_key)
@@ -477,21 +499,23 @@ int bgp_peer_dump_init(struct bgp_peer *peer, int output, int type)
   return (ret | amqp_ret);
 }
 
-int bgp_peer_dump_close(struct bgp_peer *peer, int output, int type)
+int bgp_peer_dump_close(struct bgp_peer *peer, struct bgp_dump_stats *bds, int output, int type)
 {
   char event_type[] = "dump_close", peer_src_ip[] = "peer_src_ip", bmp_router[] = "bmp_router";
   int ret = 0, amqp_ret = 0;
 
   /* pointers to BGP or BMP vars */
+  struct timeval *lt;
   char *amqp_routing_key, *file, *pa_str, *lts;
 
-  if (!peer || !peer->log) return;
+  if (!peer || !peer->log) return ret;
 
   if (type == FUNC_TYPE_BGP) {
     amqp_routing_key = config.bgp_table_dump_amqp_routing_key; 
     file = config.bgp_table_dump_file;
 
     pa_str = peer_src_ip;
+    lt = &log_tstamp;
     lts = log_tstamp_str;
   }
   else if (type == FUNC_TYPE_BMP) {
@@ -499,9 +523,13 @@ int bgp_peer_dump_close(struct bgp_peer *peer, int output, int type)
     file = config.bmp_dump_file;
 
     pa_str = bmp_router;
+    lt = &bmp_log_tstamp;
     lts = bmp_log_tstamp_str;
   }
   else return ret;
+
+  gettimeofday(lt, NULL);
+  compose_timestamp(lts, SRVBUFLEN, lt, TRUE, config.sql_history_since_epoch);
 
 #ifdef WITH_RABBITMQ
   if (amqp_routing_key)
@@ -525,6 +553,16 @@ int bgp_peer_dump_close(struct bgp_peer *peer, int output, int type)
     kv = json_pack("{ss}", "event_type", event_type);
     json_object_update_missing(obj, kv);
     json_decref(kv);
+
+    if (bds) {
+      kv = json_pack("{sI}", "entries", bds->entries);
+      json_object_update_missing(obj, kv);
+      json_decref(kv);
+
+      kv = json_pack("{sI}", "tables", bds->tables);
+      json_object_update_missing(obj, kv);
+      json_decref(kv);
+    }
 
     if (file)
       write_and_free_json(peer->log->fd, obj);
@@ -550,10 +588,12 @@ void bgp_handle_dump_event()
   struct bgp_table *table;
   struct bgp_node *node;
   struct bgp_peer_log peer_log;
+  struct bgp_dump_stats bds;
   afi_t afi;
   safi_t safi;
   pid_t dumper_pid;
   time_t start;
+  u_int64_t dump_elems;
 
   /* pre-flight check */
   if ((!config.bgp_table_dump_file && !config.bgp_table_dump_amqp_routing_key) ||
@@ -569,11 +609,12 @@ void bgp_handle_dump_event()
     memset(last_filename, 0, sizeof(last_filename));
     memset(current_filename, 0, sizeof(current_filename));
     memset(&peer_log, 0, sizeof(struct bgp_peer_log));
+    memset(&bds, 0, sizeof(struct bgp_dump_stats));
 
 #ifdef WITH_RABBITMQ
     if (config.bgp_table_dump_amqp_routing_key) {
       bgp_table_dump_init_amqp_host();
-      ret = p_amqp_connect(&bgp_table_dump_amqp_host);
+      ret = p_amqp_connect_to_publish(&bgp_table_dump_amqp_host);
       if (ret) exit(ret);
     }
 #endif
@@ -620,6 +661,7 @@ void bgp_handle_dump_event()
 #endif
 
 	bgp_peer_dump_init(peer, config.bgp_table_dump_output, FUNC_TYPE_BGP);
+	dump_elems = 0;
 
 	for (afi = AFI_IP; afi < AFI_MAX; afi++) {
 	  for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++) {
@@ -635,6 +677,7 @@ void bgp_handle_dump_event()
 	        for (ri = node->info[modulo+peer_buckets]; ri; ri = ri->next) {
 		  if (ri->peer == peer) {
 	            bgp_peer_log_msg(node, ri, safi, event_type, config.bgp_table_dump_output);
+	            dump_elems++;
 		  }
 		}
 	      }
@@ -645,9 +688,12 @@ void bgp_handle_dump_event()
 	}
 
         saved_peer = peer;
-        strlcpy(last_filename, current_filename, SRVBUFLEN);
-        bgp_peer_dump_close(peer, config.bgp_table_dump_output, FUNC_TYPE_BGP);
 	tables_num++;
+
+        strlcpy(last_filename, current_filename, SRVBUFLEN);
+	bds.entries = dump_elems;
+	bds.tables = tables_num;
+        bgp_peer_dump_close(peer, &bds, config.bgp_table_dump_output, FUNC_TYPE_BGP);
       }
     }
 
@@ -681,6 +727,7 @@ void bgp_daemon_msglog_init_amqp_host()
   if (!config.nfacctd_bgp_msglog_amqp_exchange_type) config.nfacctd_bgp_msglog_amqp_exchange_type = default_amqp_exchange_type;
   if (!config.nfacctd_bgp_msglog_amqp_host) config.nfacctd_bgp_msglog_amqp_host = default_amqp_host;
   if (!config.nfacctd_bgp_msglog_amqp_vhost) config.nfacctd_bgp_msglog_amqp_vhost = default_amqp_vhost;
+  if (!config.nfacctd_bgp_msglog_amqp_retry) config.nfacctd_bgp_msglog_amqp_retry = AMQP_DEFAULT_RETRY;
 
   p_amqp_set_user(&bgp_daemon_msglog_amqp_host, config.nfacctd_bgp_msglog_amqp_user);
   p_amqp_set_passwd(&bgp_daemon_msglog_amqp_host, config.nfacctd_bgp_msglog_amqp_passwd);
@@ -690,7 +737,9 @@ void bgp_daemon_msglog_init_amqp_host()
   p_amqp_set_vhost(&bgp_daemon_msglog_amqp_host, config.nfacctd_bgp_msglog_amqp_vhost);
   p_amqp_set_persistent_msg(&bgp_daemon_msglog_amqp_host, config.nfacctd_bgp_msglog_amqp_persistent_msg);
   p_amqp_set_frame_max(&bgp_daemon_msglog_amqp_host, config.nfacctd_bgp_msglog_amqp_frame_max);
+  p_amqp_set_content_type_json(&bgp_daemon_msglog_amqp_host);
   p_amqp_set_heartbeat_interval(&bgp_daemon_msglog_amqp_host, config.nfacctd_bgp_msglog_amqp_heartbeat_interval);
+  p_amqp_set_retry_interval(&bgp_daemon_msglog_amqp_host, config.nfacctd_bgp_msglog_amqp_retry);
 }
 #else
 void bgp_daemon_msglog_init_amqp_host()
@@ -718,6 +767,7 @@ void bgp_table_dump_init_amqp_host()
   p_amqp_set_vhost(&bgp_table_dump_amqp_host, config.bgp_table_dump_amqp_vhost);
   p_amqp_set_persistent_msg(&bgp_table_dump_amqp_host, config.bgp_table_dump_amqp_persistent_msg);
   p_amqp_set_frame_max(&bgp_table_dump_amqp_host, config.bgp_table_dump_amqp_frame_max);
+  p_amqp_set_content_type_json(&bgp_table_dump_amqp_host);
   p_amqp_set_heartbeat_interval(&bgp_table_dump_amqp_host, config.bgp_table_dump_amqp_heartbeat_interval);
 }
 #else

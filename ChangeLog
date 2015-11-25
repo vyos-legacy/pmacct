@@ -1,5 +1,112 @@
-pmacct (Promiscuous mode IP Accounting package) v1.5.1
+pmacct (Promiscuous mode IP Accounting package) v1.5.2
 pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+
+1.5.2 -- 07-09-2015
+  + Introduced support for a RabbitMQ broker to be used for queueing and
+    data exchange between Core Process and plugins. This is in alternative to
+    the home-grown circular queue implementation. plugin_pipe_amqp directive,
+    along with all other plugin_pipe_amqp_* directives, can be set globally
+    or apply on a per plugin basis (ie. it is a valid scenario, if multiple
+    plugins are instantiated, that some make use of home-grown queueing,
+    while others use RabbitMQ based queueing).
+  + Introducting support for Maximind GeoIP v2 (libmaxminddb) library: if
+    pmacct is compiled with --enable-geoipv2, this defines full pathname to
+    a Maxmind GeoIP database v2 (libmaxminddb) Only the binary database
+    format is supported (ie. it is not possible to load distinct CSVs for
+    IPv4 and IPv6 addresses).
+  + Introduced infrastructure for sFlow counters and support specifically for
+    generic, ethernet and vlan counters. Counters are exported in JSON format
+    to files, specified via sfacctd_counter_file. The supplied filename can
+    contain as variable the sFlow agent IP address.
+  + Introduced a new thread_stack config directive to allow to modify the
+    thread stack size. Natanael Copa reported that some libc implementations,
+    ie. musl libc, may set a stack size that is too small by default.
+  + Introduced networks_file_no_lpm feature: it applies when aggregation
+    method includes src_net and/or dst_net and nfacctd_net (or equivalents)
+    and/or nfacctd_as_new (or equivalents) are set to longest (or fallback):
+    an IP prefix defined as part of the supplied networks_file wins always,
+    even if it's not longest.
+  + tee plugin: added support for (non-)transparent IPv6 replication [further
+    QA required]
+  + plugin_common.c, sql_common.c: added log message to estimate base cache
+    memory usage.
+  + print, AMQP, MongoDB plugins; sfacctd, BGP, BMP daemons: introducing
+    timestamps_since_epoch to write timestamps in 'since Epoch' format.
+  + nfacctd: flow bytes counter can now be sourced via element ID #352
+    (layer2OctetDeltaCount) in addition to element ID's already supported.
+    Thanks to Jonathan Thorpe for his support.
+  + Introducing proc_priority: redefines the process scheduling priority,
+    equivalent to using the 'nice' tool. Each daemon process, ie. core,
+    plugins, etc., can define a different priority.
+  ! fix, BMP daemon: improved preliminar checks in bmp_log_msg() and added
+    missing SIGHUP signal handling to reload bmp_daemon_msglog_file files.
+  ! fix, bgp_logdump.c: under certain configuration conditions call to both
+    write_and_free_json() and write_and_free_json_amqp() was leading to SEGV.
+    Thanks to Yuriy Lachin for reporting the issue.
+  ! fix, BGP daemon: improved BGP dump output: more accurate timestamping of
+    dump_init, dump_close events. dump_close now mentions amount of entries
+    and tables dumped. Thanks to Yuriy Lachin for brainstorming around this.
+  ! fix, cfg.c: raised amount of allowed config lines from 256 to 8K.
+  ! fix, print/AMQP/MongoDB plugins: SEGV observed when IPFIX vlen variables 
+    were stored in the pending_queries_queue structure (ie. as a result of a
+    time mismatch among the IPFIX exporter and the collector box).
+  ! fix, vlen primitives: when 'raw' semantics was selected, print_hex() was
+    returning wrong hex string length (one char short). As a consequence
+    occasionally some extra dirty chars were seen at the end of the converted
+    string.
+  ! fix, vlen primitives: memory leak verified in print/AMQP/MongoDB plugins.
+  ! fix, print, MongoDB & AMQP plugins: dirty values printed as part of the
+    'proto' under certain conditions. Thanks to Rene Stoutjesdijk for his
+    support resolving the issue.
+  ! fix, amqp_common.c: amqp_exchange_declare() call changed so to address
+    the change of rabbitmq-c API for support of auto_delete & internal for
+    exchange.declare. Backward compatibility with rabbitmq-c <= 0.5.2 is
+    also taken care of. Thanks to Brent Van Dussen for reporting the issue.
+  ! fix, compiling on recent FreeBSD: solved some errors catched by the -Wall
+    compiler flag. Thanks to Stephen Fulton for reporting the issue. Most of
+    the patch is courtesy by Mike Bowie.
+  ! fix, print/AMQP/MongoDB plugins: enforcing cleanup of malloc()ed structs
+    part of entries added to the pending queue, ie. because seen as future
+    entries due to a mismatch of the collector clock with the one of NetFlow/
+    IPFIX exporter(s). This may have lead to data inconsistencies.
+  ! fix, amqp_common.c: Content type was only specified for messages published
+    when the amqp_persistent_msg configuration option is specified. This info
+    should always be applied to describe the payload of the message. Patch is
+    courtesy by Will Dowling.
+  ! fix, amqp_plugin.c: generate an error on compile if --enable-rabbitmq is
+    specified without --enable-jansson. It's clear in the documentation that
+    both are required for AMQP support, but if built without jansson it will
+    silently not publish messages to AMQP. Patch is courtesy by Will Dowling.
+  ! fix, amqp_common.c: modified the content type to "application/json" in
+    line with RFC4627. Patch is courtesy by Will Dowling.
+  ! fix, setsockopt(): u_int64_t pipe_size vars changed to int, in line with
+    typical OS buffer limits (Linux, Solaris). Introduced check supplied pipe
+    size values are not bigger than INT_MAX. Many thanks to Markus Weber for
+    reporting the issue.
+  ! fix, nl.c: removed pretag_free_label() from pcap_cb() and ensuring init
+    of pptrs. Under certain conditions SEGVs could be noticed.
+  ! fix, flow stitching: when print/AMQP/MongoDB plugins were making use of
+    the pending queries queue, ie. to compensate for time offsets/flows in
+    the future, the stitching feature could potentially lead to SEGV due to
+    unsettled pointers.
+  ! fix, pgsql plugin: SEGV were noticed when insert/update queries to the
+    PostgreSQL database were returning different than PGRES_COMMAND_OK, hence
+    triggering the reprocess mechanism. Thanks very much to Alan Turower for
+    his support.
+  ! fix, improved logging of elements received/sent at buffering point between
+    core process and plugins. Also added explicit start/end purge log message
+    for cases in which there is no data to purge. 
+  ! fix, signals.c: ignore_falling_child() now logs if a child process exited
+    with abnormal conditions; this is useful to track writer processes (created
+    by plugins) are terminated by a signal, ie. SEGV. This is already the case
+    for plugins themselves, with the Core Process reporting a simlar log
+    message in case of abnormal exit. Thanks very much to Rene Stoutjesdijk
+    for his support.
+  ! fix, preprocess-data.h: added supported functions minf, minb, minbpp and
+    minppf to non SQL plugins. Thanks to Jared Deyo for reporting the issue. 
+  ! fix, nfprobe_plugin.c: IP protocol was not set up correctly for IPv6
+    traffic in NetFlow v9/IPFIX. Thanks to Gabriel Vermeulen his support
+    solving the issue.
 
 1.5.1 -- 21-02-2015
   + BMP daemon: BMP, BGP Monitoring Protocol, can be used to monitor BGP

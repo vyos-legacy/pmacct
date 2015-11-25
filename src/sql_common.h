@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -301,7 +301,7 @@ EXT void count_post_nat_src_ip_aton_handler(const struct db_cache *, struct inse
 EXT void count_post_nat_dst_ip_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void fake_host_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 
-#if defined WITH_GEOIP
+#if defined (WITH_GEOIP) || defined (WITH_GEOIPV2)
 EXT void count_src_host_country_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_dst_host_country_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 #endif
@@ -328,7 +328,6 @@ EXT void sql_init_default_values(struct extra_primitives *);
 EXT void sql_init_historical_acct(time_t, struct insert_data *);
 EXT void sql_init_triggers(time_t, struct insert_data *);
 EXT void sql_init_refresh_deadline(time_t *);
-EXT void sql_init_pipe(struct pollfd *, int);
 EXT struct template_entry *sql_init_logfile_template(struct template_header *);
 EXT void sql_link_backend_descriptors(struct BE_descs *, struct DBdesc *, struct DBdesc *);
 EXT void sql_cache_modulo(struct primitives_ptrs *, struct insert_data *);

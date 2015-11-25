@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -18,6 +18,10 @@
     along with this program; if not, write to the Free Software
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
+
+#ifdef WITH_RABBITMQ 
+#include "amqp_common.h"
+#endif
 
 #define DEFAULT_CHBUFLEN 4096
 #define DEFAULT_PIPE_SIZE 65535
@@ -61,6 +65,22 @@ struct aggregate_filter {
   struct bpf_program **table;
 };
 
+struct plugin_type_entry {
+  int id;
+  char string[10];
+  void (*func)(int, struct configuration *, void *);
+};
+
+struct plugins_list_entry {
+  int id;
+  pid_t pid;
+  char name[SRVBUFLEN];
+  struct configuration cfg;
+  int pipe[2];
+  struct plugin_type_entry type;
+  struct plugins_list_entry *next;
+};
+
 struct channels_list_entry {
   pm_cfgreg_t aggregation;
   pm_cfgreg_t aggregation_2;
@@ -88,7 +108,20 @@ struct channels_list_entry {
   struct sampling s;
   struct plugins_list_entry *plugin;			/* backpointer to the plugin the actual channel belongs to */
   struct extra_primitives extras;			/* offset for non-standard aggregation primitives structures */
+#ifdef WITH_RABBITMQ
+  struct p_amqp_host amqp_host;
+  int amqp_host_reconnect;				/* flag need to reconnect to RabbitMQ server */ 
+  void *amqp_host_sleep;				/* pointer to the sleep thread (in case of reconnection) */
+#endif
 };
+
+#ifdef WITH_RABBITMQ
+struct plugin_pipe_amqp_sleeper {
+  struct p_amqp_host *amqp_host;
+  struct plugins_list_entry *plugin;
+  int *do_reconnect;
+};
+#endif
 
 #if (defined __PLUGIN_HOOKS_C)
 extern struct channels_list_entry channels_list[MAX_N_PLUGINS];
@@ -121,6 +154,19 @@ EXT int pkt_extras_clean(void *, int);
 EXT void evaluate_sampling(struct sampling *, pm_counter_t *, pm_counter_t *, pm_counter_t *);
 EXT pm_counter_t take_simple_random_skip(pm_counter_t);
 EXT pm_counter_t take_simple_systematic_skip(pm_counter_t);
+#if defined WITH_RABBITMQ
+EXT char *plugin_pipe_amqp_compose_routing_key(char *, char *);
+EXT void plugin_pipe_amqp_init_host(struct p_amqp_host *, struct plugins_list_entry *);
+EXT struct plugin_pipe_amqp_sleeper *plugin_pipe_amqp_sleeper_define(struct p_amqp_host *, int *, struct plugins_list_entry *);
+EXT void plugin_pipe_amqp_sleeper_free(struct plugin_pipe_amqp_sleeper **);
+EXT void plugin_pipe_amqp_sleeper_publish_func(struct plugin_pipe_amqp_sleeper *);
+EXT void plugin_pipe_amqp_sleeper_start(struct channels_list_entry *);
+EXT void plugin_pipe_amqp_sleeper_stop(struct channels_list_entry *);
+EXT int plugin_pipe_amqp_connect_to_consume(struct p_amqp_host *, struct plugins_list_entry *);
+EXT int plugin_pipe_amqp_set_poll_timeout(struct p_amqp_host *, int);
+EXT int plugin_pipe_amqp_calc_poll_timeout_diff(struct p_amqp_host *, time_t);
+#endif
+EXT void plugin_pipe_amqp_compile_check();
 #undef EXT
 
 #if (defined __PLUGIN_HOOKS_C)
@@ -153,8 +199,4 @@ EXT void mongodb_plugin(int, struct configuration *, void *);
 #ifdef WITH_RABBITMQ
 EXT void amqp_plugin(int, struct configuration *, void *);
 #endif
-
-EXT void stats_plugin(int, struct configuration *, void *);
-
-EXT char *extract_token(char **, int);
 #undef EXT
