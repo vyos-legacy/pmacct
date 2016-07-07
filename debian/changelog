@@ -1,3 +1,9 @@
+pmacct (1.6.0-1) unstable; urgency=medium
+
+  * New upstream version (1.6.0)
+
+ -- Jonas Gröger <jonas.groeger@noris.de>  Thu, 07 Jul 2016 16:09:14 +0200
+
 pmacct (1.5.2-1) unstable; urgency=medium
 
   * [290e9b2] Merge tag 'upstream/1.5.2'
