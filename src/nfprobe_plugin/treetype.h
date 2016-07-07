@@ -22,7 +22,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: treetype.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ */
+/* $Id$ */
 
 /* Select our tree types for various data structures */
 

@@ -35,7 +35,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * @(#) $Header: /home/repo-0.14/pmacct/include/sll.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $ (LBL)
+ * @(#) $Header$ (LBL)
  */
 
 /*

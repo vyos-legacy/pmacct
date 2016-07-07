@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -26,7 +26,7 @@
 #include "pmacct-data.h"
 #include "plugin_hooks.h"
 #include "sql_common.h"
-#include "crc32.c"
+#include "crc32.h"
 #include "sql_common_m.c"
 
 /* Functions */
@@ -93,7 +93,7 @@ void sql_init_global_buffers()
   memset(&lru_head, 0, sizeof(lru_head));
   lru_tail = &lru_head;
 
-  Log(LOG_INFO, "INFO ( %s/%s ): cache entries=%u base cache memory=%u bytes\n", config.name, config.type,
+  Log(LOG_INFO, "INFO ( %s/%s ): cache entries=%llu base cache memory=%llu bytes\n", config.name, config.type,
         config.sql_cache_entries, ((config.sql_cache_entries * sizeof(struct db_cache)) +
 	(2 * (qq_size * sizeof(struct db_cache *)))));
 
@@ -124,14 +124,6 @@ void sql_init_default_values(struct extra_primitives *extras)
     ret = setpriority(PRIO_PROCESS, 0, config.proc_priority);
     if (ret) Log(LOG_WARNING, "WARN ( %s/%s ): proc_priority failed (errno: %d)\n", config.name, config.type, errno);
     else Log(LOG_INFO, "INFO ( %s/%s ): proc_priority set to %d\n", config.name, config.type, getpriority(PRIO_PROCESS, 0));
-  }
-
-  if ( (config.what_to_count & COUNT_CLASS ||
-	config.what_to_count & COUNT_TCPFLAGS ||
-	extras->off_pkt_bgp_primitives) &&
-       config.sql_recovery_logfile) {
-    Log(LOG_ERR, "ERROR ( %s/%s ): sql_recovery_logfile is not compatible with: classifiers, BGP-related primitives and TCP flags. Try configuring a backup DB.\n", config.name, config.type);
-    exit_plugin(1);
   }
 
   if (!config.sql_refresh_time) config.sql_refresh_time = DEFAULT_DB_REFRESH_TIME;
@@ -275,16 +267,6 @@ void sql_init_refresh_deadline(time_t *rd)
   *rd += (config.sql_refresh_time+config.sql_startup_delay); /* it's a deadline not a basetime */
 }
 
-struct template_entry *sql_init_logfile_template(struct template_header *hdr)
-{
-  struct template_entry *te;
-
-  te = build_template(hdr);
-  set_template_funcs(hdr, te);
-
-  return te;
-}
-
 void sql_link_backend_descriptors(struct BE_descs *registry, struct DBdesc *p, struct DBdesc *b)
 {
   memset(registry, 0, sizeof(struct BE_descs));
@@ -392,8 +374,7 @@ int sql_cache_flush(struct db_cache *queue[], int index, struct insert_data *ida
     /* If we are very near to our maximum writers threshold, let's resort to any configured
        recovery mechanism - SQL_CACHE_COMMITTED => SQL_CACHE_ERROR; otherwise, will proceed
        as usual */
-    if ((sql_writers.active == config.sql_max_writers-1) &&
-	(config.sql_backup_host || config.sql_recovery_logfile)) {
+    if ((sql_writers.active == config.sql_max_writers-1) && config.sql_backup_host) {
       for (j = 0; j < index; j++) {
 	if (queue[j]->valid == SQL_CACHE_COMMITTED) queue[j]->valid = SQL_CACHE_ERROR;
       }
@@ -450,6 +431,7 @@ int sql_cache_flush_pending(struct db_cache *queue[], int index, struct insert_d
 	    PendingElem->pmpls = NULL;
 	    PendingElem->pcust = NULL;
 	    PendingElem->pvlen = NULL;
+	    PendingElem->stitch = NULL;
             RetireElem(PendingElem);
 
             queue[j] = Cursor;
@@ -488,9 +470,12 @@ void sql_cache_handle_flush_event(struct insert_data *idata, time_t *refresh_dea
           (*sqlfunc_cbr.connect)(&p, config.sql_host);
         else
           (*sqlfunc_cbr.connect)(&p, NULL);
-        (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, idata);
-        (*sqlfunc_cbr.close)(&bed);
       }
+
+      /* qq_ptr check inside purge function along with a Log() call */
+      (*sqlfunc_cbr.purge)(queries_queue, qq_ptr, idata);
+
+      if (qq_ptr) (*sqlfunc_cbr.close)(&bed);
 
       if (config.sql_trigger_exec) {
         if (idata->now > idata->triggertime) sql_trigger_exec(config.sql_trigger_exec);
@@ -952,7 +937,7 @@ void sql_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
   if (insert_status == SQL_INSERT_SAFE_ACTION) {
     safe_action:
 
-    Log(LOG_WARNING, "WARN ( %s/%s ): purging process (CAUSE: safe action)\n", config.name, config.type);
+    Log(LOG_INFO, "INFO ( %s/%s ): Finished cache entries (ie. sql_cache_entries). Purging.\n", config.name, config.type);
   
     if (qq_ptr) sql_cache_flush(queries_queue, qq_ptr, idata, FALSE); 
 
@@ -1103,7 +1088,7 @@ void sql_exit_gracefully(int signum)
   idata.new_basetime = glob_new_basetime;
   idata.timeslot = glob_timeslot;
   idata.committed_basetime = glob_committed_basetime;
-  if (config.sql_backup_host || config.sql_recovery_logfile) idata.recover = TRUE;
+  if (config.sql_backup_host) idata.recover = TRUE;
   if (config.what_to_count & COUNT_CLASS) config.sql_aggressive_classification = FALSE;
   if (config.sql_locking_style) idata.locks = sql_select_locking_style(config.sql_locking_style);
 
@@ -1259,6 +1244,9 @@ int sql_evaluate_primitives(int primitive)
     if (config.what_to_count_2 & COUNT_NAT_EVENT) what_to_count_2 |= COUNT_NAT_EVENT;
     if (config.what_to_count_2 & COUNT_TIMESTAMP_START) what_to_count_2 |= COUNT_TIMESTAMP_START;
     if (config.what_to_count_2 & COUNT_TIMESTAMP_END) what_to_count_2 |= COUNT_TIMESTAMP_END;
+    if (config.what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL) what_to_count_2 |= COUNT_TIMESTAMP_ARRIVAL;
+    if (config.what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) what_to_count_2 |= COUNT_EXPORT_PROTO_SEQNO;
+    if (config.what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) what_to_count_2 |= COUNT_EXPORT_PROTO_VERSION;
     if (config.what_to_count_2 & COUNT_LABEL) what_to_count_2 |= COUNT_LABEL;
   }
 
@@ -2314,7 +2302,7 @@ int sql_evaluate_primitives(int primitive)
       strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
     }
     strncat(insert_clause, "timestamp_start", SPACELEFT(insert_clause));
-    if (config.sql_history_since_epoch) {
+    if (config.timestamps_since_epoch) {
       strncat(where[primitive].string, "timestamp_start=%u", SPACELEFT(where[primitive].string));
       strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
     }
@@ -2366,7 +2354,7 @@ int sql_evaluate_primitives(int primitive)
       strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
     }
     strncat(insert_clause, "timestamp_end", SPACELEFT(insert_clause));
-    if (config.sql_history_since_epoch) {
+    if (config.timestamps_since_epoch) {
       strncat(where[primitive].string, "timestamp_end=%u", SPACELEFT(where[primitive].string));
       strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
     }
@@ -2409,6 +2397,58 @@ int sql_evaluate_primitives(int primitive)
     }
   }
 
+  if (what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL) {
+    int use_copy=0;
+
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
+    }
+    strncat(insert_clause, "timestamp_arrival", SPACELEFT(insert_clause));
+    if (config.timestamps_since_epoch) {
+      strncat(where[primitive].string, "timestamp_arrival=%u", SPACELEFT(where[primitive].string));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    }
+    else {
+      if (!strcmp(config.type, "mysql")) {
+        strncat(where[primitive].string, "timestamp_arrival=FROM_UNIXTIME(%u)", SPACELEFT(where[primitive].string));
+        strncat(values[primitive].string, "FROM_UNIXTIME(%u)", SPACELEFT(values[primitive].string));
+      }
+      else if (!strcmp(config.type, "pgsql")) {
+        if (config.sql_use_copy) {
+          strncat(values[primitive].string, "%s", SPACELEFT(values[primitive].string));
+          use_copy = TRUE;
+        }
+        else {
+          strncat(where[primitive].string, "timestamp_arrival=ABSTIME(%u)::Timestamp", SPACELEFT(where[primitive].string));
+          strncat(values[primitive].string, "ABSTIME(%u)::Timestamp", SPACELEFT(values[primitive].string));
+        }
+      }
+      else if (!strcmp(config.type, "sqlite3")) {
+        strncat(where[primitive].string, "timestamp_arrival=DATETIME(%u, 'unixepoch', 'localtime')", SPACELEFT(where[primitive].string));
+        strncat(values[primitive].string, "DATETIME(%u, 'unixepoch', 'localtime')", SPACELEFT(values[primitive].string));
+      }
+    }
+    if (!use_copy) values[primitive].handler = where[primitive].handler = count_timestamp_arrival_handler;
+    else values[primitive].handler = where[primitive].handler = PG_copy_count_timestamp_arrival_handler;
+    values[primitive].type = where[primitive].type = COUNT_INT_TIMESTAMP_ARRIVAL;
+    primitive++;
+
+    if (!config.timestamps_secs) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
+
+      strncat(insert_clause, "timestamp_arrival_residual", SPACELEFT(insert_clause));
+      strncat(where[primitive].string, "timestamp_arrival_residual=%u", SPACELEFT(where[primitive].string));
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_INT_TIMESTAMP_ARRIVAL;
+      values[primitive].handler = where[primitive].handler = count_timestamp_arrival_residual_handler;
+      primitive++;
+    }
+  }
+
   if (config.nfacctd_stitching) {
     int use_copy=0;
 
@@ -2419,7 +2459,7 @@ int sql_evaluate_primitives(int primitive)
       strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
     }
     strncat(insert_clause, "timestamp_min", SPACELEFT(insert_clause));
-    if (config.sql_history_since_epoch) {
+    if (config.timestamps_since_epoch) {
       strncat(where[primitive].string, "timestamp_min=%u", SPACELEFT(where[primitive].string));
       strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
     }
@@ -2468,7 +2508,7 @@ int sql_evaluate_primitives(int primitive)
       strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
     }
     strncat(insert_clause, "timestamp_max", SPACELEFT(insert_clause));
-    if (config.sql_history_since_epoch) {
+    if (config.timestamps_since_epoch) {
       strncat(where[primitive].string, "timestamp_max=%u", SPACELEFT(where[primitive].string));
       strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
     }
@@ -2510,6 +2550,34 @@ int sql_evaluate_primitives(int primitive)
       values[primitive].handler = where[primitive].handler = count_timestamp_max_residual_handler;
       primitive++;
     }
+  }
+
+  if (what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
+    }
+    strncat(insert_clause, "export_proto_seqno", SPACELEFT(insert_clause));
+    strncat(where[primitive].string, "export_proto_seqno=%u", SPACELEFT(where[primitive].string));
+    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    values[primitive].handler = where[primitive].handler = count_export_proto_seqno_handler;
+    values[primitive].type = where[primitive].type = COUNT_INT_EXPORT_PROTO_SEQNO;
+    primitive++;
+  }
+
+  if (what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
+    }
+    strncat(insert_clause, "export_proto_version", SPACELEFT(insert_clause));
+    strncat(where[primitive].string, "export_proto_version=%u", SPACELEFT(where[primitive].string));
+    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    values[primitive].handler = where[primitive].handler = count_export_proto_version_handler;
+    values[primitive].type = where[primitive].type = COUNT_INT_EXPORT_PROTO_VERSION;
+    primitive++;
   }
 
   /* all custom primitives printed here */
@@ -2962,145 +3030,26 @@ int sql_query(struct BE_descs *bed, struct db_cache *elem, struct insert_data *i
   }
 
   if ( elem->valid == SQL_CACHE_ERROR || (bed->p->fail && !(elem->valid == SQL_CACHE_INUSE)) ) {
-
-  if (config.sql_backup_host) {
-    if (!bed->b->fail) {
-      if (!bed->b->connected) {
-        (*sqlfunc_cbr.connect)(bed->b, config.sql_backup_host);
-        if (config.sql_table_schema) {
-	  time_t stamp = idata->new_basetime ? idata->new_basetime : idata->basetime;
-
-	  sql_create_table(bed->b, &stamp, NULL); // XXX: should not be null
-	}
-        (*sqlfunc_cbr.lock)(bed->b);
-      }
+    if (config.sql_backup_host) {
       if (!bed->b->fail) {
-        if ((*sqlfunc_cbr.op)(bed->b, elem, idata)) sql_db_fail(bed->b);
+        if (!bed->b->connected) {
+          (*sqlfunc_cbr.connect)(bed->b, config.sql_backup_host);
+          if (config.sql_table_schema) {
+	    time_t stamp = idata->new_basetime ? idata->new_basetime : idata->basetime;
+
+	    sql_create_table(bed->b, &stamp, NULL); // XXX: should not be null
+	  }
+          (*sqlfunc_cbr.lock)(bed->b);
+        }
+        if (!bed->b->fail) {
+          if ((*sqlfunc_cbr.op)(bed->b, elem, idata)) sql_db_fail(bed->b);
+        }
       }
     }
-  }
-  if (config.sql_recovery_logfile) {
-    int sz;
-
-    if (idata->mv.last_queue_elem) goto quit; 
-
-    if (!bed->lf->fail) {
-      if (!bed->lf->open) {
-	bed->lf->file = sql_file_open(config.sql_recovery_logfile, "a", idata);
-	if (bed->lf->file) bed->lf->open = TRUE;
-	else {
-	  bed->lf->open = FALSE;
-	  bed->lf->fail = TRUE;
-	}
-      }
-      if (!bed->lf->fail) {
-	sz = TPL_push(logbuf.ptr, elem);
-	logbuf.ptr += sz;
-	if ((logbuf.ptr+sz) > logbuf.end) { /* we test whether the next element will fit into the buffer */
-	  fwrite(logbuf.base, (logbuf.ptr-logbuf.base), 1, bed->lf->file);
-	  logbuf.ptr = logbuf.base;
-	}
-      }
-    }
-  }
-
   }
 
   quit:
   return TRUE;
-}
-
-FILE *sql_file_open(const char *path, const char *mode, const struct insert_data *idata)
-{
-  struct stat st, st2;
-  struct logfile_header lh;
-  struct template_header tth;
-  FILE *f;
-  int ret;
-  uid_t owner = -1;
-  gid_t group = -1;
-
-  if (config.files_uid) owner = config.files_uid;
-  if (config.files_gid) group = config.files_gid;
-
-  file_open:
-  f = fopen(path, "a+");
-  if (f) {
-    ret = chown(path, owner, group);
-    if (file_lock(fileno(f))) {
-      Log(LOG_ALERT, "ALERT ( %s/%s ): Unable to obtain lock of '%s'.\n", config.name, config.type, path);
-      goto close;
-    }
-
-    fstat(fileno(f), &st);
-    if (!st.st_size) {
-      memset(&lh, 0, sizeof(struct logfile_header));
-      strlcpy(lh.sql_db, config.sql_db, DEF_HDR_FIELD_LEN);
-      if (!idata->dyn_table) strlcpy(lh.sql_table, config.sql_table, DEF_HDR_FIELD_LEN);
-      else {
-        struct tm *nowtm;
-
-        nowtm = localtime(&idata->new_basetime);
-        strftime(lh.sql_table, DEF_HDR_FIELD_LEN, config.sql_table, nowtm);
-      }
-      strlcpy(lh.sql_user, config.sql_user, DEF_HDR_FIELD_LEN);
-      if (config.sql_host) strlcpy(lh.sql_host, config.sql_host, DEF_HDR_FIELD_LEN);
-      else lh.sql_host[0] = '\0';
-      lh.sql_table_version = config.sql_table_version;
-      lh.sql_table_version = htons(lh.sql_table_version);
-      lh.sql_optimize_clauses = config.sql_optimize_clauses;
-      lh.sql_optimize_clauses = htons(lh.sql_optimize_clauses);
-      lh.sql_history = config.sql_history;
-      lh.sql_history = htons(lh.sql_history);
-      lh.what_to_count = htonl(config.what_to_count);
-      lh.magic = htonl(MAGIC);
-
-      fwrite(&lh, sizeof(lh), 1, f);
-      fwrite(&th, sizeof(th), 1, f);
-      fwrite(te, ntohs(th.num)*sizeof(struct template_entry), 1, f);
-    }
-    else {
-      rewind(f);
-      if ((ret = fread(&lh, sizeof(lh), 1, f)) != 1) {
-        Log(LOG_ALERT, "ALERT ( %s/%s ): Unable to read header: '%s'.\n", config.name, config.type, path);
-        goto close;
-      }
-      if (ntohl(lh.magic) != MAGIC) {
-        Log(LOG_ALERT, "ALERT ( %s/%s ): Invalid magic number: '%s'.\n", config.name, config.type, path);
-        goto close;
-      }
-      if ((ret = fread(&tth, sizeof(tth), 1, f)) != 1) {
-        Log(LOG_ALERT, "ALERT ( %s/%s ): Unable to read template: '%s'.\n", config.name, config.type, path);
-        goto close;
-      }
-      if ((tth.num != th.num) || (tth.sz != th.sz)) {
-        Log(LOG_ALERT, "ALERT ( %s/%s ): Invalid template in: '%s'.\n", config.name, config.type, path);
-        goto close;
-      }
-      if ((st.st_size+(idata->ten*sizeof(struct pkt_data))) >= MAX_LOGFILE_SIZE) {
-        Log(LOG_INFO, "INFO ( %s/%s ): No more space in '%s'.\n", config.name, config.type, path);
-
-        /* We reached the maximum logfile length; we test if any previous process
-           has already rotated the logfile. If not, we will rotate it. */
-        stat(path, &st2);
-        if (st2.st_size >= st.st_size) {
-          ret = file_archive(path, MAX_LOGFILE_ROTATIONS);
-          if (ret < 0) goto close;
-        }
-        file_unlock(fileno(f));
-        fclose(f);
-        goto file_open;
-      }
-      fseek(f, 0, SEEK_END);
-    }
-  }
-
-  return f;
-
-  close:
-  file_unlock(fileno(f));
-  fclose(f);
-  return NULL;
 }
 
 void sql_create_table(struct DBdesc *db, time_t *basetime, struct primitives_ptrs *prim_ptrs)

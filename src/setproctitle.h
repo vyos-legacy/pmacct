@@ -10,7 +10,7 @@
  * the sendmail distribution.
  *
  *
- *      $Id: setproctitle.h,v 1.1.1.1 2006/11/19 15:16:07 paolo Exp $
+ *      $Id$
  */
 
 #ifdef __hpux

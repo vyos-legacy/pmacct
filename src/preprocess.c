@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -55,7 +55,8 @@ void set_preprocess_funcs(char *string, struct preprocess *prep, int dictionary)
       key = token;
       *sep = '\0';
       value = sep+1;
-    } 
+      lower_string(key);
+    }
 
     /* validation against dictionaries */
     if (dictionary == PREP_DICT_SQL) {
@@ -640,7 +641,8 @@ int check_fsrc(struct db_cache *queue[], int *num, int seq)
     check_validity(ptr->cache_ptr, seq);
   }
 
-  if (config.debug) Log(LOG_DEBUG, "DEBUG: TOT/%u/%u SUBTOT/%u/%u\n", *num, total, fsrc_queue.num-1, subtotal);
+  if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): TOT/%u/%u SUBTOT/%u/%u\n",
+			config.name, config.type, *num, total, fsrc_queue.num-1, subtotal);
 
   end:
   return FALSE;

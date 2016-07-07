@@ -21,7 +21,7 @@
 #include "common.h"
 #ifndef HAVE_STRLCPY
 
-RCSID("$Id: strlcat.c,v 1.2 2015/03/11 18:24:28 paolo Exp $");
+RCSID("$Id$");
 
 #if defined(LIBC_SCCS) && !defined(lint)
 static char *rcsid = "$OpenBSD: strlcat.c,v 1.11 2003/06/17 21:56:24 millert Exp $";

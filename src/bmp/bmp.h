@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -23,20 +23,23 @@
 
 /* defines */
 #define BMP_TCP_PORT		1790
-#define BMP_MAX_PACKET_SIZE	4096
 #define BMP_MAX_PEERS_DEFAULT	4
 #define BMP_V3			3
 
-/* definitions based on draft-ietf-grow-bmp-07 */
+#define BMP_MISSING_PEER_UP_LOG_TOUT	60
+
+/* definitions originally based on draft-ietf-grow-bmp-07 */
+/* definitions review #1 based on draft-ietf-grow-bmp-17 */
 
 /* BMP message types */
-#define BMP_MSG_ROUTE		0	
+#define BMP_MSG_ROUTE_MONITOR	0	
 #define	BMP_MSG_STATS		1
 #define BMP_MSG_PEER_DOWN	2
 #define BMP_MSG_PEER_UP		3
 #define	BMP_MSG_INIT		4
 #define BMP_MSG_TERM		5
-#define BMP_MSG_TYPE_MAX	5 /* set to the highest BMP_MSG_* value */
+#define BMP_MSG_ROUTE_MIRROR	6	
+#define BMP_MSG_TYPE_MAX	6 /* set to the highest BMP_MSG_* value */
 
 static const char *bmp_msg_types[] = {
   "Route Monitoring",
@@ -44,7 +47,8 @@ static const char *bmp_msg_types[] = {
   "Peer Down Notification",
   "Peer Up Notification",
   "Initiation Message",
-  "Termination Message"
+  "Termination Message",
+  "Route Mirroring"
 };
 
 struct bmp_common_hdr {
@@ -102,6 +106,12 @@ struct bmp_stats_hdr {
   u_int32_t	count;
 } __attribute__ ((packed));
 
+struct bmp_peer {
+  struct bgp_peer self;
+  void *bgp_peers;
+  struct log_notification missing_peer_up;
+};
+
 #define BMP_STATS_TYPE0		0 /* (32-bit Counter) Number of prefixes rejected by inbound policy */
 #define BMP_STATS_TYPE1		1 /* (32-bit Counter) Number of (known) duplicate prefix advertisements */
 #define BMP_STATS_TYPE2		2 /* (32-bit Counter) Number of (known) duplicate withdraws */
@@ -158,53 +168,29 @@ struct bmp_data {
 
 /* more includes */
 #include "bmp_logdump.h"
+#include "bmp_msg.h"
+#include "bmp_util.h"
+#include "bmp_lookup.h"
 
 /* prototypes */
-#if (!defined __BMP_C)
+#if !defined(__BMP_C)
 #define EXT extern
 #else
 #define EXT
 #endif
 EXT void nfacctd_bmp_wrapper();
 EXT void skinny_bmp_daemon();
-EXT void bmp_attr_init();
-EXT void bmp_process_packet(char *, u_int32_t, struct bgp_peer *);
-EXT void bmp_process_msg_init(char **, u_int32_t *, struct bgp_peer *);
-EXT void bmp_process_msg_term(char **, u_int32_t *, struct bgp_peer *);
-EXT void bmp_process_msg_peer_up(char **, u_int32_t *, struct bgp_peer *);
-EXT void bmp_process_msg_peer_down(char **, u_int32_t *, struct bgp_peer *);
-EXT void bmp_process_msg_stats(char **, u_int32_t *, struct bgp_peer *);
-EXT void bmp_process_msg_route(char **, u_int32_t *, struct bgp_peer *);
-
-EXT void bmp_common_hdr_get_len(struct bmp_common_hdr *, u_int32_t *);
-EXT void bmp_init_hdr_get_len(struct bmp_init_hdr *, u_int16_t *);
-EXT void bmp_term_hdr_get_len(struct bmp_term_hdr *, u_int16_t *);
-EXT void bmp_term_hdr_get_reason_type(char **, u_int32_t *, u_int16_t *);
-EXT void bmp_peer_hdr_get_family(struct bmp_peer_hdr *, u_int8_t *);
-EXT void bmp_peer_hdr_get_peer_ip(struct bmp_peer_hdr *, struct host_addr *, u_int8_t);
-EXT void bmp_peer_hdr_get_bgp_id(struct bmp_peer_hdr *, struct host_addr *);
-EXT void bmp_peer_hdr_get_tstamp(struct bmp_peer_hdr *, struct timeval *);
-EXT void bmp_peer_hdr_get_peer_asn(struct bmp_peer_hdr *, u_int32_t *);
-EXT void bmp_peer_hdr_get_peer_type(struct bmp_peer_hdr *, u_int8_t *);
-EXT void bmp_peer_up_hdr_get_local_ip(struct bmp_peer_up_hdr *, struct host_addr *, u_int8_t);
-EXT void bmp_peer_up_hdr_get_loc_port(struct bmp_peer_up_hdr *, u_int16_t *);
-EXT void bmp_peer_up_hdr_get_rem_port(struct bmp_peer_up_hdr *, u_int16_t *);
-EXT void bmp_peer_down_hdr_get_reason(struct bmp_peer_down_hdr *, u_char *);
-EXT void bmp_peer_down_hdr_get_loc_code(char **, u_int32_t *, u_int16_t *);
-EXT void bmp_stats_hdr_get_count(struct bmp_stats_hdr *, u_int32_t *);
-EXT void bmp_stats_cnt_hdr_get_type(struct bmp_stats_cnt_hdr *, u_int16_t *);
-EXT void bmp_stats_cnt_hdr_get_len(struct bmp_stats_cnt_hdr *, u_int16_t *);
-EXT void bmp_stats_cnt_get_data32(char **, u_int32_t *, u_int32_t *);
-EXT void bmp_stats_cnt_get_data64(char **, u_int32_t *, u_int64_t *);
-
-EXT char *bmp_get_and_check_length(char **, u_int32_t *, u_int32_t);
+#undef EXT
 
 /* global variables */
-EXT struct bgp_peer *bmp_peers;
-EXT struct hash *bmp_attrhash;
-EXT struct hash *bmp_ashash;
-EXT struct hash *bmp_comhash;
-EXT struct hash *bmp_ecomhash;
-EXT struct bgp_table *bmp_rib[AFI_MAX][SAFI_MAX];
+#if !defined(__BMP_C)
+#define EXT extern
+#else
+#define EXT
+#endif
+EXT struct bmp_peer *bmp_peers;
 EXT u_int32_t (*bmp_route_info_modulo)(struct bgp_peer *, path_id_t *);
+
+EXT struct bgp_rt_structs *bmp_routing_db;
+EXT struct bgp_misc_structs *bmp_misc_db;
 #undef EXT

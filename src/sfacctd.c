@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -34,7 +34,6 @@
 #include "bgp/bgp.h"
 #include "sfacctd.h"
 #include "sfv5_module.h"
-#include "sfacctd_logdump.h"
 #include "pretag_handlers.h"
 #include "pmacct-data.h"
 #include "plugin_hooks.h"
@@ -42,18 +41,10 @@
 #include "ip_flow.h"
 #include "classifier.h"
 #include "net_aggr.h"
-#include "crc32.c"
-#ifdef WITH_JANSSON
-#include <jansson.h>
-#endif
+#include "crc32.h"
 
 /* variables to be exported away */
-int debug;
-struct configuration config; /* global configuration */ 
-struct plugins_list_entry *plugins_list = NULL; /* linked list of each plugin configuration */ 
 struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
-int have_num_memory_pools; /* global getopt() stuff */
-pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
 
 /* Functions */
 void usage_daemon(char *prog_name)
@@ -73,7 +64,7 @@ void usage_daemon(char *prog_name)
   printf("  -D  \tDaemonize\n"); 
   printf("  -n  \tPath to a file containing Network definitions\n");
   printf("  -o  \tPath to a file containing Port definitions\n");
-  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | mongodb | tee ] \n\tActivate plugin\n"); 
+  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | mongodb | amqp | kafka | tee ] \n\tActivate plugin\n"); 
   printf("  -d  \tEnable debug\n");
   printf("  -S  \t[ auth | mail | daemon | kern | user | local[0-7] ] \n\tLog to the specified syslog facility\n");
   printf("  -F  \tWrite Core Process PID into the specified file\n");
@@ -160,7 +151,6 @@ int main(int argc,char **argv, char **envp)
   compute_once();
 
   /* a bunch of default definitions */ 
-  have_num_memory_pools = FALSE;
   reload_map = FALSE;
   reload_geoipv2_file = FALSE;
   reload_log_sf_cnt = FALSE;
@@ -173,12 +163,14 @@ int main(int argc,char **argv, char **envp)
   bta_map_caching = TRUE;
   sampling_map_caching = TRUE;
   find_id_func = SF_find_id;
+  plugins_list = NULL;
 
   data_plugins = 0;
   tee_plugins = 0;
   xflow_status_table_entries = 0;
   xflow_tot_bad_datagrams = 0;
   errflag = 0;
+  sfacctd_counter_backend_methods = 0;
 
   memset(cfg_cmdline, 0, sizeof(cfg_cmdline));
   memset(&server, 0, sizeof(server));
@@ -273,7 +265,6 @@ int main(int argc,char **argv, char **envp)
     case 'm':
       strlcpy(cfg_cmdline[rows], "imt_mem_pools_number: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
-      have_num_memory_pools = TRUE;
       rows++;
       break;
     case 'p':
@@ -353,11 +344,12 @@ int main(int argc,char **argv, char **envp)
   if (config.daemon) {
     list = plugins_list;
     while (list) {
-      if (!strcmp(list->type.string, "print")) printf("INFO ( %s/core ): Daemonizing. Hmm, bye bye screen.\n", config.name);
+      if (!strcmp(list->type.string, "print") && !list->cfg.print_output_file)
+        printf("INFO ( %s/%s ): Daemonizing. Bye bye screen.\n", list->name, list->type.string);
       list = list->next;
     }
     if (debug || config.debug)
-      printf("WARN ( %s/core ): debug is enabled; forking in background. Console logging will get lost.\n", config.name); 
+      printf("WARN ( %s/core ): debug is enabled; forking in background. Logging to standard error (stderr) will get lost.\n", config.name); 
     daemonize();
   }
 
@@ -366,7 +358,7 @@ int main(int argc,char **argv, char **envp)
     logf = parse_log_facility(config.syslog);
     if (logf == ERR) {
       config.syslog = NULL;
-      printf("WARN ( %s/core ): specified syslog facility is not supported; logging to console.\n", config.name);
+      printf("WARN ( %s/core ): specified syslog facility is not supported. Logging to standard error (stderr).\n", config.name);
     }
     else openlog(NULL, LOG_PID, logf);
     Log(LOG_INFO, "INFO ( %s/core ): Start logging ...\n", config.name);
@@ -374,7 +366,7 @@ int main(int argc,char **argv, char **envp)
 
   if (config.logfile)
   {
-    config.logfile_fd = open_logfile(config.logfile, "a");
+    config.logfile_fd = open_output_file(config.logfile, "a", FALSE);
     list = plugins_list;
     while (list) {
       list->cfg.logfile_fd = config.logfile_fd ;
@@ -403,11 +395,14 @@ int main(int argc,char **argv, char **envp)
   while (list) {
     if (list->type.id != PLUGIN_ID_CORE) {  
       /* applies to all plugins */
+      plugin_pipe_check(&list->cfg);
+
       if (list->cfg.sampling_rate && config.ext_sampling_rate) {
         Log(LOG_ERR, "ERROR ( %s/core ): Internal packet sampling and external packet sampling are mutual exclusive.\n", config.name);
         exit(1);
       }
 
+      /* applies to specific plugins */
       if (list->type.id == PLUGIN_ID_NFPROBE || list->type.id == PLUGIN_ID_SFPROBE) {
         Log(LOG_ERR, "ERROR ( %s/core ): 'nfprobe' and 'sfprobe' plugins not supported in 'sfacctd'.\n", config.name);
         exit(1);
@@ -422,7 +417,7 @@ int main(int argc,char **argv, char **envp)
 
         if (list->cfg.what_to_count_2 & (COUNT_POST_NAT_SRC_HOST|COUNT_POST_NAT_DST_HOST|
                         COUNT_POST_NAT_SRC_PORT|COUNT_POST_NAT_DST_PORT|COUNT_NAT_EVENT|
-                        COUNT_TIMESTAMP_START|COUNT_TIMESTAMP_END))
+                        COUNT_TIMESTAMP_START|COUNT_TIMESTAMP_END|COUNT_TIMESTAMP_ARRIVAL))
           list->cfg.data_type |= PIPE_TYPE_NAT;
 
         if (list->cfg.what_to_count_2 & (COUNT_MPLS_LABEL_TOP|COUNT_MPLS_LABEL_BOTTOM|
@@ -437,8 +432,8 @@ int main(int argc,char **argv, char **envp)
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	  list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
-        if ((list->cfg.what_to_count & COUNT_SRC_HOST) && (list->cfg.what_to_count & COUNT_SRC_NET) ||
-            (list->cfg.what_to_count & COUNT_DST_HOST) && (list->cfg.what_to_count & COUNT_DST_NET)) {
+        if (((list->cfg.what_to_count & COUNT_SRC_HOST) && (list->cfg.what_to_count & COUNT_SRC_NET)) ||
+            ((list->cfg.what_to_count & COUNT_DST_HOST) && (list->cfg.what_to_count & COUNT_DST_NET))) {
           if (!list->cfg.tmp_net_own_field) {
             Log(LOG_ERR, "ERROR ( %s/%s ): src_host, src_net and dst_host, dst_net are mutually exclusive: set tmp_net_own_field to true. Exiting...\n\n", list->name, list->type.string);
             exit(1);
@@ -485,11 +480,12 @@ int main(int argc,char **argv, char **envp)
 	list->cfg.what_to_count |= COUNT_COUNTERS;
       }
     }
+
     list = list->next;
   }
 
   if (tee_plugins && data_plugins) {
-    Log(LOG_ERR, "ERROR: 'tee' plugins are not compatible with data (memory/mysql/pgsql/etc.) plugins. Exiting...\n\n");
+    Log(LOG_ERR, "ERROR ( %s/core ): 'tee' plugins are not compatible with data (memory/mysql/pgsql/etc.) plugins. Exiting...\n\n", config.name);
     exit(1);
   }
 
@@ -584,7 +580,7 @@ int main(int argc,char **argv, char **envp)
       memset(&multi_req4, 0, sizeof(multi_req4));
       multi_req4.imr_multiaddr.s_addr = mcast_groups[idx].address.ipv4.s_addr;
       if (setsockopt(config.sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char *)&multi_req4, sizeof(multi_req4)) < 0) {
-	Log(LOG_ERR, "ERROR: IPv4 multicast address - ADD membership failed.\n");
+	Log(LOG_ERR, "ERROR ( %s/core ): IPv4 multicast address - ADD membership failed.\n", config.name);
 	exit(1);
       }
     }
@@ -593,7 +589,7 @@ int main(int argc,char **argv, char **envp)
       memset(&multi_req6, 0, sizeof(multi_req6));
       ip6_addr_cpy(&multi_req6.ipv6mr_multiaddr, &mcast_groups[idx].address.ipv6);
       if (setsockopt(config.sock, IPPROTO_IPV6, IPV6_JOIN_GROUP, (char *)&multi_req6, sizeof(multi_req6)) < 0) {
-	Log(LOG_ERR, "ERROR: IPv6 multicast address - ADD membership failed.\n");
+	Log(LOG_ERR, "ERROR ( %s/core ): IPv6 multicast address - ADD membership failed.\n", config.name);
 	exit(1);
       }
     }
@@ -645,7 +641,7 @@ int main(int argc,char **argv, char **envp)
         pptrs.v4.bpas_table = (u_char *) &bpas_table;
       }
       else {
-        Log(LOG_ERR, "ERROR: bgp_peer_as_src_type set to 'map' but no map defined. Exiting.\n");
+        Log(LOG_ERR, "ERROR ( %s/core ): bgp_peer_as_src_type set to 'map' but no map defined. Exiting.\n", config.name);
         exit(1);
       }
     }
@@ -657,7 +653,7 @@ int main(int argc,char **argv, char **envp)
         pptrs.v4.blp_table = (u_char *) &blp_table;
       }
       else {
-        Log(LOG_ERR, "ERROR: bgp_src_local_pref_type set to 'map' but no map defined. Exiting.\n");
+        Log(LOG_ERR, "ERROR ( %s/core ): bgp_src_local_pref_type set to 'map' but no map defined. Exiting.\n", config.name);
         exit(1);
       }
     }
@@ -669,7 +665,7 @@ int main(int argc,char **argv, char **envp)
         pptrs.v4.bmed_table = (u_char *) &bmed_table;
       }
       else {
-        Log(LOG_ERR, "ERROR: bgp_src_med_type set to 'map' but no map defined. Exiting.\n");
+        Log(LOG_ERR, "ERROR ( %s/core ): bgp_src_med_type set to 'map' but no map defined. Exiting.\n", config.name);
         exit(1);
       }
     }
@@ -737,8 +733,7 @@ int main(int argc,char **argv, char **envp)
   load_plugins(&req);
   load_plugin_filters(1);
   evaluate_packet_handlers();
-  if (!config.proc_name) pm_setproctitle("%s [%s]", "Core Process", "default");
-  else pm_setproctitle("%s [%s]", "Core Process", config.proc_name);
+  pm_setproctitle("%s [%s]", "Core Process", config.proc_name);
   if (config.pidfile) write_pid_file(config.pidfile);
   load_networks(config.networks_file, &nt, &nc);
 
@@ -889,15 +884,29 @@ int main(int argc,char **argv, char **envp)
     allowed = TRUE;
   }
 
-  if (config.sfacctd_counter_file) {
-    sf_cnt_log = malloc(MAX_SF_CNT_LOG_ENTRIES*sizeof(struct bgp_peer_log));
-    if (!sf_cnt_log) {
-      Log(LOG_ERR, "ERROR ( %s/core ): Unable to malloc() sFlow counters log structure. Exiting.\n", config.name);
-      exit(1);
+  if (config.sfacctd_counter_file || config.sfacctd_counter_amqp_routing_key || config.sfacctd_counter_kafka_topic) {
+    if (config.sfacctd_counter_file) sfacctd_counter_backend_methods++;
+    if (config.sfacctd_counter_amqp_routing_key) sfacctd_counter_backend_methods++;
+    if (config.sfacctd_counter_kafka_topic) sfacctd_counter_backend_methods++;
+
+    if (sfacctd_counter_backend_methods > 1) {
+      Log(LOG_ERR, "ERROR ( %s/core ): sfacctd_counter_file, sfacctd_counter_amqp_routing_key and sfacctd_counter_kafka_topic are mutually exclusive. Exiting.\n", config.name);
+      exit_all(1);
     }
-    memset(sf_cnt_log, 0, MAX_SF_CNT_LOG_ENTRIES*sizeof(struct bgp_peer_log));
-    config.sfacctd_counter_max_nodes = MAX_SF_CNT_LOG_ENTRIES;
-    bgp_peer_log_seq_init(&sf_cnt_log_seq);
+    else {
+      sf_cnt_misc_db = &inter_domain_misc_dbs[FUNC_TYPE_SFLOW_COUNTER];
+      config.sfacctd_counter_max_nodes = MAX_SF_CNT_LOG_ENTRIES;
+      memset(sf_cnt_misc_db, 0, sizeof(struct bgp_misc_structs));
+      sf_cnt_link_misc_structs(sf_cnt_misc_db);
+
+      sf_cnt_misc_db->peers_log = malloc(MAX_SF_CNT_LOG_ENTRIES*sizeof(struct bgp_peer_log));
+      if (!sf_cnt_misc_db->peers_log) {
+        Log(LOG_ERR, "ERROR ( %s/core ): Unable to malloc() sFlow counters log structure. Exiting.\n", config.name);
+        exit(1);
+      }
+      memset(sf_cnt_misc_db->peers_log, 0, MAX_SF_CNT_LOG_ENTRIES*sizeof(struct bgp_peer_log));
+      bgp_peer_log_seq_init(&sf_cnt_misc_db->log_seq);
+    }
 
     if (!config.sfacctd_counter_output) {
 #ifdef WITH_JANSSON
@@ -906,6 +915,26 @@ int main(int argc,char **argv, char **envp)
       Log(LOG_WARNING, "WARN ( %s/core ): sfacctd_counter_output set to json but will produce no output (missing --enable-jansson).\n", config.name);
 #endif
     }
+  }
+
+  if (config.sfacctd_counter_amqp_routing_key) {
+#ifdef WITH_RABBITMQ
+    sfacctd_counter_init_amqp_host();
+    p_amqp_connect_to_publish(&sfacctd_counter_amqp_host);
+
+    if (!config.sfacctd_counter_amqp_retry)
+      config.sfacctd_counter_amqp_retry = AMQP_DEFAULT_RETRY;
+#else
+    Log(LOG_WARNING, "WARN ( %s/core ): p_amqp_connect_to_publish() not possible due to missing --enable-rabbitmq\n", config.name);
+#endif
+  }
+
+  if (config.sfacctd_counter_kafka_topic) {
+#ifdef WITH_KAFKA
+    sfacctd_counter_init_kafka_host();
+#else
+    Log(LOG_WARNING, "WARN ( %s/core ): p_kafka_connect_to_produce() not possible due to missing --enable-rabbitmq\n", config.name);
+#endif
   }
 
   /* Main loop */
@@ -956,17 +985,40 @@ int main(int argc,char **argv, char **envp)
       int nodes_idx;
 
       for (nodes_idx = 0; nodes_idx < config.sfacctd_counter_max_nodes; nodes_idx++) {
-        if (sf_cnt_log[nodes_idx].fd) {
-          fclose(sf_cnt_log[nodes_idx].fd);
-          sf_cnt_log[nodes_idx].fd = open_logfile(sf_cnt_log[nodes_idx].filename, "a");
+        if (sf_cnt_misc_db->peers_log[nodes_idx].fd) {
+          fclose(sf_cnt_misc_db->peers_log[nodes_idx].fd);
+          sf_cnt_misc_db->peers_log[nodes_idx].fd = open_output_file(sf_cnt_misc_db->peers_log[nodes_idx].filename, "a", FALSE);
+	  setlinebuf(sf_cnt_misc_db->peers_log[nodes_idx].fd);
         }
         else break;
       }
+
+      reload_log_sf_cnt = FALSE;
     }
 
-    if (config.sfacctd_counter_file) {
-      gettimeofday(&sf_cnt_log_tstamp, NULL);
-      compose_timestamp(sf_cnt_log_tstamp_str, SRVBUFLEN, &sf_cnt_log_tstamp, TRUE, config.sql_history_since_epoch);
+    if (sfacctd_counter_backend_methods) {
+      gettimeofday(&sf_cnt_misc_db->log_tstamp, NULL);
+      compose_timestamp(sf_cnt_misc_db->log_tstamp_str, SRVBUFLEN, &sf_cnt_misc_db->log_tstamp, TRUE, config.timestamps_since_epoch);
+
+#ifdef WITH_RABBITMQ
+      if (config.sfacctd_counter_amqp_routing_key) {
+        time_t last_fail = P_broker_timers_get_last_fail(&sfacctd_counter_amqp_host.btimers);
+
+        if (last_fail && ((last_fail + P_broker_timers_get_retry_interval(&sfacctd_counter_amqp_host.btimers)) <= sf_cnt_misc_db->log_tstamp.tv_sec)) {
+          sfacctd_counter_init_amqp_host();
+          p_amqp_connect_to_publish(&sfacctd_counter_amqp_host);
+        }
+      }
+#endif
+
+#ifdef WITH_KAFKA
+      if (config.sfacctd_counter_kafka_topic) {
+        time_t last_fail = P_broker_timers_get_last_fail(&sfacctd_counter_kafka_host.btimers);
+
+        if (last_fail && ((last_fail + P_broker_timers_get_retry_interval(&sfacctd_counter_kafka_host.btimers)) <= sf_cnt_misc_db->log_tstamp.tv_sec))
+          sfacctd_counter_init_kafka_host();
+      }
+#endif
     }
 
     if (data_plugins) {
@@ -1061,7 +1113,7 @@ void process_SFv2v4_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
     config.name, debug_agent_addr, debug_agent_port, spp->datagramVersion, sequenceNo);
   }
 
-  if (config.sfacctd_counter_file) sfv245_check_counter_log_init(&pptrsv->v4); 
+  if (sfacctd_counter_backend_methods) sfv245_check_counter_log_init(&pptrsv->v4); 
 
   for (idx = 0; idx < samplesInPacket; idx++) {
     InterSampleCleanup(spp);
@@ -1108,7 +1160,7 @@ void process_SFv5_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
     config.name, debug_agent_addr, debug_agent_port, spp->datagramVersion, sequenceNo);
   }
 
-  if (config.sfacctd_counter_file) sfv245_check_counter_log_init(&pptrsv->v4); 
+  if (sfacctd_counter_backend_methods) sfv245_check_counter_log_init(&pptrsv->v4); 
 
   for (idx = 0; idx < samplesInPacket; idx++) {
     InterSampleCleanup(spp);
@@ -2311,7 +2363,7 @@ void readv5CountersSample(SFSample *sample, int expanded, struct packet_ptrs_vec
   u_int32_t sampleLength, num_elements, idx, drain;
   u_char *sampleStart;
 
-  if (config.sfacctd_counter_file) {
+  if (sfacctd_counter_backend_methods) {
     if (pptrsv) xse = (struct xflow_status_entry *) pptrsv->v4.f_status;
     if (xse) peer = (struct bgp_peer *) xse->sf_cnt; 
   }
@@ -2349,7 +2401,7 @@ void readv5CountersSample(SFSample *sample, int expanded, struct packet_ptrs_vec
     }
     else Log(LOG_WARNING, "WARN ( %s/core ): readv5CountersSample(): no IEs available in SFv5 modules DB.\n", config.name);
 
-    if (config.sfacctd_counter_file) sf_cnt_log_msg(peer, sample, length, "log", config.sfacctd_counter_output, tag);
+    if (sfacctd_counter_backend_methods) sf_cnt_log_msg(peer, sample, length, "log", config.sfacctd_counter_output, tag);
     else skipBytes(sample, length);
   }
 
@@ -2439,10 +2491,11 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
       if (config.nfacctd_isis) isis_srcdst_lookup(pptrs);
       if (config.nfacctd_bgp_to_agent_map) BTA_find_id((struct id_table *)pptrs->bta_table, pptrs, &pptrs->bta, &pptrs->bta2);
       if (config.nfacctd_flow_to_rd_map) SF_find_id((struct id_table *)pptrs->bitr_table, pptrs, &pptrs->bitr, NULL);
-      if (config.nfacctd_bgp) bgp_srcdst_lookup(pptrs);
+      if (config.nfacctd_bgp) bgp_srcdst_lookup(pptrs, FUNC_TYPE_BGP);
       if (config.nfacctd_bgp_peer_as_src_map) SF_find_id((struct id_table *)pptrs->bpas_table, pptrs, &pptrs->bpas, NULL);
       if (config.nfacctd_bgp_src_local_pref_map) SF_find_id((struct id_table *)pptrs->blp_table, pptrs, &pptrs->blp, NULL);
       if (config.nfacctd_bgp_src_med_map) SF_find_id((struct id_table *)pptrs->bmed_table, pptrs, &pptrs->bmed, NULL);
+      if (config.nfacctd_bmp) bmp_srcdst_lookup(pptrs);
       exec_plugins(pptrs, req);
       break;
 #if defined ENABLE_IPV6
@@ -2475,10 +2528,11 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
       if (config.nfacctd_isis) isis_srcdst_lookup(&pptrsv->v6);
       if (config.nfacctd_bgp_to_agent_map) BTA_find_id((struct id_table *)pptrs->bta_table, &pptrsv->v6, &pptrsv->v6.bta, &pptrsv->v6.bta2);
       if (config.nfacctd_flow_to_rd_map) SF_find_id((struct id_table *)pptrs->bitr_table, &pptrsv->v6, &pptrsv->v6.bitr, NULL);
-      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->v6);
+      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->v6, FUNC_TYPE_BGP);
       if (config.nfacctd_bgp_peer_as_src_map) SF_find_id((struct id_table *)pptrs->bpas_table, &pptrsv->v6, &pptrsv->v6.bpas, NULL);
       if (config.nfacctd_bgp_src_local_pref_map) SF_find_id((struct id_table *)pptrs->blp_table, &pptrsv->v6, &pptrsv->v6.blp, NULL);
       if (config.nfacctd_bgp_src_med_map) SF_find_id((struct id_table *)pptrs->bmed_table, &pptrsv->v6, &pptrsv->v6.bmed, NULL);
+      if (config.nfacctd_bmp) bmp_srcdst_lookup(&pptrsv->v6);
       exec_plugins(&pptrsv->v6, req);
       break;
 #endif
@@ -2512,10 +2566,11 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
       if (config.nfacctd_isis) isis_srcdst_lookup(&pptrsv->vlan4);
       if (config.nfacctd_bgp_to_agent_map) BTA_find_id((struct id_table *)pptrs->bta_table, &pptrsv->vlan4, &pptrsv->vlan4.bta, &pptrsv->vlan4.bta2);
       if (config.nfacctd_flow_to_rd_map) SF_find_id((struct id_table *)pptrs->bitr_table, &pptrsv->vlan4, &pptrsv->vlan4.bitr, NULL);
-      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->vlan4);
+      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->vlan4, FUNC_TYPE_BGP);
       if (config.nfacctd_bgp_peer_as_src_map) SF_find_id((struct id_table *)pptrs->bpas_table, &pptrsv->vlan4, &pptrsv->vlan4.bpas, NULL);
       if (config.nfacctd_bgp_src_local_pref_map) SF_find_id((struct id_table *)pptrs->blp_table, &pptrsv->vlan4, &pptrsv->vlan4.blp, NULL);
       if (config.nfacctd_bgp_src_med_map) SF_find_id((struct id_table *)pptrs->bmed_table, &pptrsv->vlan4, &pptrsv->vlan4.bmed, NULL);
+      if (config.nfacctd_bmp) bmp_srcdst_lookup(&pptrsv->vlan4);
       exec_plugins(&pptrsv->vlan4, req);
       break;
 #if defined ENABLE_IPV6
@@ -2549,10 +2604,11 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
       if (config.nfacctd_isis) isis_srcdst_lookup(&pptrsv->vlan6);
       if (config.nfacctd_bgp_to_agent_map) BTA_find_id((struct id_table *)pptrs->bta_table, &pptrsv->vlan6, &pptrsv->vlan6.bta, &pptrsv->vlan6.bta2);
       if (config.nfacctd_flow_to_rd_map) SF_find_id((struct id_table *)pptrs->bitr_table, &pptrsv->vlan6, &pptrsv->vlan6.bitr, NULL);
-      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->vlan6);
+      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->vlan6, FUNC_TYPE_BGP);
       if (config.nfacctd_bgp_peer_as_src_map) SF_find_id((struct id_table *)pptrs->bpas_table, &pptrsv->vlan6, &pptrsv->vlan6.bpas, NULL);
       if (config.nfacctd_bgp_src_local_pref_map) SF_find_id((struct id_table *)pptrs->blp_table, &pptrsv->vlan6, &pptrsv->vlan6.blp, NULL);
       if (config.nfacctd_bgp_src_med_map) SF_find_id((struct id_table *)pptrs->bmed_table, &pptrsv->vlan6, &pptrsv->vlan6.bmed, NULL);
+      if (config.nfacctd_bmp) bmp_srcdst_lookup(&pptrsv->vlan6);
       exec_plugins(&pptrsv->vlan6, req);
       break;
 #endif
@@ -2599,10 +2655,11 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
       if (config.nfacctd_isis) isis_srcdst_lookup(&pptrsv->mpls4);
       if (config.nfacctd_bgp_to_agent_map) BTA_find_id((struct id_table *)pptrs->bta_table, &pptrsv->mpls4, &pptrsv->mpls4.bta, &pptrsv->mpls4.bta2);
       if (config.nfacctd_flow_to_rd_map) SF_find_id((struct id_table *)pptrs->bitr_table, &pptrsv->mpls4, &pptrsv->mpls4.bitr, NULL);
-      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->mpls4);
+      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->mpls4, FUNC_TYPE_BGP);
       if (config.nfacctd_bgp_peer_as_src_map) SF_find_id((struct id_table *)pptrs->bpas_table, &pptrsv->mpls4, &pptrsv->mpls4.bpas, NULL);
       if (config.nfacctd_bgp_src_local_pref_map) SF_find_id((struct id_table *)pptrs->blp_table, &pptrsv->mpls4, &pptrsv->mpls4.blp, NULL);
       if (config.nfacctd_bgp_src_med_map) SF_find_id((struct id_table *)pptrs->bmed_table, &pptrsv->mpls4, &pptrsv->mpls4.bmed, NULL);
+      if (config.nfacctd_bmp) bmp_srcdst_lookup(&pptrsv->mpls4);
       exec_plugins(&pptrsv->mpls4, req);
       break;
 #if defined ENABLE_IPV6
@@ -2648,10 +2705,11 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
       if (config.nfacctd_isis) isis_srcdst_lookup(&pptrsv->mpls6);
       if (config.nfacctd_bgp_to_agent_map) BTA_find_id((struct id_table *)pptrs->bta_table, &pptrsv->mpls6, &pptrsv->mpls6.bta, &pptrsv->mpls6.bta2);
       if (config.nfacctd_flow_to_rd_map) SF_find_id((struct id_table *)pptrs->bitr_table, &pptrsv->mpls6, &pptrsv->mpls6.bitr, NULL);
-      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->mpls6);
+      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->mpls6, FUNC_TYPE_BGP);
       if (config.nfacctd_bgp_peer_as_src_map) SF_find_id((struct id_table *)pptrs->bpas_table, &pptrsv->mpls6, &pptrsv->mpls6.bpas, NULL);
       if (config.nfacctd_bgp_src_local_pref_map) SF_find_id((struct id_table *)pptrs->blp_table, &pptrsv->mpls6, &pptrsv->mpls6.blp, NULL);
       if (config.nfacctd_bgp_src_med_map) SF_find_id((struct id_table *)pptrs->bmed_table, &pptrsv->mpls6, &pptrsv->mpls6.bmed, NULL);
+      if (config.nfacctd_bmp) bmp_srcdst_lookup(&pptrsv->mpls6);
       exec_plugins(&pptrsv->mpls6, req);
       break;
 #endif
@@ -2698,10 +2756,11 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
       if (config.nfacctd_isis) isis_srcdst_lookup(&pptrsv->vlanmpls4);
       if (config.nfacctd_bgp_to_agent_map) BTA_find_id((struct id_table *)pptrs->bta_table, &pptrsv->vlanmpls4, &pptrsv->vlanmpls4.bta, &pptrsv->vlanmpls4.bta2);
       if (config.nfacctd_flow_to_rd_map) SF_find_id((struct id_table *)pptrs->bitr_table, &pptrsv->vlanmpls4, &pptrsv->vlanmpls4.bitr, NULL);
-      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->vlanmpls4);
+      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->vlanmpls4, FUNC_TYPE_BGP);
       if (config.nfacctd_bgp_peer_as_src_map) SF_find_id((struct id_table *)pptrs->bpas_table, &pptrsv->vlanmpls4, &pptrsv->vlanmpls4.bpas, NULL);
       if (config.nfacctd_bgp_src_local_pref_map) SF_find_id((struct id_table *)pptrs->blp_table, &pptrsv->vlanmpls4, &pptrsv->vlanmpls4.blp, NULL);
       if (config.nfacctd_bgp_src_med_map) SF_find_id((struct id_table *)pptrs->bmed_table, &pptrsv->vlanmpls4, &pptrsv->vlanmpls4.bmed, NULL);
+      if (config.nfacctd_bmp) bmp_srcdst_lookup(&pptrsv->vlanmpls4);
       exec_plugins(&pptrsv->vlanmpls4, req);
       break;
 #if defined ENABLE_IPV6
@@ -2748,10 +2807,11 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
       if (config.nfacctd_isis) isis_srcdst_lookup(&pptrsv->vlanmpls6);
       if (config.nfacctd_bgp_to_agent_map) BTA_find_id((struct id_table *)pptrs->bta_table, &pptrsv->vlanmpls6, &pptrsv->vlanmpls6.bta, &pptrsv->vlanmpls6.bta2);
       if (config.nfacctd_flow_to_rd_map) SF_find_id((struct id_table *)pptrs->bitr_table, &pptrsv->vlanmpls6, &pptrsv->vlanmpls6.bitr, NULL);
-      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->vlanmpls6);
+      if (config.nfacctd_bgp) bgp_srcdst_lookup(&pptrsv->vlanmpls6, FUNC_TYPE_BGP);
       if (config.nfacctd_bgp_peer_as_src_map) SF_find_id((struct id_table *)pptrs->bpas_table, &pptrsv->vlanmpls6, &pptrsv->vlanmpls6.bpas, NULL);
       if (config.nfacctd_bgp_src_local_pref_map) SF_find_id((struct id_table *)pptrs->blp_table, &pptrsv->vlanmpls6, &pptrsv->vlanmpls6.blp, NULL);
       if (config.nfacctd_bgp_src_med_map) SF_find_id((struct id_table *)pptrs->bmed_table, &pptrsv->vlanmpls6, &pptrsv->vlanmpls6.bmed, NULL);
+      if (config.nfacctd_bmp) bmp_srcdst_lookup(&pptrsv->vlanmpls6);
       exec_plugins(&pptrsv->vlanmpls6, req);
       break;
 #endif
@@ -2819,7 +2879,7 @@ int SF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_i
 #endif
 
   for (x = begin; x < end; x++) {
-    if (host_addr_mask_sa_cmp(&t->e[x].agent_ip.a, &t->e[x].agent_mask, &sa_local) == 0) {
+    if (host_addr_mask_sa_cmp(&t->e[x].key.agent_ip.a, &t->e[x].key.agent_mask, &sa_local) == 0) {
       ret = pretag_entry_process(&t->e[x], pptrs, tag, tag2);
 
       if (!ret || ret > TRUE) {
@@ -2955,15 +3015,26 @@ void sfv245_check_counter_log_init(struct packet_ptrs *pptrs)
 
 int sf_cnt_log_msg(struct bgp_peer *peer, SFSample *sample, u_int32_t len, char *event_type, int output, u_int32_t tag)
 {
-  int ret = 0, etype = BGP_LOGDUMP_ET_NONE;
+  struct bgp_misc_structs *bms = bgp_select_misc_db(FUNC_TYPE_SFLOW_COUNTER);
+  int ret = 0, amqp_ret = 0, kafka_ret = 0, etype = BGP_LOGDUMP_ET_NONE;
 
-  if (!peer || !sample || !event_type) {
+  if (!bms || !peer || !sample || !event_type) {
     skipBytes(sample, len);
     return ret;
   }
 
   if (!strcmp(event_type, "dump")) etype = BGP_LOGDUMP_ET_DUMP;
   else if (!strcmp(event_type, "log")) etype = BGP_LOGDUMP_ET_LOG;
+
+#ifdef WITH_RABBITMQ
+  if (config.sfacctd_counter_amqp_routing_key && etype == BGP_LOGDUMP_ET_LOG)
+    p_amqp_set_routing_key(peer->log->amqp_host, peer->log->filename);
+#endif
+
+#ifdef WITH_KAFKA
+  if (config.sfacctd_counter_kafka_topic && etype == BGP_LOGDUMP_ET_LOG)
+    p_kafka_set_topic(peer->log->kafka_host, peer->log->filename);
+#endif
 
   if (output == PRINT_OUTPUT_JSON) {
 #ifdef WITH_JANSSON
@@ -2972,12 +3043,12 @@ int sf_cnt_log_msg(struct bgp_peer *peer, SFSample *sample, u_int32_t len, char 
 
     /* no need for seq and timestamp for "dump" event_type */
     if (etype == BGP_LOGDUMP_ET_LOG) {
-      kv = json_pack("{sI}", "seq", sf_cnt_log_seq);
+      kv = json_pack("{sI}", "seq", (json_int_t)bms->log_seq);
       json_object_update_missing(obj, kv);
       json_decref(kv);
-      bgp_peer_log_seq_increment(&sf_cnt_log_seq);
+      bgp_peer_log_seq_increment(&bms->log_seq);
 
-      kv = json_pack("{ss}", "timestamp", sf_cnt_log_tstamp_str);
+      kv = json_pack("{ss}", "timestamp", bms->log_tstamp_str);
       json_object_update_missing(obj, kv);
       json_decref(kv);
     }
@@ -2991,15 +3062,15 @@ int sf_cnt_log_msg(struct bgp_peer *peer, SFSample *sample, u_int32_t len, char 
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
-    kv = json_pack("{sI}", "source_id_index", sample->ds_index);
+    kv = json_pack("{sI}", "source_id_index", (json_int_t)sample->ds_index);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
-    kv = json_pack("{sI}", "sflow_seq", sample->sequenceNo);
+    kv = json_pack("{sI}", "sflow_seq", (json_int_t)sample->sequenceNo);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
-    kv = json_pack("{sI}", "sflow_cnt_seq", sample->cntSequenceNo);
+    kv = json_pack("{sI}", "sflow_cnt_seq", (json_int_t)sample->cntSequenceNo);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
@@ -3020,11 +3091,25 @@ int sf_cnt_log_msg(struct bgp_peer *peer, SFSample *sample, u_int32_t len, char 
 
     if (config.sfacctd_counter_file && etype == BGP_LOGDUMP_ET_LOG)
       write_and_free_json(peer->log->fd, obj);
+
+#ifdef WITH_RABBITMQ
+    if (config.sfacctd_counter_amqp_routing_key && etype == BGP_LOGDUMP_ET_LOG) {
+      amqp_ret = write_and_free_json_amqp(peer->log->amqp_host, obj);
+      p_amqp_unset_routing_key(peer->log->amqp_host);
+    }
+#endif
+
+#ifdef WITH_KAFKA
+    if (config.sfacctd_counter_kafka_topic && etype == BGP_LOGDUMP_ET_LOG) {
+      kafka_ret = write_and_free_json_kafka(peer->log->kafka_host, obj);
+      p_kafka_unset_topic(peer->log->kafka_host);
+    }
+#endif
 #endif
   }
   else skipBytes(sample, len);
 
-  return ret;
+  return (ret | amqp_ret | kafka_ret);
 }
 
 int readCounters_generic(struct bgp_peer *peer, SFSample *sample, char *event_type, int output, void *vobj)
@@ -3063,79 +3148,79 @@ int readCounters_generic(struct bgp_peer *peer, SFSample *sample, char *event_ty
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifIndex", sample->ifCounters.ifIndex);
+  kv = json_pack("{sI}", "ifIndex", (json_int_t)sample->ifCounters.ifIndex);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifType", sample->ifCounters.ifType);
+  kv = json_pack("{sI}", "ifType", (json_int_t)sample->ifCounters.ifType);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifSpeed", sample->ifCounters.ifSpeed);
+  kv = json_pack("{sI}", "ifSpeed", (json_int_t)sample->ifCounters.ifSpeed);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifDirection", sample->ifCounters.ifDirection);
+  kv = json_pack("{sI}", "ifDirection", (json_int_t)sample->ifCounters.ifDirection);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifStatus", sample->ifCounters.ifStatus);
+  kv = json_pack("{sI}", "ifStatus", (json_int_t)sample->ifCounters.ifStatus);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifInOctets", sample->ifCounters.ifInOctets);
+  kv = json_pack("{sI}", "ifInOctets", (json_int_t)sample->ifCounters.ifInOctets);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifInUcastPkts", sample->ifCounters.ifInUcastPkts);
+  kv = json_pack("{sI}", "ifInUcastPkts", (json_int_t)sample->ifCounters.ifInUcastPkts);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifInMulticastPkts", sample->ifCounters.ifInMulticastPkts);
+  kv = json_pack("{sI}", "ifInMulticastPkts", (json_int_t)sample->ifCounters.ifInMulticastPkts);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifInBroadcastPkts", sample->ifCounters.ifInBroadcastPkts);
+  kv = json_pack("{sI}", "ifInBroadcastPkts", (json_int_t)sample->ifCounters.ifInBroadcastPkts);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifInDiscards", sample->ifCounters.ifInDiscards);
+  kv = json_pack("{sI}", "ifInDiscards", (json_int_t)sample->ifCounters.ifInDiscards);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifInErrors", sample->ifCounters.ifInErrors);
+  kv = json_pack("{sI}", "ifInErrors", (json_int_t)sample->ifCounters.ifInErrors);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifInUnknownProtos", sample->ifCounters.ifInUnknownProtos);
+  kv = json_pack("{sI}", "ifInUnknownProtos", (json_int_t)sample->ifCounters.ifInUnknownProtos);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifOutOctets", sample->ifCounters.ifOutOctets);
+  kv = json_pack("{sI}", "ifOutOctets", (json_int_t)sample->ifCounters.ifOutOctets);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifOutUcastPkts", sample->ifCounters.ifOutUcastPkts);
+  kv = json_pack("{sI}", "ifOutUcastPkts", (json_int_t)sample->ifCounters.ifOutUcastPkts);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifOutMulticastPkts", sample->ifCounters.ifOutMulticastPkts);
+  kv = json_pack("{sI}", "ifOutMulticastPkts", (json_int_t)sample->ifCounters.ifOutMulticastPkts);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifOutBroadcastPkts", sample->ifCounters.ifOutBroadcastPkts);
+  kv = json_pack("{sI}", "ifOutBroadcastPkts", (json_int_t)sample->ifCounters.ifOutBroadcastPkts);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifOutDiscards", sample->ifCounters.ifOutDiscards);
+  kv = json_pack("{sI}", "ifOutDiscards", (json_int_t)sample->ifCounters.ifOutDiscards);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifOutErrors", sample->ifCounters.ifOutErrors);
+  kv = json_pack("{sI}", "ifOutErrors", (json_int_t)sample->ifCounters.ifOutErrors);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ifPromiscuousMode", sample->ifCounters.ifPromiscuousMode);
+  kv = json_pack("{sI}", "ifPromiscuousMode", (json_int_t)sample->ifCounters.ifPromiscuousMode);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 #endif
@@ -3176,55 +3261,55 @@ int readCounters_ethernet(struct bgp_peer *peer, SFSample *sample, char *event_t
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsAlignmentErrors", m32_1);
+  kv = json_pack("{sI}", "dot3StatsAlignmentErrors", (json_int_t)m32_1);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsFCSErrors", m32_2);
+  kv = json_pack("{sI}", "dot3StatsFCSErrors", (json_int_t)m32_2);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsSingleCollisionFrames", m32_3);
+  kv = json_pack("{sI}", "dot3StatsSingleCollisionFrames", (json_int_t)m32_3);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsMultipleCollisionFrames", m32_4);
+  kv = json_pack("{sI}", "dot3StatsMultipleCollisionFrames", (json_int_t)m32_4);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsSQETestErrors", m32_5);
+  kv = json_pack("{sI}", "dot3StatsSQETestErrors", (json_int_t)m32_5);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsDeferredTransmissions", m32_6);
+  kv = json_pack("{sI}", "dot3StatsDeferredTransmissions", (json_int_t)m32_6);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsLateCollisions", m32_7);
+  kv = json_pack("{sI}", "dot3StatsLateCollisions", (json_int_t)m32_7);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsExcessiveCollisions", m32_8);
+  kv = json_pack("{sI}", "dot3StatsExcessiveCollisions", (json_int_t)m32_8);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsInternalMacTransmitErrors", m32_9);
+  kv = json_pack("{sI}", "dot3StatsInternalMacTransmitErrors", (json_int_t)m32_9);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsCarrierSenseErrors", m32_10);
+  kv = json_pack("{sI}", "dot3StatsCarrierSenseErrors", (json_int_t)m32_10);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsFrameTooLongs", m32_11);
+  kv = json_pack("{sI}", "dot3StatsFrameTooLongs", (json_int_t)m32_11);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsInternalMacReceiveErrors", m32_12);
+  kv = json_pack("{sI}", "dot3StatsInternalMacReceiveErrors", (json_int_t)m32_12);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "dot3StatsSymbolErrors", m32_13);
+  kv = json_pack("{sI}", "dot3StatsSymbolErrors", (json_int_t)m32_13);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 #endif
@@ -3257,27 +3342,27 @@ int readCounters_vlan(struct bgp_peer *peer, SFSample *sample, char *event_type,
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "octets", m64_1);
+  kv = json_pack("{sI}", "octets", (json_int_t)m64_1);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "ucastPkts", m32_1);
+  kv = json_pack("{sI}", "ucastPkts", (json_int_t)m32_1);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "multicastPkts", m32_2);
+  kv = json_pack("{sI}", "multicastPkts", (json_int_t)m32_2);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "broadcastPkts", m32_3);
+  kv = json_pack("{sI}", "broadcastPkts", (json_int_t)m32_3);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "discards", m32_3);
+  kv = json_pack("{sI}", "discards", (json_int_t)m32_3);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "vlan", sample->in_vlan);
+  kv = json_pack("{sI}", "vlan", (json_int_t)sample->in_vlan);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 #endif
@@ -3285,7 +3370,77 @@ int readCounters_vlan(struct bgp_peer *peer, SFSample *sample, char *event_type,
   return ret;
 }
 
-/* Dummy objects here - ugly to see but well portable */
-void NF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
+#if defined WITH_RABBITMQ
+void sfacctd_counter_init_amqp_host()
 {
+  p_amqp_init_host(&sfacctd_counter_amqp_host);
+
+  if (!config.sfacctd_counter_amqp_user) config.sfacctd_counter_amqp_user = rabbitmq_user;
+  if (!config.sfacctd_counter_amqp_passwd) config.sfacctd_counter_amqp_passwd = rabbitmq_pwd;
+  if (!config.sfacctd_counter_amqp_exchange) config.sfacctd_counter_amqp_exchange = default_amqp_exchange;
+  if (!config.sfacctd_counter_amqp_exchange_type) config.sfacctd_counter_amqp_exchange_type = default_amqp_exchange_type;
+  if (!config.sfacctd_counter_amqp_host) config.sfacctd_counter_amqp_host = default_amqp_host;
+  if (!config.sfacctd_counter_amqp_vhost) config.sfacctd_counter_amqp_vhost = default_amqp_vhost;
+  if (!config.sfacctd_counter_amqp_retry) config.sfacctd_counter_amqp_retry = AMQP_DEFAULT_RETRY;
+
+  p_amqp_set_user(&sfacctd_counter_amqp_host, config.sfacctd_counter_amqp_user);
+  p_amqp_set_passwd(&sfacctd_counter_amqp_host, config.sfacctd_counter_amqp_passwd);
+  p_amqp_set_exchange(&sfacctd_counter_amqp_host, config.sfacctd_counter_amqp_exchange);
+  p_amqp_set_exchange_type(&sfacctd_counter_amqp_host, config.sfacctd_counter_amqp_exchange_type);
+  p_amqp_set_host(&sfacctd_counter_amqp_host, config.sfacctd_counter_amqp_host);
+  p_amqp_set_vhost(&sfacctd_counter_amqp_host, config.sfacctd_counter_amqp_vhost);
+  p_amqp_set_persistent_msg(&sfacctd_counter_amqp_host, config.sfacctd_counter_amqp_persistent_msg);
+  p_amqp_set_frame_max(&sfacctd_counter_amqp_host, config.sfacctd_counter_amqp_frame_max);
+  p_amqp_set_content_type_json(&sfacctd_counter_amqp_host);
+  p_amqp_set_heartbeat_interval(&sfacctd_counter_amqp_host, config.sfacctd_counter_amqp_heartbeat_interval);
+  P_broker_timers_set_retry_interval(&sfacctd_counter_amqp_host.btimers, config.sfacctd_counter_amqp_retry);
+}
+#else
+void sfacctd_counter_init_amqp_host()
+{
+}
+#endif
+
+#if defined WITH_KAFKA
+int sfacctd_counter_init_kafka_host()
+{
+  int ret;
+
+  p_kafka_init_host(&sfacctd_counter_kafka_host);
+  ret = p_kafka_connect_to_produce(&sfacctd_counter_kafka_host);
+
+  if (!config.sfacctd_counter_kafka_broker_host) config.sfacctd_counter_kafka_broker_host = default_kafka_broker_host;
+  if (!config.sfacctd_counter_kafka_broker_port) config.sfacctd_counter_kafka_broker_port = default_kafka_broker_port;
+  if (!config.sfacctd_counter_kafka_retry) config.sfacctd_counter_kafka_retry = PM_KAFKA_DEFAULT_RETRY;
+
+  p_kafka_set_broker(&sfacctd_counter_kafka_host, config.sfacctd_counter_kafka_broker_host, config.sfacctd_counter_kafka_broker_port);
+  p_kafka_set_topic(&sfacctd_counter_kafka_host, config.sfacctd_counter_kafka_topic);
+  p_kafka_set_partition(&sfacctd_counter_kafka_host, config.sfacctd_counter_kafka_partition);
+  p_kafka_set_content_type(&sfacctd_counter_kafka_host, PM_KAFKA_CNT_TYPE_STR);
+  P_broker_timers_set_retry_interval(&sfacctd_counter_kafka_host.btimers, config.sfacctd_counter_kafka_retry);
+
+  return ret;
+}
+#else
+int sfacctd_counter_init_kafka_host()
+{
+  return ERR;
+}
+#endif
+
+void sf_cnt_link_misc_structs(struct bgp_misc_structs *bms)
+{
+#if defined WITH_RABBITMQ
+  bms->msglog_amqp_host = &sfacctd_counter_amqp_host;
+#endif
+#if defined WITH_KAFKA
+  bms->msglog_kafka_host = &sfacctd_counter_kafka_host;
+#endif
+  bms->max_peers = config.sfacctd_counter_max_nodes;
+  bms->msglog_file = config.sfacctd_counter_file;
+  bms->msglog_amqp_routing_key = config.sfacctd_counter_amqp_routing_key;
+  bms->msglog_kafka_topic = config.sfacctd_counter_kafka_topic;
+  strcpy(bms->peer_str, "peer_src_ip");
+
+  /* dump not supported */
 }

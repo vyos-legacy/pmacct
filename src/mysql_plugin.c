@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -44,6 +44,7 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct plugins_list_entry *plugin_data = ((struct channels_list_entry *)ptr)->plugin;
   int datasize = ((struct channels_list_entry *)ptr)->datasize;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
+  pid_t core_pid = ((struct channels_list_entry *)ptr)->core_pid;
   struct networks_file_data nfd;
   char *dataptr;
 
@@ -67,7 +68,7 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
   if (config.logfile) {
     fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile, "a");
+    config.logfile_fd = open_output_file(config.logfile, "a", FALSE);
   }
 
   sql_set_signals();
@@ -92,7 +93,7 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     plugin_pipe_amqp_compile_check();
 #ifdef WITH_RABBITMQ
     pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
-    amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+    amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
 #endif
   }
   else setnonblocking(pipe_fd);
@@ -103,10 +104,6 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   /* building up static SQL clauses */
   idata.num_primitives = MY_compose_static_queries();
   glob_num_primitives = idata.num_primitives; 
-
-  /* handling logfile template stuff */
-  te = sql_init_logfile_template(&th); 
-  INIT_BUF(logbuf);
 
   /* setting up environment variables */
   SQL_SetENV();
@@ -152,9 +149,9 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     if (config.pipe_amqp && pipe_fd == ERR) {
       if (timeout == amqp_timeout) {
         pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
-        amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
-      else amqp_timeout = plugin_pipe_amqp_calc_poll_timeout_diff(amqp_host, idata.now);
+      else amqp_timeout = plugin_pipe_calc_retry_timeout_diff(&amqp_host->btimers, idata.now);
     }
 #endif
 
@@ -187,11 +184,10 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	  else {
 	    rg_err_count++;
 	    if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-              Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
-              Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
-              Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
-              Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
-              Log(LOG_ERR, "- increase system maximum socket size.\n\n");
+              Log(LOG_WARNING, "WARN ( %s/%s ): Missing data detected (plugin_buffer_size=%llu plugin_pipe_size=%llu).\n",
+                        config.name, config.type, config.buffer_size, config.pipe_size);
+              Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
+                        config.name, config.type);
 	    }
             seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
 	  }
@@ -207,7 +203,7 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         if (ret) pipe_fd = ERR;
 
         seq = ((struct ch_buf_hdr *)pipebuf)->seq;
-        amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
 #endif
 
@@ -228,8 +224,12 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
-      Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received seq=%u num_entries=%u\n", config.name, config.type, seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
+      if (config.debug_internal_msg) 
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u seq=%u num_entries=%u\n",
+                config.name, config.type, core_pid, seq, ((struct ch_buf_hdr *)pipebuf)->num);
+
+      if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
         for (num = 0; primptrs_funcs[num]; num++)
           (*primptrs_funcs[num])((u_char *)data, &extras, &prim_ptrs);
@@ -256,6 +256,7 @@ void mysql_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           else dataptr += prim_ptrs.vlen_next_off;
           data = (struct pkt_data *) dataptr;
 	}
+      }
       }
 
       if (!config.pipe_amqp) goto read_data;
@@ -419,7 +420,6 @@ int MY_cache_dbop(struct DBdesc *db, struct db_cache *cache_elem, struct insert_
 void MY_cache_purge(struct db_cache *queue[], int index, struct insert_data *idata)
 {
   struct db_cache *LastElemCommitted = NULL;
-  struct logfile lf;
   time_t start;
   int j, stop, ret, go_to_pending, saved_index = index;
   char orig_insert_clause[LONGSRVBUFLEN], orig_update_clause[LONGSRVBUFLEN], orig_lock_clause[LONGSRVBUFLEN];
@@ -434,8 +434,6 @@ void MY_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
     return;
   }
 
-  bed.lf = &lf;
-  memset(&lf, 0, sizeof(struct logfile));
   memset(&prim_ptrs, 0, sizeof(prim_ptrs));
   memset(&dummy_data, 0, sizeof(dummy_data));
 
@@ -530,7 +528,7 @@ void MY_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
 
   /* rewinding stuff */
   if (idata->locks == PM_LOCK_EXCLUSIVE) (*sqlfunc_cbr.unlock)(&bed);
-  if ((lf.fail) || (b.fail)) Log(LOG_ALERT, "ALERT ( %s/%s ): recovery for MySQL daemon failed.\n", config.name, config.type);
+  if (b.fail) Log(LOG_ALERT, "ALERT ( %s/%s ): recovery for MySQL daemon failed.\n", config.name, config.type);
 
   /* If we have pending queries then start again */
   if (pqq_ptr) goto start;
@@ -540,7 +538,8 @@ void MY_cache_purge(struct db_cache *queue[], int index, struct insert_data *ida
 		config.name, config.type, writer_pid, idata->qn, saved_index, idata->elap_time); 
 
   if (config.sql_trigger_exec) {
-    if (!config.debug) idata->elap_time = time(NULL)-start;
+    if (queue && queue[0]) idata->basetime = queue[0]->basetime;
+    idata->elap_time = time(NULL)-start;
     SQL_SetENV_child(idata);
   }
 }
@@ -553,14 +552,14 @@ int MY_evaluate_history(int primitive)
       strncat(values[primitive].string, ", ", sizeof(values[primitive].string));
       strncat(where[primitive].string, " AND ", sizeof(where[primitive].string));
     }
-    if (!config.sql_history_since_epoch)
+    if (!config.timestamps_since_epoch)
       strncat(where[primitive].string, "FROM_UNIXTIME(%u) = ", SPACELEFT(where[primitive].string));
     else
       strncat(where[primitive].string, "%u = ", SPACELEFT(where[primitive].string));
     strncat(where[primitive].string, "stamp_inserted", SPACELEFT(where[primitive].string));
 
     strncat(insert_clause, "stamp_updated, stamp_inserted", SPACELEFT(insert_clause));
-    if (!config.sql_history_since_epoch)
+    if (!config.timestamps_since_epoch)
       strncat(values[primitive].string, "FROM_UNIXTIME(%u), FROM_UNIXTIME(%u)", SPACELEFT(values[primitive].string));
     else
       strncat(values[primitive].string, "%u, %u", SPACELEFT(values[primitive].string));
@@ -612,7 +611,7 @@ int MY_compose_static_queries()
   set_event_primitives = sql_compose_static_set_event();
 
   if (config.sql_history) {
-    if (!config.sql_history_since_epoch) {
+    if (!config.timestamps_since_epoch) {
       strncpy(set[set_primitives].string, ", ", SPACELEFT(set[set_primitives].string));
       strncat(set[set_primitives].string, "stamp_updated=NOW()", SPACELEFT(set[set_primitives].string));
       set[set_primitives].type = TIMESTAMP;
@@ -660,16 +659,6 @@ void MY_Unlock(struct BE_descs *bed)
 {
   if (bed->p->connected) mysql_query(bed->p->desc, unlock_clause);
   if (bed->b->connected) mysql_query(bed->b->desc, unlock_clause);
-
-  if (bed->lf->open) {
-    if (logbuf.ptr != logbuf.base) {
-      fwrite(logbuf.base, (logbuf.ptr-logbuf.base), 1, bed->lf->file);
-      logbuf.ptr = logbuf.base;
-    }
-    file_unlock(fileno(bed->lf->file));
-    fclose(bed->lf->file);
-    bed->lf->open = FALSE;
-  }
 }
 
 void MY_DB_Connect(struct DBdesc *db, char *host)
@@ -756,7 +745,7 @@ void MY_init_default_values(struct insert_data *idata)
   if (strchr(config.sql_table, '%') || strchr(config.sql_table, '$')) idata->dyn_table = TRUE;
   glob_dyn_table = idata->dyn_table;
 
-  if (config.sql_backup_host || config.sql_recovery_logfile) idata->recover = TRUE;
+  if (config.sql_backup_host) idata->recover = TRUE;
 
   if (config.sql_multi_values) {
     multi_values_buffer = malloc(config.sql_multi_values);

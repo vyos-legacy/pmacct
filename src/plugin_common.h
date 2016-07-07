@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
 */
 
 /*
@@ -23,6 +23,7 @@
 #if (!defined __PLUGIN_COMMON_EXPORT)
 #include "net_aggr.h"
 #include "ports_aggr.h"
+
 /* including sql_common.h exporteable part as pre-requisite for preprocess.h inclusion later */
 #define __SQL_COMMON_EXPORT
 #include "sql_common.h"
@@ -44,6 +45,8 @@
 #define PRINT_CACHE_ERROR	255
 
 /* structures */
+#ifndef STRUCT_SCRATCH_AREA
+#define STRUCT_SCRATCH_AREA
 struct scratch_area {
   unsigned char *base;
   unsigned char *ptr;
@@ -51,7 +54,10 @@ struct scratch_area {
   u_int64_t size;
   struct scratch_area *next;
 };
+#endif
 
+#ifndef STRUCT_CHAINED_CACHE
+#define STRUCT_CHAINED_CACHE
 struct chained_cache {
   struct pkt_primitives primitives;
   pm_counter_t bytes_counter;
@@ -70,6 +76,24 @@ struct chained_cache {
   struct pkt_stitching *stitch;
   struct chained_cache *next;
 };
+#endif
+
+#ifndef P_TABLE_RR
+#define P_TABLE_RR
+struct p_table_rr {
+  int min; /* unused */
+  int max;
+  int next;
+};
+#endif
+
+#ifndef P_BROKER_TIMERS
+#define P_BROKER_TIMERS
+struct p_broker_timers {
+  time_t last_fail;
+  int retry_interval;
+};
+#endif
 
 #if (!defined __PLUGIN_COMMON_EXPORT)
 
@@ -101,6 +125,14 @@ EXT void P_cache_handle_flush_event(struct ports_table *);
 EXT void P_exit_now(int);
 EXT int P_trigger_exec(char *);
 EXT void primptrs_set_all_from_chained_cache(struct primitives_ptrs *, struct chained_cache *);
+EXT void P_handle_table_dyn_rr(char *, int, char *, struct p_table_rr *);
+EXT void P_handle_table_dyn_strings(char *, int, char *, struct chained_cache *);
+
+EXT void P_broker_timers_set_last_fail(struct p_broker_timers *, time_t);
+EXT void P_broker_timers_set_retry_interval(struct p_broker_timers *, int);
+EXT void P_broker_timers_unset_last_fail(struct p_broker_timers *);
+EXT time_t P_broker_timers_get_last_fail(struct p_broker_timers *);
+EXT int P_broker_timers_get_retry_interval(struct p_broker_timers *);
 
 /* global vars */
 EXT void (*insert_func)(struct primitives_ptrs *, struct insert_data *); /* pointer to INSERT function */

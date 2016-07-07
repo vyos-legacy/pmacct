@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -29,7 +29,7 @@
 #include "mongodb_plugin.h"
 #include "ip_flow.h"
 #include "classifier.h"
-#include "crc32.c"
+#include "crc32.h"
 
 /* Functions */
 void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr) 
@@ -46,6 +46,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct plugins_list_entry *plugin_data = ((struct channels_list_entry *)ptr)->plugin;
   int datasize = ((struct channels_list_entry *)ptr)->datasize;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
+  pid_t core_pid = ((struct channels_list_entry *)ptr)->core_pid;
   struct networks_file_data nfd;
 
   unsigned char *rgptr;
@@ -68,7 +69,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   P_set_signals();
   P_init_default_values();
   P_config_checks();
-  pipebuf = (unsigned char *) Malloc(config.buffer_size);
+  pipebuf = (unsigned char *) pm_malloc(config.buffer_size);
   memset(pipebuf, 0, config.buffer_size);
 
   if (!config.mongo_insert_batch)
@@ -111,7 +112,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     plugin_pipe_amqp_compile_check();
 #ifdef WITH_RABBITMQ
     pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
-    amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+    amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
 #endif
   }
   else setnonblocking(pipe_fd);
@@ -135,6 +136,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   mongo_init(&db_conn);
   mongo_set_op_timeout(&db_conn, 1000);
+  bson_set_oid_fuzz(&MongoDB_oid_fuzz);
 
   /* plugin main loop */
   for(;;) {
@@ -171,9 +173,9 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     if (config.pipe_amqp && pipe_fd == ERR) {
       if (timeout == amqp_timeout) {
         pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
-        amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
-      else amqp_timeout = plugin_pipe_amqp_calc_poll_timeout_diff(amqp_host, idata.now);
+      else amqp_timeout = plugin_pipe_calc_retry_timeout_diff(&amqp_host->btimers, idata.now);
     }
 #endif
 
@@ -204,11 +206,10 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           else {
             rg_err_count++;
             if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-              Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
-              Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
-              Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
-              Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
-              Log(LOG_ERR, "- increase system maximum socket size.\n\n");
+              Log(LOG_WARNING, "WARN ( %s/%s ): Missing data detected (plugin_buffer_size=%llu plugin_pipe_size=%llu).\n",
+                        config.name, config.type, config.buffer_size, config.pipe_size);
+              Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
+                        config.name, config.type);
             }
             seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
           }
@@ -224,7 +225,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         if (ret) pipe_fd = ERR;
 
         seq = ((struct ch_buf_hdr *)pipebuf)->seq;
-        amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
 #endif
 
@@ -232,8 +233,12 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       if (idata.now > refresh_deadline) P_cache_handle_flush_event(&pt);
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
-      Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received seq=%u num_entries=%u\n", config.name, config.type, seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
+      if (config.debug_internal_msg) 
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u seq=%u num_entries=%u\n",
+                config.name, config.type, core_pid, seq, ((struct ch_buf_hdr *)pipebuf)->num);
+
+      if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
         for (num = 0; primptrs_funcs[num]; num++)
           (*primptrs_funcs[num])((u_char *)data, &extras, &prim_ptrs);
@@ -260,6 +265,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           else dataptr += prim_ptrs.vlen_next_off;
           data = (struct pkt_data *) dataptr;
 	}
+      }
       }
 
       if (!config.pipe_amqp) goto read_data;
@@ -300,9 +306,9 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
   }
 
   if (config.sql_host)
-    db_status = mongo_connect(&db_conn, config.sql_host, 27017 /* default port */);
+    db_status = mongo_client(&db_conn, config.sql_host, 27017 /* default port */);
   else
-    db_status = mongo_connect(&db_conn, "127.0.0.1", 27017 /* default port */);
+    db_status = mongo_client(&db_conn, "127.0.0.1", 27017 /* default port */);
 
   if (db_status != MONGO_OK) {
     switch (db_conn.err) {
@@ -683,10 +689,10 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
       if (config.what_to_count_2 & COUNT_MPLS_STACK_DEPTH) bson_append_int(bson_elem, "mpls_stack_depth", pmpls->mpls_stack_depth);
   
       if (config.what_to_count_2 & COUNT_TIMESTAMP_START) {
-	if (config.sql_history_since_epoch) {
+	if (config.timestamps_since_epoch) {
 	  char tstamp_str[SRVBUFLEN];
 
-	  compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_start, TRUE, config.sql_history_since_epoch);
+	  compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_start, TRUE, config.timestamps_since_epoch);
 	  bson_append_string(bson_elem, "timestamp_start", tstamp_str);
 	}
 	else {
@@ -699,10 +705,10 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
 	}
       }
       if (config.what_to_count_2 & COUNT_TIMESTAMP_END) {
-        if (config.sql_history_since_epoch) {
+        if (config.timestamps_since_epoch) {
           char tstamp_str[SRVBUFLEN];
 
-          compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_end, TRUE, config.sql_history_since_epoch);
+          compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_end, TRUE, config.timestamps_since_epoch);
           bson_append_string(bson_elem, "timestamp_end", tstamp_str);
         }
         else {
@@ -714,15 +720,31 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
           bson_append_date(bson_elem, "timestamp_end", bdate);
 	}
       }
-
-      if (config.nfacctd_stitching && queue[j]->stitch) {
-        if (config.sql_history_since_epoch) {
+      if (config.what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL) {
+        if (config.timestamps_since_epoch) {
           char tstamp_str[SRVBUFLEN];
 
-          compose_timestamp(tstamp_str, SRVBUFLEN, &queue[j]->stitch->timestamp_min, TRUE, config.sql_history_since_epoch);
+          compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_arrival, TRUE, config.timestamps_since_epoch);
+          bson_append_string(bson_elem, "timestamp_arrival", tstamp_str);
+        }
+        else {
+          bson_date_t bdate;
+
+          bdate = 1000*pnat->timestamp_arrival.tv_sec;
+          if (pnat->timestamp_arrival.tv_usec) bdate += (pnat->timestamp_arrival.tv_usec/1000);
+
+          bson_append_date(bson_elem, "timestamp_arrival", bdate);
+        }
+      }
+
+      if (config.nfacctd_stitching && queue[j]->stitch) {
+        if (config.timestamps_since_epoch) {
+          char tstamp_str[SRVBUFLEN];
+
+          compose_timestamp(tstamp_str, SRVBUFLEN, &queue[j]->stitch->timestamp_min, TRUE, config.timestamps_since_epoch);
           bson_append_string(bson_elem, "timestamp_min", tstamp_str);
 
-          compose_timestamp(tstamp_str, SRVBUFLEN, &queue[j]->stitch->timestamp_max, TRUE, config.sql_history_since_epoch);
+          compose_timestamp(tstamp_str, SRVBUFLEN, &queue[j]->stitch->timestamp_max, TRUE, config.timestamps_since_epoch);
           bson_append_string(bson_elem, "timestamp_max", tstamp_str);
         }
 	else {
@@ -737,6 +759,9 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
           bson_append_date(bson_elem, "timestamp_max", bdate_max);
 	}
       }
+
+      if (config.what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) bson_append_int(bson_elem, "export_proto_seqno", data->export_proto_seqno);
+      if (config.what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) bson_append_int(bson_elem, "export_proto_version", data->export_proto_version);
   
       /* all custom primitives printed here */
       {
@@ -784,10 +809,12 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
       if (config.debug) bson_print(bson_elem);
   
       if (batch_idx == config.mongo_insert_batch) {
-        if (dyn_table) db_status = mongo_insert_batch(&db_conn, current_table, bson_batch, batch_idx, NULL, 0);
-        else db_status = mongo_insert_batch(&db_conn, config.sql_table, bson_batch, batch_idx, NULL, 0);
-        if (db_status != MONGO_OK)
-  	  Log(LOG_ERR, "ERROR ( %s/%s ): Unable to insert all elements in batch: try a smaller mongo_insert_batch value.\n", config.name, config.type);
+	if (dyn_table) db_status = mongo_insert_batch(&db_conn, current_table, bson_batch, batch_idx, NULL, MONGO_CONTINUE_ON_ERROR);
+	else db_status = mongo_insert_batch(&db_conn, config.sql_table, bson_batch, batch_idx, NULL, MONGO_CONTINUE_ON_ERROR);
+	if (db_status != MONGO_OK) {
+   	  Log(LOG_ERR, "ERROR ( %s/%s ): Unable to insert all elements in batch: try a smaller mongo_insert_batch value.\n", config.name, config.type);
+	  Log(LOG_ERR, "ERROR ( %s/%s ): Server error: %s. (PID: %u, QN: %u/%u)\n", config.name, config.type, db_conn.lasterrstr, writer_pid, qn, saved_index);
+	}
   
         for (i = 0; i < batch_idx; i++) {
           bson_elem = (bson *) bson_batch[i];
@@ -802,10 +829,12 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
 
   /* last round on the lollipop */
   if (batch_idx) {
-    if (dyn_table) db_status = mongo_insert_batch(&db_conn, current_table, bson_batch, batch_idx, NULL, 0);
-    else db_status = mongo_insert_batch(&db_conn, config.sql_table, bson_batch, batch_idx, NULL, 0);
-    if (db_status != MONGO_OK) 
+    if (dyn_table) db_status = mongo_insert_batch(&db_conn, current_table, bson_batch, batch_idx, NULL, MONGO_CONTINUE_ON_ERROR);
+    else db_status = mongo_insert_batch(&db_conn, config.sql_table, bson_batch, batch_idx, NULL, MONGO_CONTINUE_ON_ERROR);
+    if (db_status != MONGO_OK) {
       Log(LOG_ERR, "ERROR ( %s/%s ): Unable to insert all elements in batch: try a smaller mongo_insert_batch value.\n", config.name, config.type);
+      Log(LOG_ERR, "ERROR ( %s/%s ): Server error: %s. (PID: %u, QN: %u/%u)\n", config.name, config.type, db_conn.lasterrstr, writer_pid, qn, saved_index);
+    }
 
     for (i = 0; i < batch_idx; i++) {
       bson_elem = (bson *) bson_batch[i];
@@ -865,11 +894,7 @@ void MongoDB_create_indexes(mongo *db_conn, const char *table)
 	    bson_append_int(idx_key, token, 1);
 	  }
 	  bson_finish(idx_key);
-#if MONGO_MAJOR <= 0 && MONGO_MINOR <= 7
-	  mongo_create_index(db_conn, table, idx_key, NULL, 0, NULL);
-#else
 	  mongo_create_index(db_conn, table, idx_key, NULL, 0, -1, NULL);
-#endif
 	  bson_destroy(idx_key);
         }
       }
@@ -887,4 +912,13 @@ void MongoDB_append_label(bson *bson_elem, char *name, struct pkt_vlen_hdr_primi
   vlen_prims_get(pvlen, wtc, &label_ptr);
   if (label_ptr) bson_append_string(bson_elem, name, label_ptr); 
   else bson_append_null(bson_elem, name);
+}
+
+int MongoDB_oid_fuzz()
+{
+  struct timeval now;
+  gettimeofday(&now, NULL);
+  srand((int) now.tv_usec);
+
+  return rand();
 }
