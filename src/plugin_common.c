@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -27,7 +27,7 @@
 #include "plugin_common.h"
 #include "ip_flow.h"
 #include "classifier.h"
-#include "crc32.c"
+#include "crc32.h"
 
 /* Functions */
 void P_set_signals()
@@ -45,7 +45,7 @@ void P_init_default_values()
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
   if (config.logfile) {
     if (config.logfile_fd) fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile, "a");
+    config.logfile_fd = open_output_file(config.logfile, "a", FALSE);
   }
 
   if (config.proc_priority) {
@@ -80,14 +80,14 @@ void P_init_default_values()
   sa.num = config.print_cache_entries*AVERAGE_CHAIN_LEN;
   sa.size = sa.num*dbc_size;
 
-  Log(LOG_INFO, "INFO ( %s/%s ): cache entries=%u base cache memory=%u bytes\n", config.name, config.type,
+  Log(LOG_INFO, "INFO ( %s/%s ): cache entries=%llu base cache memory=%llu bytes\n", config.name, config.type,
 	config.print_cache_entries, ((config.print_cache_entries * dbc_size) + (2 * ((sa.num +
 	config.print_cache_entries) * sizeof(struct chained_cache *))) + sa.size));
 
-  cache = (struct chained_cache *) Malloc(config.print_cache_entries*dbc_size);
-  queries_queue = (struct chained_cache **) Malloc((sa.num+config.print_cache_entries)*sizeof(struct chained_cache *));
-  pending_queries_queue = (struct chained_cache **) Malloc((sa.num+config.print_cache_entries)*sizeof(struct chained_cache *));
-  sa.base = (unsigned char *) Malloc(sa.size);
+  cache = (struct chained_cache *) pm_malloc(config.print_cache_entries*dbc_size);
+  queries_queue = (struct chained_cache **) pm_malloc((sa.num+config.print_cache_entries)*sizeof(struct chained_cache *));
+  pending_queries_queue = (struct chained_cache **) pm_malloc((sa.num+config.print_cache_entries)*sizeof(struct chained_cache *));
+  sa.base = (unsigned char *) pm_malloc(sa.size);
   sa.ptr = sa.base;
   sa.next = NULL;
 
@@ -311,11 +311,7 @@ void P_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata
       }
       else {
 	cache_ptr = P_cache_attach_new_node(cache_ptr); 
-	if (!cache_ptr) {
-	  Log(LOG_WARNING, "WARN ( %s/%s ): Finished cache entries. Purging.\n", config.name, config.type);
-	  Log(LOG_WARNING, "WARN ( %s/%s ): You may want to set a larger print_cache_entries value.\n", config.name, config.type);
-	  goto safe_action;
-	}
+	if (!cache_ptr) goto safe_action;
 	else {
 	  queries_queue[qq_ptr] = cache_ptr;
 	  qq_ptr++;
@@ -332,10 +328,7 @@ void P_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata
     if (pbgp) {
       if (!cache_ptr->pbgp) cache_ptr->pbgp = (struct pkt_bgp_primitives *) malloc(PbgpSz);
       if (cache_ptr->pbgp) memcpy(cache_ptr->pbgp, pbgp, sizeof(struct pkt_bgp_primitives));
-      else {
-        Log(LOG_WARNING, "WARN ( %s/%s ): Finished memory for cache entries. Purging.\n", config.name, config.type);
-        goto safe_action;
-      }
+      else goto safe_action;
     }
     else {
       if (cache_ptr->pbgp) free(cache_ptr->pbgp);
@@ -345,10 +338,7 @@ void P_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata
     if (pnat) {
       if (!cache_ptr->pnat) cache_ptr->pnat = (struct pkt_nat_primitives *) malloc(PnatSz);
       if (cache_ptr->pnat) memcpy(cache_ptr->pnat, pnat, sizeof(struct pkt_nat_primitives));
-      else {
-        Log(LOG_WARNING, "WARN ( %s/%s ): Finished memory for cache entries. Purging.\n", config.name, config.type);
-        goto safe_action;
-      }
+      else goto safe_action;
     }
     else {
       if (cache_ptr->pnat) free(cache_ptr->pnat);
@@ -358,10 +348,7 @@ void P_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata
     if (pmpls) {
       if (!cache_ptr->pmpls) cache_ptr->pmpls = (struct pkt_mpls_primitives *) malloc(PmplsSz);
       if (cache_ptr->pmpls) memcpy(cache_ptr->pmpls, pmpls, sizeof(struct pkt_mpls_primitives));
-      else {
-        Log(LOG_WARNING, "WARN ( %s/%s ): Finished memory for cache entries. Purging.\n", config.name, config.type);
-        goto safe_action;
-      }
+      else goto safe_action;
     }
     else {
       if (cache_ptr->pmpls) free(cache_ptr->pmpls);
@@ -371,10 +358,7 @@ void P_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata
     if (pcust) {
       if (!cache_ptr->pcust) cache_ptr->pcust = malloc(config.cpptrs.len);
       if (cache_ptr->pcust) memcpy(cache_ptr->pcust, pcust, config.cpptrs.len);
-      else {
-        Log(LOG_WARNING, "WARN ( %s/%s ): Finished memory for cache entries. Purging.\n", config.name, config.type);
-        goto safe_action;
-      }
+      else goto safe_action;
     }
     else {
       if (cache_ptr->pcust) free(cache_ptr->pcust);
@@ -390,10 +374,7 @@ void P_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata
 
     if (pvlen) {
       cache_ptr->pvlen = (struct pkt_vlen_hdr_primitives *) vlen_prims_copy(pvlen);
-      if (!cache_ptr->pvlen) {
-        Log(LOG_WARNING, "WARN ( %s/%s ): Finished memory for cache entries. Purging.\n", config.name, config.type);
-        goto safe_action;
-      }
+      if (!cache_ptr->pvlen) goto safe_action;
     }
 
     cache_ptr->packet_counter = data->pkt_num;
@@ -496,7 +477,9 @@ void P_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *idata
   {
     int ret;
 
-    if (config.type_id == PLUGIN_ID_PRINT && config.sql_table)
+    Log(LOG_INFO, "INFO ( %s/%s ): Finished cache entries (ie. print_cache_entries). Purging.\n", config.name, config.type);
+
+    if (config.type_id == PLUGIN_ID_PRINT && config.sql_table && !config.print_output_file_append)
       Log(LOG_WARNING, "WARN ( %s/%s ): Make sure print_output_file_append is set to true.\n", config.name, config.type);
 
     if (qq_ptr) P_cache_mark_flush(queries_queue, qq_ptr, FALSE);
@@ -569,6 +552,13 @@ void P_cache_insert_pending(struct chained_cache *queue[], int index, struct cha
       queries_queue[qq_ptr] = cache_ptr;
       qq_ptr++;
     }
+
+    if (cache_ptr->pbgp) free(cache_ptr->pbgp);
+    if (cache_ptr->pmpls) free(cache_ptr->pmpls);
+    if (cache_ptr->pnat) free(cache_ptr->pnat);
+    if (cache_ptr->pcust) free(cache_ptr->pcust);
+    if (cache_ptr->pvlen) free(cache_ptr->pvlen);
+    if (cache_ptr->stitch) free(cache_ptr->stitch);
 
     memcpy(cache_ptr, &container[j], dbc_size); 
 
@@ -654,7 +644,7 @@ void P_cache_mark_flush(struct chained_cache *queue[], int index, int exiting)
       else queue[j]->valid = PRINT_CACHE_COMMITTED;
     }
 
-    if (pqq_ptr) pqq_container = (struct chained_cache *) malloc(pqq_ptr*dbc_size);
+    if (pqq_ptr) pqq_container = (struct chained_cache *) malloc(pqq_ptr*dbc_size); 
     
     /* we copy un-committed elements to a container structure for re-insertion
        in cache. As we copy elements out of the cache we mark entries as free */
@@ -911,4 +901,133 @@ void primptrs_set_all_from_chained_cache(struct primitives_ptrs *prim_ptrs, stru
     prim_ptrs->pcust = entry->pcust;
     prim_ptrs->pvlen = entry->pvlen;
   }
+}
+
+void P_handle_table_dyn_rr(char *new, int newlen, char *old, struct p_table_rr *rk_rr)
+{
+  char index_str[SRVBUFLEN];
+  int oldlen;
+
+  oldlen = strlen(old);
+  if (oldlen <= newlen) strcpy(new, old);
+  else {
+    strncpy(new, old, newlen);
+    return;
+  }
+
+  memset(index_str, 0, SRVBUFLEN);
+  snprintf(index_str, SRVBUFLEN, "_%u", rk_rr->next);
+  strncat(new, index_str, (newlen-oldlen));
+
+  rk_rr->next++;
+  rk_rr->next %= rk_rr->max;
+}
+
+void P_handle_table_dyn_strings(char *new, int newlen, char *old, struct chained_cache *elem)
+{
+  int oldlen, ptr_len;
+  char peer_src_ip_string[] = "$peer_src_ip", post_tag_string[] = "$post_tag";
+  char pre_tag_string[] = "$pre_tag";
+  char *ptr_start, *ptr_end;
+
+  oldlen = strlen(old);
+  if (oldlen <= newlen) strcpy(new, old);
+  else {
+    strncpy(new, old, newlen);
+    return;
+  }
+
+  if (!strchr(new, '$')) return;
+  ptr_start = strstr(new, peer_src_ip_string);
+  if (ptr_start) {
+    char ip_address[INET6_ADDRSTRLEN];
+    char buf[newlen];
+    int len;
+
+    if (!elem || !elem->pbgp) goto out_peer_src_ip; 
+
+    len = strlen(ptr_start);
+    ptr_end = ptr_start;
+    ptr_len = strlen(peer_src_ip_string);
+    ptr_end += ptr_len;
+    len -= ptr_len;
+
+    addr_to_str(ip_address, &elem->pbgp->peer_src_ip);
+    snprintf(buf, newlen, "%s", ip_address);
+    strncat(buf, ptr_end, len);
+
+    len = strlen(buf);
+    *ptr_start = '\0';
+    strncat(new, buf, len);
+  }
+  out_peer_src_ip:
+
+  if (!strchr(new, '$')) return;
+  ptr_start = strstr(new, post_tag_string);
+  if (ptr_start) {
+    char buf[newlen];
+    int len;
+
+    len = strlen(ptr_start);
+    ptr_end = ptr_start;
+    ptr_len = strlen(post_tag_string);
+    ptr_end += ptr_len;
+    len -= ptr_len;
+
+    snprintf(buf, newlen, "%u", config.post_tag);
+    strncat(buf, ptr_end, len);
+
+    len = strlen(buf);
+    *ptr_start = '\0';
+    strncat(new, buf, len);
+  }
+
+  if (!strchr(new, '$')) return;
+  ptr_start = strstr(new, pre_tag_string);
+  if (ptr_start) {
+    char buf[newlen];
+    int len;
+
+    len = strlen(ptr_start);
+    ptr_end = ptr_start;
+    ptr_len = strlen(pre_tag_string);
+    ptr_end += ptr_len;
+    len -= ptr_len;
+
+    snprintf(buf, newlen, "%u", elem->primitives.tag);
+    strncat(buf, ptr_end, len);
+
+    len = strlen(buf);
+    *ptr_start = '\0';
+    strncat(new, buf, len);
+  }
+}
+
+void P_broker_timers_set_last_fail(struct p_broker_timers *btimers, time_t timestamp)
+{
+  if (btimers) btimers->last_fail = timestamp;
+}
+
+time_t P_broker_timers_get_last_fail(struct p_broker_timers *btimers)
+{
+  if (btimers) return btimers->last_fail;
+
+  return FALSE;
+}
+
+void P_broker_timers_unset_last_fail(struct p_broker_timers *btimers)
+{
+  if (btimers) btimers->last_fail = FALSE;
+}
+
+void P_broker_timers_set_retry_interval(struct p_broker_timers *btimers, int interval)
+{
+  if (btimers) btimers->retry_interval = interval;
+}
+
+int P_broker_timers_get_retry_interval(struct p_broker_timers *btimers)
+{
+  if (btimers) return btimers->retry_interval;
+
+  return ERR;
 }

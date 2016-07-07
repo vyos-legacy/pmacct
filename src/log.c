@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -34,16 +34,16 @@ void Log(short int level, char *msg, ...)
 
   if (!config.syslog && !config.logfile_fd) {
     va_start(ap, msg);
-    vprintf(msg, ap);
+    vfprintf(stderr, msg, ap);
     va_end(ap);
-    fflush(stdout);
+    fflush(stderr);
   }
   else {
     va_start(ap, msg);
     vsnprintf(syslog_string, LOGSTRLEN, msg, ap);
     va_end(ap);
 
-    if (config.syslog) syslog(level, syslog_string);
+    if (config.syslog) syslog(level, "%s", syslog_string);
 
     if (config.logfile_fd) {
       char timebuf[SRVBUFLEN];
@@ -72,6 +72,13 @@ int parse_log_facility(const char *facility)
   return ERR;
 }
 
+void log_notification_init(struct log_notification *ln)
+{
+  if (ln) {
+    memset(ln, 0, sizeof(struct log_notification));
+  }
+}
+
 void log_notifications_init(struct _log_notifications *ln)
 {
   if (ln) {
@@ -79,18 +86,52 @@ void log_notifications_init(struct _log_notifications *ln)
   }
 }
 
-void log_notification_set(u_int8_t *elem)
+int log_notification_set(struct log_notification *ln, time_t now, int timeout)
 {
-  *elem = TRUE;
+  if (ln) {
+    ln->knob = TRUE;
+    if (now) ln->stamp = now;
+    else ln->stamp = time(NULL);
+    ln->timeout = timeout;
+
+    return SUCCESS;
+  }
+  else return ERR;
 }
 
-void log_notification_unset(u_int8_t *elem)
+int log_notification_unset(struct log_notification *ln)
 {
-  *elem = FALSE;
+  if (ln) {
+    log_notification_init(ln);
+
+    return SUCCESS;
+  }
+  else return ERR;
 }
 
-int log_notification_isset(u_int8_t elem)
+int log_notification_isset(struct log_notification *ln, time_t now)
 {
-  if (elem == TRUE) return TRUE;
-  else return FALSE;
+  time_t now_local;
+
+  if (ln) {
+    if (ln->timeout) {
+      if (!now) now_local = time(NULL);
+      else now_local = now;
+
+      if (now_local < (ln->stamp + ln->timeout)) {
+        /* valid */
+        if (ln->knob == TRUE) return TRUE;
+        else return FALSE;
+      }
+      else {
+        /* expired */
+        log_notification_unset(ln);
+        return FALSE;
+      }
+    }
+    else {
+      if (ln->knob == TRUE) return TRUE;
+      else return FALSE;
+    }
+  }
 }

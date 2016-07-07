@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -98,6 +98,7 @@ void skinny_isis_daemon()
   glob_isis_seq_num = 0;
 
   /* initializing IS-IS structures */
+  isis = NULL;
   isis_init();
   dyn_cache_init();
 

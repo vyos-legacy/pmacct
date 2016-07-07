@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -35,13 +35,7 @@
 #include "thread_pool.h"
 
 /* variables to be exported away */
-int debug;
-struct configuration config; /* global configuration */ 
-struct plugins_list_entry *plugins_list = NULL; /* linked list of each plugin configuration */ 
 struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
-int have_num_memory_pools; /* global getopt() stuff */
-pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
-u_char dummy_tlhdr[16];
 
 /* Functions */
 void usage_daemon(char *prog_name)
@@ -58,9 +52,10 @@ void usage_daemon(char *prog_name)
   printf("  -c  \tAggregation method, see full list of primitives with -a (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
   printf("  -N  \tDisable promiscuous mode\n");
+  printf("  -z  \tAllow to run with non root privileges (ie. setcap in use)\n");
   printf("  -n  \tPath to a file containing Network definitions\n");
   printf("  -o  \tPath to a file containing Port definitions\n");
-  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | mongodb | nfprobe | sfprobe ] \n\tActivate plugin\n"); 
+  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | mongodb | amqp | kafka | nfprobe | sfprobe ] \n\tActivate plugin\n"); 
   printf("  -d  \tEnable debug\n");
   printf("  -i  \tListen on the specified interface\n");
   printf("  -I  \tRead packets from the specified savefile\n");
@@ -128,7 +123,6 @@ int main(int argc,char **argv, char **envp)
   compute_once();
 
   /* a bunch of default definitions */ 
-  have_num_memory_pools = FALSE;
   reload_map = FALSE;
   reload_geoipv2_file = FALSE;
   bpas_map_allocated = FALSE;
@@ -139,6 +133,7 @@ int main(int argc,char **argv, char **envp)
   sampling_map_caching = FALSE;
   custom_primitives_allocated = FALSE;
   find_id_func = PM_find_id;
+  plugins_list = NULL;
 
   errflag = 0;
 
@@ -176,6 +171,10 @@ int main(int argc,char **argv, char **envp)
       break;
     case 'D':
       strlcpy(cfg_cmdline[rows], "daemonize: true", SRVBUFLEN);
+      rows++;
+      break;
+    case 'z':
+      strlcpy(cfg_cmdline[rows], "pmacctd_nonroot: true", SRVBUFLEN);
       rows++;
       break;
     case 'd':
@@ -227,7 +226,6 @@ int main(int argc,char **argv, char **envp)
     case 'm':
       strlcpy(cfg_cmdline[rows], "imt_mem_pools_number: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
-      have_num_memory_pools = TRUE;
       rows++;
       break;
     case 'p':
@@ -332,7 +330,7 @@ int main(int argc,char **argv, char **envp)
   else config.snaplen = psize;
 
   if (!config.pcap_savefile) {
-    if (getuid() != 0) {
+    if (getuid() != 0 && !config.pmacctd_nonroot) {
       printf("%s (%s)\n\n", PMACCTD_USAGE_HEADER, PMACCT_BUILD);
       printf("ERROR ( %s/core ): You need superuser privileges to run this command.\nExiting ...\n\n", config.name);
       exit(1);
@@ -342,11 +340,12 @@ int main(int argc,char **argv, char **envp)
   if (config.daemon) {
     list = plugins_list;
     while (list) {
-      if (!strcmp(list->type.string, "print")) printf("INFO ( %s/core ): Daemonizing. Hmm, bye bye screen.\n", config.name);
+      if (!strcmp(list->type.string, "print") && !list->cfg.print_output_file)
+        printf("INFO ( %s/%s ): Daemonizing. Bye bye screen.\n", list->name, list->type.string);
       list = list->next;
     }
     if (debug || config.debug)
-      printf("WARN ( %s/core ): debug is enabled; forking in background. Console logging will get lost.\n", config.name); 
+      printf("WARN ( %s/core ): debug is enabled; forking in background. Logging to standard error (stderr) will get lost.\n", config.name); 
     daemonize();
   }
 
@@ -355,7 +354,7 @@ int main(int argc,char **argv, char **envp)
     logf = parse_log_facility(config.syslog);
     if (logf == ERR) {
       config.syslog = NULL;
-      printf("WARN ( %s/core ): specified syslog facility is not supported; logging to console.\n", config.name);
+      printf("WARN ( %s/core ): specified syslog facility is not supported. Logging to standard error (stderr).\n", config.name);
     }
     else openlog(NULL, LOG_PID, logf);
     Log(LOG_INFO, "INFO ( %s/core ): Start logging ...\n", config.name);
@@ -363,7 +362,7 @@ int main(int argc,char **argv, char **envp)
 
   if (config.logfile)
   {
-    config.logfile_fd = open_logfile(config.logfile, "a");
+    config.logfile_fd = open_output_file(config.logfile, "a", FALSE);
     list = plugins_list;
     while (list) {
       list->cfg.logfile_fd = config.logfile_fd ;
@@ -392,15 +391,19 @@ int main(int argc,char **argv, char **envp)
   while (list) {
     if (list->type.id != PLUGIN_ID_CORE) {
       /* applies to all plugins */
+      plugin_pipe_check(&list->cfg);
+
       if (config.classifiers_path && (list->cfg.sampling_rate || config.ext_sampling_rate)) {
         Log(LOG_ERR, "ERROR ( %s/core ): Packet sampling and classification are mutual exclusive.\n", config.name);
         exit(1);
       }
+
       if (list->cfg.sampling_rate && config.ext_sampling_rate) {
         Log(LOG_ERR, "ERROR ( %s/core ): Internal packet sampling and external packet sampling are mutual exclusive.\n", config.name);
         exit(1);
       }
 
+      /* applies to specific plugins */
       if (list->type.id == PLUGIN_ID_TEE) {
         Log(LOG_ERR, "ERROR ( %s/core ): 'tee' plugin not supported in 'pmacctd'.\n", config.name);
         exit(1);
@@ -521,7 +524,7 @@ int main(int argc,char **argv, char **envp)
       else {
         if (list->cfg.what_to_count_2 & (COUNT_POST_NAT_SRC_HOST|COUNT_POST_NAT_DST_HOST|
                         COUNT_POST_NAT_SRC_PORT|COUNT_POST_NAT_DST_PORT|COUNT_NAT_EVENT|
-                        COUNT_TIMESTAMP_START|COUNT_TIMESTAMP_END))
+                        COUNT_TIMESTAMP_START|COUNT_TIMESTAMP_END|COUNT_TIMESTAMP_ARRIVAL))
           list->cfg.data_type |= PIPE_TYPE_NAT;
 
         if (list->cfg.what_to_count_2 & (COUNT_MPLS_LABEL_TOP|COUNT_MPLS_LABEL_BOTTOM|
@@ -546,8 +549,8 @@ int main(int argc,char **argv, char **envp)
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	  list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
-        if ((list->cfg.what_to_count & COUNT_SRC_HOST) && (list->cfg.what_to_count & COUNT_SRC_NET) ||
-            (list->cfg.what_to_count & COUNT_DST_HOST) && (list->cfg.what_to_count & COUNT_DST_NET)) {
+        if (((list->cfg.what_to_count & COUNT_SRC_HOST) && (list->cfg.what_to_count & COUNT_SRC_NET)) ||
+            ((list->cfg.what_to_count & COUNT_DST_HOST) && (list->cfg.what_to_count & COUNT_DST_NET))) {
           if (!list->cfg.tmp_net_own_field) {
             Log(LOG_ERR, "ERROR ( %s/%s ): src_host, src_net and dst_host, dst_net are mutually exclusive: set tmp_net_own_field to true. Exiting...\n\n", list->name, list->type.string);
             exit(1);
@@ -687,7 +690,7 @@ int main(int argc,char **argv, char **envp)
     Log(LOG_ERR, "ERROR ( %s/core ): data link not supported: %d\n", config.name, device.link_type); 
     exit_all(1);
   }
-  else Log(LOG_INFO, "OK ( %s/core ): link type is: %d\n", config.name, device.link_type); 
+  else Log(LOG_INFO, "INFO ( %s/core ): link type is: %d\n", config.name, device.link_type); 
 
   if (device.link_type != DLT_EN10MB && device.link_type != DLT_IEEE802 && device.link_type != DLT_LINUX_SLL) {
     list = plugins_list;
@@ -710,10 +713,10 @@ int main(int argc,char **argv, char **envp)
   }
 
   if (pcap_compile(device.dev_desc, &filter, config.clbuf, 0, netmask) < 0)
-    Log(LOG_WARNING, "WARN: %s\nWARN ( %s/core ): going on without a filter\n", config.name, pcap_geterr(device.dev_desc));
+    Log(LOG_WARNING, "WARN ( %s/core ): %s (going on without a filter)\n", config.name, pcap_geterr(device.dev_desc));
   else {
     if (pcap_setfilter(device.dev_desc, &filter) < 0)
-      Log(LOG_WARNING, "WARN: %s\nWARN ( %s/core ): going on without a filter\n", config.name, pcap_geterr(device.dev_desc));
+      Log(LOG_WARNING, "WARN ( %s/core ): %s (going on without a filter)\n", config.name, pcap_geterr(device.dev_desc));
   }
 
   /* signal handling we want to inherit to plugins (when not re-defined elsewhere) */
@@ -745,7 +748,7 @@ int main(int argc,char **argv, char **envp)
 	cb_data.bpas_table = (u_char *) &bpas_table;
       }
       else {
-        Log(LOG_ERR, "ERROR: bgp_peer_as_src_type set to 'map' but no map defined. Exiting.\n");
+        Log(LOG_ERR, "ERROR ( %s/core ): bgp_peer_as_src_type set to 'map' but no map defined. Exiting.\n", config.name);
         exit(1);
       }
     }
@@ -757,7 +760,7 @@ int main(int argc,char **argv, char **envp)
         cb_data.blp_table = (u_char *) &blp_table;
       }
       else {
-        Log(LOG_ERR, "ERROR: bgp_src_local_pref_type set to 'map' but no map defined. Exiting.\n");
+        Log(LOG_ERR, "ERROR ( %s/core ): bgp_src_local_pref_type set to 'map' but no map defined. Exiting.\n", config.name);
         exit(1);
       }
     }
@@ -769,7 +772,7 @@ int main(int argc,char **argv, char **envp)
         cb_data.bmed_table = (u_char *) &bmed_table;
       }
       else {
-        Log(LOG_ERR, "ERROR: bgp_src_med_type set to 'map' but no map defined. Exiting.\n");
+        Log(LOG_ERR, "ERROR ( %s/core ): bgp_src_med_type set to 'map' but no map defined. Exiting.\n", config.name);
         exit(1);
       }
     }
@@ -829,8 +832,7 @@ int main(int argc,char **argv, char **envp)
 
   /* plugins glue: creation (until 093) */
   evaluate_packet_handlers();
-  if (!config.proc_name) pm_setproctitle("%s [%s]", "Core Process", "default");
-  else pm_setproctitle("%s [%s]", "Core Process", config.proc_name);
+  pm_setproctitle("%s [%s]", "Core Process", config.proc_name);
   if (config.pidfile) write_pid_file(config.pidfile);  
 
   /* signals to be handled only by pmacctd;
@@ -872,13 +874,4 @@ int main(int argc,char **argv, char **envp)
     }
     device.active = FALSE;
   }
-}
-
-/* Dummy objects here - ugly to see but well portable */
-void NF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
-{
-}
-
-void SF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_id_t *tag2)
-{
 }

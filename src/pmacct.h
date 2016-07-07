@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -60,6 +60,7 @@
 #include <signal.h>
 #include <syslog.h>
 #include <sys/resource.h>
+#include <search.h>
 
 #include <sys/mman.h>
 #if !defined (MAP_ANONYMOUS)
@@ -184,6 +185,16 @@ struct plugin_requests {
   int map_row_len;		/* map row length: wins over global setting */
 };
 
+typedef struct {
+  char *val;
+  u_int16_t len;
+} pm_hash_key_t;
+
+typedef struct {
+  pm_hash_key_t key;
+  u_int16_t off;
+} pm_hash_serial_t;
+
 #include "pmacct-defines.h"
 #include "network.h"
 #include "pretag.h"
@@ -227,8 +238,8 @@ struct pcap_callback_data {
   u_char * bmed_table; 
   u_char * biss_table; 
   struct pcap_device *device;
-  u_int16_t ifindex_in;
-  u_int16_t ifindex_out;
+  u_int32_t ifindex_in;
+  u_int32_t ifindex_out;
 };
 
 struct _protocols_struct {
@@ -247,6 +258,7 @@ struct _primitives_matrix_struct {
   u_int8_t uacctd;
   u_int8_t nfacctd;
   u_int8_t sfacctd;
+  u_int8_t pmtelemetryd;
   char desc[PRIMITIVE_DESC_LEN];
 };
 
@@ -318,7 +330,19 @@ EXT void compute_once();
 EXT void set_index_pkt_ptrs(struct packet_ptrs *);
 #undef EXT
 
-#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C)
+#ifndef HAVE_STRLCPY
+size_t strlcpy(char *, const char *, size_t);
+#endif
+
+#if (defined WITH_JANSSON)
+#include <jansson.h>
+#if (!defined HAVE_JSON_OBJECT_UPDATE_MISSING)
+int json_object_update_missing(json_t *, json_t *);
+#endif
+#endif
+
+/* global variables */
+#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C) && (!defined __PMTELEMETRYD_C)
 #define EXT extern
 #else
 #define EXT
@@ -326,27 +350,16 @@ EXT void set_index_pkt_ptrs(struct packet_ptrs *);
 EXT struct host_addr mcast_groups[MAX_MCAST_GROUPS];
 EXT int reload_map, reload_map_exec_plugins, reload_geoipv2_file;
 EXT int reload_map_bgp_thread, reload_log_bgp_thread, reload_log_bmp_thread;
-EXT int reload_log_sf_cnt;
+EXT int reload_log_sf_cnt, reload_log_telemetry_thread;
 EXT int data_plugins, tee_plugins;
 EXT struct timeval reload_map_tstamp;
 EXT struct child_ctl sql_writers;
+EXT int debug;
+EXT struct configuration config; /* global configuration structure */
+EXT struct plugins_list_entry *plugins_list; /* linked list of each plugin configuration */
+EXT pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
+EXT u_char dummy_tlhdr[16];
+EXT pcap_t *glob_pcapt;
+EXT struct pcap_stat ps;
 #undef EXT
-
-#ifndef HAVE_STRLCPY
-size_t strlcpy(char *, const char *, size_t);
-#endif
-
-/* global variables */
-pcap_t *glob_pcapt;
-struct pcap_stat ps;
-
-#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C)
-extern int debug;
-extern int have_num_memory_pools; /* global getopt() stuff */
-extern struct configuration config; /* global configuration structure */ 
-extern struct plugins_list_entry *plugins_list; /* linked list of each plugin configuration */
-extern pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
-extern u_char dummy_tlhdr[16];
-#endif
-
 #endif /* _PMACCT_H_ */

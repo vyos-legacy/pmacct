@@ -1,24 +1,30 @@
 pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 
 Q1: What is pmacct project homepage ?
-A: It is http://www.pmacct.net/ . There isn't any official mirror site. 
+A: pmacct homepage is http://www.pmacct.net/
 
 
-Q2: 'pmacct', 'pmacctd', 'nfacctd', 'sfacctd', 'uacctd' -- but what do they mean ?
+Q2: 'pmacct', 'pmacctd', 'nfacctd', 'sfacctd', 'uacctd' and 'pmtelemetryd' -- but
+    what do they mean ?
 A: 'pmacct' is intended to be the name of the project; 'pmacctd' is the name of the
    libpcap-based IPv4/IPv6 accounting daemon; 'nfacctd' is the name of the NetFlow
    (versions supported NetFlow v1 to v9) and IPFIX accounting daemon; 'sfacctd' is
    the name of the sFlow v2/v4/v5 accounting daemon; 'uacctd' is the name of the
-   Linux Netlink ULOG-based accounting daemon.
+   Linux Netlink NFLOG-based accounting daemon (historically, it was using ULOG,
+   hence its name); 'pmtelemetryd' is the name of the streamed telemetry collector
+   daemon, where quoting Cisco IOS-XR Telemetry Configuration Guide at the time of
+   this writing "Streaming telemetry [ .. ] data can be used for analysis and
+   troubleshooting purposes to maintain the health of the network. This is achieved
+   by leveraging the capabilities of machine-to-machine communication. [ .. ]". 
 
 
 Q3: Does pmacct stand for Promiscuous mode IP Accounting package ?
 A: That is not entirely correct today, it was originally though. pmacct born as a
    libpcap-based project only. Over the time it evolved to include NetFlow first,
-   sFlow shortly afterwards and ULOG more recently - striving to maintain a consistent
-   implementation over the set, unless technical considerations prevent that to happen
-   for specific cases.  
+   sFlow shortly afterwards and NFLOG more recently - this is striving to maintain
+   a consistent implementation over the set, unless technical considerations
+   prevent that to happen for specific cases.  
 
 
 Q4: What are pmacct main features?
@@ -26,11 +32,11 @@ A: pmacct can collect, replicate and export network data. Collect in memory tabl
    store persistently to RDBMS (MySQL, PostgreSQL, SQLite 3.x), noSQL databases
    (key-value: BerkeleyDB 5.x via SQLite API or document-oriented: MongoDB) and
    flat-files (csv, formatted, JSON output), publish to message exchanges via AMQP
-   (ie. to insert in ElasticSearch, Cassandra or CouchDB). Export speaking sFlow v5,
-   NetFlow v1/v5/v9 and IPFIX. pmacct is able to perform data aggregation, offering
-   a rich set of primitives to choose from; it can also filter, sample, renormalize,
-   tag and classify at L7. pmacct integrates a BGP daemon join routing visibility and
-   network traffic information.
+   (ie. to insert in ElasticSearch, Cassandra or CouchDB) and Kafka brokers. Export
+   speaking sFlow v5, NetFlow v1/v5/v9 and IPFIX. pmacct is able to perform data
+   aggregation, offering a rich set of primitives to choose from; it can also filter,
+   sample, renormalize, tag and classify at L7. pmacct integrates a BGP daemon join
+   routing visibility and network traffic information.
 
 
 Q5: Does any of the pmacct daemons logs to flat files?
@@ -41,7 +47,7 @@ A: Yes, but in a specific way. In other tools flat-files are typically used to l
    By inception, pmacct always aimed to a single-stage approach instead, ie. offer data
    reduction tecniques and correlation tools to process network traffic data on the fly,
    so to immediately offer the desired view(s) of the traffic. pmacct writes to files in
-   text-format (either csv or formatted via its 'print' plugin, see QUICKSTART doc for
+   text-format (json, csv or formatted via its 'print' plugin, see QUICKSTART doc for
    further information) so to maximize potential integration with 3rd party applications
    while keeping low the effort of customization.
 
@@ -66,10 +72,14 @@ A: CPU cycles are proportional to the amount of traffic (packets, flows, samples
    ones. Kernel-to-userspace copies are critical and hence the first to be optimized;
    for this purpose you may look at the following solutions: 
 
-   libpcap-mmap, http://public.lanl.gov/cpw/ : a libpcap version which supports mmap()
-   on the linux kernel 2.[46].x . Applications, like pmacctd, need just to be linked
-   against the mmap()ed version of libpcap to work correctly. 
-
+   Linux kernel has support for mmap() since 2.4. The kernel needs to
+   be 2.6.34+ or compiled with option CONFIG_PACKET_MMAP. You need at
+   least a 2.6.27 to get compatibility with 64bit. Starting from 3.10,
+   you get 20% increase of performance and packet capture rate. You
+   also need a matching libpcap library. mmap() support has been added
+   in 1.0.0. To take advantage of the performance boost from Linux
+   3.10, you need at least libpcap 1.5.0.
+   
    PF_RING, http://www.ntop.org/PF_RING.html : it's a new type of network socket that
    improves the packet capture speed; it's available for Linux kernels 2.[46].x; it's
    kernel based; has libpcap support for seamless integration with existing applications.
@@ -222,16 +232,7 @@ A: When IPv6 code is enabled, sfacctd and nfacctd will try to fire up an IPv6 so
    commandline, use the following: 'nfacctd [ ... options ... ] -L 192.168.0.14'.  
 
 
-Q15: 32 bit counters are not large enough to me, in fact i see them rolling over and
-     returning inconsistent results. What to do ?
-A: pmacct >= 0.9.2 optionally supports 64 bits counters via a '--enable-64bit' switch
-   while configuring the package for compilation. It will affect all counters: bytes,
-   packets and flows. Use such switch only when required as 32 bits counters allow to
-   save some memory. Usually, overflowing counters are recognizable by unexpected
-   fluctuations in the counters value - caused, as said, by one or multiple rollovers. 
- 
-
-Q16: SQL table versions, what they are -- why and when do i need them ? Also, can i
+Q15: SQL table versions, what they are -- why and when do i need them ? Also, can i
      customize SQL tables ?
 A: pmacct tarball gets with so called 'default' tables (IP and BGP); they are built
    by SQL scripts stored in the 'sql/' section of the tarball. Default tables enable
@@ -246,7 +247,7 @@ A: pmacct tarball gets with so called 'default' tables (IP and BGP); they are bu
    key. You will then be responsible for building the custom schema and indexes.
 
 
-Q17: What is the best way to kill a running instance of pmacct avoiding data loss ?
+Q16: What is the best way to kill a running instance of pmacct avoiding data loss ?
 A: Two ways. a) Simply kill a specific plugin that you don't need anymore: you will
    have to identify it and use the 'kill -INT <process number> command; b) kill the
    whole pmacct instance: you can either use the 'killall -INT <daemon name>' command
@@ -262,7 +263,7 @@ A: Two ways. a) Simply kill a specific plugin that you don't need anymore: you w
    the SO_REUSEADDR socket option. 
 
 
-Q18: I find interesting store network data in a SQL database. But i'm actually hitting
+Q17: I find interesting store network data in a SQL database. But i'm actually hitting
      poor performances. Do you have any tips to improve/optimize things ?
 A: Few hints are summed below in order to improve SQL database performances. They are
    not really tailored to a specific SQL engine but rather of general applicability.
@@ -298,7 +299,7 @@ A: Few hints are summed below in order to improve SQL database performances. The
      in case of unsecured shutdowns (remember power failure is a variable ...).
 
 
-Q19: I've configured the server hosting pmacct with my local timezone - which includes
+Q18: I've configured the server hosting pmacct with my local timezone - which includes
      DST (Daylight Saving Time). Is this allright?
 A: In general, it's good rule to run the backend part of any accounting system as UTC;
    pmacct uses the underlying system clock, expecially in the SQL plugins to calculate
@@ -306,7 +307,7 @@ A: In general, it's good rule to run the backend part of any accounting system a
    but not recommended. 
 
 
-Q20: I'm using the 'tee' plugin with transparent mode set to true and keep receiving
+Q19: I'm using the 'tee' plugin with transparent mode set to true and keep receiving
      "Can't bridge Address Families when in transparent mode. Exiting ..." messages,
      why?
 
@@ -320,7 +321,7 @@ A: It means you can't receive packets on an IPv4 address and transparently repli
    IP address (nfacctd_ip), if IPv4 is used.
 
 
-Q21: I've enabled IPv6 support in pmacct with --enable-ipv6. Even though the daemon
+Q20: I've enabled IPv6 support in pmacct with --enable-ipv6. Even though the daemon
      binds to the "::" address, i don't receive NetFlow/IPFIX/sFlow/BGP data sent via
      IPv4, why?
 

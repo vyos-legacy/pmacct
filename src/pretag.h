@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -61,8 +61,7 @@
 #define PRETAG_VLAN_ID			0x020000000
 #define PRETAG_IP			0x040000000
 #define PRETAG_SET_LABEL		0x080000000
-#define PRETAG_MPLS_PW_ID		0x100000000
-#define PRETAG_CVLAN_ID			0x200000000
+#define PRETAG_CVLAN_ID			0x100000000
 
 #define PRETAG_MAP_RCODE_ID		0x00000100
 #define PRETAG_MAP_RCODE_ID2		0x00000200
@@ -137,12 +136,7 @@ typedef struct {
   char *v;
 } ptlt_t;
 
-struct id_entry {
-  pm_id_t id;
-  pm_id_t id2;
-  pt_label_t label;
-  pm_id_t flags;
-  pm_id_t pos;
+struct id_entry_key {
   pt_hostaddr_t agent_ip;
   pt_hostmask_t agent_mask;
   pt_hostaddr_t nexthop;
@@ -157,7 +151,7 @@ struct id_entry {
   pt_uint32_t sample_type; /* applies to sFlow sample type */
   pt_uint8_t direction;
   pt_uint32_t src_as;
-  pt_uint32_t dst_as; 
+  pt_uint32_t dst_as;
   pt_uint32_t peer_src_as;
   pt_uint32_t peer_dst_as;
   pt_uint32_t src_local_pref;
@@ -167,14 +161,22 @@ struct id_entry {
   pt_etheraddr_t dst_mac;
   pt_uint16_t vlan_id;
   pt_uint16_t cvlan_id;
-  s_uint8_t set_tos;
   s_uint16_t lookup_bgp_port;
   char *src_comms[16]; /* XXX: MAX_BGP_COMM_PATTERNS = 16 */
   char *comms[16]; /* XXX: MAX_BGP_COMM_PATTERNS = 16 */
   pt_rd_t mpls_vpn_rd;
-  pt_uint32_t mpls_pw_id;
   struct bpf_program filter;
   pt_uint8_t v8agg;
+};
+
+struct id_entry {
+  pm_id_t id;
+  pm_id_t id2;
+  pt_label_t label;
+  pm_id_t flags;
+  pm_id_t pos;
+  s_uint8_t set_tos;
+  struct id_entry_key key;
   pretag_handler func[N_MAP_HANDLERS];
   pt_bitmap_t func_type[N_MAP_HANDLERS];
   pretag_handler set_func[N_MAP_HANDLERS];
@@ -188,11 +190,13 @@ struct id_entry {
   u_int8_t id2_inc;
 };
 
-typedef int (*pretag_copier)(struct id_entry *, void *);
+typedef int (*pretag_copier)(struct id_entry *, pm_hash_serial_t *, void *);
 
 struct id_index_entry {
   u_int16_t depth;
-  struct id_entry *e[ID_TABLE_INDEX_DEPTH];
+  pm_hash_key_t hash_key[ID_TABLE_INDEX_DEPTH];
+  struct id_entry_key key[ID_TABLE_INDEX_DEPTH]; /* XXX: to be removed */
+  struct id_entry *result[ID_TABLE_INDEX_DEPTH];
 };
 
 struct id_table_index {
@@ -200,6 +204,7 @@ struct id_table_index {
   int entries;
   pretag_copier idt_handler[MAX_BITMAP_ENTRIES];
   pretag_copier fdata_handler[MAX_BITMAP_ENTRIES];
+  pm_hash_serial_t hash_serializer;
   struct id_index_entry *idx_t;
 };
 
@@ -262,6 +267,7 @@ EXT int pretag_index_insert_bitmap(struct id_table *, pt_bitmap_t);
 EXT int pretag_index_set_handlers(struct id_table *);
 EXT int pretag_index_allocate(struct id_table *);
 EXT int pretag_index_fill(struct id_table *, pt_bitmap_t, struct id_entry *);
+EXT void pretag_index_report(struct id_table *);
 EXT void pretag_index_destroy(struct id_table *);
 EXT void pretag_index_lookup(struct id_table *, struct packet_ptrs *, struct id_entry **, int);
 EXT void pretag_index_results_sort(struct id_entry **, int);

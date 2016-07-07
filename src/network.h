@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -363,8 +363,8 @@ struct packet_ptrs {
   struct class_st cst; /* classifiers: class status */
   u_int8_t shadow; /* 0=the packet is being distributed for the 1st time
 		      1=the packet is being distributed for the 2nd+ time */
-  u_int16_t ifindex_in;  /* input ifindex; only used by ULOG for the time being */
-  u_int16_t ifindex_out; /* output ifindex; only used by ULOG for the time being */
+  u_int32_t ifindex_in;  /* input ifindex; only used by NFLOG for the time being */
+  u_int32_t ifindex_out; /* output ifindex; only used by NFLOG for the time being */
   u_int8_t tun_stack; /* tunnelling stack */
   u_int8_t tun_layer; /* tunnelling layer count */
   u_int32_t sample_type; /* sFlow sample type */
@@ -433,6 +433,8 @@ struct pkt_primitives {
   pm_class_t class;
   u_int32_t sampling_rate;
   u_int16_t pkt_len_distrib;
+  u_int32_t export_proto_seqno;
+  u_int16_t export_proto_version;
 };
 
 struct pkt_data {
@@ -460,8 +462,8 @@ struct pkt_payload {
   struct host_addr dst_ip;
   as_t src_as;
   as_t dst_as;
-  u_int16_t ifindex_in;
-  u_int16_t ifindex_out;
+  u_int32_t ifindex_in;
+  u_int32_t ifindex_out;
   u_int8_t src_nmask;
   u_int8_t dst_nmask;
   u_int16_t vlan;
@@ -552,6 +554,7 @@ struct pkt_nat_primitives {
   u_int8_t nat_event;
   struct timeval timestamp_start; /* XXX: clean-up: to be moved in a separate structure */
   struct timeval timestamp_end; /* XXX: clean-up: to be moved in a separate structure */
+  struct timeval timestamp_arrival; /* XXX: clean-up: to be moved in a separate structure */
 };
 
 struct pkt_mpls_primitives {
@@ -627,4 +630,11 @@ struct tunnel_entry {
   tunnel_configurator tc;
 };
 
-struct tunnel_handler tunnel_registry[TUNNEL_REGISTRY_STACKS][TUNNEL_REGISTRY_ENTRIES];
+/* global variables */
+#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C) && (!defined __PMTELEMETRYD_C)
+#define EXT extern
+#else
+#define EXT
+#endif
+EXT struct tunnel_handler tunnel_registry[TUNNEL_REGISTRY_STACKS][TUNNEL_REGISTRY_ENTRIES];
+#undef EXT

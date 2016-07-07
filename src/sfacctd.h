@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -28,6 +28,7 @@
 #define DEFAULT_SFACCTD_PORT 6343 
 #define SFLOW_MIN_MSG_SIZE 200 
 #define SFLOW_MAX_MSG_SIZE 65536 /* inflated ? */
+#define MAX_SF_CNT_LOG_ENTRIES 1024
 
 enum INMPacket_information_type {
   INMPACKETTYPE_HEADER  = 1,      /* Packet headers are sampled */
@@ -308,6 +309,9 @@ EXT int sf_cnt_log_msg(struct bgp_peer *, SFSample *, u_int32_t, char *, int, u_
 EXT int readCounters_generic(struct bgp_peer *, SFSample *, char *, int, void *);
 EXT int readCounters_ethernet(struct bgp_peer *, SFSample *, char *, int, void *);
 EXT int readCounters_vlan(struct bgp_peer *, SFSample *, char *, int, void *);
+EXT void sfacctd_counter_init_amqp_host();
+EXT int sfacctd_counter_init_kafka_host();
+EXT void sf_cnt_link_misc_structs(struct bgp_misc_structs *);
 
 EXT char *sfv245_check_status(SFSample *spp, struct sockaddr *);
 EXT void sfv245_check_counter_log_init(struct packet_ptrs *);
@@ -316,11 +320,8 @@ EXT void usage_daemon(char *);
 EXT void compute_once();
 
 /* global variables */
-EXT struct bgp_peer_log *sf_cnt_log;
-EXT u_int64_t sf_cnt_log_seq;
-EXT struct timeval sf_cnt_log_tstamp;
-EXT char sf_cnt_log_tstamp_str[SRVBUFLEN];
-
+EXT int sfacctd_counter_backend_methods;
+EXT struct bgp_misc_structs *sf_cnt_misc_db;
 EXT struct host_addr debug_a;
 EXT u_char debug_agent_addr[50];
 EXT u_int16_t debug_agent_port;

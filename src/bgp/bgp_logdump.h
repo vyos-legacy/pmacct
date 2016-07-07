@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -27,11 +27,19 @@
 #define BGP_LOGDUMP_ET_LOG	1
 #define BGP_LOGDUMP_ET_DUMP	2
 
+#define BGP_LOG_TYPE_MISC	0
+#define BGP_LOG_TYPE_UPDATE	1
+#define BGP_LOG_TYPE_WITHDRAW	2
+#define BGP_LOG_TYPE_DELETE	3
+#define BGP_LOG_TYPE_OPEN	4
+#define BGP_LOG_TYPE_CLOSE	5
+
 struct bgp_peer_log {
   FILE *fd;
   int refcnt;
   char filename[SRVBUFLEN];
   void *amqp_host;
+  void *kafka_host;
 };
 
 struct bgp_dump_stats {
@@ -50,18 +58,13 @@ EXT int bgp_peer_log_close(struct bgp_peer *, int, int);
 EXT void bgp_peer_log_seq_init(u_int64_t *);
 EXT void bgp_peer_log_seq_increment(u_int64_t *);
 EXT void bgp_peer_log_dynname(char *, int, char *, struct bgp_peer *);
-EXT int bgp_peer_log_msg(struct bgp_node *, struct bgp_info *, safi_t, char *, int);
+EXT int bgp_peer_log_msg(struct bgp_node *, struct bgp_info *, safi_t, char *, int, int);
 EXT int bgp_peer_dump_init(struct bgp_peer *, int, int);
 EXT int bgp_peer_dump_close(struct bgp_peer *, struct bgp_dump_stats *, int, int);
 EXT void bgp_handle_dump_event();
 EXT void bgp_daemon_msglog_init_amqp_host();
 EXT void bgp_table_dump_init_amqp_host();
-
-/* global variables */
-EXT struct bgp_peer_log *peers_log;
-EXT u_int64_t log_seq;
-EXT struct timeval log_tstamp;
-EXT char log_tstamp_str[SRVBUFLEN];
-
+EXT int bgp_daemon_msglog_init_kafka_host();
+EXT int bgp_table_dump_init_kafka_host();
 #undef EXT
 #endif 

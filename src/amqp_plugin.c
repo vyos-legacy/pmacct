@@ -27,12 +27,7 @@
 #include "plugin_hooks.h"
 #include "plugin_common.h"
 #include "amqp_plugin.h"
-#include "ip_flow.h"
-#include "classifier.h"
-#include "crc32.c"
-#ifdef WITH_JANSSON
-#include <jansson.h>
-#else
+#ifndef WITH_JANSSON
 #error "--enable-rabbitmq requires --enable-jansson"
 #endif
 
@@ -51,6 +46,7 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct plugins_list_entry *plugin_data = ((struct channels_list_entry *)ptr)->plugin;
   int datasize = ((struct channels_list_entry *)ptr)->datasize;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
+  pid_t core_pid = ((struct channels_list_entry *)ptr)->core_pid;
   struct networks_file_data nfd;
 
   unsigned char *rgptr;
@@ -71,7 +67,7 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   P_set_signals();
   P_init_default_values();
   P_config_checks();
-  pipebuf = (unsigned char *) Malloc(config.buffer_size);
+  pipebuf = (unsigned char *) pm_malloc(config.buffer_size);
   memset(pipebuf, 0, config.buffer_size);
 
   timeout = config.sql_refresh_time*1000;
@@ -127,7 +123,7 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (config.pipe_amqp) {
     plugin_pipe_amqp_compile_check();
     pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
-    amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+    amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
   }
   else setnonblocking(pipe_fd);
 
@@ -182,9 +178,9 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     if (config.pipe_amqp && pipe_fd == ERR) {
       if (timeout == amqp_timeout) {
         pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
-        amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
-      else amqp_timeout = plugin_pipe_amqp_calc_poll_timeout_diff(amqp_host, idata.now);
+      else amqp_timeout = plugin_pipe_calc_retry_timeout_diff(&amqp_host->btimers, idata.now);
     }
 
     switch (ret) {
@@ -214,11 +210,10 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           else {
             rg_err_count++;
             if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-              Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
-              Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
-              Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
-              Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
-              Log(LOG_ERR, "- increase system maximum socket size.\n\n");
+              Log(LOG_WARNING, "WARN ( %s/%s ): Missing data detected (plugin_buffer_size=%llu plugin_pipe_size=%llu).\n",
+			config.name, config.type, config.buffer_size, config.pipe_size);
+              Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
+			config.name, config.type);
             }
             seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
           }
@@ -233,15 +228,19 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         if (ret) pipe_fd = ERR;
 
         seq = ((struct ch_buf_hdr *)pipebuf)->seq;
-        amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
 
       /* lazy refresh time handling */ 
       if (idata.now > refresh_deadline) P_cache_handle_flush_event(&pt);
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
-      Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received seq=%u num_entries=%u\n", config.name, config.type, seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
+      if (config.debug_internal_msg)
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u seq=%u num_entries=%u\n",
+		config.name, config.type, core_pid, seq, ((struct ch_buf_hdr *)pipebuf)->num);
+
+      if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
         for (num = 0; primptrs_funcs[num]; num++)
           (*primptrs_funcs[num])((u_char *)data, &extras, &prim_ptrs);
@@ -268,6 +267,7 @@ void amqp_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           else dataptr += prim_ptrs.vlen_next_off;
           data = (struct pkt_data *) dataptr;
 	}
+      }
       }
 
       if (!config.pipe_amqp) goto read_data;
@@ -350,6 +350,7 @@ void amqp_cache_purge(struct chained_cache *queue[], int index)
   start = time(NULL);
 
   for (j = 0; j < index; j++) {
+    void *json_obj;
     char *json_str;
 
     if (queue[j]->valid != PRINT_CACHE_COMMITTED) continue;
@@ -372,10 +373,12 @@ void amqp_cache_purge(struct chained_cache *queue[], int index)
 
     if (queue[j]->valid == PRINT_CACHE_FREE) continue;
 
-    json_str = compose_json(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
+    json_obj = compose_json(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
                          &queue[j]->primitives, pbgp, pnat, pmpls, pcust, pvlen, queue[j]->bytes_counter,
 			 queue[j]->packet_counter, queue[j]->flow_counter, queue[j]->tcp_flags,
 			 &queue[j]->basetime, queue[j]->stitch);
+
+    json_str = compose_json_str(json_obj);
 
 #ifdef WITH_JANSSON
     if (json_str && config.sql_multi_values) {
@@ -404,15 +407,16 @@ void amqp_cache_purge(struct chained_cache *queue[], int index)
 
     if (json_str) {
       if (is_routing_key_dyn) {
-	amqp_handle_routing_key_dyn_strings(dyn_amqp_routing_key, SRVBUFLEN, orig_amqp_routing_key, queue[j]);
+	P_handle_table_dyn_strings(dyn_amqp_routing_key, SRVBUFLEN, orig_amqp_routing_key, queue[j]);
 	p_amqp_set_routing_key(&amqpp_amqp_host, dyn_amqp_routing_key);
       }
 
       if (config.amqp_routing_key_rr) {
-        p_amqp_handle_routing_key_dyn_rr(dyn_amqp_routing_key, SRVBUFLEN, orig_amqp_routing_key, &amqpp_amqp_host.rk_rr);
+        P_handle_table_dyn_rr(dyn_amqp_routing_key, SRVBUFLEN, orig_amqp_routing_key, &amqpp_amqp_host.rk_rr);
 	p_amqp_set_routing_key(&amqpp_amqp_host, dyn_amqp_routing_key);
       }
 
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
       ret = p_amqp_publish_string(&amqpp_amqp_host, json_str);
       free(json_str);
       json_str = NULL;
@@ -435,6 +439,7 @@ void amqp_cache_purge(struct chained_cache *queue[], int index)
 
     if (json_str) {
       /* no handling of dyn routing keys here: not compatible */
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
       ret = p_amqp_publish_string(&amqpp_amqp_host, json_str);
       free(json_str);
       json_str = NULL;
@@ -453,84 +458,4 @@ void amqp_cache_purge(struct chained_cache *queue[], int index)
   if (config.sql_trigger_exec) P_trigger_exec(config.sql_trigger_exec); 
 
   if (empty_pcust) free(empty_pcust);
-}
-
-void amqp_handle_routing_key_dyn_strings(char *new, int newlen, char *old, struct chained_cache *elem)
-{
-  int oldlen, ptr_len;
-  char peer_src_ip_string[] = "$peer_src_ip", post_tag_string[] = "$post_tag";
-  char pre_tag_string[] = "$pre_tag";
-  char *ptr_start, *ptr_end;
-
-  oldlen = strlen(old);
-  if (oldlen <= newlen) strcpy(new, old);
-  else {
-    strncpy(new, old, newlen);
-    return;
-  }
-
-  if (!strchr(new, '$')) return;
-  ptr_start = strstr(new, peer_src_ip_string);
-  if (ptr_start) {
-    char ip_address[INET6_ADDRSTRLEN];
-    char buf[newlen];
-    int len;
-
-    if (!elem || !elem->pbgp) goto out_peer_src_ip; 
-
-    len = strlen(ptr_start);
-    ptr_end = ptr_start;
-    ptr_len = strlen(peer_src_ip_string);
-    ptr_end += ptr_len;
-    len -= ptr_len;
-
-    addr_to_str(ip_address, &elem->pbgp->peer_src_ip);
-    snprintf(buf, newlen, "%s", ip_address);
-    strncat(buf, ptr_end, len);
-
-    len = strlen(buf);
-    *ptr_start = '\0';
-    strncat(new, buf, len);
-  }
-  out_peer_src_ip:
-
-  if (!strchr(new, '$')) return;
-  ptr_start = strstr(new, post_tag_string);
-  if (ptr_start) {
-    char buf[newlen];
-    int len;
-
-    len = strlen(ptr_start);
-    ptr_end = ptr_start;
-    ptr_len = strlen(post_tag_string);
-    ptr_end += ptr_len;
-    len -= ptr_len;
-
-    snprintf(buf, newlen, "%u", config.post_tag);
-    strncat(buf, ptr_end, len);
-
-    len = strlen(buf);
-    *ptr_start = '\0';
-    strncat(new, buf, len);
-  }
-
-  if (!strchr(new, '$')) return;
-  ptr_start = strstr(new, pre_tag_string);
-  if (ptr_start) {
-    char buf[newlen];
-    int len;
-
-    len = strlen(ptr_start);
-    ptr_end = ptr_start;
-    ptr_len = strlen(pre_tag_string);
-    ptr_end += ptr_len;
-    len -= ptr_len;
-
-    snprintf(buf, newlen, "%u", elem->primitives.tag);
-    strncat(buf, ptr_end, len);
-
-    len = strlen(buf);
-    *ptr_start = '\0';
-    strncat(new, buf, len);
-  }
 }
