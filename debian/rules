@@ -18,8 +18,8 @@ override_dh_auto_configure:
 		--enable-threads \
 		--enable-jansson \
 		--enable-geoip \
-		--enable-rabbitmq
-
+		--enable-rabbitmq \
+		--enable-kafka
 
 override_dh_installinit:
 	dh_installinit --name pmacctd --no-start
@@ -38,5 +38,4 @@ override_dh_systemd_enable:
 
 %:
 	dh $@ --with autotools_dev,systemd
-
 
