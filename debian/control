@@ -13,6 +13,7 @@ Build-Depends: debhelper (>= 9),
  librabbitmq-dev,
  libjansson-dev,
  librdkafka-dev,
+ libnetfilter-log-dev,
  autotools-dev,
  pkg-config,
  dh-systemd
