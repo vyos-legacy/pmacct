@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -19,23 +19,22 @@
     Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
 */
 
-/* 
-    much of the sflow v2/v4/v5 definitions are based on sFlow toolkit 3.8 and
-    later which is Copyright (C) InMon Corporation 2001 ALL RIGHTS RESERVED
-*/
+/* includes */
 
 /* defines */
-#define MAX_SF_CNT_LOG_ENTRIES 1024
 
-// #if (!defined __SFACCTD_C)
-#if (!defined __BGP_LOGDUMP_C)
+/* prototypes */
+#if (!defined __TELEMETRY_UTIL_C)
 #define EXT extern
 #else
 #define EXT
 #endif
-/* global variables */
-EXT struct bgp_peer_log *sf_cnt_log;
-EXT u_int64_t sf_cnt_log_seq;
-EXT struct timeval sf_cnt_log_tstamp;
-EXT char sf_cnt_log_tstamp_str[SRVBUFLEN];
+EXT int telemetry_peer_init(telemetry_peer *, int);
+EXT int telemetry_peer_z_init(telemetry_peer_z *);
+EXT void telemetry_peer_close(telemetry_peer *, int);
+EXT void telemetry_peer_z_close(telemetry_peer_z *);
+EXT u_int32_t telemetry_cisco_hdr_get_len(telemetry_peer *);
+EXT int telemetry_is_zjson(int);
+EXT void telemetry_link_misc_structs(telemetry_misc_structs *);
+EXT int telemetry_tpuc_addr_cmp(const void *, const void *);
 #undef EXT

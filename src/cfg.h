@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -81,15 +81,18 @@ struct configuration {
   char *name;
   char *type;
   int type_id;
+  int pmacctd_nonroot;
   char *proc_name;
   int proc_priority;
   int sock;
   int bgp_sock;
   int acct_type; 
   int data_type; 
+  int pipe_homegrown;
   u_int64_t pipe_size;
   u_int64_t buffer_size;
   int pipe_backlog;
+  int pipe_check_core_pid;
   int pipe_amqp;
   char *pipe_amqp_host;
   char *pipe_amqp_vhost;
@@ -98,6 +101,12 @@ struct configuration {
   char *pipe_amqp_exchange;
   char *pipe_amqp_routing_key;
   int pipe_amqp_retry;
+  int pipe_kafka;
+  char *pipe_kafka_broker_host;
+  char *pipe_kafka_topic;
+  int pipe_kafka_partition;
+  int pipe_kafka_broker_port;
+  int pipe_kafka_retry;
   int files_umask;
   int files_uid;
   int files_gid;
@@ -128,12 +137,10 @@ struct configuration {
   int sql_history;
   int sql_history_offset;
   int sql_history_howmany; /* internal */
-  int sql_history_since_epoch;
   int sql_startup_delay;
   int sql_cache_entries;
   int sql_dont_try_update;
   char *sql_history_roundoff;
-  char *sql_recovery_logfile;
   int sql_max_writers;
   int sql_trigger_time;
   int sql_trigger_time_howmany; /* internal */
@@ -147,6 +154,7 @@ struct configuration {
   int sql_use_copy;
   char *sql_delimiter;
   int timestamps_secs;
+  int timestamps_since_epoch;
   int mongo_insert_batch;
   char *amqp_exchange_type;
   int amqp_persistent_msg;
@@ -154,10 +162,13 @@ struct configuration {
   u_int32_t amqp_heartbeat_interval;
   char *amqp_vhost;
   int amqp_routing_key_rr;
+  int kafka_broker_port;
+  int kafka_partition;
   int print_cache_entries;
   int print_markers;
   int print_output;
   int print_output_file_append;
+  char *print_output_lock_file;
   char *print_output_separator;
   char *print_output_file;
   char *print_latest_file;
@@ -175,7 +186,74 @@ struct configuration {
   int sfacctd_counter_output;
   char *sfacctd_counter_file;
   int sfacctd_counter_max_nodes;
+  char *sfacctd_counter_amqp_host;
+  char *sfacctd_counter_amqp_vhost;
+  char *sfacctd_counter_amqp_user;
+  char *sfacctd_counter_amqp_passwd;
+  char *sfacctd_counter_amqp_exchange;
+  char *sfacctd_counter_amqp_exchange_type;
+  char *sfacctd_counter_amqp_routing_key;
+  int sfacctd_counter_amqp_persistent_msg;
+  u_int32_t sfacctd_counter_amqp_frame_max;
+  u_int32_t sfacctd_counter_amqp_heartbeat_interval;
+  int sfacctd_counter_amqp_retry;
+  char *sfacctd_counter_kafka_broker_host;
+  char *sfacctd_counter_kafka_topic;
+  int sfacctd_counter_kafka_partition;
+  int sfacctd_counter_kafka_broker_port;
+  int sfacctd_counter_kafka_retry;
   int nfacctd_disable_checks;
+  int telemetry_daemon;
+  int telemetry_sock;
+  int telemetry_port_tcp;
+  int telemetry_port_udp;
+  char *telemetry_ip;
+  char *telemetry_decoder;
+  int telemetry_max_peers;
+  int telemetry_udp_timeout;
+  char *telemetry_allow_file;
+  int telemetry_pipe_size;
+  int telemetry_ipprec;
+  char *telemetry_msglog_file;
+  int telemetry_msglog_output;
+  char *telemetry_msglog_amqp_host;
+  char *telemetry_msglog_amqp_vhost;
+  char *telemetry_msglog_amqp_user;
+  char *telemetry_msglog_amqp_passwd;
+  char *telemetry_msglog_amqp_exchange;
+  char *telemetry_msglog_amqp_exchange_type;
+  char *telemetry_msglog_amqp_routing_key;
+  int telemetry_msglog_amqp_routing_key_rr;
+  int telemetry_msglog_amqp_persistent_msg;
+  u_int32_t telemetry_msglog_amqp_frame_max;
+  u_int32_t telemetry_msglog_amqp_heartbeat_interval;
+  int telemetry_msglog_amqp_retry;
+  char *telemetry_dump_file;
+  char *telemetry_dump_latest_file;
+  int telemetry_dump_output;
+  int telemetry_dump_refresh_time;
+  char *telemetry_dump_amqp_host;
+  char *telemetry_dump_amqp_vhost;
+  char *telemetry_dump_amqp_user;
+  char *telemetry_dump_amqp_passwd;
+  char *telemetry_dump_amqp_exchange;
+  char *telemetry_dump_amqp_exchange_type;
+  char *telemetry_dump_amqp_routing_key;
+  int telemetry_dump_amqp_routing_key_rr;
+  int telemetry_dump_amqp_persistent_msg;
+  u_int32_t telemetry_dump_amqp_frame_max;
+  u_int32_t telemetry_dump_amqp_heartbeat_interval;
+  char *telemetry_msglog_kafka_broker_host;
+  int telemetry_msglog_kafka_broker_port;
+  char *telemetry_msglog_kafka_topic;
+  int telemetry_msglog_kafka_topic_rr;
+  int telemetry_msglog_kafka_partition;
+  int telemetry_msglog_kafka_retry;
+  char *telemetry_dump_kafka_broker_host;
+  int telemetry_dump_kafka_broker_port;
+  char *telemetry_dump_kafka_topic;
+  int telemetry_dump_kafka_topic_rr;
+  int telemetry_dump_kafka_partition;
   int nfacctd_bgp;
   int nfacctd_bgp_msglog_output;
   char *nfacctd_bgp_msglog_file;
@@ -191,6 +269,12 @@ struct configuration {
   u_int32_t nfacctd_bgp_msglog_amqp_frame_max;
   u_int32_t nfacctd_bgp_msglog_amqp_heartbeat_interval;
   int nfacctd_bgp_msglog_amqp_retry;
+  char *nfacctd_bgp_msglog_kafka_broker_host;
+  char *nfacctd_bgp_msglog_kafka_topic;
+  int nfacctd_bgp_msglog_kafka_topic_rr;
+  int nfacctd_bgp_msglog_kafka_partition;
+  int nfacctd_bgp_msglog_kafka_broker_port;
+  int nfacctd_bgp_msglog_kafka_retry;
   char *nfacctd_bgp_ip;
   char *nfacctd_bgp_id;
   int nfacctd_bgp_port;
@@ -226,6 +310,7 @@ struct configuration {
   int bgp_table_per_peer_hash;
   int bgp_table_dump_output;
   char *bgp_table_dump_file;
+  char *bgp_table_dump_latest_file;
   int bgp_table_dump_refresh_time;
   char *bgp_table_dump_amqp_host;
   char *bgp_table_dump_amqp_vhost;
@@ -238,6 +323,11 @@ struct configuration {
   int bgp_table_dump_amqp_persistent_msg;
   u_int32_t bgp_table_dump_amqp_frame_max;
   u_int32_t bgp_table_dump_amqp_heartbeat_interval;
+  char *bgp_table_dump_kafka_broker_host;
+  char *bgp_table_dump_kafka_topic;
+  int bgp_table_dump_kafka_topic_rr;
+  int bgp_table_dump_kafka_partition;
+  int bgp_table_dump_kafka_broker_port;
   int bmp_sock;
   int nfacctd_bmp;
   char *nfacctd_bmp_ip;
@@ -248,7 +338,6 @@ struct configuration {
   int nfacctd_bmp_ipprec;
   int nfacctd_bmp_batch;
   int nfacctd_bmp_batch_interval;
-  char *nfacctd_bmp_neighbors_file;
   int nfacctd_bmp_msglog_output;
   char *nfacctd_bmp_msglog_file;
   char *nfacctd_bmp_msglog_amqp_host;
@@ -263,12 +352,19 @@ struct configuration {
   u_int32_t nfacctd_bmp_msglog_amqp_frame_max;
   u_int32_t nfacctd_bmp_msglog_amqp_heartbeat_interval;
   int nfacctd_bmp_msglog_amqp_retry;
+  char *nfacctd_bmp_msglog_kafka_broker_host;
+  char *nfacctd_bmp_msglog_kafka_topic;
+  int nfacctd_bmp_msglog_kafka_topic_rr;
+  int nfacctd_bmp_msglog_kafka_partition;
+  int nfacctd_bmp_msglog_kafka_broker_port;
+  int nfacctd_bmp_msglog_kafka_retry;
   int bmp_table_peer_buckets;
   int bmp_table_per_peer_buckets;
   int bmp_table_attr_hash_buckets;
   int bmp_table_per_peer_hash;
   int bmp_dump_output;
   char *bmp_dump_file;
+  char *bmp_dump_latest_file;
   int bmp_dump_refresh_time;
   char *bmp_dump_amqp_host;
   char *bmp_dump_amqp_vhost;
@@ -281,6 +377,11 @@ struct configuration {
   int bmp_dump_amqp_persistent_msg;
   u_int32_t bmp_dump_amqp_frame_max;
   u_int32_t bmp_dump_amqp_heartbeat_interval;
+  char *bmp_dump_kafka_broker_host;
+  char *bmp_dump_kafka_topic;
+  int bmp_dump_kafka_topic_rr;
+  int bmp_dump_kafka_partition;
+  int bmp_dump_kafka_broker_port;
   int nfacctd_isis;
   char *nfacctd_isis_ip;
   char *nfacctd_isis_net;
@@ -342,6 +443,7 @@ struct configuration {
   char *sampling_map;
   char *syslog;
   int debug;
+  int debug_internal_msg;
   int snaplen;
   char *classifiers_path;
   int classifier_tentatives;
@@ -371,13 +473,14 @@ struct configuration {
   int tee_pipe_size;
   int uacctd_group;
   int uacctd_nl_size;
+  int uacctd_threshold;
   char *tunnel0;
   char *pkt_len_distrib_bins_str;
   char *pkt_len_distrib_bins[MAX_PKT_LEN_DISTRIB_BINS];
   u_int16_t pkt_len_distrib_bins_lookup[ETHER_JUMBO_MTU+1];
   int use_ip_next_hop;
   int tmp_net_own_field;
-  int thread_stack;
+  size_t thread_stack;
 };
 
 /* prototypes */ 
@@ -402,4 +505,6 @@ EXT char *cfg[SRVBUFLEN], *cfg_cmdline[SRVBUFLEN];
 EXT struct custom_primitives custom_primitives_registry;
 EXT pm_cfgreg_t custom_primitives_type;
 EXT int rows;
+
+static char default_proc_name[] = "default";
 #undef EXT

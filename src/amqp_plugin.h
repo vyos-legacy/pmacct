@@ -24,6 +24,8 @@
 #include <amqp_tcp_socket.h>
 #include <sys/poll.h>
 
+/* defines */
+
 /* structures */
 
 /* prototypes */
@@ -34,7 +36,6 @@
 #endif
 EXT void amqp_plugin(int, struct configuration *, void *);
 EXT void amqp_cache_purge(struct chained_cache *[], int);
-EXT void amqp_handle_routing_key_dyn_strings(char *, int, char *, struct chained_cache *);
 
 /* global vars */
 EXT void (*insert_func)(struct primitives_ptrs *, struct insert_data *); /* pointer to INSERT function */

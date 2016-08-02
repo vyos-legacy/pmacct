@@ -19,7 +19,10 @@ DESC:		SQL table name.
 VAR:		$EFFECTIVE_SQL_TABLE
 DESC:		SQL table name. This is defined only if the 'sql_table' value
 		contains variables. Variables are replaced here by their actual
-		values.
+		values. This value will be inaccurate if multiple SQL tables
+		are written as part of the same purge, ie. as a result of: 1)
+		nfacctd daemon but nfacctd_time_new set to false (default); 2)
+		$peer_src_ip part of the SQL table name.
 
 VAR:		$SQL_HOST
 DESC:		SQL server hostname (if any)
@@ -35,12 +38,6 @@ VAR:		$SAMPLING_RATE
 DESC:		Packet sampling ratio (1 out of N). It is defined only if packet
 		sampling is actually enabled via a 'sampling_rate' configuration
 		directive (see CONFIG-KEYS for further details about the key). 
-
-VAR:		$SQL_RECOVERY_LOGFILE
-DESC:		Full pathname to the logfile used when recovery mode is enabled.
-		This is defined only if a 'sql_recovery_logfile' configuration
-		directive is defined (see CONFIG-KEYS for further details about
-		the key). Note: sql_recovery_logfile is being deprecated. 
 
 VAR:		$SQL_RECOVERY_BACKUP_HOST
 DESC:		SQL server hostname contacted if the primary server fails. This

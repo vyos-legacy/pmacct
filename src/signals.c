@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -60,12 +60,13 @@ void handle_falling_child()
     if (failed_plugins[j]) { 
       list = search_plugin_by_pid(failed_plugins[j]);
       if (list) {
-        Log(LOG_WARNING, "WARN: connection lost to '%s-%s'; closing connection.\n", list->name, list->type.string);
+        Log(LOG_WARNING, "WARN ( %s/%s ): connection lost to '%s-%s'; closing connection.\n",
+		config.name, config.type, list->name, list->type.string);
         close(list->pipe[1]);
         delete_pipe_channel(list->pipe[1]);
         ret = delete_plugin_by_id(list->id);
         if (!ret) {
-          Log(LOG_WARNING, "WARN: no more plugins active. Shutting down.\n");
+          Log(LOG_WARNING, "WARN ( %s/%s ): no more plugins active. Shutting down.\n", config.name, config.type);
 	  if (config.pidfile) remove_pid_file(config.pidfile);
           exit(1);
         }
@@ -78,12 +79,13 @@ void handle_falling_child()
   j = waitpid(-1, 0, WNOHANG);
   list = search_plugin_by_pid(j);
   if (list) {
-    Log(LOG_WARNING, "WARN: connection lost to '%s-%s'; closing connection.\n", list->name, list->type.string);
+    Log(LOG_WARNING, "WARN ( %s/%s ): connection lost to '%s-%s'; closing connection.\n",
+	config.name, config.type, list->name, list->type.string);
     close(list->pipe[1]);
     delete_pipe_channel(list->pipe[1]);
     ret = delete_plugin_by_id(list->id);
     if (!ret) {
-      Log(LOG_WARNING, "WARN: no more plugins active. Shutting down.\n");
+      Log(LOG_WARNING, "WARN ( %s/%s ): no more plugins active. Shutting down.\n", config.name, config.type);
       if (config.pidfile) remove_pid_file(config.pidfile);
       exit(1);
     }
@@ -160,20 +162,21 @@ void reload()
     logf = parse_log_facility(config.syslog);
     if (logf == ERR) {
       config.syslog = NULL;
-      Log(LOG_WARNING, "WARN: specified syslog facility is not supported; logging to console.\n");
+      Log(LOG_WARNING, "WARN ( %s/%s ): specified syslog facility is not supported; logging to console.\n", config.name, config.type);
     }
     openlog(NULL, LOG_PID, logf);
-    Log(LOG_INFO, "INFO: Start logging ...\n");
+    Log(LOG_INFO, "INFO ( %s/%s ): Start logging ...\n", config.name, config.type);
   }
 
   if (config.logfile) {
     fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile, "a");
+    config.logfile_fd = open_output_file(config.logfile, "a", FALSE);
   }
 
   if (config.nfacctd_bgp_msglog_file) reload_log_bgp_thread = TRUE;
   if (config.nfacctd_bmp_msglog_file) reload_log_bmp_thread = TRUE;
   if (config.sfacctd_counter_file) reload_log_sf_cnt = TRUE;
+  if (config.telemetry_msglog_file) reload_log_telemetry_thread = TRUE;
 
   signal(SIGHUP, reload);
 }
@@ -184,10 +187,12 @@ void push_stats()
 
   if (config.acct_type == ACCT_PM) {
     if (config.dev) {
-      if (pcap_stats(glob_pcapt, &ps) < 0) Log(LOG_INFO, "\npcap_stats: %s\n", pcap_geterr(glob_pcapt));
-      Log(LOG_NOTICE, "\n");
-      Log(LOG_NOTICE, "%s: (%u) %u packets received by filter\n", config.dev, now, ps.ps_recv);
-      Log(LOG_NOTICE, "%s: (%u) %u packets dropped by kernel\n", config.dev, now, ps.ps_drop);
+      if (pcap_stats(glob_pcapt, &ps) < 0) Log(LOG_INFO, "INFO ( %s/%s ): pcap_stats: %s\n",
+						config.name, config.type, pcap_geterr(glob_pcapt));
+      Log(LOG_NOTICE, "NOTICE ( %s/%s ): %s: (%u) %u packets received by filter\n",
+		config.name, config.type, config.dev, now, ps.ps_recv);
+      Log(LOG_NOTICE, "NOTICE ( %s/%s ): %s: (%u) %u packets dropped by kernel\n",
+		config.name, config.type, config.dev, now, ps.ps_drop);
     }
   }
   else if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF)

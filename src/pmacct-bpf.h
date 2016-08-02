@@ -37,7 +37,7 @@
  *
  *      @(#)bpf.h       7.1 (Berkeley) 5/7/91
  *
- * @(#) $Header: /home/repo-0.14/pmacct/src/pmacct-bpf.h,v 1.1.1.1 2009/02/19 10:20:23 paolo Exp $ (LBL)
+ * @(#) $Header$ (LBL)
  */
 
 /*

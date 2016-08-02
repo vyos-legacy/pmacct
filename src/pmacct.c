@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -27,9 +27,6 @@
 #include "imt_plugin.h"
 #include "bgp/bgp_packet.h"
 #include "bgp/bgp.h"
-#ifdef WITH_JANSSON
-#include <jansson.h>
-#endif
 
 /* prototypes */
 int Recv(int, unsigned char **);
@@ -57,6 +54,7 @@ void pmc_custom_primitive_header_print(char *, int, struct imt_custom_primitive_
 void pmc_custom_primitive_value_print(char *, int, char *, struct imt_custom_primitive_entry *, int);
 void pmc_vlen_prims_get(struct pkt_vlen_hdr_primitives *, pm_cfgreg_t, char **);
 void pmc_printf_csv_label(struct pkt_vlen_hdr_primitives *, pm_cfgreg_t, char *, char *);
+void pmc_lower_string(char *);
 
 /* vars */
 struct imt_custom_primitives pmc_custom_primitives_registry;
@@ -87,7 +85,7 @@ void usage_client(char *prog)
   printf("  -n\t<bytes | packets | flows | all> \n\tSelect the counters to print (applies to -N)\n");
   printf("  -S\tSum counters instead of returning a single counter for each request (applies to -N)\n");
   printf("  -a\tDisplay all table fields (even those currently unused)\n");
-  printf("  -c\t< src_mac | dst_mac | vlan | cos | src_host | dst_host | src_net | dst_net | src_mask | dst_mask | \n\t src_port | dst_port | tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | \n\t sum_port | in_iface | out_iface | tag | tag2 | flows | class | std_comm | ext_comm | as_path | \n\t peer_src_ip | peer_dst_ip | peer_src_as | peer_dst_as | src_as_path | src_std_comm | src_med | \n\t src_ext_comm | src_local_pref | mpls_vpn_rd | etype | sampling_rate | pkt_len_distrib |\n\t post_nat_src_host | post_nat_dst_host | post_nat_src_port | post_nat_dst_port | nat_event |\n\t timestamp_start | timestamp_end | mpls_label_top | mpls_label_bottom | mpls_stack_depth | label | \n\t src_host_country | dst_host_country > \n\tSelect primitives to match (required by -N and -M)\n");
+  printf("  -c\t< src_mac | dst_mac | vlan | cos | src_host | dst_host | src_net | dst_net | src_mask | dst_mask | \n\t src_port | dst_port | tos | proto | src_as | dst_as | sum_mac | sum_host | sum_net | sum_as | \n\t sum_port | in_iface | out_iface | tag | tag2 | flows | class | std_comm | ext_comm | as_path | \n\t peer_src_ip | peer_dst_ip | peer_src_as | peer_dst_as | src_as_path | src_std_comm | src_med | \n\t src_ext_comm | src_local_pref | mpls_vpn_rd | etype | sampling_rate | pkt_len_distrib |\n\t post_nat_src_host | post_nat_dst_host | post_nat_src_port | post_nat_dst_port | nat_event |\n\t timestamp_start | timestamp_end | timestamp_arrival | mpls_label_top | mpls_label_bottom | \n\t mpls_stack_depth | label | src_host_country | dst_host_country | export_proto_seqno | \n\t export_proto_version> \n\tSelect primitives to match (required by -N and -M)\n");
   printf("  -T\t<bytes | packets | flows>,[<# how many>] \n\tOutput top N statistics (applies to -M and -s)\n");
   printf("  -e\tClear statistics\n");
   printf("  -i\tShow time (in seconds) since statistics were last cleared (ie. pmacct -e)\n");
@@ -102,7 +100,7 @@ void usage_client(char *prog)
   printf("  -E\tSet sparator for CSV format\n");
   printf("  -I\tSet timestamps in 'since Epoch' format\n");
   printf("  -u\tLeave IP protocols in numerical format\n");
-  printf("  -o\tPrint IP prefixes in a different field than IP addresses (temporary)\n");
+  printf("  -o\tPrint IP prefixes in the same field as IP addresses (temporary, 1.5 compatible)\n");
   printf("  -V\tPrint version and exit\n");
   printf("\n");
   printf("  See QUICKSTART file in the distribution for examples\n");
@@ -226,6 +224,9 @@ void write_stats_header_formatted(pm_cfgreg_t what_to_count, pm_cfgreg_t what_to
 
     printf("TIMESTAMP_START                ");
     printf("TIMESTAMP_END                  ");
+    printf("TIMESTAMP_ARRIVAL              ");
+    printf("SEQNO       ");
+    printf("EXPORT_PROTO_VERSION  ");
 
     /* all custom primitives printed here */
     {
@@ -341,6 +342,9 @@ void write_stats_header_formatted(pm_cfgreg_t what_to_count, pm_cfgreg_t what_to
 
     if (what_to_count_2 & COUNT_TIMESTAMP_START) printf("TIMESTAMP_START                ");
     if (what_to_count_2 & COUNT_TIMESTAMP_END) printf("TIMESTAMP_END                  "); 
+    if (what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL) printf("TIMESTAMP_ARRIVAL              "); 
+    if (what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) printf("EXPORT_PROTO_SEQNO  "); 
+    if (what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) printf("EXPORT_PROTO_VERSION  "); 
 
     /* all custom primitives printed here */
     {
@@ -447,6 +451,9 @@ void write_stats_header_csv(pm_cfgreg_t what_to_count, pm_cfgreg_t what_to_count
     printf("%sMPLS_STACK_DEPTH", write_sep(sep, &count));
     printf("%sTIMESTAMP_START", write_sep(sep, &count));
     printf("%sTIMESTAMP_END", write_sep(sep, &count));
+    printf("%sTIMESTAMP_ARRIVAL", write_sep(sep, &count));
+    printf("%sSEQNO", write_sep(sep, &count));
+    printf("%sEXPORT_PROTO_VERSION", write_sep(sep, &count));
     /* all custom primitives printed here */
     {
       char cp_str[SRVBUFLEN];
@@ -543,6 +550,9 @@ void write_stats_header_csv(pm_cfgreg_t what_to_count, pm_cfgreg_t what_to_count
 
     if (what_to_count_2 & COUNT_TIMESTAMP_START) printf("%sTIMESTAMP_START", write_sep(sep, &count));
     if (what_to_count_2 & COUNT_TIMESTAMP_END) printf("%sTIMESTAMP_END", write_sep(sep, &count));
+    if (what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL) printf("%sTIMESTAMP_ARRIVAL", write_sep(sep, &count));
+    if (what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) printf("%sEXPORT_PROTO_SEQNO", write_sep(sep, &count));
+    if (what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) printf("%sEXPORT_PROTO_VERSION", write_sep(sep, &count));
 
     /* all custom primitives printed here */
     {
@@ -637,7 +647,7 @@ int main(int argc,char **argv)
   char *clibuf, *bufptr;
   unsigned char *largebuf, *elem, *ct, *pldt, *cpt;
   char ethernet_address[18], ip_address[INET6_ADDRSTRLEN];
-  char path[128], file[128], password[9], rd_str[SRVBUFLEN];
+  char path[SRVBUFLEN], file[SRVBUFLEN], password[9], rd_str[SRVBUFLEN], tmpbuf[SRVBUFLEN];
   char *as_path, empty_aspath[] = "^$", empty_string[] = "", *bgp_comm, unknown_pkt_len_distrib[] = "not_recv";
   int sd, buflen, unpacked, printed;
   int counter=0, ct_idx=0, ct_num=0, sep_len=0;
@@ -647,7 +657,7 @@ int main(int argc,char **argv)
 
   /* mrtg stuff */
   char match_string[LARGEBUFLEN], *match_string_token, *match_string_ptr;
-  char count[128], *count_token[N_PRIMITIVES], *count_ptr;
+  char count[SRVBUFLEN], *count_token[N_PRIMITIVES], *count_ptr;
   int count_index = 0, match_string_index = 0, index = 0;
   pm_cfgreg_t count_token_int[N_PRIMITIVES];
   
@@ -702,7 +712,7 @@ int main(int argc,char **argv)
   which_counter = FALSE;
   topN_counter = FALSE;
   topN_howmany = FALSE;
-  tmp_net_own_field = FALSE;
+  tmp_net_own_field = TRUE;
   sum_counters = FALSE;
   num_counters = FALSE;
   fetch_from_file = FALSE;
@@ -727,7 +737,9 @@ int main(int argc,char **argv)
       break;
     case 'c':
       strlcpy(count, optarg, sizeof(count));
+      pmc_lower_string(count);
       count_ptr = count;
+
       while ((*count_ptr != '\0') && (count_index <= N_PRIMITIVES-1)) {
         count_token[count_index] = pmc_extract_token(&count_ptr, ',');
 	if (!strcmp(count_token[count_index], "src_host")) {
@@ -974,6 +986,18 @@ int main(int argc,char **argv)
           count_token_int[count_index] = COUNT_INT_TIMESTAMP_END;
           what_to_count_2 |= COUNT_TIMESTAMP_END;
         }
+        else if (!strcmp(count_token[count_index], "timestamp_arrival")) {
+          count_token_int[count_index] = COUNT_INT_TIMESTAMP_ARRIVAL;
+          what_to_count_2 |= COUNT_TIMESTAMP_ARRIVAL;
+        }
+        else if (!strcmp(count_token[count_index], "export_proto_seqno")) {
+          count_token_int[count_index] = COUNT_INT_EXPORT_PROTO_SEQNO;
+          what_to_count_2 |= COUNT_EXPORT_PROTO_SEQNO;
+        }
+        else if (!strcmp(count_token[count_index], "export_proto_version")) {
+          count_token_int[count_index] = COUNT_INT_EXPORT_PROTO_VERSION;
+          what_to_count_2 |= COUNT_EXPORT_PROTO_VERSION;
+        }
         else if (!strcmp(count_token[count_index], "label")) {
           count_token_int[count_index] = COUNT_INT_LABEL;
           what_to_count_2 |= COUNT_LABEL;
@@ -1034,24 +1058,28 @@ int main(int argc,char **argv)
       want_counter = TRUE;
       break;
     case 'n':
-      if (!strcmp(optarg, "bytes")) which_counter = 0;
-      else if (!strcmp(optarg, "packets")) which_counter = 1;
-      else if (!strcmp(optarg, "flows")) which_counter = 3;
-      else if (!strcmp(optarg, "all")) which_counter = 2;
-      else printf("WARN: -n, ignoring unknown counter type: %s.\n", optarg);
+      strlcpy(tmpbuf, optarg, sizeof(tmpbuf));
+      pmc_lower_string(tmpbuf);
+      if (!strcmp(tmpbuf, "bytes")) which_counter = 0;
+      else if (!strcmp(tmpbuf, "packets")) which_counter = 1;
+      else if (!strcmp(tmpbuf, "flows")) which_counter = 3;
+      else if (!strcmp(tmpbuf, "all")) which_counter = 2;
+      else printf("WARN: -n, ignoring unknown counter type: %s.\n", tmpbuf);
       break;
     case 'T':
-      topN_howmany_ptr = strchr(optarg, ',');
+      strlcpy(tmpbuf, optarg, sizeof(tmpbuf));
+      pmc_lower_string(tmpbuf);
+      topN_howmany_ptr = strchr(tmpbuf, ',');
       if (topN_howmany_ptr) {
 	*topN_howmany_ptr = '\0';
 	topN_howmany_ptr++;
 	topN_howmany = strtoul(topN_howmany_ptr, &endptr, 10);
       }
 
-      if (!strcmp(optarg, "bytes")) topN_counter = 1;
-      else if (!strcmp(optarg, "packets")) topN_counter = 2;
-      else if (!strcmp(optarg, "flows")) topN_counter = 3;
-      else printf("WARN: -T, ignoring unknown counter type: %s.\n", optarg);
+      if (!strcmp(tmpbuf, "bytes")) topN_counter = 1;
+      else if (!strcmp(tmpbuf, "packets")) topN_counter = 2;
+      else if (!strcmp(tmpbuf, "flows")) topN_counter = 3;
+      else printf("WARN: -T, ignoring unknown counter type: %s.\n", tmpbuf);
       break;
     case 'S':
       sum_counters = TRUE;
@@ -1073,18 +1101,20 @@ int main(int argc,char **argv)
       want_all_fields = TRUE;
       break;
     case 'o':
-      tmp_net_own_field = TRUE;
+      tmp_net_own_field = FALSE;
       break;
     case 'r':
       q.type |= WANT_RESET;
       want_reset = TRUE;
       break;
     case 'O':
-      if (!strcmp(optarg, "formatted"))
+      strlcpy(tmpbuf, optarg, sizeof(tmpbuf));
+      pmc_lower_string(tmpbuf);
+      if (!strcmp(tmpbuf, "formatted"))
         want_output = PRINT_OUTPUT_FORMATTED;
-      else if (!strcmp(optarg, "csv"))
+      else if (!strcmp(tmpbuf, "csv"))
         want_output = PRINT_OUTPUT_CSV;
-      else if (!strcmp(optarg, "json")) {
+      else if (!strcmp(tmpbuf, "json")) {
 #ifdef WITH_JANSSON
         want_output = PRINT_OUTPUT_JSON;
 #else
@@ -1092,15 +1122,15 @@ int main(int argc,char **argv)
         printf("WARN: -O set to json but will produce no output (missing --enable-jansson).\n");
 #endif
       }
-      else if (!strcmp(optarg, "event_formatted")) {
+      else if (!strcmp(tmpbuf, "event_formatted")) {
 	want_output = PRINT_OUTPUT_FORMATTED;
         want_output |= PRINT_OUTPUT_EVENT;
       }
-      else if (!strcmp(optarg, "event_csv")) {
+      else if (!strcmp(tmpbuf, "event_csv")) {
 	want_output = PRINT_OUTPUT_CSV;
         want_output |= PRINT_OUTPUT_EVENT;
       }
-      else printf("WARN: -O, ignoring unknown output value: '%s'.\n", optarg);
+      else printf("WARN: -O, ignoring unknown output value: '%s'.\n", tmpbuf);
       break;
     case 'E':
       strlcpy(sep, optarg, sizeof(sep));
@@ -1807,6 +1837,32 @@ int main(int argc,char **argv)
 	  request.pnat.timestamp_end.tv_sec = mktime(&tmp);
 	  request.pnat.timestamp_end.tv_usec = residual;
         }
+        else if (!strcmp(count_token[match_string_index], "timestamp_arrival")) {
+          struct tm tmp;
+          char *delim = strchr(match_string_token, '.');
+          u_int32_t residual = 0;
+
+          if (delim) {
+            /* we have residual time after secs */
+            *delim = '\0';
+            delim++;
+            residual = strtol(delim, NULL, 0);
+          }
+
+          strptime(match_string_token, "%Y-%m-%d %H:%M:%S", &tmp);
+          request.pnat.timestamp_arrival.tv_sec = mktime(&tmp);
+          request.pnat.timestamp_arrival.tv_usec = residual;
+        }
+        else if (!strcmp(count_token[match_string_index], "export_proto_seqno")) {
+          char *endptr;
+
+          request.data.export_proto_seqno = strtoul(match_string_token, &endptr, 10);
+        }
+        else if (!strcmp(count_token[match_string_index], "export_proto_version")) {
+          char *endptr;
+
+          request.data.export_proto_version = strtoul(match_string_token, &endptr, 10);
+        }
 	else if (!strcmp(count_token[match_string_index], "label")) {
 	  // XXX: to be supported in future
           printf("ERROR: -M and -N are not supported (yet) against variable-length primitives (ie. label)\n");
@@ -1936,10 +1992,10 @@ int main(int argc,char **argv)
       }
     }
 
-    if ((what_to_count & COUNT_SRC_HOST) && (what_to_count & COUNT_SRC_NET) ||
-        (what_to_count & COUNT_DST_HOST) && (what_to_count & COUNT_DST_NET)) {
+    if (((what_to_count & COUNT_SRC_HOST) && (what_to_count & COUNT_SRC_NET)) ||
+        ((what_to_count & COUNT_DST_HOST) && (what_to_count & COUNT_DST_NET))) {
       if (!tmp_net_own_field) {
-        printf("ERROR: src_host, src_net and dst_host, dst_net are mutually exclusive: set -o.\n");
+        printf("ERROR: src_host, src_net and dst_host, dst_net are mutually exclusive\n");
         exit(1);
       }
     }
@@ -2511,6 +2567,24 @@ int main(int argc,char **argv)
           else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), tstamp_str);
         }
 
+        if (!have_wtc || (what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL)) {
+          char tstamp_str[SRVBUFLEN];
+
+          pmc_compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_arrival, TRUE, want_tstamp_since_epoch);
+          if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-30s ", tstamp_str);
+          else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), tstamp_str);
+        }
+
+        if (!have_wtc || (what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO)) {
+          if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-18u  ", acc_elem->primitives.export_proto_seqno);
+          else if (want_output & PRINT_OUTPUT_CSV) printf("%s%u", write_sep(sep_ptr, &count), acc_elem->primitives.export_proto_seqno);
+        }
+
+        if (!have_wtc || (what_to_count_2 & COUNT_EXPORT_PROTO_VERSION)) {
+          if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-20u  ", acc_elem->primitives.export_proto_version);
+          else if (want_output & PRINT_OUTPUT_CSV) printf("%s%u", write_sep(sep_ptr, &count), acc_elem->primitives.export_proto_version);
+        }
+
         /* all custom primitives printed here */
         {
           char cp_str[SRVBUFLEN];
@@ -2777,7 +2851,7 @@ int Recv(int sd, unsigned char **buf)
           elem += unpacked;
 	}
 	/* check 2: enough space in dss */
-	if (((u_int32_t)elem+num) > (u_int32_t)sbrk(0)) sbrk(LARGEBUFLEN);
+	if (((char *)elem+num) > (char *)sbrk(0)) sbrk(LARGEBUFLEN);
 
 	memcpy(elem, rxbuf, num);
 	unpacked += num;
@@ -2963,6 +3037,8 @@ int pmc_bgp_rd2str(char *str, rd_t *rd)
     sprintf(str, "unknown");
     break;
   }
+
+  return TRUE;
 }
 
 int pmc_bgp_str2rd(rd_t *output, char *value)
@@ -3055,13 +3131,13 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
   json_t *obj = json_object(), *kv;
   
   if (wtc & COUNT_TAG) {
-    kv = json_pack("{sI}", "tag", pbase->tag);
+    kv = json_pack("{sI}", "tag", (json_int_t)pbase->tag);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_TAG2) {
-    kv = json_pack("{sI}", "tag2", pbase->tag2);
+    kv = json_pack("{sI}", "tag2", (json_int_t)pbase->tag2);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -3097,13 +3173,13 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
   }
 
   if (wtc & COUNT_VLAN) {
-    kv = json_pack("{sI}", "vlan", pbase->vlan_id);
+    kv = json_pack("{sI}", "vlan", (json_int_t)pbase->vlan_id);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_COS) {
-    kv = json_pack("{sI}", "cos", pbase->cos);
+    kv = json_pack("{sI}", "cos", (json_int_t)pbase->cos);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -3117,13 +3193,13 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
 #endif
 
   if (wtc & COUNT_SRC_AS) {
-    kv = json_pack("{sI}", "as_src", pbase->src_as);
+    kv = json_pack("{sI}", "as_src", (json_int_t)pbase->src_as);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_DST_AS) {
-    kv = json_pack("{sI}", "as_dst", pbase->dst_as);
+    kv = json_pack("{sI}", "as_dst", (json_int_t)pbase->dst_as);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -3176,25 +3252,25 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
   }
 
   if (wtc & COUNT_LOCAL_PREF) {
-    kv = json_pack("{sI}", "local_pref", pbgp->local_pref);
+    kv = json_pack("{sI}", "local_pref", (json_int_t)pbgp->local_pref);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_MED) {
-    kv = json_pack("{sI}", "med", pbgp->med);
+    kv = json_pack("{sI}", "med", (json_int_t)pbgp->med);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_PEER_SRC_AS) {
-    kv = json_pack("{sI}", "peer_as_src", pbgp->peer_src_as);
+    kv = json_pack("{sI}", "peer_as_src", (json_int_t)pbgp->peer_src_as);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_PEER_DST_AS) {
-    kv = json_pack("{sI}", "peer_as_dst", pbgp->peer_dst_as);
+    kv = json_pack("{sI}", "peer_as_dst", (json_int_t)pbgp->peer_dst_as);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -3261,25 +3337,25 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
   }
 
   if (wtc & COUNT_SRC_LOCAL_PREF) {
-    kv = json_pack("{sI}", "src_local_pref", pbgp->src_local_pref);
+    kv = json_pack("{sI}", "src_local_pref", (json_int_t)pbgp->src_local_pref);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_SRC_MED) {
-    kv = json_pack("{sI}", "src_med", pbgp->src_med);
+    kv = json_pack("{sI}", "src_med", (json_int_t)pbgp->src_med);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_IN_IFACE) {
-    kv = json_pack("{sI}", "iface_in", pbase->ifindex_in);
+    kv = json_pack("{sI}", "iface_in", (json_int_t)pbase->ifindex_in);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_OUT_IFACE) {
-    kv = json_pack("{sI}", "iface_out", pbase->ifindex_out);
+    kv = json_pack("{sI}", "iface_out", (json_int_t)pbase->ifindex_out);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -3322,25 +3398,25 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
   }
 
   if (wtc & COUNT_SRC_NMASK) {
-    kv = json_pack("{sI}", "mask_src", pbase->src_nmask);
+    kv = json_pack("{sI}", "mask_src", (json_int_t)pbase->src_nmask);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_DST_NMASK) {
-    kv = json_pack("{sI}", "mask_dst", pbase->dst_nmask);
+    kv = json_pack("{sI}", "mask_dst", (json_int_t)pbase->dst_nmask);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_SRC_PORT) {
-    kv = json_pack("{sI}", "port_src", pbase->src_port);
+    kv = json_pack("{sI}", "port_src", (json_int_t)pbase->src_port);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_DST_PORT) {
-    kv = json_pack("{sI}", "port_dst", pbase->dst_port);
+    kv = json_pack("{sI}", "port_dst", (json_int_t)pbase->dst_port);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -3397,19 +3473,19 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
 
   if (wtc & COUNT_IP_PROTO) {
     if (!want_ipproto_num) kv = json_pack("{ss}", "ip_proto", _protocols[pbase->proto].name);
-    else kv = json_pack("{sI}", "ip_proto", _protocols[pbase->proto].number);
+    else kv = json_pack("{sI}", "ip_proto", (json_int_t)_protocols[pbase->proto].number);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_IP_TOS) {
-    kv = json_pack("{sI}", "tos", pbase->tos);
+    kv = json_pack("{sI}", "tos", (json_int_t)pbase->tos);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_SAMPLING_RATE) {
-    kv = json_pack("{sI}", "sampling_rate", pbase->sampling_rate);
+    kv = json_pack("{sI}", "sampling_rate", (json_int_t)pbase->sampling_rate);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -3440,37 +3516,37 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
   }
 
   if (wtc_2 & COUNT_POST_NAT_SRC_PORT) {
-    kv = json_pack("{sI}", "post_nat_port_src", pnat->post_nat_src_port);
+    kv = json_pack("{sI}", "post_nat_port_src", (json_int_t)pnat->post_nat_src_port);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_POST_NAT_DST_PORT) {
-    kv = json_pack("{sI}", "post_nat_port_dst", pnat->post_nat_dst_port);
+    kv = json_pack("{sI}", "post_nat_port_dst", (json_int_t)pnat->post_nat_dst_port);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_NAT_EVENT) {
-    kv = json_pack("{sI}", "nat_event", pnat->nat_event);
+    kv = json_pack("{sI}", "nat_event", (json_int_t)pnat->nat_event);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_MPLS_LABEL_TOP) {
-    kv = json_pack("{sI}", "mpls_label_top", pmpls->mpls_label_top);
+    kv = json_pack("{sI}", "mpls_label_top", (json_int_t)pmpls->mpls_label_top);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_MPLS_LABEL_BOTTOM) {
-    kv = json_pack("{sI}", "mpls_label_bottom", pmpls->mpls_label_bottom);
+    kv = json_pack("{sI}", "mpls_label_bottom", (json_int_t)pmpls->mpls_label_bottom);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_MPLS_STACK_DEPTH) {
-    kv = json_pack("{sI}", "mpls_stack_depth", pmpls->mpls_stack_depth);
+    kv = json_pack("{sI}", "mpls_stack_depth", (json_int_t)pmpls->mpls_stack_depth);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -3485,6 +3561,25 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
   if (wtc_2 & COUNT_TIMESTAMP_END) {
     pmc_compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_end, TRUE, want_tstamp_since_epoch);
     kv = json_pack("{ss}", "timestamp_end", tstamp_str);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+
+  if (wtc_2 & COUNT_TIMESTAMP_ARRIVAL) {
+    pmc_compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_arrival, TRUE, want_tstamp_since_epoch);
+    kv = json_pack("{ss}", "timestamp_arrival", tstamp_str);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+
+  if (wtc_2 & COUNT_EXPORT_PROTO_SEQNO) {
+    kv = json_pack("{sI}", "export_proto_seqno", (json_int_t)pbase->export_proto_seqno);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+
+  if (wtc_2 & COUNT_EXPORT_PROTO_VERSION) {
+    kv = json_pack("{sI}", "export_proto_version", (json_int_t)pbase->export_proto_version);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -3514,17 +3609,17 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
   }
 
   if (flow_type != NF9_FTYPE_EVENT && flow_type != NF9_FTYPE_OPTION) {
-    kv = json_pack("{sI}", "packets", packet_counter);
+    kv = json_pack("{sI}", "packets", (json_int_t)packet_counter);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
     if (wtc & COUNT_FLOWS) {
-      kv = json_pack("{sI}", "flows", flow_counter);
+      kv = json_pack("{sI}", "flows", (json_int_t)flow_counter);
       json_object_update_missing(obj, kv);
       json_decref(kv);
     }
 
-    kv = json_pack("{sI}", "bytes", bytes_counter);
+    kv = json_pack("{sI}", "bytes", (json_int_t)bytes_counter);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -3756,4 +3851,14 @@ void pmc_printf_csv_label(struct pkt_vlen_hdr_primitives *pvlen, pm_cfgreg_t wtc
   pmc_vlen_prims_get(pvlen, wtc, &label_ptr);
   if (!label_ptr) label_ptr = empty_string;
   printf("%s%s", sep, label_ptr);
+}
+
+void pmc_lower_string(char *string)
+{
+  int i = 0;
+
+  while (string[i] != '\0') {
+    string[i] = tolower(string[i]);
+    i++;
+  }
 }

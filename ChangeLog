@@ -1,5 +1,215 @@
-pmacct (Promiscuous mode IP Accounting package) v1.5.2
-pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+pmacct (Promiscuous mode IP Accounting package) v1.6.0
+pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+
+1.6.0 -- 07-06-2016
+  + Streamed telemetry daemon: quoting Cisco IOS-XR Telemetry Configuration
+    Guide at the time of this writing: "Streaming telemetry [ .. ] data
+    can be used for analysis and troubleshooting purposes to maintain the
+    health of the network. This is achieved by leveraging the capabilities of
+    machine-to-machine communication. [ .. ]" Streamed telemetry support comes
+    in two flavours: 1) a telemetry thread can be started in existing daemons,
+    ie. sFlow, NetFlow/IPFIX, etc. for the purpose of data correlation and 2)
+    a new daemon pmtelemetryd for standalone consumpton of data. Streamed
+    telemetry data can be logged real-time and/or dumped at regular time
+    intervals to flat-files, RabbitMQ or Kafka brokers.
+  + BMP daemon: introduced support for Route Monitoring messages. RM messages
+    "provide an initial dump of all routes received from a peer as well as an
+    ongoing mechanism that sends the incremental routes advertised and
+    withdrawn by a peer to the monitoring station". Like for BMP events, RM
+    messages can be logged real-time and/or dumped at regular time intervals
+    to flat-files, RabbiMQ and Kafka brokers. RM messages are also saved in a
+    RIB structure for IP prefix lookup.
+  + uacctd: ULOG support switched to NFLOG, the newer and L3 independent Linux
+    packet logging framework. One of the key advantages of NFLOG is support for
+    IPv4 and IPv6 (whereas ULOG was restricted to IPv4 only). The code has been
+    contributed by Vincent Bernat ( @vincentbernat ). 
+  + build system: it was modernized so not to rely on specific and old versions
+    of automake and autoconf, as it was the case until 1.5. Among the things,
+    pkg-config and libtool are leveraged and an autogen.sh script is generated.
+    The code has been contributed by Vincent Bernat ( @vincentbernat ).
+  + sfacctd: RabbitMQ and Kafka support was introduced to real-time log and/
+    or dump at regular time intervals of sFlow counters. This is in addition
+    to existing support for flat-files.
+  + maps_index: several improvements were carried out in the area of indexing
+    of maps: optimizations to pretag_index_fill() and pretag_index_lookup() to
+    improve lookup speeds; optimized id_entry structure, ie. by splitting key
+    and non-key parts, and hashing key in order to consume less memory; added
+    duplicate entry detection (cause of sudden index destruction);
+    pretag_index_destroy() destroys hash keys for each index entry, solving a
+    memory leak issue. Thanks to Job Snijders ( @job ) for his support.
+  + Introduced 'export_proto_seqno' aggregation primitive to report on
+    sequence number of the export protocol (ie. NetFlow, sFlow, IPFIX). This
+    feature may enable more advanced offline analysis of packet loss, out of
+    orders, etc. over time windows than basic online analytics provided by the
+    daemons. 
+  + log.c: logging moved from standard output (stdout) to standard error
+    (stderr) so to not conflict with stdout printing of statistics (print
+    plugin). Thanks to Jim Westfall ( @jwestfall69 ) for his support. 
+  + print plugin: introduced a new print_output_lock_file config directive 
+    to lock standard output (stdout) output so to prevent multiple processes
+    (instances of the same print plugin or different instances of print plugin)
+    overlap output. Thanks to Jim Westfall ( @jwestfall69 ) for his support. 
+  + pkt_handlers.c: euristics in NetFlow v9/IPFIX VLAN handler were improved
+    for the case of flows in egress direction. Also IP protocol checks were
+    removed for UDP/TCP ports and TCP flags in case the export protocol is
+    NetFlow v9/IPFIX. Thanks to Alexander Ponamarchuk for his support.
+  ! Code refactoring: improved re-usability of much of the BGP code (so to
+    make it possible to use it as a library for some BMP daemon features, ie.
+    Route Monitoring messages support); consolidated functions to handle log
+    and print plugin output files; improved log messages to always include
+    process name and type.
+  ! fix, bpf_filter.c: issue compiling against libpcap 1.7.x; introduced a
+    check for existing bpf_filter() in libpcap in order to prevent namespace
+    conflicts.
+  ! fix, tmp_net_own_field default value changed to true. This knob can be
+    still switched to false for this release but is going to be removed soon.
+  ! fix, cfg.c, cfg_handlers.c, pmacct.c: some configuration directives and
+    pmacct CL parameters requiring string parsing, ie. -T -O -c, are now
+    passed through tolower().
+  ! fix, MongoDB plugin: removed version check around mongo_create_index()
+    and now defaulting to latest MongoDB C legacy driver API. This is due to
+    some versioning issue in the driver.
+  ! fix, timestamp_arrival: primitive was reporting incorrect results (ie.
+    always zero) if timestamp_start or timestamp_end were not also specified
+    as part of the same aggregation method. Many thanks to Vincent Morel for
+    reporting the issue.
+  ! fix, thread stack: a value of 0, default, leaves the stack size to the
+    system default or pmacct minimum (8192000) if system default is too low.
+    Some systems may throw an error if the defined size is not a multiple of
+    the system page size.
+  ! fix, nfacctd: improved NetFlow v9/IPFIX parsing. Added new length checks
+    and fixed some existing checks. Thanks to Robert Wuttke ( @Benocs ) for his
+    support.
+  ! fix, pretag_handlers.c: BPAS_map_bgp_nexthop_handler() and BPAS_map_bgp_
+    peer_dst_as_handler() were not setting a func_type.
+  ! fix, JSON support: Jansson 2.2 does not have json_object_update_missing()
+    function which was introduced in 2.3. This is not provided as part of a
+    jansson.c file and compiled in conditionally, if needed. Jansson 2.2 is
+    still shipped along by some recent OS releases. Thanks to Vincent Bernat
+    ( @vincentbernat ) for contributing the patch.
+  ! fix, log.c: use a format string when calling syslog(). Passing directly a
+    potentially uncontrolled string could crash the program if the string
+    contains formatting parameters. Thanks to Vincent Bernat ( @vincentbernat )
+    for contributing the patch.
+  ! fix, sfacctd.c: default value for config.sfacctd_counter_max_nodes was set
+    after sf_cnt_link_misc_structs(). Thanks to Robin Douine for his support
+    resolving the issue.
+  ! fix, sfacctd.c: timestamp was consistently being reported as null in sFlow
+    counters output. Thanks to Robin Douine for his support resolving the issue.
+  ! fix, SQL plugins: $SQL_HISTORY_BASETIME environment variable was reporting a
+    wrong value (next basetime) in the sql_trigger_exec script. Thanks to Rain
+    Nõmm for reporting the issue.
+  ! fix, pretag.c: in pretag_index_fill(), replaced memcpy() with hash_dup_key()
+    also a missing res_fdata initialization in pretag_index_lookup() was solved;
+    these issues were originating false negatives upon lookup. Thanks to Rain
+    Nõmm fo his suppor.
+  ! fix, ISIS daemon: hash_* functions renamed into isis_hash_* to avoid name
+    space clashes with their BGP daemon counter-parts.
+  ! fix, kafka_common.c: rd_kafka_conf_set_log_cb moved to p_kafka_init_host()
+    due to crashes seen in p_kafka_connect_to_produce(). Thanks to Paul Mabey
+    for his support resolving the issue.
+  ! fix, bgp_lookup.c: bgp_node_match_* were not returning any match in
+    bgp_follow_nexthop_lookup(). Thanks to Tim Jackson ( @jackson-tim ) for his
+    support resolving the issue.
+  ! fix, sql_common.c: crashes observed when nfacctd_stitching was set to true
+    and nfacctd_time_new was set to false. Thanks to Jaroslav Jiráse
+    ( @jjirasek ) for his support solving the issue.
+  - SQL plugins: sql_recovery_logfile feature was removed from the code due
+    to lack of support and interest. Along with it, also pmmyplay and pmpgplay
+    tools have been removed. 
+  - pre_tag_map: removed support for mpls_pw_id due to lack of interest.
+
+1.5.3 -- 14-01-2016
+  + Introduced the Kafka plugin: Apache Kafka is publish-subscribe messaging
+    rethought as a distributed commit log. Its qualities being: fast, scalable,
+    durable and distributed by design. pmacct Kafka plugin is designed to
+    send aggregated network traffic data, in JSON format, through a Kafka
+    broker to 3rd party applications.
+  + Introduced Kafka support to BGP and BMP daemons, in both their msglog
+    and dump flavors (ie. see [bgp|bmp]_daemon_msglog_kafka_broker_host and
+    [bgp_table|bmp]_dump_kafka_broker_host and companion config directives).
+  + Introduced support for a Kafka broker to be used for queueing and data
+    exchange between Core Process and plugins. plugin_pipe_kafka directive,
+    along with all other plugin_pipe_kafka_* directives, can be set globally
+    or apply on a per plugin basis - similarly to what was done for RabbitMQ
+    (ie. plugin_pipe_amqp). Support is currently restricted only to print
+    plugin.
+  + Added a new timestamp_arrival primitive to expose NetFlow/IPFIX records
+    observation time (ie. arrival at the collector), in addition to flows
+    start and end times (timestamp_start and timestamp_end respectively).
+  + plugin_pipe_amqp: feature extended to the plugins missing it: nfprobe,
+    sfprobe and tee.
+  + Introduced bgp_table_dump_latest_file: defines the full pathname to
+    pointer(s) to latest file(s). Update of the latest pointer is done
+    evaluating files modification time. Many thanks to Juan Camilo Cardona
+    ( @jccardonar ) for proposing the feature.
+  + Introduced pmacctd_nonroot config directive to allow to run pmacctd
+    from a user with non root privileges. This can be desirable on systems
+    supporting a tool like setcap, ie. 'setcap "cap_net_raw,cap_net_admin=ep"
+    /path/to/pmacctd', to assign specific system capabilities to unprivileged
+    users. Patch is courtesy by Laurent Oudot ( @loudot-tehtris ).
+  + Introduced plugin_pipe_check_core_pid: when enabled (default), validates
+    the sender of data at the plugin side. Useful when plugin_pipe_amqp or
+    plugin_pipe_kafka are enabled and hence a broker sits between the daemon
+    Core Process and the Plugins.
+  + A new debug_internal_msg config directive to specifically enable debug
+    of internal messaging between Core process and plugins.
+  ! bgp_table_dump_refresh_time, bmp_dump_refresh_time: max allowed value
+    raised to 86400 from 3600.
+  ! [n|s]facctd_as_new renamed [n|s]facctd_as; improved input checks to all
+    *_as (ie. nfacctd_as) and *_net (ie. nfacctd_net) config directives.
+  ! pkt_handlers.c: NF_sampling_rate_handler(), SF_sampling_rate_handler()
+    now perform a renormalization check at last (instead of at first) so to
+    report the case of unknown (0) sampling rate.
+  ! plugin_pipe_amqp_routing_key: default value changed to '$core_proc_name-
+    $plugin_name-$plugin_type'. Also, increased flexibility for customizing
+    the key with the use of variables (values computed at startup).
+  ! Improved amqp_receiver.py example with CL arguments and better exception
+    handling. Also removed file amqp_receiver_trace.py, example is now merged
+    in amqp_receiver.py.
+  ! fix, BGP daemon: several code optimizations and a few starving conditions
+    fixed. Thanks to Markus Weber ( @FvDxxx ) for his peer index round-robin
+    patch; thanks also to Job Snijders ( @job ) for his extensive support in
+    this area.
+  ! fix, BMP daemon: greatly improved message parsing and segment reassembly;
+    RabbitMQ broker support found broken; several code optimizations are also
+    included.
+  ! fix, bgp_table.c: bgp_table_top(), added input check to prevent crashes
+    in cases table contains no routes.
+  ! fix, networks_file: missing atoi() for networks_cache_entries. Patch is
+    courtesy by Markus Weber ( @FvDxxx ).
+  ! fix, plugin_pipe_amqp_routing_key: check introduced to prevent multiple
+    plugins to bind to the same RabbitMQ exchange, routing key combination.
+    Thanks to Jerred Horsman for reporting the issue.
+  ! fix, MongoDB plugin: added a custom oid fuzz generator to prevent
+    concurrent inserts to fail; switched from deprecated mongo_connect() to
+    mongo_client(); added MONGO_CONTINUE_ON_ERROR flag to mongo_insert_batch
+    along with more verbose error reporting. Patches are all courtesy by
+    Russell Heilling ( @xchewtoyx ).
+  ! fix, nl.c: increments made too early after introduction of MAX_GTP_TRIALS
+    Affected: pmacctd processing of GTP in releases 1.5.x. Patch is courtesy
+    by TANAKA Masayuki ( @tanakamasayuki ).
+  ! fix, pkt_handlers.c: improved case for no SAMPLER_ID, ALU & IPFIX in
+    NF_sampling_rate_handler() on par with NF_counters_renormalize_handler().
+  ! fix, SQL scripts: always use "DROP TABLE IF EXISTS" for both PostgreSQL
+    and SQLite. Pathes are courtesy by Vincent Bernat ( @vincentbernat ).
+  ! fix, plugin_hooks.c: if p_amqp_publish_binary() calls were done while a
+    sleeper thread was launched, a memory corruption was observed.
+  ! fix, util.c: mkdir() calls in mkdir_multilevel() now default to mode 777
+    instead of 700; this allows more play with files_umask (by default 077).
+    Thanks to Ruben Laban for reporting the issue.
+  ! fix, BMP daemon: solved a build issue under MacOS X. Path is courtesy by
+    Junpei YOSHINO ( @junpei-yoshino ).
+  ! fix, util.c: self-defined Malloc() can allocate more than 4GB of memory;
+    function is also now renamed pm_malloc().
+  ! fix, PostgreSQL plugin: upon purge, call sql_query() only if status of
+    the entry is SQL_CACHE_COMMITTED. Thanks to Harry Foster ( @harryfoster )
+    for his support resolving the issue.
+  ! fix, building system: link pfring before pcap to prevend failures when
+    linking. Patch is courtesy by @matthewsf . 
+  ! fix, plugin_common.c: memory leak discovered when pending queries queue
+    was involved (ie. cases where print_refresh_time > print_history). Thanks
+    to Edward Henigin for reporting the issue.
 
 1.5.2 -- 07-09-2015
   + Introduced support for a RabbitMQ broker to be used for queueing and

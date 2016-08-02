@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -44,6 +44,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   u_int32_t request, sz;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
   int datasize = ((struct channels_list_entry *)ptr)->datasize;
+  pid_t core_pid = ((struct channels_list_entry *)ptr)->core_pid;
   struct extra_primitives extras;
   unsigned char *rgptr;
   int pollagain = 0;
@@ -85,7 +86,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
   if (config.logfile) {
     fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile, "a");
+    config.logfile_fd = open_output_file(config.logfile, "a", FALSE);
   }
 
   if (extras.off_pkt_vlen_hdr_primitives) {
@@ -115,13 +116,13 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   no_more_space = FALSE;
 
   if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET))
-    insert_func = sum_host_insert;
-  else if (config.what_to_count & COUNT_SUM_PORT) insert_func = sum_port_insert;
-  else if (config.what_to_count & COUNT_SUM_AS) insert_func = sum_as_insert;
+    imt_insert_func = sum_host_insert;
+  else if (config.what_to_count & COUNT_SUM_PORT) imt_insert_func = sum_port_insert;
+  else if (config.what_to_count & COUNT_SUM_AS) imt_insert_func = sum_as_insert;
 #if defined (HAVE_L2)
-  else if (config.what_to_count & COUNT_SUM_MAC) insert_func = sum_mac_insert;
+  else if (config.what_to_count & COUNT_SUM_MAC) imt_insert_func = sum_mac_insert;
 #endif
-  else insert_func = insert_accounting_structure;
+  else imt_insert_func = insert_accounting_structure;
 
   memset(&nt, 0, sizeof(nt));
   memset(&nc, 0, sizeof(nc));
@@ -139,9 +140,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     }
   }
 
-  if ((!config.num_memory_pools) && (!have_num_memory_pools))
-    config.num_memory_pools = NUM_MEMORY_POOLS;
-  
+  if (!config.num_memory_pools) config.num_memory_pools = NUM_MEMORY_POOLS;
   if (!config.memory_pool_size) config.memory_pool_size = MEMORY_POOL_SIZE;  
   else {
     if (config.memory_pool_size < sizeof(struct acc)) {
@@ -234,12 +233,12 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           FD_SET(pipe_fd, &bkp_read_descs);
           if (pipe_fd > select_fd) select_fd = pipe_fd;
           select_fd++;
-	  amqp_timeout = AMQP_LONGLONG_RETRY;
+	  amqp_timeout = LONGLONG_RETRY;
         }
-	else amqp_timeout = p_amqp_get_retry_interval(amqp_host);
+	else amqp_timeout = P_broker_timers_get_retry_interval(&amqp_host->btimers);
       }
       else {
-        amqp_timeout = ((p_amqp_get_last_fail(amqp_host) + p_amqp_get_retry_interval(amqp_host)) - cycle_stamp.tv_sec);
+        amqp_timeout = ((P_broker_timers_get_last_fail(&amqp_host->btimers) + P_broker_timers_get_retry_interval(&amqp_host->btimers)) - cycle_stamp.tv_sec);
         assert(amqp_timeout >= 0);
       }
     }
@@ -411,11 +410,10 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         if (((struct ch_buf_hdr *)pipebuf)->seq != seq) {
           rg_err_count++;
           if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-            Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
-            Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
-            Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%d'.\n", config.pipe_size);
-            Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%d'.\n", config.buffer_size);
-            Log(LOG_ERR, "- increase system maximum socket size.\n\n");
+	    Log(LOG_WARNING, "WARN ( %s/%s ): Missing data detected (plugin_buffer_size=%llu plugin_pipe_size=%llu).\n",
+		config.name, config.type, config.buffer_size, config.pipe_size);
+	    Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
+		config.name, config.type);
             seq = ((struct ch_buf_hdr *)pipebuf)->seq;
 	  }
 	}
@@ -425,7 +423,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         ret = p_amqp_consume_binary(amqp_host, pipebuf, config.buffer_size);
         if (!ret) {
           seq = ((struct ch_buf_hdr *)pipebuf)->seq;
-	  amqp_timeout = AMQP_LONGLONG_RETRY;
+	  amqp_timeout = LONGLONG_RETRY;
 	  num = TRUE;
 	}
 	else {
@@ -433,7 +431,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
             FD_CLR(pipe_fd, &bkp_read_descs);
 	    pipe_fd = ERR;
           }
-	  amqp_timeout = p_amqp_get_retry_interval(amqp_host);
+	  amqp_timeout = P_broker_timers_get_retry_interval(&amqp_host->btimers);
 	}
       }
 #endif
@@ -441,8 +439,11 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       if (num > 0) {
 	data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
-        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received seq=%u num_entries=%u\n", config.name, config.type, seq, ((struct ch_buf_hdr *)pipebuf)->num);
+	if (config.debug_internal_msg) 
+	  Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u seq=%u num_entries=%u\n",
+		config.name, config.type, core_pid, seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
+	if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
 	while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
 
 	  // XXX: to be optimized: remove empty_* vars
@@ -481,7 +482,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	  prim_ptrs.pcust = pcust;
 	  prim_ptrs.pvlen = pvlen;
 	  
-          (*insert_func)(&prim_ptrs);
+          (*imt_insert_func)(&prim_ptrs);
 
 	  ((struct ch_buf_hdr *)pipebuf)->num--;
 	  if (((struct ch_buf_hdr *)pipebuf)->num) {
@@ -490,6 +491,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
             data = (struct pkt_data *) dataptr;
 	  }
         }
+	}
       }
     } 
 

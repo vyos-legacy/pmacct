@@ -12,7 +12,10 @@ Build-Depends: debhelper (>= 9),
  libgeoip-dev,
  librabbitmq-dev,
  libjansson-dev,
+ librdkafka-dev,
+ libnetfilter-log-dev,
  autotools-dev,
+ pkg-config,
  dh-systemd
 Standards-Version: 3.9.6
 Homepage: http://www.pmacct.net/
