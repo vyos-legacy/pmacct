@@ -1,8 +1,26 @@
-pmacct (1.6.0-1) unstable; urgency=medium
+pmacct (1.5.2-2) unstable; urgency=medium
 
-  * New upstream version (1.6.0)
+  [ Jonas Gröger ]
+  * [de3a707] Imported Upstream version 1.6.0
+  * [751008b] Merge tag 'upstream/1.6.0'
+    Upstream version 1.6.0
+  * [74a633a] Updating changelog (1.6.0)
+  * [45875dd] Build with Plugin: kafka
+  * [875047c] Remove patch 'fix-syslog-format-security' (is in upstream)
+    Fix in https://github.com/pmacct/pmacct/commit/133fd78a3ac0accbaf7852c4d66ac1225d461ffd
+  * [3899f4f] Fix debian/docs
 
- -- Jonas Gröger <jonas.groeger@noris.de>  Thu, 07 Jul 2016 16:09:14 +0200
+  [ Martin ]
+  * [886f326] Fix Dependency for Plugin: Kafka
+  * [d247b82] Fix Dependency: pkg-config
+  * [35c0508] Build with Plugin: Nflog
+  * [b4808e0] Fix Dependency for Plugin: nflog
+
+  [ Bernd Zeimetz ]
+  * [4b80b28] Merge pull request #3 from crza/master.
+    Fixed Dependencies for new upstream version
+
+ -- Bernd Zeimetz <bzed@debian.org>  Sat, 20 Aug 2016 14:50:19 +0200
 
 pmacct (1.5.2-1) unstable; urgency=medium
 
