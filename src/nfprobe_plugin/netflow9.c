@@ -29,7 +29,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* $Id: netflow9.c,v 1.43 2014/08/03 16:16:56 paolo Exp $ */
+/* $Id$ */
 
 #define __NFPROBE_NETFLOW9_C
 

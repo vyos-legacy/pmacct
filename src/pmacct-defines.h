@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -22,8 +22,9 @@
 /* defines */
 #define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:uRVa"
 #define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:uRVa"
-#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:O:uwWL:RVa"
+#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:O:uwWL:RVaz"
 #define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:v:o:O:uRg:L:Va"
+#define ARGS_PMTELEMETRYD "hVL:l:f:dDS:F:"
 #define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:O:E:uDVUoiI"
 #define N_PRIMITIVES 57
 #define N_FUNCS 10 
@@ -58,6 +59,8 @@
 #define INT_MAX (2147483647U)
 #endif
 
+#define LONGLONG_RETRY INT_MAX
+
 #if defined ENABLE_IPV6
 #define DEFAULT_SNAPLEN 128
 #else
@@ -70,25 +73,36 @@
 #define LONGSRVBUFLEN (384+MOREBUFSZ)
 #define LONGLONGSRVBUFLEN (1024+MOREBUFSZ)
 #define LARGEBUFLEN (8192+MOREBUFSZ)
+#define OUTPUT_FILE_BUFSZ (100 * LARGEBUFLEN)
 
 #define PRIMITIVE_LEN 		32
 #define PRIMITIVE_DESC_LEN	64
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.5.2"
-#define UACCTD_USAGE_HEADER "Linux NetFilter ULOG Accounting Daemon, uacctd 1.5.2"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.5.2"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 1.5.2"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 1.5.2"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.5.2"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.5.2"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.6.0"
+#define UACCTD_USAGE_HEADER "Linux NetFilter NFLOG Accounting Daemon, uacctd 1.6.0"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.6.0"
+#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 1.6.0"
+#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 1.6.0"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.6.0"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.6.0"
+#define PMTELEMETRYD_USAGE_HEADER "Streamed Telemetry Accounting Daemon, pmtelemetryd 1.6.0"
 #define PMACCT_COMPILE_ARGS COMPILE_ARGS
 #ifndef TRUE
 #define TRUE 1
+#endif
+#ifndef FALSE
 #define FALSE 0
 #endif
+#ifndef FALSE_NONZERO
+#define FALSE_NONZERO 2
+#endif
+#ifndef ERR
 #define ERR -1
+#endif
+#ifndef SUCCESS
 #define SUCCESS 0
+#endif
 
 #define	E_NOTFOUND	2
 
@@ -108,8 +122,9 @@
 #define ACCT_PM		1	/* promiscuous mode */
 #define ACCT_NF		2	/* NetFlow */
 #define ACCT_SF		3	/* sFlow */
-#define ACCT_UL		4	/* Linux NetFilter ULOG */
-#define ACCT_MEMCLIENT	5	/* pmacct memroy client */
+#define ACCT_UL		4	/* Linux NetFilter NFLOG */
+#define ACCT_PMTELE	5	/* Telemetry */
+#define ACCT_MEMCLIENT	6	/* pmacct memroy client */
 
 /* map type */
 #define MAP_TAG 		0	/* pre_tag_map */
@@ -187,11 +202,14 @@
 #define COUNT_INT_NAT_EVENT		0x0002000000000100ULL
 #define COUNT_INT_TIMESTAMP_START	0x0002000000000200ULL
 #define COUNT_INT_TIMESTAMP_END		0x0002000000000400ULL
-#define COUNT_INT_MPLS_LABEL_TOP	0x0002000000000800ULL
-#define COUNT_INT_MPLS_LABEL_BOTTOM	0x0002000000001000ULL
-#define COUNT_INT_MPLS_STACK_DEPTH	0x0002000000002000ULL
-#define COUNT_INT_LABEL			0x0002000000004000ULL
-#define COUNT_INT_CUSTOM_PRIMITIVES	0x0002000000008000ULL
+#define COUNT_INT_TIMESTAMP_ARRIVAL	0x0002000000000800ULL
+#define COUNT_INT_MPLS_LABEL_TOP	0x0002000000001000ULL
+#define COUNT_INT_MPLS_LABEL_BOTTOM	0x0002000000002000ULL
+#define COUNT_INT_MPLS_STACK_DEPTH	0x0002000000004000ULL
+#define COUNT_INT_LABEL			0x0002000000008000ULL
+#define COUNT_INT_EXPORT_PROTO_SEQNO	0x0002000000010000ULL
+#define COUNT_INT_EXPORT_PROTO_VERSION  0x0002000000020000ULL
+#define COUNT_INT_CUSTOM_PRIMITIVES	0x0002000000040000ULL
 
 #define COUNT_INDEX_MASK	0xFFFF
 #define COUNT_INDEX_CP		0xFFFF000000000000ULL  /* index 0xffff reserved to custom primitives */
@@ -260,10 +278,13 @@
 #define COUNT_NAT_EVENT			(COUNT_INT_NAT_EVENT & COUNT_REGISTRY_MASK)
 #define COUNT_TIMESTAMP_START		(COUNT_INT_TIMESTAMP_START & COUNT_REGISTRY_MASK)
 #define COUNT_TIMESTAMP_END		(COUNT_INT_TIMESTAMP_END & COUNT_REGISTRY_MASK)
+#define COUNT_TIMESTAMP_ARRIVAL		(COUNT_INT_TIMESTAMP_ARRIVAL & COUNT_REGISTRY_MASK)
 #define COUNT_MPLS_LABEL_TOP		(COUNT_INT_MPLS_LABEL_TOP & COUNT_REGISTRY_MASK)
 #define COUNT_MPLS_LABEL_BOTTOM		(COUNT_INT_MPLS_LABEL_BOTTOM & COUNT_REGISTRY_MASK)
 #define COUNT_MPLS_STACK_DEPTH		(COUNT_INT_MPLS_STACK_DEPTH & COUNT_REGISTRY_MASK)
 #define COUNT_LABEL			(COUNT_INT_LABEL & COUNT_REGISTRY_MASK)
+#define COUNT_EXPORT_PROTO_SEQNO	(COUNT_INT_EXPORT_PROTO_SEQNO & COUNT_REGISTRY_MASK)
+#define COUNT_EXPORT_PROTO_VERSION	(COUNT_INT_EXPORT_PROTO_VERSION & COUNT_REGISTRY_MASK)
 #define COUNT_CUSTOM_PRIMITIVES		(COUNT_INT_CUSTOM_PRIMITIVES & COUNT_REGISTRY_MASK)
 /* PRIMITIVES DEFINITION: END */
 
@@ -346,9 +367,12 @@
 #define CUSTOM_PRIMITIVE_TYPE_MAC	5
 #define CUSTOM_PRIMITIVE_TYPE_RAW	6
 
+#define FUNC_TYPE_NULL			0
 #define FUNC_TYPE_BGP			1
 #define FUNC_TYPE_BMP			2
 #define FUNC_TYPE_SFLOW_COUNTER		3
+#define FUNC_TYPE_TELEMETRY		4
+#define FUNC_TYPE_MAX			5
 
 typedef u_int32_t pm_class_t;
 typedef u_int64_t pm_id_t;

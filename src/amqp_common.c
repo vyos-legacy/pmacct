@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -33,7 +33,7 @@ void p_amqp_init_host(struct p_amqp_host *amqp_host)
     memset(amqp_host, 0, sizeof(struct p_amqp_host));
     p_amqp_set_frame_max(amqp_host, AMQP_DEFAULT_FRAME_SIZE);
     p_amqp_set_heartbeat_interval(amqp_host, AMQP_DEFAULT_HEARTBEAT);
-    p_amqp_set_retry_interval(amqp_host, AMQP_DEFAULT_RETRY);
+    P_broker_timers_set_retry_interval(&amqp_host->btimers, AMQP_DEFAULT_RETRY);
   }
 }
 
@@ -71,7 +71,7 @@ char *p_amqp_get_routing_key(struct p_amqp_host *amqp_host)
 
 void p_amqp_init_routing_key_rr(struct p_amqp_host *amqp_host)
 {
-  if (amqp_host) memset(&amqp_host->rk_rr, 0, sizeof(struct p_amqp_rk_rr));
+  if (amqp_host) memset(&amqp_host->rk_rr, 0, sizeof(struct p_table_rr));
 }
 
 void p_amqp_set_routing_key_rr(struct p_amqp_host *amqp_host, int rk_rr)
@@ -88,7 +88,10 @@ int p_amqp_get_routing_key_rr(struct p_amqp_host *amqp_host)
 
 void p_amqp_set_exchange_type(struct p_amqp_host *amqp_host, char *exchange_type)
 {
-  if (amqp_host) amqp_host->exchange_type = exchange_type;
+  if (amqp_host && exchange_type) {
+    lower_string(exchange_type);
+    amqp_host->exchange_type = exchange_type;
+  }
 }
 
 void p_amqp_set_host(struct p_amqp_host *amqp_host, char *host)
@@ -136,39 +139,10 @@ void p_amqp_set_content_type_binary(struct p_amqp_host *amqp_host)
   } 
 }
 
-void p_amqp_set_last_fail(struct p_amqp_host *amqp_host, time_t timestamp)
-{
-  if (amqp_host) amqp_host->last_fail = timestamp;
-}
-
-time_t p_amqp_get_last_fail(struct p_amqp_host *amqp_host)
-{
-  if (amqp_host) return amqp_host->last_fail;
-
-  return FALSE;
-}
-
-void p_amqp_unset_last_fail(struct p_amqp_host *amqp_host)
-{
-  if (amqp_host) amqp_host->last_fail = FALSE;
-}
-
-void p_amqp_set_retry_interval(struct p_amqp_host *amqp_host, int interval)
-{
-  if (amqp_host) amqp_host->retry_interval = interval;
-}
-
-int p_amqp_get_retry_interval(struct p_amqp_host *amqp_host)
-{
-  if (amqp_host) return amqp_host->retry_interval;
-
-  return ERR;
-}
-
 int p_amqp_get_sockfd(struct p_amqp_host *amqp_host)
 {
   if (amqp_host) {
-    if (!p_amqp_get_last_fail(amqp_host)) return amqp_get_sockfd(amqp_host->conn);
+    if (!P_broker_timers_get_last_fail(&amqp_host->btimers)) return amqp_get_sockfd(amqp_host->conn);
   }
 
   return ERR;
@@ -252,7 +226,7 @@ int p_amqp_connect_to_publish(struct p_amqp_host *amqp_host)
 
   Log(LOG_DEBUG, "DEBUG ( %s/%s ): Connection successful to RabbitMQ: p_amqp_connect_to_publish()\n", config.name, config.type);
 
-  p_amqp_unset_last_fail(amqp_host);
+  P_broker_timers_unset_last_fail(&amqp_host->btimers);
   return SUCCESS;
 }
 
@@ -344,7 +318,7 @@ int p_amqp_connect_to_consume(struct p_amqp_host *amqp_host)
  
   Log(LOG_DEBUG, "DEBUG ( %s/%s ): Connection successful to RabbitMQ: p_amqp_connect_to_consume()\n", config.name, config.type);
 
-  p_amqp_unset_last_fail(amqp_host);
+  P_broker_timers_unset_last_fail(&amqp_host->btimers);
   return SUCCESS;
 }
 
@@ -496,7 +470,7 @@ void p_amqp_close(struct p_amqp_host *amqp_host, int set_fail)
 
     if (set_fail) {
       Log(LOG_ERR, "ERROR ( %s/%s ): Connection failed to RabbitMQ: p_amqp_close()\n", config.name, config.type);
-      p_amqp_set_last_fail(amqp_host, time(NULL));
+      P_broker_timers_set_last_fail(&amqp_host->btimers, time(NULL));
     }
     amqp_destroy_connection(amqp_host->conn);
     amqp_host->conn = NULL;
@@ -507,24 +481,4 @@ int p_amqp_is_alive(struct p_amqp_host *amqp_host)
 {
   if (amqp_host->status == AMQP_STATUS_OK && amqp_host->conn && (amqp_get_sockfd(amqp_host->conn) >= 0)) return SUCCESS;
   else return ERR;
-}
-
-void p_amqp_handle_routing_key_dyn_rr(char *new, int newlen, char *old, struct p_amqp_rk_rr *rk_rr)
-{
-  char index_str[SRVBUFLEN];
-  int oldlen;
-
-  oldlen = strlen(old);
-  if (oldlen <= newlen) strcpy(new, old);
-  else {
-    strncpy(new, old, newlen);
-    return;
-  }
-
-  memset(index_str, 0, SRVBUFLEN);
-  snprintf(index_str, SRVBUFLEN, "_%u", rk_rr->next);
-  strncat(new, index_str, (newlen-oldlen));
-
-  rk_rr->next++;
-  rk_rr->next %= rk_rr->max; 
 }

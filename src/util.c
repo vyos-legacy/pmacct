@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -27,11 +27,7 @@
 #include "ip_flow.h"
 #include "classifier.h"
 #include "plugin_hooks.h"
-#ifdef WITH_JANSSON
-#include <jansson.h>
-#endif
-
-static const char pkt_len_distrib_unknown[] = "unknown";
+#include <search.h>
 
 /* functions */
 void setnonblocking(int sock)
@@ -161,7 +157,7 @@ char *copy_argv(register char **argv)
 
    buf = (char *)malloc(len);
    if (buf == NULL) {
-     Log(LOG_ERR, "ERROR: copy_argv: malloc()\n");
+     Log(LOG_ERR, "ERROR ( %s/%s ): copy_argv: malloc()\n", config.name, config.type);
      return NULL;
    }
 
@@ -185,7 +181,7 @@ void trim_spaces(char *buf)
 
   tmp_buf = (char *)malloc(len + 1);
   if (tmp_buf == NULL) {
-    Log(LOG_ERR, "ERROR: trim_spaces: malloc()\n");
+    Log(LOG_ERR, "ERROR: trim_spaces: malloc() failed.\n");
     return;
   }
    
@@ -219,7 +215,7 @@ void trim_all_spaces(char *buf)
 
   tmp_buf = (char *)malloc(len + 1);
   if (tmp_buf == NULL) {
-    Log(LOG_ERR, "ERROR: trim_all_spaces: malloc()\n");
+    Log(LOG_ERR, "ERROR: trim_all_spaces: malloc() failed.\n");
     return;
   }
 
@@ -247,9 +243,9 @@ void strip_quotes(char *buf)
 
   len = strlen(buf);
 
-  tmp_buf = (char *)malloc(len + 1);
+  tmp_buf = (char *) malloc(len + 1);
   if (tmp_buf == NULL) {
-    Log(LOG_ERR, "ERROR: strip_quotes: malloc()\n");
+    Log(LOG_ERR, "ERROR ( %s/%s ): strip_quotes: malloc() failed.\n", config.name, config.type);
     return;
   }
   ptr = buf;
@@ -335,7 +331,7 @@ time_t roundoff_time(time_t t, char *value)
 	rounded->tm_mday = 1;
 	rounded->tm_mon = 0;
       }
-      else Log(LOG_WARNING, "WARN: ignoring unknown round off value: %c\n", value[j]); 
+      else Log(LOG_WARNING, "WARN ( %s/%s ): ignoring unknown round off value: %c\n", config.name, config.type, value[j]); 
     }
   }
 
@@ -363,140 +359,95 @@ time_t calc_monthly_timeslot(time_t t, int howmany, int op)
   return (final-base);
 }	
 
-FILE *open_logfile(char *filename, char *mode)
+FILE *open_output_file(char *filename, char *mode, int lock)
 {
-  char timebuf[SRVBUFLEN], buf[LARGEBUFLEN];
   FILE *file = NULL;
   uid_t owner = -1;
   gid_t group = -1;
   int ret;
 
-  strlcpy(buf, filename, LARGEBUFLEN);
+  if (!filename || !mode) return file;
 
   if (config.files_uid) owner = config.files_uid;
   if (config.files_gid) group = config.files_gid;
 
-  ret = mkdir_multilevel(buf, TRUE, owner, group);
+  ret = mkdir_multilevel(filename, TRUE, owner, group);
   if (ret) {
-    printf("ERROR: Unable to open_logfile() '%s': mkdir_multilevel() failed.\n", buf);
-    file = NULL;
-
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] open_output_file(): mkdir_multilevel() failed.\n", config.name, config.type, filename);
     return file;
   }
 
-  ret = access(buf, F_OK);
+  ret = access(filename, F_OK);
 
   file = fopen(filename, mode); 
+
   if (file) {
     if (chown(filename, owner, group) == -1)
-      printf("WARN: Unable to chown() logfile '%s': %s\n", filename, strerror(errno));
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] open_output_file(): chown() failed (%s).\n", config.name, config.type, filename, strerror(errno));
+
+    if (lock) {
+      if (file_lock(fileno(file))) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): [%s] open_output_file(): file_lock() failed.\n", config.name, config.type, filename);
+        file = NULL;
+      }
+    }
   }
   else {
-    printf("WARN: Unable to fopen() logfile '%s': %s\n", filename, strerror(errno));
+    Log(LOG_WARNING, "WARN ( %s/%s ): [%s] open_output_file(): fopen() failed (%s).\n", config.name, config.type, filename, strerror(errno));
     file = NULL;
   }
 
   return file;
 }
 
-void close_print_output_file(FILE *f, char *table_schema, char *current_table, struct primitives_ptrs *prim_ptrs)
+void link_latest_output_file(char *link_filename, char *filename_to_link)
 {
-  char latest_fname[SRVBUFLEN], buf[LARGEBUFLEN];
   int ret, rewrite_latest = FALSE;
-  u_int16_t offset;
+  char buf[SRVBUFLEN];
   uid_t owner = -1;
   gid_t group = -1;
 
-  /* first-off let's close current file */
-  fclose(f);
-
-  /* get out if we miss a piece */
-  if (!table_schema || !current_table || !prim_ptrs) return;
+  if (!link_filename || !filename_to_link) return;
 
   if (config.files_uid) owner = config.files_uid;
   if (config.files_gid) group = config.files_gid;
 
-  /* let's compose latest filename */
-  memset(buf, 0, LARGEBUFLEN);
-  strlcpy(latest_fname, table_schema, SRVBUFLEN);
-  handle_dynname_internal_strings_same(buf, LARGEBUFLEN, latest_fname, prim_ptrs);
-
   /* create dir structure to get to file, if needed */
-  ret = mkdir_multilevel(latest_fname, TRUE, owner, group);
+  ret = mkdir_multilevel(link_filename, TRUE, owner, group);
   if (ret) {
-    Log(LOG_ERR, "ERROR: Unable to open print_latest_file '%s': mkdir_multilevel() failed.\n", buf);
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] link_latest_output_file(): mkdir_multilevel() failed.\n", config.name, config.type, buf);
     return;
   }
 
-  /* if a file with same name exists let's investigate if current_table is newer */
-  ret = access(latest_fname, F_OK);
+  /* if a file with same name exists let's investigate if filename_to_link is newer */
+  ret = access(link_filename, F_OK);
 
   if (!ret) {
-    readlink(latest_fname, buf, LARGEBUFLEN);
+    struct stat s1, s2;
 
-    /* current_table is newer than buf or buf is un-existing */
-    if (strncmp(current_table, buf, SRVBUFLEN) > 0) rewrite_latest = TRUE;
+    memset(&s1, 0, sizeof(struct stat));
+    memset(&s2, 0, sizeof(struct stat));
+    readlink(link_filename, buf, LARGEBUFLEN);
+
+    /* filename_to_link is newer than buf or buf is un-existing */
+    stat(buf, &s1);
+    stat(filename_to_link, &s2);
+    if (s2.st_mtime >= s1.st_mtime) rewrite_latest = TRUE;
   }
   else rewrite_latest = TRUE;
 
   if (rewrite_latest) {
-    uid_t owner = -1;
-    gid_t group = -1;
+    unlink(link_filename);
+    symlink(filename_to_link, link_filename);
 
-    unlink(latest_fname);
-    symlink(current_table, latest_fname);
-
-    if (config.files_uid) owner = config.files_uid;
-    if (config.files_gid) group = config.files_gid;
-    if (lchown(latest_fname, owner, group) == -1)
-      printf("WARN: Unable to chown() print_latest_file '%s'\n", latest_fname);
+    if (lchown(link_filename, owner, group) == -1)
+      Log(LOG_WARNING, "WARN ( %s/%s ): link_latest_output_file(): unable to chown() '%s'.\n", config.name, config.type, link_filename);
   }
 }
 
-FILE *open_print_output_file(char *filename, int *append)
+void close_output_file(FILE *f)
 {
-  char buf[LARGEBUFLEN];
-  FILE *file = NULL;
-  uid_t owner = -1;
-  gid_t group = -1;
-  int ret;
-
-  strlcpy(buf, filename, LARGEBUFLEN);
-
-  if (config.files_uid) owner = config.files_uid;
-  if (config.files_gid) group = config.files_gid;
-
-  ret = mkdir_multilevel(buf, TRUE, owner, group);
-  if (ret) {
-    Log(LOG_ERR, "ERROR: Unable to open print_ouput_file '%s': mkdir_multilevel() failed.\n", buf);
-    file = NULL;
-
-    return file;
-  }
-
-  ret = access(buf, F_OK);
-
-  if (config.print_output_file_append && !ret) {
-    file = fopen(buf, "a");
-    *append = TRUE;
-  }
-  else file = fopen(buf, "w");
-
-  if (file) {
-    if (chown(buf, owner, group) == -1)
-      Log(LOG_WARNING, "WARN: Unable to chown() print_ouput_file '%s': %s\n", buf, strerror(errno));
-
-    if (file_lock(fileno(file))) {
-      Log(LOG_ALERT, "ALERT: Unable to obtain lock for print_ouput_file '%s'.\n", buf);
-      file = NULL;
-    }
-  }
-  else {
-    Log(LOG_ERR, "ERROR: Unable to open print_ouput_file '%s'\n", buf);
-    file = NULL;
-  }
-
-  return file;
+  if (f) fclose(f);
 }
 
 /*
@@ -566,7 +517,7 @@ void handle_dynname_internal_strings(char *new, int newlen, char *old, struct pr
     len -= strlen(psi_string);
 
     if (prim_ptrs && prim_ptrs->pbgp) addr_to_str(peer_src_ip, &prim_ptrs->pbgp->peer_src_ip);
-    else strlcpy(peer_src_ip, empty_peer_src_ip, strlen(empty_peer_src_ip));
+    else strlcpy(peer_src_ip, empty_peer_src_ip, strlen(peer_src_ip));
 
     escape_ip_uscores(peer_src_ip);
     snprintf(buf, newlen, "%s", peer_src_ip);
@@ -664,10 +615,10 @@ void write_pid_file(char *filename)
   file = fopen(filename,"w");
   if (file) {
     if (chown(filename, owner, group) == -1)
-      Log(LOG_WARNING, "WARN: Unable to chown() pidfile '%s': %s\n", filename, strerror(errno));
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Unable to chown(): %s\n", config.name, config.type, filename, strerror(errno));
 
     if (file_lock(fileno(file))) {
-      Log(LOG_ALERT, "ALERT: Unable to obtain lock for pidfile '%s'.\n", filename);
+      Log(LOG_ERR, "ERROR ( %s/%s ): [%s] Unable to obtain lock.\n", config.name, config.type, filename);
       return;
     }
     sprintf(pid, "%d\n", getpid());
@@ -677,7 +628,7 @@ void write_pid_file(char *filename)
     fclose(file);
   }
   else {
-    Log(LOG_ERR, "ERROR: Unable to open pidfile '%s'\n", filename);
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] fopen() failed.\n", config.name, config.type, filename);
     return;
   }
 }
@@ -692,10 +643,10 @@ void write_pid_file_plugin(char *filename, char *type, char *name)
 
   fname = malloc(len);
   if (!fname) {
-    Log(LOG_ERR, "ERROR: malloc() failed (write_pid_file_plugin)\n");
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] malloc() failed.\n", config.name, config.type, filename);
     return;
   }
-  memset(fname, 0, sizeof(fname));
+  memset(fname, 0, len);
   strcpy(fname, filename);
   strcat(fname, minus);
   strcat(fname, type);
@@ -708,14 +659,14 @@ void write_pid_file_plugin(char *filename, char *type, char *name)
   if (config.files_uid) owner = config.files_uid;
   if (config.files_gid) group = config.files_gid;
 
-  file = fopen(fname,"w");
+  file = fopen(fname, "w");
   if (file) {
     if (chown(fname, owner, group) == -1)
-      Log(LOG_WARNING, "WARN: Unable to chown() '%s': %s\n", fname, strerror(errno));
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Unable to chown(): %s\n", config.name, config.type, fname, strerror(errno));
 
     if (file_lock(fileno(file))) {
-      Log(LOG_ALERT, "ALERT: Unable to obtain lock of '%s'.\n", fname);
-      return;
+      Log(LOG_ERR, "ERROR ( %s/%s ): [%s] Unable to obtain lock.\n", config.name, config.type, fname);
+      goto exit_lane;
     }
     sprintf(pid, "%d\n", getpid());
     fwrite(pid, strlen(pid), 1, file);
@@ -724,9 +675,12 @@ void write_pid_file_plugin(char *filename, char *type, char *name)
     fclose(file);
   }
   else {
-    Log(LOG_ERR, "ERROR: Unable to open file '%s'\n", fname);
-    return;
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] fopen() failed.\n", config.name, config.type, fname);
+    goto exit_lane;
   }
+
+  exit_lane:
+  free(fname);
 }
 
 void remove_pid_file(char *filename)
@@ -776,7 +730,7 @@ int sanitize_buf_net(char *filename, char *buf, int rows)
 {
   if (!sanitize_buf(buf)) {
     if (!strchr(buf, '/')) {
-      Log(LOG_ERR, "ERROR ( %s ): Missing '/' separator at line %d. Ignoring.\n", filename, rows);
+      Log(LOG_ERR, "ERROR ( %s/%s ): [%s:%u] Missing '/' separator. Ignoring.\n", config.name, config.type, filename, rows);
       return TRUE;
     }
   }
@@ -805,7 +759,7 @@ int check_not_valid_char(char *filename, char *buf, int c)
   if (!buf) return FALSE;
   
   if (strchr(buf, c)) {
-    Log(LOG_ERR, "ERROR ( %s ): Invalid symbol '%c' detected. ", filename, c);
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] Invalid symbol '%c' detected.\n", config.name, config.type, filename, c);
     return TRUE; 
   }
   else return FALSE;
@@ -880,6 +834,8 @@ void lower_string(char *string)
 {
   int i = 0;
 
+  if (!string) return;
+
   while (string[i] != '\0') {
     string[i] = tolower(string[i]);
     i++;
@@ -951,32 +907,6 @@ void evaluate_sums(u_int64_t *wtc, char *name, char *type)
   if (flows) *wtc |= COUNT_FLOWS;
 }
 
-int file_archive(const char *path, int rotations)
-{
-  struct stat st;
-  char *new_path;
-  int j, ret, len = strlen(path)+11;
-  
-  new_path = malloc(len);
-  if (!new_path) {
-    Log(LOG_ERR, "ERROR: malloc() failed (file_archive)\n");
-    return -1;
-  }
-  memset(new_path, 0, len);
-  for (j = 1; j < rotations; j++) {
-    snprintf(new_path, len, "%s.%d", path, j); 
-    ret = stat(new_path, &st);
-    if (ret < 0) {
-      rename(path, new_path);
-      return 0;
-    }
-  }
-
-  /* we should never reach this point */
-  Log(LOG_ALERT, "ALERT: No more recovery logfile ( %s ) rotations allowed. Data is getting lost.\n", path);  
-  return -1;
-}
-
 void stop_all_childs()
 {
   my_sigint_handler(0); /* it does same thing */
@@ -1000,14 +930,14 @@ int read_SQLquery_from_file(char *path, char *buf, int size)
   memset(buf, 0, size);
   f = fopen(path, "r");
   if (!f) {
-    Log(LOG_ERR, "ERROR: %s does not exist.\n", path);
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] file does not exist.\n", config.name, config.type, path);
     return(0);
   }
   
   ret = fread(buf, size, 1, f);
 
   if (ret != 1 && !feof(f)) {
-    Log(LOG_ERR, "ERROR: Unable to read from SQL schema '%s': %s\n", path, strerror(errno));
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] Unable to read from SQL schema: %s\n", config.name, config.type, path, strerror(errno));
     return(0);
   }
 
@@ -1015,7 +945,7 @@ int read_SQLquery_from_file(char *path, char *buf, int size)
   
   ptr = strrchr(buf, ';');
   if (!ptr) {
-    Log(LOG_ERR, "ERROR: missing trailing ';' in SQL query read from %s.\n", path);
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] missing trailing ';' in SQL query.\n", config.name, config.type, path);
     return(0); 
   } 
   else *ptr = '\0';
@@ -1202,7 +1132,14 @@ void reset_fallback_status(struct packet_ptrs *pptrs)
 
 void set_default_preferences(struct configuration *cfg)
 {
-  if (!cfg->nfacctd_as) cfg->nfacctd_as = NF_AS_KEEP;
+  if (!cfg->proc_name) cfg->proc_name = default_proc_name;
+  if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF) {
+    if (!cfg->nfacctd_net) cfg->nfacctd_net = NF_NET_KEEP;
+    if (!cfg->nfacctd_as) cfg->nfacctd_as = NF_AS_KEEP;
+    set_truefalse_nonzero(&cfg->nfacctd_disable_checks);
+  }
+  set_truefalse_nonzero(&cfg->pipe_check_core_pid);
+  set_truefalse_nonzero(&cfg->tmp_net_own_field);
   if (!cfg->nfacctd_bgp_peer_as_src_type) cfg->nfacctd_bgp_peer_as_src_type = BGP_SRC_PRIMITIVES_KEEP;
   if (!cfg->nfacctd_bgp_src_std_comm_type) cfg->nfacctd_bgp_src_std_comm_type = BGP_SRC_PRIMITIVES_KEEP;
   if (!cfg->nfacctd_bgp_src_ext_comm_type) cfg->nfacctd_bgp_src_ext_comm_type = BGP_SRC_PRIMITIVES_KEEP;
@@ -1231,59 +1168,6 @@ void set_sampling_table(struct packet_ptrs_vector *pptrsv, u_char *t)
 #endif
 }
 
-struct packet_ptrs *copy_packet_ptrs(struct packet_ptrs *pptrs)
-{
-  struct packet_ptrs *new_pptrs;
-  int offset;
-  u_char dummy_tlhdr[16];
-
-  /* Copy the whole structure first */
-  if ((new_pptrs = malloc(sizeof(struct packet_ptrs))) == NULL) {
-    return NULL;
-  }
-  memcpy(new_pptrs, pptrs, sizeof(struct packet_ptrs));
-
-  /* Copy the packet buffer */
-  if ((new_pptrs->packet_ptr = malloc(pptrs->pkthdr->caplen)) == NULL) {
-    free(new_pptrs);
-    return NULL;
-  }
-  memcpy(new_pptrs->packet_ptr, pptrs->packet_ptr, pptrs->pkthdr->caplen);
-
-  /* Copy the pcap packet header */
-  if ((new_pptrs->pkthdr = malloc(sizeof(struct pcap_pkthdr))) == NULL) {
-    free(new_pptrs->packet_ptr);
-    free(new_pptrs);
-    return NULL;
-  }
-  memcpy(new_pptrs->pkthdr, pptrs->pkthdr, sizeof(struct pcap_pkthdr));
-
-  /* Fix the pointers */
-  offset = (int) new_pptrs->packet_ptr - (int) pptrs->packet_ptr;
-
-  /* Pointers can be NULL */
-  if (pptrs->iph_ptr)
-    new_pptrs->iph_ptr += offset;
-  if (pptrs->tlh_ptr)
-    if(pptrs->tlh_ptr > pptrs->packet_ptr && pptrs->tlh_ptr < pptrs->packet_ptr+offset) // If it is not a dummy tlh_ptr
-      new_pptrs->tlh_ptr += offset;
-    else {
-      memset(dummy_tlhdr, 0, sizeof(dummy_tlhdr));
-      new_pptrs->tlh_ptr = dummy_tlhdr;
-    }
-  if (pptrs->payload_ptr)
-    new_pptrs->payload_ptr += offset;
-
-  return new_pptrs;
-}
-
-void free_packet_ptrs(struct packet_ptrs *pptrs)
-{
-  free(pptrs->pkthdr);
-  free(pptrs->packet_ptr);
-  free(pptrs);
-}
-
 void evaluate_bgp_aspath_radius(char *path, int len, int radius)
 {
   int count, idx;
@@ -1304,6 +1188,7 @@ void copy_stdcomm_to_asn(char *stdcomm, as_t *asn, int is_origin)
   char *p1, *p2;
 
   if (!stdcomm || !strlen(stdcomm) || (delim = strchr(stdcomm, ':')) == NULL) return; 
+  if (validate_truefalse(is_origin)) return;
 
   delim2 = strchr(stdcomm, ',');
   *delim = '\0';
@@ -1315,7 +1200,7 @@ void copy_stdcomm_to_asn(char *stdcomm, as_t *asn, int is_origin)
   else *asn = atoi(p1);
 }
 
-void *Malloc(unsigned int size)
+void *pm_malloc(size_t size)
 {
   unsigned char *obj;
 
@@ -1324,13 +1209,58 @@ void *Malloc(unsigned int size)
     sbrk(size);
     obj = (unsigned char *) malloc(size);
     if (!obj) {
-      Log(LOG_ERR, "ERROR ( %s/%s ): Unable to grab enough memory (requested: %u bytes). Exiting ...\n",
+      Log(LOG_ERR, "ERROR ( %s/%s ): Unable to grab enough memory (requested: %llu bytes). Exiting ...\n",
       config.name, config.type, size);
       exit_plugin(1);
     }
   }
 
   return obj;
+}
+
+void *pm_tsearch(const void *key, void **rootp, int (*compar)(const void *key1, const void *key2), size_t alloc_size)
+{
+  void *alloc_key, *ret_key;
+
+  if (alloc_size) {
+    alloc_key = malloc(alloc_size);
+    memcpy(alloc_key, key, alloc_size);
+    ret_key = tsearch(alloc_key, rootp, compar);
+
+    if ((*(void **) ret_key) != alloc_key) free(alloc_key);
+
+    return ret_key;
+  }
+  else return tsearch(key, rootp, compar); 
+}
+
+void *pm_tfind(const void *key, void *const *rootp, int (*compar) (const void *key1, const void *key2))
+{
+  return tfind(key, rootp, compar);
+}
+
+void *pm_tdelete(const void *key, void **rootp, int (*compar)(const void *key1, const void *key2))
+{
+  void *ptr = tdelete(key, rootp, compar);
+
+  if (ptr) free((*(void **) ptr));
+
+  return NULL;
+}
+
+void pm_twalk(const void *root, void (*action)(const void *nodep, const VISIT which, const int depth))
+{
+  twalk(root, action);
+}
+
+void pm_tdestroy(void **root, void (*free_node)(void *nodep))
+{
+  /* in implementations where tdestroy() is not defined, tdelete() against
+     the root node of the three destroys also the last few remaining bits */
+#if (defined HAVE_TDESTROY)
+  tdestroy((*root), free_node);
+#endif
+  (*root) = NULL;
 }
 
 void load_allow_file(char *filename, struct hosts_table *t)
@@ -1341,7 +1271,7 @@ void load_allow_file(char *filename, struct hosts_table *t)
 
   if (filename) {
     if ((file = fopen(filename, "r")) == NULL) {
-      Log(LOG_ERR, "ERROR ( %s/core ): allow file '%s' not found\n", config.name, filename);
+      Log(LOG_ERR, "ERROR ( %s/%s ): [%s] file not found.\n", config.name, config.type, filename);
       exit(1);
     }
 
@@ -1352,7 +1282,7 @@ void load_allow_file(char *filename, struct hosts_table *t)
       if (fgets(buf, SRVBUFLEN, file)) {
         if (!sanitize_buf(buf)) {
           if (str_to_addr(buf, &t->table[index])) index++;
-          else Log(LOG_WARNING, "WARN ( %s/core ): 'nfacctd_allow_file': Bad IP address '%s'. Ignored.\n", config.name, buf);
+          else Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Bad IP address '%s'. Ignored.\n", config.name, config.type, filename, buf);
         }
       }
     }
@@ -1373,7 +1303,7 @@ void load_bgp_md5_file(char *filename, struct bgp_md5_table *t)
 
   if (filename) {
     if ((file = fopen(filename, "r")) == NULL) {
-      Log(LOG_ERR, "ERROR ( %s/core/BGP ): BGP MD5 file '%s' not found\n", config.name, filename);
+      Log(LOG_ERR, "ERROR ( %s/core/BGP ): [%s] file not found.\n", config.name, filename);
       exit(1);
     }
 
@@ -1398,7 +1328,7 @@ void load_bgp_md5_file(char *filename, struct bgp_md5_table *t)
 	  }
 
           if (ret > 0 && len > 0) index++;
-          else Log(LOG_WARNING, "WARN ( %s/core/BGP ): 'bgp_daemon_md5_file': line '%s' ignored.\n", config.name, buf);
+          else Log(LOG_WARNING, "WARN ( %s/core/BGP ): [%s] line '%s' ignored.\n", config.name, filename, buf);
         }
       }
     }
@@ -1517,8 +1447,8 @@ int load_tags(char *filename, struct pretag_filter *filter, char *value_ptr)
     else range = value;
 
     if (range_ptr && range <= value) {
-      Log(LOG_ERR, "WARN ( %s/%s ): Range value is expected in format low-high. '%llu-%llu' not loaded in file '%s'.\n",
-			config.name, config.type, value, range, filename);
+      Log(LOG_ERR, "WARN ( %s/%s ): [%s] Range value is expected in format low-high. '%llu-%llu'.\n",
+			config.name, config.type, filename, value, range);
       changes++;
       break;
     }
@@ -1596,11 +1526,14 @@ int evaluate_labels(struct pretag_label_filter *filter, pt_label_t *label)
 
 void load_pkt_len_distrib_bins()
 {
-  char *ptr, *endptr_v, *endptr_r, *token, *range_ptr;
+  char *ptr, *endptr_v, *endptr_r, *token, *range_ptr, *pkt_len_distrib_unknown;
   u_int16_t value = 0, range = 0;
   int idx, aux_idx;
 
   ptr = config.pkt_len_distrib_bins_str;
+
+  pkt_len_distrib_unknown = malloc(strlen("unknown") + 1);
+  strcpy(pkt_len_distrib_unknown, "unknown");
 
   /* We leave config.pkt_len_distrib_bins[0] to NULL to catch unknowns */
   config.pkt_len_distrib_bins[0] = pkt_len_distrib_unknown;
@@ -1669,26 +1602,26 @@ void version_daemon(char *header)
 } 
 
 #ifdef WITH_JANSSON 
-char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
+void *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
 		  struct pkt_bgp_primitives *pbgp, struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
 		  char *pcust, struct pkt_vlen_hdr_primitives *pvlen, pm_counter_t bytes_counter,
 		  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime,
 		  struct pkt_stitching *stitch)
 {
   char src_mac[18], dst_mac[18], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN], ip_address[INET6_ADDRSTRLEN];
-  char rd_str[SRVBUFLEN], misc_str[SRVBUFLEN], *as_path, *bgp_comm, empty_string[] = "", *tmpbuf = NULL, *label_ptr;
+  char rd_str[SRVBUFLEN], misc_str[SRVBUFLEN], *as_path, *bgp_comm, empty_string[] = "", *label_ptr;
   char tstamp_str[SRVBUFLEN];
   int ret = FALSE;
   json_t *obj = json_object(), *kv;
 
   if (wtc & COUNT_TAG) {
-    kv = json_pack("{sI}", "tag", pbase->tag);
+    kv = json_pack("{sI}", "tag", (json_int_t)pbase->tag);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_TAG2) {
-    kv = json_pack("{sI}", "tag2", pbase->tag2);
+    kv = json_pack("{sI}", "tag2", (json_int_t)pbase->tag2);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -1724,13 +1657,13 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
   }
 
   if (wtc & COUNT_VLAN) {
-    kv = json_pack("{sI}", "vlan", pbase->vlan_id);
+    kv = json_pack("{sI}", "vlan", (json_int_t)pbase->vlan_id);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_COS) {
-    kv = json_pack("{sI}", "cos", pbase->cos);
+    kv = json_pack("{sI}", "cos", (json_int_t)pbase->cos);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -1744,13 +1677,13 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
 #endif
 
   if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS)) {
-    kv = json_pack("{sI}", "as_src", pbase->src_as);
+    kv = json_pack("{sI}", "as_src", (json_int_t)pbase->src_as);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_DST_AS) {
-    kv = json_pack("{sI}", "as_dst", pbase->dst_as);
+    kv = json_pack("{sI}", "as_dst", (json_int_t)pbase->dst_as);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -1803,25 +1736,25 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
   }
 
   if (wtc & COUNT_LOCAL_PREF) {
-    kv = json_pack("{sI}", "local_pref", pbgp->local_pref);
+    kv = json_pack("{sI}", "local_pref", (json_int_t)pbgp->local_pref);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_MED) {
-    kv = json_pack("{sI}", "med", pbgp->med);
+    kv = json_pack("{sI}", "med", (json_int_t)pbgp->med);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_PEER_SRC_AS) {
-    kv = json_pack("{sI}", "peer_as_src", pbgp->peer_src_as);
+    kv = json_pack("{sI}", "peer_as_src", (json_int_t)pbgp->peer_src_as);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_PEER_DST_AS) {
-    kv = json_pack("{sI}", "peer_as_dst", pbgp->peer_dst_as);
+    kv = json_pack("{sI}", "peer_as_dst", (json_int_t)pbgp->peer_dst_as);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -1888,25 +1821,25 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
   }
 
   if (wtc & COUNT_SRC_LOCAL_PREF) {
-    kv = json_pack("{sI}", "src_local_pref", pbgp->src_local_pref);
+    kv = json_pack("{sI}", "src_local_pref", (json_int_t)pbgp->src_local_pref);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_SRC_MED) {
-    kv = json_pack("{sI}", "src_med", pbgp->src_med);
+    kv = json_pack("{sI}", "src_med", (json_int_t)pbgp->src_med);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_IN_IFACE) {
-    kv = json_pack("{sI}", "iface_in", pbase->ifindex_in);
+    kv = json_pack("{sI}", "iface_in", (json_int_t)pbase->ifindex_in);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_OUT_IFACE) {
-    kv = json_pack("{sI}", "iface_out", pbase->ifindex_out);
+    kv = json_pack("{sI}", "iface_out", (json_int_t)pbase->ifindex_out);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -1949,25 +1882,25 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
   }
 
   if (wtc & COUNT_SRC_NMASK) {
-    kv = json_pack("{sI}", "mask_src", pbase->src_nmask);
+    kv = json_pack("{sI}", "mask_src", (json_int_t)pbase->src_nmask);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_DST_NMASK) {
-    kv = json_pack("{sI}", "mask_dst", pbase->dst_nmask);
+    kv = json_pack("{sI}", "mask_dst", (json_int_t)pbase->dst_nmask);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & (COUNT_SRC_PORT|COUNT_SUM_PORT)) {
-    kv = json_pack("{sI}", "port_src", pbase->src_port);
+    kv = json_pack("{sI}", "port_src", (json_int_t)pbase->src_port);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_DST_PORT) {
-    kv = json_pack("{sI}", "port_dst", pbase->dst_port);
+    kv = json_pack("{sI}", "port_dst", (json_int_t)pbase->dst_port);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -2026,19 +1959,19 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
     if (!config.num_protos && (pbase->proto < protocols_number))
       kv = json_pack("{ss}", "ip_proto", _protocols[pbase->proto].name);
     else
-      kv = json_pack("{sI}", "ip_proto", pbase->proto);
+      kv = json_pack("{sI}", "ip_proto", (json_int_t)pbase->proto);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_IP_TOS) {
-    kv = json_pack("{sI}", "tos", pbase->tos);
+    kv = json_pack("{sI}", "tos", (json_int_t)pbase->tos);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_SAMPLING_RATE) {
-    kv = json_pack("{sI}", "sampling_rate", pbase->sampling_rate);
+    kv = json_pack("{sI}", "sampling_rate", (json_int_t)pbase->sampling_rate);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -2063,63 +1996,82 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
   }
 
   if (wtc_2 & COUNT_POST_NAT_SRC_PORT) {
-    kv = json_pack("{sI}", "post_nat_port_src", pnat->post_nat_src_port);
+    kv = json_pack("{sI}", "post_nat_port_src", (json_int_t)pnat->post_nat_src_port);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_POST_NAT_DST_PORT) {
-    kv = json_pack("{sI}", "post_nat_port_dst", pnat->post_nat_dst_port);
+    kv = json_pack("{sI}", "post_nat_port_dst", (json_int_t)pnat->post_nat_dst_port);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_NAT_EVENT) {
-    kv = json_pack("{sI}", "nat_event", pnat->nat_event);
+    kv = json_pack("{sI}", "nat_event", (json_int_t)pnat->nat_event);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_MPLS_LABEL_TOP) {
-    kv = json_pack("{sI}", "mpls_label_top", pmpls->mpls_label_top);
+    kv = json_pack("{sI}", "mpls_label_top", (json_int_t)pmpls->mpls_label_top);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_MPLS_LABEL_BOTTOM) {
-    kv = json_pack("{sI}", "mpls_label_bottom", pmpls->mpls_label_bottom);
+    kv = json_pack("{sI}", "mpls_label_bottom", (json_int_t)pmpls->mpls_label_bottom);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_MPLS_STACK_DEPTH) {
-    kv = json_pack("{sI}", "mpls_stack_depth", pmpls->mpls_stack_depth);
+    kv = json_pack("{sI}", "mpls_stack_depth", (json_int_t)pmpls->mpls_stack_depth);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_TIMESTAMP_START) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_start, TRUE, config.sql_history_since_epoch);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_start, TRUE, config.timestamps_since_epoch);
     kv = json_pack("{ss}", "timestamp_start", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc_2 & COUNT_TIMESTAMP_END) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_end, TRUE, config.sql_history_since_epoch);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_end, TRUE, config.timestamps_since_epoch);
     kv = json_pack("{ss}", "timestamp_end", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
+  if (wtc_2 & COUNT_TIMESTAMP_ARRIVAL) {
+    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_arrival, TRUE, config.timestamps_since_epoch);
+    kv = json_pack("{ss}", "timestamp_arrival", tstamp_str);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+
   if (config.nfacctd_stitching && stitch) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_min, TRUE, config.sql_history_since_epoch);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_min, TRUE, config.timestamps_since_epoch);
     kv = json_pack("{ss}", "timestamp_min", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
-    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_max, TRUE, config.sql_history_since_epoch);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_max, TRUE, config.timestamps_since_epoch);
     kv = json_pack("{ss}", "timestamp_max", tstamp_str);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+
+  if (wtc_2 & COUNT_EXPORT_PROTO_SEQNO) {
+    kv = json_pack("{sI}", "export_proto_seqno", (json_int_t)pbase->export_proto_seqno);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+  }
+
+  if (wtc_2 & COUNT_EXPORT_PROTO_VERSION) {
+    kv = json_pack("{sI}", "export_proto_version", (json_int_t)pbase->export_proto_version);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
@@ -2153,34 +2105,42 @@ char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pk
 
     tv.tv_sec = basetime->tv_sec;
     tv.tv_usec = 0;
-    compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE, config.sql_history_since_epoch);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE, config.timestamps_since_epoch);
     kv = json_pack("{ss}", "stamp_inserted", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
     tv.tv_sec = time(NULL);
     tv.tv_usec = 0;
-    compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE, config.sql_history_since_epoch);
+    compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE, config.timestamps_since_epoch);
     kv = json_pack("{ss}", "stamp_updated", tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (flow_type != NF9_FTYPE_EVENT && flow_type != NF9_FTYPE_OPTION) {
-    kv = json_pack("{sI}", "packets", packet_counter);
+    kv = json_pack("{sI}", "packets", (json_int_t)packet_counter);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
     if (wtc & COUNT_FLOWS) {
-      kv = json_pack("{sI}", "flows", flow_counter);
+      kv = json_pack("{sI}", "flows", (json_int_t)flow_counter);
       json_object_update_missing(obj, kv);
       json_decref(kv);
     }
 
-    kv = json_pack("{sI}", "bytes", bytes_counter);
+    kv = json_pack("{sI}", "bytes", (json_int_t)bytes_counter);
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
+
+  return obj;
+}
+
+char *compose_json_str(void *obj)
+{
+  char *tmpbuf = NULL;
+  json_t *json_obj = (json_t *) obj;
 
   tmpbuf = json_dumps(obj, 0);
   json_decref(obj);
@@ -2195,12 +2155,14 @@ void write_and_free_json(FILE *f, void *obj)
 
   if (!f) return;
 
+  /* Waiting for jansson issue #256 on GitHub to be solved,
+     ie. introduction of trailing newline chars, in order to
+     switch to json_dumpf() */
   tmpbuf = json_dumps(json_obj, 0);
   json_decref(json_obj);
 
   if (tmpbuf) {
     fprintf(f, "%s\n", tmpbuf);
-    fflush(f);
     free(tmpbuf);
   }
 }
@@ -2210,7 +2172,7 @@ int write_and_free_json_amqp(void *amqp_log, void *obj)
 {
   char *orig_amqp_routing_key = NULL, dyn_amqp_routing_key[SRVBUFLEN];
   struct p_amqp_host *alog = (struct p_amqp_host *) amqp_log;
-  int ret;
+  int ret = ERR;
 
   char *tmpbuf = NULL;
   json_t *json_obj = (json_t *) obj;
@@ -2219,10 +2181,9 @@ int write_and_free_json_amqp(void *amqp_log, void *obj)
   json_decref(json_obj);
 
   if (tmpbuf) {
-
     if (alog->rk_rr.max) {
       orig_amqp_routing_key = p_amqp_get_routing_key(alog);
-      p_amqp_handle_routing_key_dyn_rr(dyn_amqp_routing_key, SRVBUFLEN, orig_amqp_routing_key, &alog->rk_rr);
+      P_handle_table_dyn_rr(dyn_amqp_routing_key, SRVBUFLEN, orig_amqp_routing_key, &alog->rk_rr);
       p_amqp_set_routing_key(alog, dyn_amqp_routing_key);
     }
 
@@ -2235,14 +2196,52 @@ int write_and_free_json_amqp(void *amqp_log, void *obj)
   return ret;
 }
 #endif
+
+#ifdef WITH_KAFKA
+/* XXX: impact of frequent p_kafka_set_topic() to be verified */ 
+int write_and_free_json_kafka(void *kafka_log, void *obj)
+{
+  char *orig_kafka_topic = NULL, dyn_kafka_topic[SRVBUFLEN];
+  struct p_kafka_host *alog = (struct p_kafka_host *) kafka_log;
+  int ret = ERR;
+
+  char *tmpbuf = NULL;
+  json_t *json_obj = (json_t *) obj;
+
+  tmpbuf = json_dumps(json_obj, 0);
+  json_decref(json_obj);
+
+  if (tmpbuf) {
+    if (alog->topic_rr.max) {
+      orig_kafka_topic = p_kafka_get_topic(alog);
+      P_handle_table_dyn_rr(dyn_kafka_topic, SRVBUFLEN, orig_kafka_topic, &alog->topic_rr);
+      p_kafka_set_topic(alog, dyn_kafka_topic);
+    }
+
+    ret = p_kafka_produce_data(alog, tmpbuf, strlen(tmpbuf));
+    free(tmpbuf);
+
+    if (alog->topic_rr.max) p_kafka_set_topic(alog, orig_kafka_topic);
+  }
+
+  return ret;
+}
+#endif
 #else
-char *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
+void *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
                   struct pkt_bgp_primitives *pbgp, struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
 		  char *pcust, struct pkt_vlen_hdr_primitives *pvlen, pm_counter_t bytes_counter,
 		  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime,
 		  struct pkt_stitching *stitch)
 {
   if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): compose_json(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
+
+  return NULL;
+}
+
+char *compose_json_str(void *obj)
+{
+  if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): compose_json_str(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
 
   return NULL;
 }
@@ -2258,6 +2257,13 @@ int write_and_free_json_amqp(void *amqp_log, void *obj)
 
   return 0;
 }
+
+int write_and_free_json_kafka(void *kafka_log, void *obj)
+{
+  if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): write_and_free_json_kafka(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
+
+  return 0;
+}
 #endif
 
 void compose_timestamp(char *buf, int buflen, struct timeval *tv, int usec, int since_epoch)
@@ -2266,7 +2272,7 @@ void compose_timestamp(char *buf, int buflen, struct timeval *tv, int usec, int 
   time_t time1;
   struct tm *time2;
 
-  if (config.sql_history_since_epoch) {
+  if (config.timestamps_since_epoch) {
     if (usec) snprintf(buf, buflen, "%u.%u", tv->tv_sec, tv->tv_usec);
     else snprintf(buf, buflen, "%u", tv->tv_sec);
   }
@@ -2604,7 +2610,7 @@ int mkdir_multilevel(const char *path, int trailing_filename, uid_t owner, gid_t
     if (*p == '/') {
       *p = '\0';
       if (len && access(opath, F_OK)) {
-        ret = mkdir(opath, S_IRWXU);
+        ret = mkdir(opath, (S_IRWXU|S_IRWXG|S_IRWXO));
         if (ret) return ret;
         if (chown(opath, owner, group) == -1) return ret;
       }
@@ -2616,7 +2622,7 @@ int mkdir_multilevel(const char *path, int trailing_filename, uid_t owner, gid_t
      by a traiing '/' and we do not expect the last part
      to be a filename, ie. trailing_filename set to 0 */
   if (!trailing_filename && access(opath, F_OK)) {
-    ret = mkdir(opath, S_IRWXU);
+    ret = mkdir(opath, (S_IRWXU|S_IRWXG|S_IRWXO));
     if (ret) return ret;
   }
 
@@ -2729,14 +2735,16 @@ void vlen_prims_debug(struct pkt_vlen_hdr_primitives *hdr)
   char *ptr = (char *) hdr;
   int x = 0;
 
-  printf("VLEN ARRAY: num: %u tot_len: %u\n", hdr->num, hdr->tot_len);
+  Log(LOG_DEBUG, "DEBUG ( %s/%s ): vlen_prims_debug(): VLEN ARRAY: num: %u tot_len: %u\n",
+	config.name, config.type, hdr->num, hdr->tot_len);
   ptr += PvhdrSz;
 
   for (x = 0; x < hdr->num; x++) {
     label_ptr = (pm_label_t *) ptr;
     ptr += PmLabelTSz;
 
-    printf("LABEL #%u: type: %llx len: %u val: %s\n", x, label_ptr->type, label_ptr->len, ptr);
+    Log(LOG_DEBUG, "DEBUG ( %s/%s ): vlen_prims_debug(): LABEL #%u: type: %llx len: %u val: %s\n",
+	config.name, config.type, x, label_ptr->type, label_ptr->len, ptr);
   }
 }
 
@@ -2793,4 +2801,171 @@ int vlen_prims_delete(struct pkt_vlen_hdr_primitives *hdr, pm_cfgreg_t wtc /*, o
   }
 
   return ret;
+}
+
+void replace_string(char *str, int string_len, char *var, char *value)
+{
+  char *ptr_start, *ptr_end;
+  char buf[string_len];
+  int ptr_len, len;
+
+  if (!str || !var || !value) return;
+
+  if (!strchr(str, '$')) return;
+
+  if (string_len < ((strlen(str) + strlen(value)) - strlen(var))) return;
+
+  ptr_start = strstr(str, var);
+  if (ptr_start) {
+    len = strlen(ptr_start);
+    ptr_end = ptr_start;
+    ptr_len = strlen(var);
+    ptr_end += ptr_len;
+    len -= ptr_len;
+
+    snprintf(buf, string_len, "%s", value);
+    strncat(buf, ptr_end, len);
+
+    len = strlen(buf);
+    *ptr_start = '\0';
+    strncat(str, buf, len);
+  }
+}
+
+void set_truefalse_nonzero(int *value)
+{
+  if (!value) return;
+
+  if (!(*value)) (*value) = TRUE;
+  else if ((*value) == FALSE_NONZERO) (*value) = FALSE;
+}
+
+void hash_init_key(pm_hash_key_t *key)
+{
+  if (!key) return;
+
+  memset(key->val, 0, key->len); 
+}
+
+int hash_alloc_key(pm_hash_key_t *key, u_int16_t key_len)
+{
+  if (!key || !key_len) return ERR;
+
+  if (!key->val) {
+    key->val = malloc(key_len);
+    if (key->val) {
+      key->len = key_len;
+      hash_init_key(key);
+    }
+    else return ERR;
+  }
+  else {
+    key->val = realloc(key->val, key_len);
+    if (key->val) key->len = key_len;
+    else return ERR; 
+  }
+
+  return SUCCESS;
+}
+
+int hash_dup_key(pm_hash_key_t *dst, pm_hash_key_t *src)
+{
+  if (!src || !dst) return ERR;
+
+  if (hash_alloc_key(dst, src->len) == ERR) return ERR;
+
+  memcpy(dst->val, src->val, src->len);
+
+  return SUCCESS;
+}
+
+void hash_destroy_key(pm_hash_key_t *key)
+{
+  if (!key) return;
+
+  free(key->val);
+  memset(key, 0, sizeof(pm_hash_key_t));
+}
+
+int hash_init_serial(pm_hash_serial_t *serial, u_int16_t key_len)
+{
+  int ret;
+
+  if (!serial || !key_len) return ERR;
+
+  memset(serial, 0, sizeof(pm_hash_serial_t));
+  return hash_alloc_key(&serial->key, key_len);
+}
+
+void hash_destroy_serial(pm_hash_serial_t *serial)
+{
+  if (!serial) return;
+
+  hash_destroy_key(&serial->key);
+  memset(serial, 0, sizeof(pm_hash_serial_t));
+}
+
+void hash_serial_set_off(pm_hash_serial_t *serial, u_int16_t off)
+{
+  if (!serial) return;
+
+  serial->off = off;
+}
+
+u_int16_t hash_serial_get_off(pm_hash_serial_t *serial)
+{
+  if (!serial) return ERR;
+
+  return serial->off;
+}
+
+pm_hash_key_t *hash_serial_get_key(pm_hash_serial_t *serial)
+{
+  if (!serial) return NULL;
+
+  return &serial->key;
+}
+
+u_int16_t hash_key_get_len(pm_hash_key_t *key)
+{
+  if (!key) return ERR;
+
+  return key->len;
+}
+
+char *hash_key_get_val(pm_hash_key_t *key)
+{
+  if (!key) return NULL;
+
+  return key->val;
+}
+
+void hash_serial_append(pm_hash_serial_t *serial, char *val, u_int16_t len, int realloc)
+{
+  u_int16_t key_len, key_off, rem_len;
+  int ret;
+
+  if (!serial || !val || !len) return;
+
+  key_len = hash_key_get_len(&serial->key);
+  key_off = hash_serial_get_off(serial);
+  rem_len = (key_len - key_off);
+ 
+  if (len > rem_len) {
+    if (!realloc) return;
+    else {
+      ret = hash_alloc_key(&serial->key, (hash_key_get_len(&serial->key) + (len - rem_len)));      
+      if (ret == ERR) return;
+    }
+  }
+
+  memcpy((hash_key_get_val(&serial->key) + key_off), val, len); 
+  hash_serial_set_off(serial, (key_off + len));
+}
+
+int hash_key_cmp(pm_hash_key_t *a, pm_hash_key_t *b)
+{
+  if (a->len != b->len) return (a->len - b->len);
+
+  return memcmp(a->val, b->val, b->len);
 }

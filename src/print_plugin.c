@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -29,7 +29,7 @@
 #include "print_plugin.h"
 #include "ip_flow.h"
 #include "classifier.h"
-#include "crc32.c"
+#include "crc32.h"
 
 /* Functions */
 void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr) 
@@ -40,12 +40,13 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct pollfd pfd;
   struct insert_data idata;
   time_t t;
-  int timeout, refresh_timeout, amqp_timeout, ret, num, is_event;
+  int timeout, refresh_timeout, amqp_timeout, kafka_timeout, ret, num, is_event;
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
   struct plugins_list_entry *plugin_data = ((struct channels_list_entry *)ptr)->plugin;
   int datasize = ((struct channels_list_entry *)ptr)->datasize;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
+  pid_t core_pid = ((struct channels_list_entry *)ptr)->core_pid;
   struct networks_file_data nfd;
   char default_separator[] = ",";
 
@@ -56,9 +57,14 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct extra_primitives extras;
   struct primitives_ptrs prim_ptrs;
   char *dataptr;
+  void *kafka_msg;
 
 #ifdef WITH_RABBITMQ
   struct p_amqp_host *amqp_host = &((struct channels_list_entry *)ptr)->amqp_host;
+#endif
+
+#ifdef WITH_KAFKA
+  struct p_kafka_host *kafka_host = &((struct channels_list_entry *)ptr)->kafka_host;
 #endif
 
   memcpy(&config, cfgptr, sizeof(struct configuration));
@@ -69,7 +75,7 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   P_set_signals();
   P_init_default_values();
   P_config_checks();
-  pipebuf = (unsigned char *) Malloc(config.buffer_size);
+  pipebuf = (unsigned char *) pm_malloc(config.buffer_size);
   memset(pipebuf, 0, config.buffer_size);
 
   is_event = FALSE;
@@ -115,7 +121,14 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     plugin_pipe_amqp_compile_check();
 #ifdef WITH_RABBITMQ
     pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
-    amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+    amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
+#endif
+  }
+  else if (config.pipe_kafka) {
+    plugin_pipe_kafka_compile_check();
+#ifdef WITH_KAFKA
+    pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
+    kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
 #endif
   }
   else setnonblocking(pipe_fd);
@@ -144,15 +157,22 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     exit_plugin(1);
   }
 
-  if (!config.sql_table && config.print_output & PRINT_OUTPUT_FORMATTED)
-    P_write_stats_header_formatted(stdout, is_event);
-  else if (!config.sql_table && config.print_output & PRINT_OUTPUT_CSV)
-    P_write_stats_header_csv(stdout, is_event);
+  print_output_stdout_header = TRUE;
+  if (!config.sql_table && !config.print_output_lock_file)
+    Log(LOG_WARNING, "WARN ( %s/%s ): no print_output_file and no print_output_lock_file defined.\n", config.name, config.type);
 
-  if (config.sql_table && (strchr(config.sql_table, '%') || strchr(config.sql_table, '$')))
-    dyn_table = TRUE;
-  else
-    dyn_table = FALSE;
+  if (config.sql_table) {
+    if (strchr(config.sql_table, '%') || strchr(config.sql_table, '$'))
+      dyn_table = TRUE;
+    else {
+      dyn_table = FALSE;
+    
+      if (config.print_latest_file && (strchr(config.print_latest_file, '%') || strchr(config.print_latest_file, '$'))) {
+        Log(LOG_WARNING, "WARN ( %s/%s ): Disabling print_latest_file due to non-dynamic print_output_file.\n", config.name, config.type); 
+        config.print_latest_file = NULL;
+      }
+    }
+  }
 
   /* plugin main loop */
   for(;;) {
@@ -162,8 +182,17 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     
     pfd.fd = pipe_fd;
     pfd.events = POLLIN;
-    timeout = MIN(refresh_timeout, (amqp_timeout ? amqp_timeout : INT_MAX));
-    ret = poll(&pfd, (pfd.fd == ERR ? 0 : 1), timeout);
+
+    if (config.pipe_homegrown || config.pipe_amqp) {
+      timeout = MIN(refresh_timeout, (amqp_timeout ? amqp_timeout : INT_MAX));
+      ret = poll(&pfd, (pfd.fd == ERR ? 0 : 1), timeout);
+    }
+#ifdef WITH_KAFKA
+    else if (config.pipe_kafka) {
+      timeout = MIN(refresh_timeout, (kafka_timeout ? kafka_timeout : INT_MAX)); 
+      ret = p_kafka_consume_poller(kafka_host, &kafka_msg, timeout);
+    }
+#endif
 
     if (ret <= 0) {
       if (getppid() == 1) {
@@ -189,19 +218,35 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     if (config.pipe_amqp && pipe_fd == ERR) {
       if (timeout == amqp_timeout) {
         pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
-        amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
-      else amqp_timeout = plugin_pipe_amqp_calc_poll_timeout_diff(amqp_host, idata.now); 
+      else amqp_timeout = plugin_pipe_calc_retry_timeout_diff(&amqp_host->btimers, idata.now); 
+    }
+#endif
+
+#ifdef WITH_KAFKA
+    if (config.pipe_kafka && pipe_fd == ERR) {
+      if (timeout == kafka_timeout) {
+        pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
+        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+      }
+      else kafka_timeout = plugin_pipe_calc_retry_timeout_diff(&kafka_host->btimers, idata.now);
     }
 #endif
 
     switch (ret) {
     case 0: /* timeout */
-      if (timeout == refresh_timeout) P_cache_handle_flush_event(&pt);
+      if (timeout == refresh_timeout) {
+	int saved_qq_ptr;
+
+	saved_qq_ptr = qq_ptr;
+	P_cache_handle_flush_event(&pt);
+	if (saved_qq_ptr) print_output_stdout_header = FALSE;
+      }
       break;
     default: /* we received data */
       read_data:
-      if (!config.pipe_amqp) {
+      if (config.pipe_homegrown) {
         if (!pollagain) {
           seq++;
           seq %= MAX_SEQNUM;
@@ -222,11 +267,10 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           else {
             rg_err_count++;
             if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-              Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
-              Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
-              Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
-              Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
-              Log(LOG_ERR, "- increase system maximum socket size.\n\n");
+              Log(LOG_WARNING, "WARN ( %s/%s ): Missing data detected (plugin_buffer_size=%llu plugin_pipe_size=%llu).\n",
+                        config.name, config.type, config.buffer_size, config.pipe_size);
+              Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
+                        config.name, config.type);
             }
             seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
           }
@@ -237,21 +281,40 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         rg->ptr += bufsz;
       }
 #ifdef WITH_RABBITMQ
-      else {
+      else if (config.pipe_amqp) {
         ret = p_amqp_consume_binary(amqp_host, pipebuf, config.buffer_size);
 	if (ret) pipe_fd = ERR;
 
 	seq = ((struct ch_buf_hdr *)pipebuf)->seq;
-	amqp_timeout = plugin_pipe_amqp_set_poll_timeout(amqp_host, pipe_fd);
+	amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
+      }
+#endif
+#ifdef WITH_KAFKA
+      else if (config.pipe_kafka) {
+        ret = p_kafka_consume_data(kafka_host, kafka_msg, pipebuf, config.buffer_size);
+        if (ret) pipe_fd = ERR;
+
+        seq = ((struct ch_buf_hdr *)pipebuf)->seq;
+        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
       }
 #endif
 
       /* lazy refresh time handling */ 
-      if (idata.now > refresh_deadline) P_cache_handle_flush_event(&pt);
+      if (idata.now > refresh_deadline) {
+	int saved_qq_ptr;
+
+	saved_qq_ptr = qq_ptr;
+	P_cache_handle_flush_event(&pt);
+	if (saved_qq_ptr) print_output_stdout_header = FALSE;
+      }
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
-      Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received seq=%u num_entries=%u\n", config.name, config.type, seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
+      if (config.debug_internal_msg) 
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u seq=%u num_entries=%u\n",
+                config.name, config.type, core_pid, seq, ((struct ch_buf_hdr *)pipebuf)->num);
+
+      if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
 	for (num = 0; primptrs_funcs[num]; num++)
 	  (*primptrs_funcs[num])((u_char *)data, &extras, &prim_ptrs);
@@ -279,8 +342,9 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
           data = (struct pkt_data *) dataptr;
 	}
       }
+      }
 
-      if (!config.pipe_amqp) goto read_data;
+      if (config.pipe_homegrown) goto read_data;
     }
   }
 }
@@ -298,10 +362,10 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   struct pkt_mpls_primitives empty_pmpls;
   char *empty_pcust = NULL;
   char src_mac[18], dst_mac[18], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN], ip_address[INET6_ADDRSTRLEN];
-  char rd_str[SRVBUFLEN], *sep = config.print_output_separator;
+  char rd_str[SRVBUFLEN], *sep = config.print_output_separator, *fd_buf;
   char *as_path, *bgp_comm, empty_string[] = "", empty_aspath[] = "^$", empty_ip4[] = "0.0.0.0", empty_ip6[] = "::";
   char empty_macaddress[] = "00:00:00:00:00:00", empty_rd[] = "0:0";
-  FILE *f = NULL;
+  FILE *f = NULL, *lockf = NULL;
   int j, stop, is_event = FALSE, qn = 0, go_to_pending, saved_index = index;
   time_t start, duration;
   char tmpbuf[LONGLONGSRVBUFLEN], current_table[SRVBUFLEN], elem_table[SRVBUFLEN];
@@ -330,6 +394,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   memset(&elem_prim_ptrs, 0, sizeof(elem_prim_ptrs));
   memset(&elem_dummy_data, 0, sizeof(elem_dummy_data));
 
+  fd_buf = malloc(OUTPUT_FILE_BUFSZ);
 
   for (j = 0, stop = 0; (!stop) && P_preprocess_funcs[j]; j++)
     stop = P_preprocess_funcs[j](queue, &index, j);
@@ -349,7 +414,6 @@ void P_cache_purge(struct chained_cache *queue[], int index)
 
   if (config.sql_table) {
     time_t stamp = 0;
-    int append = FALSE;
 
     strlcpy(current_table, config.sql_table, SRVBUFLEN);
 
@@ -363,9 +427,19 @@ void P_cache_purge(struct chained_cache *queue[], int index)
       strftime_same(current_table, LONGSRVBUFLEN, tmpbuf, &stamp);
     }
 
-    f = open_print_output_file(current_table, &append);
+    
+    if (config.print_output_file_append)
+      f = open_output_file(current_table, "a", TRUE);
+    else
+      f = open_output_file(current_table, "w", TRUE);
 
-    if (f && !append) { 
+    if (fd_buf) {
+      if (setvbuf(f, fd_buf, _IOFBF, OUTPUT_FILE_BUFSZ))
+        Log(LOG_WARNING, "WARN ( %s/%s ): [%s] setvbuf() failed: %s\n", config.name, config.type, current_table, errno);
+      else memset(fd_buf, 0, OUTPUT_FILE_BUFSZ);
+    }
+
+    if (f && !config.print_output_file_append) { 
       if (config.print_markers) fprintf(f, "--START (%ld+%d)--\n", stamp, config.sql_refresh_time);
 
       if (config.print_output & PRINT_OUTPUT_FORMATTED)
@@ -374,7 +448,23 @@ void P_cache_purge(struct chained_cache *queue[], int index)
         P_write_stats_header_csv(f, is_event);
     }
   }
-  else f = stdout; /* write to standard output */
+  else {
+    /* writing to stdout: pointing f and obtaining lock */
+    f = stdout;
+    if (config.print_output_lock_file) {
+      lockf = open_output_file(config.print_output_lock_file, "w", TRUE);
+      if (!lockf)
+        Log(LOG_WARNING, "WARN ( %s/%s ): Failed locking print_output_lock_file: %s\n", config.name, config.type, config.print_output_lock_file);
+    }
+
+    /* writing to stdout: writing header only once */
+    if (print_output_stdout_header) {
+      if (config.print_output & PRINT_OUTPUT_FORMATTED)
+        P_write_stats_header_formatted(stdout, is_event);
+      else if (config.print_output & PRINT_OUTPUT_CSV)
+        P_write_stats_header_csv(stdout, is_event);
+    }
+  }
 
   for (j = 0; j < index; j++) {
     int count = 0;
@@ -711,7 +801,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           time_t time1;
           struct tm *time2;
   
-          if (config.sql_history_since_epoch) {
+          if (config.timestamps_since_epoch) {
 	    snprintf(buf2, SRVBUFLEN, "%u.%u", pnat->timestamp_start.tv_sec, pnat->timestamp_start.tv_usec);
 	  }
 	  else {
@@ -729,7 +819,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           time_t time1;
           struct tm *time2;
         
-          if (config.sql_history_since_epoch) {
+          if (config.timestamps_since_epoch) {
             snprintf(buf2, SRVBUFLEN, "%u.%u", pnat->timestamp_end.tv_sec, pnat->timestamp_end.tv_usec);
           }
           else {
@@ -742,12 +832,30 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           fprintf(f, "%-30s ", buf2);
         }
 
+        if (config.what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL) {
+          char buf1[SRVBUFLEN], buf2[SRVBUFLEN];
+          time_t time1;
+          struct tm *time2;
+
+          if (config.timestamps_since_epoch) {
+            snprintf(buf2, SRVBUFLEN, "%u.%u", pnat->timestamp_arrival.tv_sec, pnat->timestamp_arrival.tv_usec);
+          }
+          else {
+            time1 = pnat->timestamp_arrival.tv_sec;
+            time2 = localtime(&time1);
+            strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+            snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, pnat->timestamp_arrival.tv_usec);
+          }
+
+          fprintf(f, "%-30s ", buf2);
+        }
+
         if (config.nfacctd_stitching && queue[j]->stitch) {
           char buf1[SRVBUFLEN], buf2[SRVBUFLEN];
           time_t time1;
           struct tm *time2;
 
-          if (config.sql_history_since_epoch) {
+          if (config.timestamps_since_epoch) {
             snprintf(buf2, SRVBUFLEN, "%u.%u", queue[j]->stitch->timestamp_min.tv_sec, queue[j]->stitch->timestamp_min.tv_usec);
             fprintf(f, "%-30s ", buf2);
 
@@ -768,6 +876,9 @@ void P_cache_purge(struct chained_cache *queue[], int index)
             fprintf(f, "%-30s ", buf2);
 	  }
         }
+
+        if (config.what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) fprintf(f, "%-18u  ", data->export_proto_seqno);
+        if (config.what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) fprintf(f, "%-20u  ", data->export_proto_version);
 
         /* all custom primitives printed here */
         {
@@ -994,7 +1105,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           time_t time1;
           struct tm *time2;
  
-          if (config.sql_history_since_epoch) {
+          if (config.timestamps_since_epoch) {
             snprintf(buf2, SRVBUFLEN, "%u.%u", pnat->timestamp_start.tv_sec, pnat->timestamp_start.tv_usec);
           }
           else {
@@ -1012,7 +1123,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           time_t time1;
           struct tm *time2;
   
-          if (config.sql_history_since_epoch) {
+          if (config.timestamps_since_epoch) {
             snprintf(buf2, SRVBUFLEN, "%u.%u", pnat->timestamp_end.tv_sec, pnat->timestamp_end.tv_usec);
           }
           else {
@@ -1025,12 +1136,30 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           fprintf(f, "%s%s", write_sep(sep, &count), buf2);
         }
 
+        if (config.what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL) {
+          char buf1[SRVBUFLEN], buf2[SRVBUFLEN];
+          time_t time1;
+          struct tm *time2;
+
+          if (config.timestamps_since_epoch) {
+            snprintf(buf2, SRVBUFLEN, "%u.%u", pnat->timestamp_arrival.tv_sec, pnat->timestamp_arrival.tv_usec);
+          }
+          else {
+            time1 = pnat->timestamp_arrival.tv_sec;
+            time2 = localtime(&time1);
+            strftime(buf1, SRVBUFLEN, "%Y-%m-%d %H:%M:%S", time2);
+            snprintf(buf2, SRVBUFLEN, "%s.%u", buf1, pnat->timestamp_arrival.tv_usec);
+          }
+
+          fprintf(f, "%s%s", write_sep(sep, &count), buf2);
+        }
+
         if (config.nfacctd_stitching && queue[j]->stitch) {
           char buf1[SRVBUFLEN], buf2[SRVBUFLEN];
           time_t time1;
           struct tm *time2;
 
-          if (config.sql_history_since_epoch) {
+          if (config.timestamps_since_epoch) {
             snprintf(buf2, SRVBUFLEN, "%u.%u", queue[j]->stitch->timestamp_min.tv_sec, queue[j]->stitch->timestamp_min.tv_usec);
 	    fprintf(f, "%s%s", write_sep(sep, &count), buf2);
 
@@ -1051,6 +1180,9 @@ void P_cache_purge(struct chained_cache *queue[], int index)
             fprintf(f, "%s%s", write_sep(sep, &count), buf2);
 	  }
         }
+
+        if (config.what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) fprintf(f, "%s%u", write_sep(sep, &count), data->export_proto_seqno);
+        if (config.what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) fprintf(f, "%s%u", write_sep(sep, &count), data->export_proto_version);
   
         /* all custom primitives printed here */
         {
@@ -1087,24 +1219,34 @@ void P_cache_purge(struct chained_cache *queue[], int index)
         else fprintf(f, "\n");
       }
       else if (f && config.print_output & PRINT_OUTPUT_JSON) {
-        char *json_str;
+        void *json_obj;
   
-        json_str = compose_json(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
+        json_obj = compose_json(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
                            &queue[j]->primitives, pbgp, pnat, pmpls, pcust, pvlen, queue[j]->bytes_counter,
   			 queue[j]->packet_counter, queue[j]->flow_counter, queue[j]->tcp_flags, NULL,
 			 queue[j]->stitch);
   
-        if (json_str) {
-          fprintf(f, "%s\n", json_str);
-          free(json_str);
-        }
+        if (json_obj) write_and_free_json(f, json_obj);
       }
     }
   }
 
   if (f && config.print_markers) fprintf(f, "--END--\n");
 
-  if (f && config.sql_table) close_print_output_file(f, config.print_latest_file, current_table, &prim_ptrs);
+  if (f && config.sql_table) {
+    if (config.print_latest_file) {
+      memset(tmpbuf, 0, LONGLONGSRVBUFLEN);
+      handle_dynname_internal_strings(tmpbuf, LONGSRVBUFLEN, config.print_latest_file, &prim_ptrs);
+      link_latest_output_file(tmpbuf, current_table);
+    }
+
+    close_output_file(f);
+  }
+  else {
+    /* writing to stdout: releasing lock */
+    fflush(f);
+    close_output_file(lockf);
+  }
 
   /* If we have pending queries then start again */
   if (pqq_ptr) goto start;
@@ -1199,10 +1341,13 @@ void P_write_stats_header_formatted(FILE *f, int is_event)
   if (config.what_to_count_2 & COUNT_MPLS_STACK_DEPTH) fprintf(f, "MPLS_STACK_DEPTH  ");
   if (config.what_to_count_2 & COUNT_TIMESTAMP_START) fprintf(f, "TIMESTAMP_START                ");
   if (config.what_to_count_2 & COUNT_TIMESTAMP_END) fprintf(f, "TIMESTAMP_END                  "); 
+  if (config.what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL) fprintf(f, "TIMESTAMP_ARRIVAL              ");
   if (config.nfacctd_stitching) {
     fprintf(f, "TIMESTAMP_MIN                  ");
     fprintf(f, "TIMESTAMP_MAX                  "); 
   }
+  if (config.what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) fprintf(f, "EXPORT_PROTO_SEQNO  ");
+  if (config.what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) fprintf(f, "EXPORT_PROTO_VERSION  ");
 
   /* all custom primitives printed here */
   {
@@ -1296,10 +1441,13 @@ void P_write_stats_header_csv(FILE *f, int is_event)
   if (config.what_to_count_2 & COUNT_MPLS_STACK_DEPTH) fprintf(f, "%sMPLS_STACK_DEPTH", write_sep(sep, &count));
   if (config.what_to_count_2 & COUNT_TIMESTAMP_START) fprintf(f, "%sTIMESTAMP_START", write_sep(sep, &count));
   if (config.what_to_count_2 & COUNT_TIMESTAMP_END) fprintf(f, "%sTIMESTAMP_END", write_sep(sep, &count));
+  if (config.what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL) fprintf(f, "%sTIMESTAMP_ARRIVAL", write_sep(sep, &count));
   if (config.nfacctd_stitching) {
     fprintf(f, "%sTIMESTAMP_MIN", write_sep(sep, &count));
     fprintf(f, "%sTIMESTAMP_MAX", write_sep(sep, &count));
   }
+  if (config.what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) fprintf(f, "%sEXPORT_PROTO_SEQNO", write_sep(sep, &count));
+  if (config.what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) fprintf(f, "%sEXPORT_PROTO_VERSION", write_sep(sep, &count));
 
   /* all custom primitives printed here */
   { 

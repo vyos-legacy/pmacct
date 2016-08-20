@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -31,7 +31,7 @@
 #include "tee_plugin/tee_recvs-data.h"
 #include "isis/isis.h"
 #include "isis/isis-data.h"
-#include "crc32.c"
+#include "crc32.h"
 
 /*
    XXX: load_id_file() interface cleanup pending:
@@ -65,7 +65,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
   char *start, *key = NULL, *value = NULL;
   int len;
 
-  Log(LOG_INFO, "INFO ( %s/%s ): Trying to (re)load map: %s\n", config.name, config.type, filename);
+  Log(LOG_INFO, "INFO ( %s/%s ): [%s] (re)loading map.\n", config.name, config.type, filename);
 
   memset(&st, 0, sizeof(st));
   memset(&tmp, 0, sizeof(struct id_table));
@@ -83,14 +83,14 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 
   buf = (char *) malloc(map_row_len);
   if (!buf) {
-    Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (load_id_file, readbuf: %u chars).\n", config.name, config.type, map_row_len);
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] malloc() failed (readbuf: %u chars).\n", config.name, config.type, filename, map_row_len);
     goto handle_error;
   }
   memset(buf, 0, map_row_len);
 
   if (filename) {
     if ((file = fopen(filename, "r")) == NULL) {
-      Log(LOG_ERR, "ERROR ( %s/%s ): map '%s' not found.\n", config.name, config.type, filename);
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] file not found.\n", config.name, config.type, filename);
       goto handle_error;
     }
 
@@ -101,7 +101,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
         memset(t, 0, sizeof(struct id_table));
         t->e = (struct id_entry *) malloc(sz);
 	if (!t->e) {
-	  Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (load_id_file)\n", config.name, config.type);
+	  Log(LOG_ERR, "ERROR ( %s/%s ): [%s] malloc() failed.\n", config.name, config.type, filename);
 	  goto handle_error;
 	}
         *map_allocated = TRUE;
@@ -114,7 +114,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 	  pretag_index_destroy(t);
 	}
 	for (index = 0; index < t->num; index++) {
-	  pcap_freecode(&t->e[index].filter);
+	  pcap_freecode(&t->e[index].key.filter);
 	  pretag_free_label(&t->e[index].label);
 	}
 
@@ -128,7 +128,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 
     tmp.e = (struct id_entry *) malloc(sz);
     if (!tmp.e) {
-      Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (load_id_file)\n", config.name, config.type);
+      Log(LOG_ERR, "ERROR ( %s/%s ): [%s] malloc() failed.\n", config.name, config.type, filename);
       goto handle_error;
     }
 
@@ -144,7 +144,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
       req->line_num = ++tot_lines;
 
       if (tmp.num >= map_entries) {
-	Log(LOG_WARNING, "WARN ( %s/%s ): map '%s' cut to the first %u entries. Number of entries can be configured via 'maps_entries'.\n",
+	Log(LOG_WARNING, "WARN ( %s/%s ): [%s] file cut to the first %u entries. Number of entries can be configured via 'maps_entries'.\n",
 		config.name, config.type, filename, map_entries);
 	break;
       }
@@ -152,8 +152,8 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
       if (fgets(buf, map_row_len, file)) {
         if (!iscomment(buf) && !isblankline(buf)) {
 	  if (strlen(buf) == (map_row_len-1) && !strchr(buf, '\n')) {
-	    Log(LOG_WARNING, "WARN ( %s/%s ): line too long (max %u chars). Line %d in map '%s' ignored.\n",
-			config.name, config.type, map_row_len, tot_lines, filename);
+	    Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] line too long (max %u chars). Ignored.\n",
+			config.name, config.type, filename, tot_lines, map_row_len);
 	    continue;
 	  }
           if (!check_not_valid_char(filename, buf, '|')) {
@@ -184,7 +184,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
                 if (start == &buf[x]) continue;
                 buf[x] = '\0';
                 if (value || !key) {
-                  Log(LOG_ERR, "ERROR ( %s/%s ): malformed line %d in map '%s'. Ignored.\n", config.name, config.type, tot_lines, filename);
+                  Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] malformed line. Ignored.\n", config.name, config.type, filename, tot_lines);
                   err = TRUE;
                   break;
                 }
@@ -208,9 +208,9 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
                     else err = E_NOTFOUND; /* key not found */
                   }
                   if (err) {
-                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s/%s ): unknown key '%s' at line %d in map '%s'. Ignored.\n",
-						config.name, config.type, key, tot_lines, filename);
-                    else Log(LOG_ERR, "Line %d ignored.\n", tot_lines);
+                    if (err == E_NOTFOUND) Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] unknown key '%s'. Ignored.\n",
+						config.name, config.type, filename, tot_lines, key);
+                    else Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] Line ignored.\n", config.name, config.type, filename, tot_lines);
                     break;
                   }
                   key = NULL; value = NULL;
@@ -224,9 +224,9 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
                     else err = E_NOTFOUND; /* key not found */
                   }
                   if (err) {
-                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s/%s ): unknown key '%s' at line %d in map '%s'. Ignored.\n", 
-						config.name, config.type, key, tot_lines, filename);
-                    else Log(LOG_ERR, "Line %d ignored.\n", tot_lines);
+                    if (err == E_NOTFOUND) Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] unknown key '%s'. Ignored.\n", 
+						config.name, config.type, filename, tot_lines, key);
+                    else Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] Line ignored.\n", config.name, config.type, filename, tot_lines);
                     break;
                   }
                   key = NULL; value = NULL;
@@ -240,9 +240,9 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
                     else err = E_NOTFOUND; /* key not found */
                   }
                   if (err) {
-                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s/%s ): unknown key '%s' at line %d in map '%s'. Ignored.\n", 
-						config.name, config.type, key, tot_lines, filename);
-                    else Log(LOG_ERR, "Line %d ignored.\n", tot_lines);
+                    if (err == E_NOTFOUND) Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] unknown key '%s'. Ignored.\n", 
+						config.name, config.type, filename, tot_lines, filename, key);
+                    else Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] Line ignored.\n", config.name, config.type, filename, tot_lines);
                     break;
                   }
                   key = NULL; value = NULL;
@@ -256,9 +256,9 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
                     else err = E_NOTFOUND; /* key not found */
                   }
                   if (err) {
-                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s/%s ): unknown key '%s' at line %d in map '%s'. Ignored.\n", 
-						config.name, config.type, key, tot_lines, filename);
-                    else Log(LOG_ERR, "Line %d ignored.\n", tot_lines);
+                    if (err == E_NOTFOUND) Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] unknown key '%s'. Ignored.\n", 
+						config.name, config.type, filename, tot_lines, key);
+                    else Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] Line ignored.\n", config.name, config.type, filename, tot_lines);
                     break;
                   }
                   key = NULL; value = NULL;
@@ -272,9 +272,9 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
                     else err = E_NOTFOUND; /* key not found */
                   }
                   if (err) {
-                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s/%s ): unknown key '%s' at line %d in map '%s'. Ignored.\n", 
-						config.name, config.type, key, tot_lines, filename);
-                    else Log(LOG_ERR, "Line %d ignored in map '%s'.\n", tot_lines, filename);
+                    if (err == E_NOTFOUND) Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] unknown key '%s'. Ignored.\n", 
+						config.name, config.type, filename, tot_lines, key);
+                    else Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] Line ignored.\n", config.name, config.type, filename, tot_lines);
                     break;
                   }
                   key = NULL; value = NULL;
@@ -288,10 +288,10 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
                     else err = E_NOTFOUND; /* key not found */
                   }
                   if (err) {
-                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s/%s ): unknown key '%s' at line %d in map '%s'. Ignored.\n",
-                                                config.name, config.type, key, tot_lines, filename);
+                    if (err == E_NOTFOUND) Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] unknown key '%s'. Ignored.\n",
+                                                config.name, config.type, filename, tot_lines, key);
                     else {
-		      Log(LOG_ERR, "Line %d ignored in map '%s'.\n", tot_lines, filename);
+		      Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] Line ignored.\n", config.name, config.type, filename, tot_lines);
 		      ignoring = TRUE;
 		    }
                   }
@@ -306,9 +306,9 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
                     else err = E_NOTFOUND; /* key not found */
                   }
                   if (err) {
-                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s/%s ): unknown key '%s' at line %d in map '%s'. Ignored.\n",
-                                                config.name, config.type, key, tot_lines, filename);
-                    else Log(LOG_ERR, "Line %d ignored.\n", tot_lines);
+                    if (err == E_NOTFOUND) Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] unknown key '%s'. Ignored.\n",
+                                                config.name, config.type, filename, tot_lines, key);
+                    else Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] Line ignored.\n", config.name, config.type, filename, tot_lines);
 		    ignoring = TRUE;
                     break;
                   }
@@ -334,9 +334,9 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 		    }
 		  }
                   if (err) {
-                    if (err == E_NOTFOUND) Log(LOG_ERR, "ERROR ( %s/%s ): unknown key '%s' at line %d in map '%s'. Ignored.\n", 
-						config.name, config.type, key, tot_lines, filename);
-                    else Log(LOG_ERR, "Line %d ignored in map '%s'.\n", tot_lines, filename);
+                    if (err == E_NOTFOUND) Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] unknown key '%s'. Ignored.\n", 
+						config.name, config.type, filename, tot_lines, key);
+                    else Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] Line ignored.\n", config.name, config.type, filename, tot_lines);
                     break; 
                   }
                   key = NULL; value = NULL;
@@ -347,9 +347,9 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
               /* verifying errors and required fields */
 	      if (acct_type == ACCT_NF || acct_type == ACCT_SF) {
 	        if (tmp.e[tmp.num].id && tmp.e[tmp.num].id2 && tmp.e[tmp.num].label.len) 
-		   Log(LOG_ERR, "ERROR ( %s/%s ): set_tag (id), set_tag2 (id2) and set_label are mutual exclusive at line %d in map '%s'.\n", 
-			config.name, config.type, tot_lines, filename);
-                else if (!err && tmp.e[tmp.num].agent_ip.a.family) {
+		   Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] set_tag (id), set_tag2 (id2) and set_label are mutual exclusive. Line ignored.\n", 
+			config.name, config.type, filename, tot_lines);
+                else if (!err && tmp.e[tmp.num].key.agent_ip.a.family) {
                   int j, z;
 
                   for (j = 0; tmp.e[tmp.num].func[j]; j++);
@@ -358,25 +358,25 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 		    tmp.e[tmp.num].func_type[j] = tmp.e[tmp.num].set_func_type[z];
 		  }
 
-	          if (tmp.e[tmp.num].agent_ip.a.family == AF_INET) v4_num++;
+	          if (tmp.e[tmp.num].key.agent_ip.a.family == AF_INET) v4_num++;
 #if defined ENABLE_IPV6
-	          else if (tmp.e[tmp.num].agent_ip.a.family == AF_INET6) v6_num++;
+	          else if (tmp.e[tmp.num].key.agent_ip.a.family == AF_INET6) v6_num++;
 #endif
                   tmp.num++;
                 }
 	        /* if any required field is missing and other errors have been signalled
 	           before we will trap an error message */
-	        else if (!err && !tmp.e[tmp.num].agent_ip.a.family)
-	          Log(LOG_ERR, "ERROR ( %s/%s ): required key missing at line %d in map '%s'. Required key is: 'ip'.\n",
-			config.name, config.type, tot_lines, filename); 
+	        else if (!err && !tmp.e[tmp.num].key.agent_ip.a.family)
+	          Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] required key missing. Required key is: 'ip'. Line ignored.\n",
+			config.name, config.type, filename, tot_lines); 
 	      }
 	      else if (acct_type == ACCT_PM) {
 	        if (tmp.e[tmp.num].id && tmp.e[tmp.num].id2 && tmp.e[tmp.num].label.len)
-                   Log(LOG_ERR, "ERROR ( %s/%s ): set_tag (id), set_tag2 (id2) and set_label are mutual exclusive at line %d in map '%s'.\n", 
-			config.name, config.type, tot_lines, filename);
-	        else if (tmp.e[tmp.num].agent_ip.a.family)
-		  Log(LOG_ERR, "ERROR ( %s/%s ): key 'ip' not applicable here. Invalid line %d in map '%s'.\n",
-			config.name, config.type, tot_lines, filename);
+                   Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] set_tag (id), set_tag2 (id2) and set_label are mutual exclusive. Line ignored.\n", 
+			config.name, config.type, filename, tot_lines);
+	        else if (tmp.e[tmp.num].key.agent_ip.a.family)
+		  Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] key 'ip' not applicable. Line ignored.\n",
+			config.name, config.type, filename, tot_lines);
 	        else if (!err) {
                   int j, z;
 
@@ -385,29 +385,29 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 		    tmp.e[tmp.num].func[j] = tmp.e[tmp.num].set_func[z];
 		    tmp.e[tmp.num].func_type[j] = tmp.e[tmp.num].set_func_type[z];
 		  }
-		  tmp.e[tmp.num].agent_ip.a.family = AF_INET; /* we emulate a dummy '0.0.0.0' IPv4 address */
+		  tmp.e[tmp.num].key.agent_ip.a.family = AF_INET; /* we emulate a dummy '0.0.0.0' IPv4 address */
 		  v4_num++; tmp.num++;
 	        }
 	      }
 	      else if (acct_type == MAP_BGP_PEER_AS_SRC || acct_type == MAP_BGP_SRC_LOCAL_PREF ||
 	  	       acct_type == MAP_BGP_SRC_MED) {
-                if (!err && (tmp.e[tmp.num].id || tmp.e[tmp.num].flags) && tmp.e[tmp.num].agent_ip.a.family) {
+                if (!err && (tmp.e[tmp.num].id || tmp.e[tmp.num].flags) && tmp.e[tmp.num].key.agent_ip.a.family) {
                   int j;
 
                   for (j = 0; tmp.e[tmp.num].func[j]; j++);
                   tmp.e[tmp.num].func[j] = pretag_id_handler;
-                  if (tmp.e[tmp.num].agent_ip.a.family == AF_INET) v4_num++;
+                  if (tmp.e[tmp.num].key.agent_ip.a.family == AF_INET) v4_num++;
 #if defined ENABLE_IPV6
-                  else if (tmp.e[tmp.num].agent_ip.a.family == AF_INET6) v6_num++;
+                  else if (tmp.e[tmp.num].key.agent_ip.a.family == AF_INET6) v6_num++;
 #endif
                   tmp.num++;
                 }
-                else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.a.family) && !err)
-                  Log(LOG_ERR, "ERROR ( %s/%s ): required key missing at line %d in map '%s'. Required keys are: 'id', 'ip'.\n", 
-			config.name, config.type, tot_lines, filename);
+                else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].key.agent_ip.a.family) && !err)
+                  Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] required key missing. Required keys are: 'id', 'ip'. Line ignored.\n", 
+			config.name, config.type, filename, tot_lines);
 	      }
               else if (acct_type == MAP_BGP_TO_XFLOW_AGENT) {
-                if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].agent_ip.a.family) {
+                if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].key.agent_ip.a.family) {
                   int j, z;
 
                   for (j = 0; tmp.e[tmp.num].func[j]; j++);
@@ -418,52 +418,52 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 		  /* imposing pretag_id_handler to be the last one */
 		  tmp.e[tmp.num].func[j] = pretag_id_handler;
 
-                  if (tmp.e[tmp.num].agent_ip.a.family == AF_INET) v4_num++;
+                  if (tmp.e[tmp.num].key.agent_ip.a.family == AF_INET) v4_num++;
 #if defined ENABLE_IPV6
-                  else if (tmp.e[tmp.num].agent_ip.a.family == AF_INET6) v6_num++;
+                  else if (tmp.e[tmp.num].key.agent_ip.a.family == AF_INET6) v6_num++;
 #endif
                   tmp.num++;
                 }
-                else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.a.family) && !err)
-                  Log(LOG_ERR, "ERROR ( %s/%s ): required key missing at line %d in map '%s'. Required keys are: 'id', 'ip'.\n",
-                        config.name, config.type, tot_lines, filename);
+                else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].key.agent_ip.a.family) && !err)
+                  Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] required key missing. Required keys are: 'id', 'ip'. Line ignored.\n",
+                        config.name, config.type, filename, tot_lines);
               }
               else if (acct_type == MAP_FLOW_TO_RD) {
-                if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].agent_ip.a.family) {
+                if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].key.agent_ip.a.family) {
                   int j;
 
                   for (j = 0; tmp.e[tmp.num].func[j]; j++);
                   tmp.e[tmp.num].func[j] = pretag_id_handler;
-                  if (tmp.e[tmp.num].agent_ip.a.family == AF_INET) v4_num++;
+                  if (tmp.e[tmp.num].key.agent_ip.a.family == AF_INET) v4_num++;
 #if defined ENABLE_IPV6
-                  else if (tmp.e[tmp.num].agent_ip.a.family == AF_INET6) v6_num++;
+                  else if (tmp.e[tmp.num].key.agent_ip.a.family == AF_INET6) v6_num++;
 #endif
                   tmp.num++;
                 }
 	      }
               else if (acct_type == MAP_SAMPLING) {
-                if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].agent_ip.a.family) {
+                if (!err && tmp.e[tmp.num].id && tmp.e[tmp.num].key.agent_ip.a.family) {
                   int j;
 
                   for (j = 0; tmp.e[tmp.num].func[j]; j++);
                   tmp.e[tmp.num].func[j] = pretag_id_handler;
-                  if (tmp.e[tmp.num].agent_ip.a.family == AF_INET) v4_num++;
+                  if (tmp.e[tmp.num].key.agent_ip.a.family == AF_INET) v4_num++;
 #if defined ENABLE_IPV6
-                  else if (tmp.e[tmp.num].agent_ip.a.family == AF_INET6) v6_num++;
+                  else if (tmp.e[tmp.num].key.agent_ip.a.family == AF_INET6) v6_num++;
 #endif
                   tmp.num++;
                 }
-                else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].agent_ip.a.family) && !err)
-                  Log(LOG_ERR, "ERROR ( %s/%s ): required key missing at line %d in map '%s'. Required keys are: 'id', 'ip'.\n",
-			config.name, config.type, tot_lines, filename);
+                else if ((!tmp.e[tmp.num].id || !tmp.e[tmp.num].key.agent_ip.a.family) && !err)
+                  Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] required key missing. Required keys are: 'id', 'ip'. Line ignored.\n",
+			config.name, config.type, filename, tot_lines);
               }
 	      else if (acct_type == MAP_TEE_RECVS) tee_recvs_map_validate(filename, req); 
 	      else if (acct_type == MAP_IGP) igp_daemon_map_validate(filename, req); 
 	      else if (acct_type == MAP_CUSTOM_PRIMITIVES) custom_primitives_map_validate(filename, req); 
 	    }
           }
-          else Log(LOG_ERR, "ERROR ( %s/%s ): malformed line %d in map '%s'. Ignored.\n",
-			config.name, config.type, tot_lines, filename);
+          else Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] malformed line. Ignored.\n",
+			config.name, config.type, filename, tot_lines);
         }
       }
     }
@@ -485,7 +485,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
       t->ipv4_base = &t->e[x];
       t->flags = tmp.flags;
       for (index = 0; index < tmp.num; index++) {
-        if (tmp.e[index].agent_ip.a.family == AF_INET) { 
+        if (tmp.e[index].key.agent_ip.a.family == AF_INET) { 
           memcpy(&t->e[x], &tmp.e[index], sizeof(struct id_entry));
 	  t->e[x].pos = x;
 	  x++;
@@ -495,7 +495,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
       t->ipv6_num = v6_num;
       t->ipv6_base = &t->e[x];
       for (index = 0; index < tmp.num; index++) {
-        if (tmp.e[index].agent_ip.a.family == AF_INET6) {
+        if (tmp.e[index].key.agent_ip.a.family == AF_INET6) {
           memcpy(&t->e[x], &tmp.e[index], sizeof(struct id_entry));
 	  t->e[x].pos = x;
           x++;
@@ -526,8 +526,8 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 	  }
 	  if (!label_solved) {
 	    ptr->jeq.ptr = NULL;
-	    Log(LOG_ERR, "ERROR ( %s/%s ): Unresolved label '%s' in map '%s'. Ignoring it.\n",
-			config.name, config.type, ptr->jeq.label, filename);
+	    Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Unresolved label '%s'. Ignoring it.\n",
+			config.name, config.type, filename, ptr->jeq.label);
 	  }
 	  free(ptr->jeq.label);
 	  ptr->jeq.label = NULL;
@@ -547,8 +547,8 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
           }
           if (!label_solved) {
             ptr->jeq.ptr = NULL;
-            Log(LOG_ERR, "ERROR ( %s/%s ): Unresolved label '%s' in map '%s'. Ignoring it.\n",
-			config.name, config.type, ptr->jeq.label, filename);
+            Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Unresolved label '%s'. Ignoring it.\n",
+			config.name, config.type, filename, ptr->jeq.label);
           }
           free(ptr->jeq.label);
           ptr->jeq.label = NULL;
@@ -576,7 +576,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
 
 	  /* insert bitmap to index list and determine entries per index */ 
 	  if (pretag_index_insert_bitmap(t, idx_bmap)) {
-	    Log(LOG_WARNING, "WARN ( %s/%s ): Out of indexes for table '%s'. Indexing disabled.\n",
+	    Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Out of indexes. Indexing disabled.\n",
 		config.name, config.type, filename);
 	    pretag_index_destroy(t);
 	    break;
@@ -603,17 +603,18 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
       }
 
       if (t->flags & PRETAG_FLAG_NEG) {
-        Log(LOG_WARNING, "WARN ( %s/%s ): Negations not supported for table '%s'. Indexing disabled.\n",
+        Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Negations not supported. Indexing disabled.\n",
                 config.name, config.type, filename);
         pretag_index_destroy(t);
       }
+      else pretag_index_report(t);
     }
   }
 
   if (tmp.e) free(tmp.e) ;
   if (buf) free(buf) ;
 
-  Log(LOG_INFO, "INFO ( %s/%s ): map '%s' successfully (re)loaded.\n", config.name, config.type, filename);
+  Log(LOG_INFO, "INFO ( %s/%s ): [%s] map successfully (re)loaded.\n", config.name, config.type, filename);
 
   return;
 
@@ -622,7 +623,7 @@ void load_id_file(int acct_type, char *filename, struct id_table *t, struct plug
   if (buf) free(buf);
 
   if (t && t->timestamp) {
-    Log(LOG_WARNING, "WARN ( %s/%s ): Rolling back the old map '%s'.\n", config.name, config.type, filename);
+    Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Rolling back old map.\n", config.name, config.type, filename);
 
     /* we update the timestamp to avoid loops */
     stat(filename, &st);
@@ -724,7 +725,7 @@ int pretag_copy_label(pt_label_t *dst, pt_label_t *src)
   if (!src || !dst) return ERR;
 
   if (dst->val) {
-    Log(LOG_ERR, "ERROR ( %s/%s ): pretag_copy_label failed: dst->val not null\n", config.name, config.type);
+    Log(LOG_WARNING, "WARN ( %s/%s ): pretag_copy_label failed: dst->val not null\n", config.name, config.type);
     return ERR;
   }
   else {
@@ -903,8 +904,8 @@ int pretag_index_set_handlers(struct id_table *t)
     }
 
     if (residual_idx_bmap) {
-      Log(LOG_WARNING, "WARN ( %s/%s ): maps_index: not supported for field(s) %x in table '%s'. Indexing disabled.\n",
-		config.name, config.type, residual_idx_bmap, t->filename);
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] maps_index: not supported for field(s) %x. Indexing disabled.\n",
+		config.name, config.type, t->filename, residual_idx_bmap);
       pretag_index_destroy(t);
     }
   }
@@ -916,23 +917,26 @@ int pretag_index_allocate(struct id_table *t)
 {
   pt_bitmap_t idx_t_size = 0;
   u_int32_t iterator = 0, j = 0;
+  int ret, destroy = FALSE;
 
   if (!t) return TRUE;
 
   for (iterator = 0; iterator < t->index_num; iterator++) {
     if (t->index[iterator].bitmap) {
-      Log(LOG_INFO, "INFO ( %s/%s ): maps_index: created index %x (%u entries) for table '%s'\n", config.name,
-    		config.type, t->index[iterator].bitmap, t->index[iterator].entries, t->filename);
+      Log(LOG_INFO, "INFO ( %s/%s ): [%s] maps_index: created index %x (%u entries).\n", config.name,
+    		config.type, t->filename, t->index[iterator].bitmap, t->index[iterator].entries);
 
       assert(!t->index[iterator].idx_t);
       idx_t_size = IDT_INDEX_HASH_BASE(t->index[iterator].entries) * sizeof(struct id_index_entry);
       t->index[iterator].idx_t = malloc(idx_t_size);
 
       if (!t->index[iterator].idx_t) {
-        Log(LOG_ERR, "ERROR ( %s/%s ): maps_index: unable to allocate index %x for table '%s'\n", config.name,
-		config.type, t->index[iterator].bitmap, t->filename);
+        Log(LOG_WARNING, "WARN ( %s/%s ): [%s] maps_index: unable to allocate index %x.\n", config.name,
+		config.type, t->filename, t->index[iterator].bitmap);
 	t->index[iterator].bitmap = 0;
 	t->index[iterator].entries = 0;
+	destroy = TRUE;
+	break;
       }
       else {
 	memset(t->index[iterator].idx_t, 0, idx_t_size); 
@@ -940,64 +944,150 @@ int pretag_index_allocate(struct id_table *t)
 	for (j = 0; j < IDT_INDEX_HASH_BASE(t->index[iterator].entries); j++) {
 	  t->index[iterator].idx_t[j].depth = ID_TABLE_INDEX_DEPTH;
 	}
+
+	hash_init_serial(&t->index[iterator].hash_serializer, 16 /* dummy len for init sake */);
+	if (ret == ERR) {
+	  Log(LOG_WARNING, "WARN ( %s/%s ): [%s] maps_index: unable to allocate hash serializer for index %x.\n", config.name,
+		config.type, t->filename, t->index[iterator].bitmap);
+	  destroy = TRUE;
+	  break;
+	}
       }
     }
   }
 
-  return FALSE;
+  if (destroy) {
+    pretag_index_destroy(t);
+    return ERR;
+  }
+
+  return SUCCESS;
 }
 
 int pretag_index_fill(struct id_table *t, pt_bitmap_t idx_bmap, struct id_entry *ptr)
 {
-  struct id_entry e;
   u_int32_t index = 0, iterator = 0, handler_index = 0;
 
-  if (!t) return TRUE;
+  if (!t) return ERR;
 
   for (iterator = 0; iterator < t->index_num; iterator++) {
     if (t->index[iterator].bitmap && t->index[iterator].bitmap == idx_bmap) {
+      struct id_entry e;
       struct id_index_entry *idie;
-      int modulo;
+      pm_hash_serial_t *hash_serializer;
+      pm_hash_key_t *hash_key;
+      int modulo, buckets;
 
-      /* fill 'e' in and compute modulo */
+      /* fill serializer in and compute modulo */
       memset(&e, 0, sizeof(struct id_entry));
+      hash_serializer = &t->index[iterator].hash_serializer;
+      hash_serial_set_off(hash_serializer, 0);
+      hash_key = hash_serial_get_key(hash_serializer);
+      buckets = IDT_INDEX_HASH_BASE(t->index[iterator].entries);
+
+      if (!hash_key) return ERR;
+
       for (handler_index = 0; t->index[iterator].idt_handler[handler_index]; handler_index++) {
-	(*t->index[iterator].idt_handler[handler_index])(&e, ptr);
+	(*t->index[iterator].idt_handler[handler_index])(&e, hash_serializer, ptr);
       }
-      modulo = cache_crc32((unsigned char *)&e, sizeof(struct id_entry)) % IDT_INDEX_HASH_BASE(t->index[iterator].entries);
+      modulo = cache_crc32(hash_key_get_val(hash_key), hash_key_get_len(hash_key)) % buckets;
       idie = &t->index[iterator].idx_t[modulo];
 
       for (index = 0; index < idie->depth; index++) {
-        if (!idie->e[index]) {
-          idie->e[index] = ptr;
+        if (!idie->result[index]) {
+	  hash_dup_key(&idie->hash_key[index], hash_key);
+          idie->result[index] = ptr;
           break;
+        }
+        /* removing duplicates */
+        else {
+	  pm_id_t saved_pos_idie, saved_pos_ptr;
+	  int match = FALSE;
+
+	  saved_pos_idie = idie->result[index]->pos; idie->result[index]->pos = 0;
+	  saved_pos_ptr = ptr->pos; ptr->pos = 0;
+
+          if (!memcmp(idie->result[index], ptr, sizeof(struct id_entry))) match = TRUE;
+
+          idie->result[index]->pos = saved_pos_idie;
+          ptr->pos = saved_pos_ptr;
+
+	  if (match) {
+	    hash_destroy_key(hash_key);
+	    break;
+	  }
         }
       }
 
       if (index == idie->depth) {
-        Log(LOG_WARNING, "WARN ( %s/%s ): maps_index: out of index space %x for table '%s'. Indexing disabled.\n",
-		config.name, config.type, idx_bmap, t->filename);
+        Log(LOG_WARNING, "WARN ( %s/%s ): [%s] maps_index: out of index space %x. Indexing disabled.\n",
+		config.name, config.type, t->filename, idx_bmap);
 	pretag_index_destroy(t);
 	break;
       }
     }
   }
 
-  return FALSE;
+  return SUCCESS;
+}
+
+void pretag_index_report(struct id_table *t)
+{
+  u_int32_t iterator = 0, buckets = 0, index = 0;
+
+  if (!t) return;
+
+  for (iterator = 0; iterator < t->index_num; iterator++) {
+    if (t->index[iterator].entries) {
+      u_int32_t bucket_depths[ID_TABLE_INDEX_DEPTH];
+
+      buckets = IDT_INDEX_HASH_BASE(t->index[iterator].entries);
+      memset(&bucket_depths, 0, sizeof(bucket_depths));
+
+      for (index = 0; index < buckets; index++) {
+	struct id_index_entry *idie = &t->index[iterator].idx_t[index]; 
+	u_int32_t depth = 0;
+
+	for (depth = 0; idie->result[depth] && depth < idie->depth; depth++); 
+
+	bucket_depths[depth]++;
+      }
+
+      Log(LOG_DEBUG, "DEBUG ( %s/%s ): [%s] maps_index: index %x depths: 0:%u 1:%u 2:%u 3:%u 4:%u 5:%u 6:%u 7:%u size: %u\n",
+	  config.name, config.type, t->filename, t->index[iterator].bitmap,
+	  bucket_depths[0], bucket_depths[1], bucket_depths[2], bucket_depths[3],
+	  bucket_depths[4], bucket_depths[5], bucket_depths[6], bucket_depths[7],
+	  (buckets * sizeof(struct id_index_entry)));
+    } 
+  }
 }
 
 void pretag_index_destroy(struct id_table *t)
 {
-  u_int32_t iterator = 0;
+  pm_hash_serial_t *hash_serializer;
+  pm_hash_key_t *hash_key;
+  u_int32_t iterator = 0, buckets = 0, bucket_idx = 0, depth_idx = 0;
 
   if (!t) return;
 
   for (iterator = 0; iterator < t->index_num; iterator++) {
     if (t->index[iterator].idx_t) {
+      buckets = IDT_INDEX_HASH_BASE(t->index[iterator].entries);
+
+      for (bucket_idx = 0; bucket_idx < buckets; bucket_idx++) {
+        for (depth_idx = 0; depth_idx < ID_TABLE_INDEX_DEPTH; depth_idx++) {
+          hash_destroy_key(&t->index[iterator].idx_t[bucket_idx].hash_key[depth_idx]);
+        }
+      }
+
       free(t->index[iterator].idx_t);
-      Log(LOG_INFO, "INFO ( %s/%s ): maps_index: destroyed index %x for table '%s'.\n",
-		config.name, config.type, t->index[iterator].bitmap, t->filename);
+      Log(LOG_INFO, "INFO ( %s/%s ): [%s] maps_index: destroyed index %x.\n",
+                config.name, config.type, t->filename, t->index[iterator].bitmap);
     }
+
+    hash_serializer = &t->index[iterator].hash_serializer;
+    hash_key = hash_serial_get_key(hash_serializer);
+    hash_destroy_key(hash_key);
     memset(&t->index[iterator], 0, sizeof(struct id_table_index));
   }
 
@@ -1006,38 +1096,39 @@ void pretag_index_destroy(struct id_table *t)
 
 void pretag_index_lookup(struct id_table *t, struct packet_ptrs *pptrs, struct id_entry **index_results, int ir_entries)
 {
-  struct id_entry res_idt, res_fdata;
+  struct id_entry res_fdata;
   struct id_index_entry *idie;
+  pm_hash_serial_t *hash_serializer;
+  pm_hash_key_t *hash_key;
   u_int32_t iterator, iterator_ir, index_cc, index_hdlr;
-  int modulo;
+  int modulo, buckets;
 
   if (!t || !pptrs || !index_results) return;
 
+  memset(&res_fdata, 0, sizeof(res_fdata));
   memset(index_results, 0, (sizeof(struct id_entry *) * ir_entries));
   iterator_ir = 0;
 
   for (iterator = 0; iterator < t->index_num; iterator++) {
     if (t->index[iterator].entries) {
-      memset(&res_idt, 0, sizeof(res_idt));
-      memset(&res_fdata, 0, sizeof(res_fdata));
+      hash_serializer = &t->index[iterator].hash_serializer;
+      hash_serial_set_off(hash_serializer, 0);
+      hash_key = hash_serial_get_key(hash_serializer);
+      buckets = IDT_INDEX_HASH_BASE(t->index[iterator].entries);
 
       for (index_hdlr = 0; (*t->index[iterator].fdata_handler[index_hdlr]); index_hdlr++) {
-        (*t->index[iterator].fdata_handler[index_hdlr])(&res_fdata, pptrs);
+        (*t->index[iterator].fdata_handler[index_hdlr])(&res_fdata, &t->index[iterator].hash_serializer, pptrs);
       }
 
-      modulo = cache_crc32((unsigned char *)&res_fdata, sizeof(struct id_entry)) % IDT_INDEX_HASH_BASE(t->index[iterator].entries);
+      modulo = cache_crc32(hash_key_get_val(hash_key), hash_key_get_len(hash_key)) % buckets;
       idie = &t->index[iterator].idx_t[modulo];
 
-      for (index_cc = 0; idie->e[index_cc] && index_cc < idie->depth; index_cc++) {
-        for (index_hdlr = 0; (*t->index[iterator].idt_handler[index_hdlr]); index_hdlr++) {
-          (*t->index[iterator].idt_handler[index_hdlr])(&res_idt, idie->e[index_cc]);
-        }
-	
-        if (!memcmp(&res_idt, &res_fdata, sizeof(struct id_entry))) {
-          index_results[iterator_ir] = idie->e[index_cc];
+      for (index_cc = 0; idie->result[index_cc] && index_cc < idie->depth; index_cc++) {
+	if (!hash_key_cmp(&idie->hash_key[index_cc], hash_key)) {
+          index_results[iterator_ir] = idie->result[index_cc];
 	  if (iterator_ir < ir_entries) iterator_ir++;
 	  else {
-	    Log(LOG_WARNING, "WARN ( %s/%s ): maps_index: out of index results space for table '%s'. Indexing disabled.\n",
+	    Log(LOG_WARNING, "WARN ( %s/%s ): [%s] maps_index: out of index results space. Indexing disabled.\n",
                 config.name, config.type, t->filename);
 	    pretag_index_destroy(t);
 	    memset(index_results, 0, (sizeof(struct id_entry *) * ir_entries));
@@ -1046,9 +1137,10 @@ void pretag_index_lookup(struct id_table *t, struct packet_ptrs *pptrs, struct i
 	}
       }
     }
+    else break;
   }
 
-  pretag_index_results_compress(index_results, ir_entries);
+  // pretag_index_results_compress(index_results, ir_entries);
   pretag_index_results_sort(index_results, ir_entries);
   pretag_index_results_compress_jeqs(index_results, ir_entries);
 }

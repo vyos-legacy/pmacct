@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -53,7 +53,6 @@ EXT int Setsocksize(int, int, int, void *, int);
 EXT void *map_shared(void *, size_t, int, int, int, off_t);
 EXT void lower_string(char *);
 EXT void evaluate_sums(u_int64_t *, char *, char *);
-EXT int file_archive(const char *, int);
 EXT void stop_all_childs();
 EXT int file_lock(int);
 EXT int file_unlock(int);
@@ -73,16 +72,21 @@ EXT void reset_fallback_status(struct packet_ptrs *);
 EXT void set_sampling_table(struct packet_ptrs_vector *, u_char *);
 EXT void set_shadow_status(struct packet_ptrs *);
 EXT void set_default_preferences(struct configuration *);
-EXT FILE *open_logfile(char *, char *);
-EXT FILE *open_print_output_file(char *, int *);
+EXT FILE *open_output_file(char *, char *, int);
+EXT void link_latest_output_file(char *, char *);
+EXT void close_output_file(FILE *);
 EXT void handle_dynname_internal_strings(char *, int, char *, struct primitives_ptrs *);
 EXT void handle_dynname_internal_strings_same(char *, int, char *, struct primitives_ptrs *);
 EXT void escape_ip_uscores(char *);
 EXT int sql_history_to_secs(int, int);
-EXT void close_print_output_file(FILE *, char *, char *, struct primitives_ptrs *);
 EXT void evaluate_bgp_aspath_radius(char *, int, int);
 EXT void copy_stdcomm_to_asn(char *, as_t *, int);
-EXT void *Malloc(unsigned int);
+EXT void *pm_malloc(size_t);
+EXT void *pm_tsearch(const void *, void **, int (*compar)(const void *, const void *), size_t);
+EXT void *pm_tfind(const void *, void *const *, int (*compar)(const void *, const void *));
+EXT void *pm_tdelete(const void *, void **, int (*compar)(const void *, const void *));
+EXT void pm_twalk(const void *, void (*action)(const void *, const VISIT, const int));
+EXT void pm_tdestroy(void **, void (*free_node)(void *));
 EXT void load_allow_file(char *, struct hosts_table *);
 EXT int check_allow(struct hosts_table *, struct sockaddr *);
 EXT void load_bgp_md5_file(char *, struct bgp_md5_table *);
@@ -98,18 +102,19 @@ EXT void load_pkt_len_distrib_bins();
 EXT void evaluate_pkt_len_distrib(struct pkt_data *);
 EXT char *write_sep(char *, int *);
 EXT void version_daemon(char *);
+EXT void set_truefalse_nonzero(int *);
 
-EXT char *compose_json(u_int64_t, u_int64_t, u_int8_t, struct pkt_primitives *,
+EXT void *compose_json(u_int64_t, u_int64_t, u_int8_t, struct pkt_primitives *,
 		      struct pkt_bgp_primitives *, struct pkt_nat_primitives *,
 		      struct pkt_mpls_primitives *, char *, struct pkt_vlen_hdr_primitives *,
 		      pm_counter_t, pm_counter_t, pm_counter_t, u_int32_t, struct timeval *,
 		      struct pkt_stitching *);
-EXT void compose_timestamp(char *, int, struct timeval *, int, int);
+EXT char *compose_json_str(void *);
 EXT void write_and_free_json(FILE *, void *);
 EXT int write_and_free_json_amqp(void *, void *);
+EXT int write_and_free_json_kafka(void *, void *);
+EXT void compose_timestamp(char *, int, struct timeval *, int, int);
 
-EXT struct packet_ptrs *copy_packet_ptrs(struct packet_ptrs *);
-EXT void free_packet_ptrs(struct packet_ptrs *);
 EXT void print_primitives(int, char *);
 EXT int mkdir_multilevel(const char *, int, uid_t, gid_t);
 EXT char bin_to_hex(int);
@@ -137,4 +142,19 @@ EXT void vlen_prims_get(struct pkt_vlen_hdr_primitives *, pm_cfgreg_t, char **);
 EXT void vlen_prims_debug(struct pkt_vlen_hdr_primitives *);
 EXT void vlen_prims_insert(struct pkt_vlen_hdr_primitives *, pm_cfgreg_t, int, char *);
 EXT int vlen_prims_delete(struct pkt_vlen_hdr_primitives *, pm_cfgreg_t);
+
+EXT void hash_init_key(pm_hash_key_t *);
+EXT int hash_init_serial(pm_hash_serial_t *, u_int16_t);
+EXT int hash_alloc_key(pm_hash_key_t *, u_int16_t);
+EXT int hash_dup_key(pm_hash_key_t *, pm_hash_key_t *);
+EXT void hash_destroy_key(pm_hash_key_t *);
+EXT void hash_destroy_serial(pm_hash_serial_t *);
+EXT void hash_serial_set_off(pm_hash_serial_t *, u_int16_t);
+EXT pm_hash_key_t *hash_serial_get_key(pm_hash_serial_t *);
+EXT u_int16_t hash_serial_get_off(pm_hash_serial_t *);
+EXT u_int16_t hash_key_get_len(pm_hash_key_t *);
+EXT char *hash_key_get_val(pm_hash_key_t *);
+EXT int hash_key_cmp(pm_hash_key_t *, pm_hash_key_t *);
+
+EXT void replace_string(char *, int, char *, char *);
 #undef EXT

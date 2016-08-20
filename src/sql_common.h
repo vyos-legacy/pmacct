@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -29,7 +29,7 @@
 #define __PLUGIN_COMMON_EXPORT
 #include "plugin_common.h"
 #undef __PLUGIN_COMMON_EXPORT
-#endif /* #if (!defined __PLUGIN_COMMON_EXPORT) */
+#endif /* #if (!defined __SQL_COMMON_EXPORT) */
 
 /* defines */
 #define DEFAULT_DB_REFRESH_TIME 60
@@ -142,26 +142,6 @@ struct db_cache {
   struct db_cache *lru_next;
 };
 
-struct logfile_header {
-  u_int32_t magic;
-  char sql_db[DEF_HDR_FIELD_LEN];
-  char sql_table[DEF_HDR_FIELD_LEN];
-  char sql_user[DEF_HDR_FIELD_LEN];
-  char sql_host[DEF_HDR_FIELD_LEN];
-  u_int16_t sql_table_version;
-  u_int16_t sql_optimize_clauses;
-  u_int16_t sql_history;
-  pm_cfgreg_t what_to_count;
-  pm_cfgreg_t what_to_count_2;
-  u_char pad[8];
-};
-
-struct logfile {
-  FILE *file;
-  short int open;
-  short int fail;
-};
-
 typedef void (*dbop_handler) (const struct db_cache *, struct insert_data *, int, char **, char **);
 
 struct frags {
@@ -184,7 +164,6 @@ struct DBdesc {
 struct BE_descs { 
   struct DBdesc *p;
   struct DBdesc *b;
-  struct logfile *lf;
 };
 
 /* Callbacks for a common SQL layer */
@@ -210,7 +189,6 @@ struct sqlfunc_cb_registry {
 
 #if (!defined __SQL_COMMON_EXPORT)
 
-#include "log_templates.h"
 #include "preprocess.h"
 
 /* functions */
@@ -277,11 +255,16 @@ EXT void count_timestamp_start_residual_handler(const struct db_cache *, struct 
 EXT void count_timestamp_end_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void PG_copy_count_timestamp_end_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_timestamp_end_residual_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_timestamp_arrival_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void PG_copy_count_timestamp_arrival_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_timestamp_arrival_residual_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_timestamp_min_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void PG_copy_count_timestamp_min_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_timestamp_min_residual_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_timestamp_max_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void PG_copy_count_timestamp_max_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_export_proto_seqno_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_export_proto_version_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_timestamp_max_residual_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_custom_primitives_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void fake_mac_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
@@ -328,7 +311,6 @@ EXT void sql_init_default_values(struct extra_primitives *);
 EXT void sql_init_historical_acct(time_t, struct insert_data *);
 EXT void sql_init_triggers(time_t, struct insert_data *);
 EXT void sql_init_refresh_deadline(time_t *);
-EXT struct template_entry *sql_init_logfile_template(struct template_header *);
 EXT void sql_link_backend_descriptors(struct BE_descs *, struct DBdesc *, struct DBdesc *);
 EXT void sql_cache_modulo(struct primitives_ptrs *, struct insert_data *);
 EXT int sql_cache_flush(struct db_cache *[], int, struct insert_data *, int);
@@ -343,7 +325,6 @@ EXT void sql_db_errmsg(struct DBdesc *);
 EXT int sql_query(struct BE_descs *, struct db_cache *, struct insert_data *);
 EXT void sql_exit_gracefully(int);
 EXT int sql_evaluate_primitives(int);
-EXT FILE *sql_file_open(const char *, const char *, const struct insert_data *);
 EXT void sql_create_table(struct DBdesc *, time_t *, struct primitives_ptrs *);
 EXT void sql_invalidate_shadow_entries(struct db_cache *[], int *);
 EXT int sql_select_locking_style(char *);
@@ -407,9 +388,6 @@ EXT void (*insert_func)(struct primitives_ptrs *, struct insert_data *);
 EXT struct DBdesc p;
 EXT struct DBdesc b;
 EXT struct BE_descs bed;
-EXT struct template_header th;
-EXT struct template_entry *te;
-EXT struct largebuf logbuf;
 EXT struct largebuf envbuf;
 EXT time_t now; /* PostgreSQL */
 #undef EXT
