@@ -1,3 +1,11 @@
+pmacct (1.6.1-1) unstable; urgency=medium
+
+  * [0497b6e] Merge tag 'upstream/1.6.1'
+    Upstream version 1.6.1
+  * [1f226fe] Depend on default-libmysqlclient-dev. (Closes: #845894)
+
+ -- Bernd Zeimetz <bzed@debian.org>  Sat, 26 Nov 2016 23:39:01 +0100
+
 pmacct (1.6.0-1) unstable; urgency=medium
 
   [ Jonas Gröger ]
