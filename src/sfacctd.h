@@ -156,13 +156,13 @@ typedef struct _SFSample {
   u_int32_t src_peer_as;
 
   u_int32_t dst_as_path_len;
-  char dst_as_path[MAX_BGP_ASPATH];
+  char dst_as_path[LARGEBUFLEN];
 
   u_int32_t dst_peer_as;
   u_int32_t dst_as;
 
   u_int32_t communities_len;
-  char comms[MAX_BGP_STD_COMMS];
+  char comms[LARGEBUFLEN];
   u_int32_t localpref;
 
   /* user id */
@@ -254,7 +254,7 @@ struct SF_icmphdr
 #else
 #define EXT
 #endif
-EXT u_int16_t SF_evaluate_flow_type(struct packet_ptrs *);
+EXT u_int8_t SF_evaluate_flow_type(struct packet_ptrs *);
 EXT void set_vector_sample_type(struct packet_ptrs_vector *, u_int32_t);
 EXT void reset_mac(struct packet_ptrs *);
 EXT void reset_mac_vlan(struct packet_ptrs *);

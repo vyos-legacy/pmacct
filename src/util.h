@@ -23,6 +23,10 @@
 #define ADD 0
 #define SUB 1
 
+#ifdef WITH_AVRO
+#include <avro.h>
+#endif
+
 /* prototypes */
 #if (!defined __UTIL_C)
 #define EXT extern
@@ -79,8 +83,6 @@ EXT void handle_dynname_internal_strings(char *, int, char *, struct primitives_
 EXT void handle_dynname_internal_strings_same(char *, int, char *, struct primitives_ptrs *);
 EXT void escape_ip_uscores(char *);
 EXT int sql_history_to_secs(int, int);
-EXT void evaluate_bgp_aspath_radius(char *, int, int);
-EXT void copy_stdcomm_to_asn(char *, as_t *, int);
 EXT void *pm_malloc(size_t);
 EXT void *pm_tsearch(const void *, void **, int (*compar)(const void *, const void *), size_t);
 EXT void *pm_tfind(const void *, void *const *, int (*compar)(const void *, const void *));
@@ -111,8 +113,20 @@ EXT void *compose_json(u_int64_t, u_int64_t, u_int8_t, struct pkt_primitives *,
 		      struct pkt_stitching *);
 EXT char *compose_json_str(void *);
 EXT void write_and_free_json(FILE *, void *);
+EXT void *compose_purge_init_json(pid_t);
+EXT void *compose_purge_close_json(pid_t, int, int, int);
 EXT int write_and_free_json_amqp(void *, void *);
 EXT int write_and_free_json_kafka(void *, void *);
+
+#ifdef WITH_AVRO
+EXT avro_schema_t build_avro_schema(u_int64_t wtc, u_int64_t wtc_2);
+EXT avro_value_t compose_avro(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
+  struct pkt_bgp_primitives *pbgp, struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
+  char *pcust, struct pkt_vlen_hdr_primitives *pvlen, pm_counter_t bytes_counter,
+  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime,
+  struct pkt_stitching *stitch, avro_value_iface_t *iface);
+#endif
+
 EXT void compose_timestamp(char *, int, struct timeval *, int, int);
 
 EXT void print_primitives(int, char *);
@@ -123,6 +137,7 @@ EXT int print_hex(const u_char *, u_char *, int);
 EXT primptrs_func primptrs_funcs[PRIMPTRS_FUNCS_N];
 EXT void set_primptrs_funcs(struct extra_primitives *);
 EXT void primptrs_set_bgp(u_char *, struct extra_primitives *, struct primitives_ptrs *);
+EXT void primptrs_set_lbgp(u_char *, struct extra_primitives *, struct primitives_ptrs *);
 EXT void primptrs_set_nat(u_char *, struct extra_primitives *, struct primitives_ptrs *);
 EXT void primptrs_set_mpls(u_char *, struct extra_primitives *, struct primitives_ptrs *);
 EXT void primptrs_set_custom(u_char *, struct extra_primitives *, struct primitives_ptrs *);
@@ -140,7 +155,7 @@ EXT void vlen_prims_free(struct pkt_vlen_hdr_primitives *);
 EXT int vlen_prims_cmp(struct pkt_vlen_hdr_primitives *, struct pkt_vlen_hdr_primitives *);
 EXT void vlen_prims_get(struct pkt_vlen_hdr_primitives *, pm_cfgreg_t, char **);
 EXT void vlen_prims_debug(struct pkt_vlen_hdr_primitives *);
-EXT void vlen_prims_insert(struct pkt_vlen_hdr_primitives *, pm_cfgreg_t, int, char *);
+EXT void vlen_prims_insert(struct pkt_vlen_hdr_primitives *, pm_cfgreg_t, int, char *, int);
 EXT int vlen_prims_delete(struct pkt_vlen_hdr_primitives *, pm_cfgreg_t);
 
 EXT void hash_init_key(pm_hash_key_t *);
@@ -155,6 +170,12 @@ EXT u_int16_t hash_serial_get_off(pm_hash_serial_t *);
 EXT u_int16_t hash_key_get_len(pm_hash_key_t *);
 EXT char *hash_key_get_val(pm_hash_key_t *);
 EXT int hash_key_cmp(pm_hash_key_t *, pm_hash_key_t *);
+
+EXT void dump_writers_init();
+EXT void dump_writers_count();
+EXT u_int32_t dump_writers_get_flags();
+EXT u_int16_t dump_writers_get_active();
+EXT int dump_writers_add(pid_t);
 
 EXT void replace_string(char *, int, char *, char *);
 #undef EXT

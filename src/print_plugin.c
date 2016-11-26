@@ -31,6 +31,10 @@
 #include "classifier.h"
 #include "crc32.h"
 
+#ifdef WITH_AVRO
+#include <avro.h>
+#endif
+
 /* Functions */
 void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr) 
 {
@@ -85,6 +89,13 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     is_event = TRUE;
 
   refresh_timeout = config.sql_refresh_time*1000;
+
+#ifdef WITH_AVRO
+  if (config.print_output & PRINT_OUTPUT_AVRO) {
+    Log(LOG_INFO, "INFO ( %s/%s ): AVRO: building schema.\n", config.name, config.type);
+    avro_acct_schema = build_avro_schema(config.what_to_count, config.what_to_count_2);
+  }
+#endif
 
   /* setting function pointers */
   if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET))
@@ -153,7 +164,8 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   if (!config.print_output_separator) config.print_output_separator = default_separator;
 
   if (extras.off_pkt_vlen_hdr_primitives && config.print_output & PRINT_OUTPUT_FORMATTED) {
-    Log(LOG_ERR, "ERROR ( %s/%s ): variable-length primitives, ie. label, are not supported in print plugin with formatted output. Exiting ..\n", config.name, config.type);
+    Log(LOG_ERR, "ERROR ( %s/%s ): variable-length primitives, ie. label as_path std_comm etc., are not supported in print plugin with formatted output.\n", config.name, config.type);
+    Log(LOG_ERR, "ERROR ( %s/%s ): Please switch to one of the other supported output formats (ie. csv, json, avro). Exiting ..\n", config.name, config.type);
     exit_plugin(1);
   }
 
@@ -259,11 +271,11 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
         if ((rg->ptr + bufsz) > rg->end) rg->ptr = rg->base;
 
-        if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
-          if (!pollagain) {
-            pollagain = TRUE;
-            goto poll_again;
-          }
+	if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
+	  if (!pollagain) {
+	    pollagain = TRUE;
+	    goto poll_again;
+	  }
           else {
             rg_err_count++;
             if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
@@ -272,6 +284,8 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
               Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
                         config.name, config.type);
             }
+
+	    rg->ptr = (rg->base + status->last_buf_off);
             seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
           }
         }
@@ -311,8 +325,9 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
       if (config.debug_internal_msg) 
-        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u seq=%u num_entries=%u\n",
-                config.name, config.type, core_pid, seq, ((struct ch_buf_hdr *)pipebuf)->num);
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u len=%llu seq=%u num_entries=%u\n",
+                config.name, config.type, core_pid, ((struct ch_buf_hdr *)pipebuf)->len,
+                seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
       if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
@@ -366,12 +381,15 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   char *as_path, *bgp_comm, empty_string[] = "", empty_aspath[] = "^$", empty_ip4[] = "0.0.0.0", empty_ip6[] = "::";
   char empty_macaddress[] = "00:00:00:00:00:00", empty_rd[] = "0:0";
   FILE *f = NULL, *lockf = NULL;
-  int j, stop, is_event = FALSE, qn = 0, go_to_pending, saved_index = index;
+  int j, stop, is_event = FALSE, qn = 0, go_to_pending, saved_index = index, file_to_be_created;
   time_t start, duration;
   char tmpbuf[LONGLONGSRVBUFLEN], current_table[SRVBUFLEN], elem_table[SRVBUFLEN];
   struct primitives_ptrs prim_ptrs, elem_prim_ptrs;
   struct pkt_data dummy_data, elem_dummy_data;
   pid_t writer_pid = getpid();
+#ifdef WITH_AVRO
+  avro_file_writer_t avro_writer;
+#endif
 
   if (!index) {
     Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - START (PID: %u) ***\n", config.name, config.type, writer_pid);
@@ -408,7 +426,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   start:
   memcpy(queue, pending_queries_queue, pqq_ptr*sizeof(struct db_cache *));
   memset(pending_queries_queue, 0, pqq_ptr*sizeof(struct db_cache *));
-  index = pqq_ptr; pqq_ptr = 0;
+  index = pqq_ptr; pqq_ptr = 0; file_to_be_created = FALSE;
 
   if (config.print_output & PRINT_OUTPUT_EVENT) is_event = TRUE;
 
@@ -427,25 +445,60 @@ void P_cache_purge(struct chained_cache *queue[], int index)
       strftime_same(current_table, LONGSRVBUFLEN, tmpbuf, &stamp);
     }
 
-    
-    if (config.print_output_file_append)
-      f = open_output_file(current_table, "a", TRUE);
-    else
-      f = open_output_file(current_table, "w", TRUE);
+    if (config.print_output & PRINT_OUTPUT_AVRO) {
+      int file_is_empty, ret;
+#ifdef WITH_AVRO
+      f = open_output_file(current_table, "ab", TRUE);
 
-    if (fd_buf) {
+      fseek(f, 0, SEEK_END);
+      file_is_empty = ftell(f) == 0;
+      close_output_file(f);
+
+      if (config.print_output_file_append && !file_is_empty)
+        ret = avro_file_writer_open(current_table, &avro_writer);
+      else
+        ret = avro_file_writer_create(current_table, avro_acct_schema, &avro_writer);
+
+      if (ret) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: failed opening %s: %s\n",
+            config.name, config.type, current_table, avro_strerror());
+        exit_plugin(EXIT_FAILURE);
+      }
+#endif
+    }
+    else {
+      if (config.print_output_file_append) {
+        file_to_be_created = access(current_table, F_OK);
+        f = open_output_file(current_table, "a", TRUE);
+      }
+      else
+        f = open_output_file(current_table, "w", TRUE);
+    }
+
+    if (!(config.print_output & PRINT_OUTPUT_AVRO) && fd_buf) {
       if (setvbuf(f, fd_buf, _IOFBF, OUTPUT_FILE_BUFSZ))
         Log(LOG_WARNING, "WARN ( %s/%s ): [%s] setvbuf() failed: %s\n", config.name, config.type, current_table, errno);
       else memset(fd_buf, 0, OUTPUT_FILE_BUFSZ);
     }
 
-    if (f && !config.print_output_file_append) { 
-      if (config.print_markers) fprintf(f, "--START (%ld+%d)--\n", stamp, config.sql_refresh_time);
+    if (f) {
+      if (config.print_markers) {
+	if ((config.print_output & PRINT_OUTPUT_CSV) || (config.print_output & PRINT_OUTPUT_FORMATTED))
+	  fprintf(f, "--START (%u)--\n", writer_pid);
+	else if (config.print_output & PRINT_OUTPUT_JSON) {
+          void *json_obj;
 
-      if (config.print_output & PRINT_OUTPUT_FORMATTED)
-        P_write_stats_header_formatted(f, is_event);
-      else if (config.print_output & PRINT_OUTPUT_CSV)
-        P_write_stats_header_csv(f, is_event);
+	  json_obj = compose_purge_init_json(writer_pid);
+          if (json_obj) write_and_free_json(f, json_obj);
+	}
+      }
+
+      if (!config.print_output_file_append || (config.print_output_file_append && file_to_be_created)) {
+	if (config.print_output & PRINT_OUTPUT_FORMATTED)
+	  P_write_stats_header_formatted(f, is_event);
+	else if (config.print_output & PRINT_OUTPUT_CSV)
+	  P_write_stats_header_csv(f, is_event);
+      }
     }
   }
   else {
@@ -455,6 +508,17 @@ void P_cache_purge(struct chained_cache *queue[], int index)
       lockf = open_output_file(config.print_output_lock_file, "w", TRUE);
       if (!lockf)
         Log(LOG_WARNING, "WARN ( %s/%s ): Failed locking print_output_lock_file: %s\n", config.name, config.type, config.print_output_lock_file);
+    }
+
+    if (config.print_markers) {
+      if ((config.print_output & PRINT_OUTPUT_CSV) || (config.print_output & PRINT_OUTPUT_FORMATTED))
+        fprintf(stdout, "--START (%u)--\n", writer_pid);
+      else if (config.print_output & PRINT_OUTPUT_JSON) {
+        void *json_obj;
+
+        json_obj = compose_purge_init_json(writer_pid);
+        if (json_obj) write_and_free_json(stdout, json_obj);
+      }
     }
 
     /* writing to stdout: writing header only once */
@@ -538,82 +602,6 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   #endif
         if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) fprintf(f, "%-10u  ", data->src_as); 
         if (config.what_to_count & COUNT_DST_AS) fprintf(f, "%-10u  ", data->dst_as); 
-  
-        if (config.what_to_count & COUNT_STD_COMM) { 
-          bgp_comm = pbgp->std_comms;
-          while (bgp_comm) {
-            bgp_comm = strchr(pbgp->std_comms, ' ');
-            if (bgp_comm) *bgp_comm = '_';
-          }
-  
-          if (strlen(pbgp->std_comms)) 
-            fprintf(f, "%-22s   ", pbgp->std_comms);
-          else
-  	  fprintf(f, "%-22u   ", 0);
-        }
-
-        if (config.what_to_count & COUNT_EXT_COMM && !(config.what_to_count & COUNT_STD_COMM)) {
-          bgp_comm = pbgp->ext_comms;
-          while (bgp_comm) {
-            bgp_comm = strchr(pbgp->ext_comms, ' ');
-            if (bgp_comm) *bgp_comm = '_';
-          }
-
-          if (strlen(pbgp->ext_comms))
-            fprintf(f, "%-22s   ", pbgp->ext_comms);
-          else
-          fprintf(f, "%-22u   ", 0);
-        }
-
-        if (config.what_to_count & COUNT_SRC_STD_COMM) {
-          bgp_comm = pbgp->src_std_comms;
-          while (bgp_comm) {
-            bgp_comm = strchr(pbgp->src_std_comms, ' ');
-            if (bgp_comm) *bgp_comm = '_';
-          }
-
-          if (strlen(pbgp->src_std_comms))
-            fprintf(f, "%-22s   ", pbgp->src_std_comms);
-          else
-          fprintf(f, "%-22u   ", 0);
-        }
-
-        if (config.what_to_count & COUNT_SRC_EXT_COMM && !(config.what_to_count & COUNT_SRC_STD_COMM)) {
-          bgp_comm = pbgp->src_ext_comms;
-          while (bgp_comm) {
-            bgp_comm = strchr(pbgp->src_ext_comms, ' ');
-            if (bgp_comm) *bgp_comm = '_';
-          }
-
-          if (strlen(pbgp->src_ext_comms))
-            fprintf(f, "%-22s   ", pbgp->src_ext_comms);
-          else
-          fprintf(f, "%-22u   ", 0);
-        }
-  
-        if (config.what_to_count & COUNT_AS_PATH) {
-          as_path = pbgp->as_path;
-          while (as_path) {
-  	    as_path = strchr(pbgp->as_path, ' ');
-  	    if (as_path) *as_path = '_';
-          }
-          if (strlen(pbgp->as_path))
-  	  fprintf(f, "%-22s   ", pbgp->as_path);
-          else
-  	  fprintf(f, "%-22s   ", empty_aspath);
-        }
-
-        if (config.what_to_count & COUNT_SRC_AS_PATH) {
-          as_path = pbgp->src_as_path;
-          while (as_path) {
-            as_path = strchr(pbgp->src_as_path, ' ');
-            if (as_path) *as_path = '_';
-          }
-          if (strlen(pbgp->src_as_path))
-          fprintf(f, "%-22s   ", pbgp->src_as_path);
-          else
-          fprintf(f, "%-22s   ", empty_aspath);
-        }
   
         if (config.what_to_count & COUNT_LOCAL_PREF) fprintf(f, "%-7u  ", pbgp->local_pref);
         if (config.what_to_count & COUNT_SRC_LOCAL_PREF) fprintf(f, "%-7u  ", pbgp->src_local_pref);
@@ -918,7 +906,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
       else if (f && config.print_output & PRINT_OUTPUT_CSV) {
         if (config.what_to_count & COUNT_TAG) fprintf(f, "%s%llu", write_sep(sep, &count), data->tag);
         if (config.what_to_count & COUNT_TAG2) fprintf(f, "%s%llu", write_sep(sep, &count), data->tag2);
-	if (config.what_to_count_2 & COUNT_LABEL) P_fprintf_csv_label(f, pvlen, COUNT_INT_LABEL, write_sep(sep, &count), empty_string);
+	if (config.what_to_count_2 & COUNT_LABEL) P_fprintf_csv_string(f, pvlen, COUNT_INT_LABEL, write_sep(sep, &count), empty_string);
         if (config.what_to_count & COUNT_CLASS) fprintf(f, "%s%s", write_sep(sep, &count), ((data->class && class[(data->class)-1].id) ? class[(data->class)-1].protocol : "unknown" ));
   #if defined (HAVE_L2)
         if (config.what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
@@ -937,83 +925,99 @@ void P_cache_purge(struct chained_cache *queue[], int index)
         if (config.what_to_count & COUNT_DST_AS) fprintf(f, "%s%u", write_sep(sep, &count), data->dst_as); 
   
         if (config.what_to_count & COUNT_STD_COMM) {
-          bgp_comm = pbgp->std_comms;
-          while (bgp_comm) {
-            bgp_comm = strchr(pbgp->std_comms, ' ');
-            if (bgp_comm) *bgp_comm = '_';
+          char *str_ptr = NULL;
+
+          vlen_prims_get(pvlen, COUNT_INT_STD_COMM, &str_ptr);
+          if (str_ptr) {
+            bgp_comm = str_ptr;
+            while (bgp_comm) {
+              bgp_comm = strchr(str_ptr, ' ');
+              if (bgp_comm) *bgp_comm = '_';
+            }
+
           }
-  
-          if (strlen(pbgp->std_comms)) 
-            fprintf(f, "%s%s", write_sep(sep, &count), pbgp->std_comms);
-          else
-            fprintf(f, "%s%s", write_sep(sep, &count), empty_string);
+
+          P_fprintf_csv_string(f, pvlen, COUNT_INT_STD_COMM, write_sep(sep, &count), empty_string);
         }
 
-        if (config.what_to_count & COUNT_EXT_COMM && !(config.what_to_count & COUNT_STD_COMM)) {
-          bgp_comm = pbgp->ext_comms;
-          while (bgp_comm) {
-            bgp_comm = strchr(pbgp->ext_comms, ' ');
-            if (bgp_comm) *bgp_comm = '_';
+        if (config.what_to_count & COUNT_EXT_COMM) {
+          char *str_ptr = NULL;
+
+          vlen_prims_get(pvlen, COUNT_INT_EXT_COMM, &str_ptr);
+          if (str_ptr) {
+            bgp_comm = str_ptr;
+            while (bgp_comm) {
+              bgp_comm = strchr(str_ptr, ' ');
+              if (bgp_comm) *bgp_comm = '_';
+            }
           }
 
-          if (strlen(pbgp->ext_comms))
-            fprintf(f, "%s%s", write_sep(sep, &count), pbgp->ext_comms);
-          else
-            fprintf(f, "%s%s", write_sep(sep, &count), empty_string);
+          P_fprintf_csv_string(f, pvlen, COUNT_INT_EXT_COMM, write_sep(sep, &count), empty_string);
         }
 
         if (config.what_to_count & COUNT_SRC_STD_COMM) {
-          bgp_comm = pbgp->src_std_comms;
-          while (bgp_comm) {
-            bgp_comm = strchr(pbgp->src_std_comms, ' ');
-            if (bgp_comm) *bgp_comm = '_';
+          char *str_ptr = NULL;
+
+          vlen_prims_get(pvlen, COUNT_INT_SRC_STD_COMM, &str_ptr);
+          if (str_ptr) {
+            bgp_comm = str_ptr;
+            while (bgp_comm) {
+              bgp_comm = strchr(str_ptr, ' ');
+              if (bgp_comm) *bgp_comm = '_';
+            }
+
           }
 
-          if (strlen(pbgp->src_std_comms))
-            fprintf(f, "%s%s", write_sep(sep, &count), pbgp->src_std_comms);
-          else
-            fprintf(f, "%s%s", write_sep(sep, &count), empty_string);
+          P_fprintf_csv_string(f, pvlen, COUNT_INT_SRC_STD_COMM, write_sep(sep, &count), empty_string);
         }
 
-        if (config.what_to_count & COUNT_SRC_EXT_COMM && !(config.what_to_count & COUNT_SRC_STD_COMM)) {
-          bgp_comm = pbgp->src_ext_comms;
-          while (bgp_comm) {
-            bgp_comm = strchr(pbgp->src_ext_comms, ' ');
-            if (bgp_comm) *bgp_comm = '_';
+        if (config.what_to_count & COUNT_SRC_EXT_COMM) {
+          char *str_ptr = NULL;
+
+          vlen_prims_get(pvlen, COUNT_INT_SRC_EXT_COMM, &str_ptr);
+          if (str_ptr) {
+            bgp_comm = str_ptr;
+            while (bgp_comm) {
+              bgp_comm = strchr(str_ptr, ' ');
+              if (bgp_comm) *bgp_comm = '_';
+            }
           }
 
-          if (strlen(pbgp->src_ext_comms))
-            fprintf(f, "%s%s", write_sep(sep, &count), pbgp->src_ext_comms);
-          else
-            fprintf(f, "%s%s", write_sep(sep, &count), empty_string);
+          P_fprintf_csv_string(f, pvlen, COUNT_INT_SRC_EXT_COMM, write_sep(sep, &count), empty_string);
         }
   
-        if (config.what_to_count & COUNT_AS_PATH) {
-          as_path = pbgp->as_path;
-          while (as_path) {
-  	    as_path = strchr(pbgp->as_path, ' ');
-  	    if (as_path) *as_path = '_';
-          }
+	if (config.what_to_count & COUNT_AS_PATH) {
+	  char *str_ptr = NULL;
 
-	  if (strlen(pbgp->as_path))
-            fprintf(f, "%s%s", write_sep(sep, &count), pbgp->as_path);
-	  else
-	    fprintf(f, "%s%s", write_sep(sep, &count), empty_string);
-        }
+	  vlen_prims_get(pvlen, COUNT_INT_AS_PATH, &str_ptr);
+	  if (str_ptr) {
+	    as_path = str_ptr;
+            while (as_path) {
+              as_path = strchr(str_ptr, ' ');
+              if (as_path) *as_path = '_';
+	    }
+
+	  }
+
+	  P_fprintf_csv_string(f, pvlen, COUNT_INT_AS_PATH, write_sep(sep, &count), empty_string);
+	}
 
         if (config.what_to_count & COUNT_SRC_AS_PATH) {
-          as_path = pbgp->src_as_path;
-          while (as_path) {
-            as_path = strchr(pbgp->src_as_path, ' ');
-            if (as_path) *as_path = '_';
+          char *str_ptr = NULL;
+
+          vlen_prims_get(pvlen, COUNT_INT_SRC_AS_PATH, &str_ptr);
+          if (str_ptr) {
+            as_path = str_ptr;
+            while (as_path) {
+              as_path = strchr(str_ptr, ' ');
+              if (as_path) *as_path = '_';
+            }
+
           }
 
-          if (strlen(pbgp->src_as_path))
-            fprintf(f, "%s%s", write_sep(sep, &count), pbgp->src_as_path);
-          else
-            fprintf(f, "%s%s", write_sep(sep, &count), empty_string);
+          P_fprintf_csv_string(f, pvlen, COUNT_INT_SRC_AS_PATH, write_sep(sep, &count), empty_string);
         }
-  
+
         if (config.what_to_count & COUNT_LOCAL_PREF) fprintf(f, "%s%u", write_sep(sep, &count), pbgp->local_pref);
         if (config.what_to_count & COUNT_SRC_LOCAL_PREF) fprintf(f, "%s%u", write_sep(sep, &count), pbgp->src_local_pref);
         if (config.what_to_count & COUNT_MED) fprintf(f, "%s%u", write_sep(sep, &count), pbgp->med);
@@ -1222,25 +1226,83 @@ void P_cache_purge(struct chained_cache *queue[], int index)
         void *json_obj;
   
         json_obj = compose_json(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
-                           &queue[j]->primitives, pbgp, pnat, pmpls, pcust, pvlen, queue[j]->bytes_counter,
-  			 queue[j]->packet_counter, queue[j]->flow_counter, queue[j]->tcp_flags, NULL,
-			 queue[j]->stitch);
+                         &queue[j]->primitives, pbgp, pnat, pmpls, pcust, pvlen, queue[j]->bytes_counter,
+                         queue[j]->packet_counter, queue[j]->flow_counter, queue[j]->tcp_flags, NULL,
+                         queue[j]->stitch);
   
         if (json_obj) write_and_free_json(f, json_obj);
+      }
+      else if (f && config.print_output & PRINT_OUTPUT_AVRO) {
+#ifdef WITH_AVRO
+        avro_value_iface_t *avro_iface = avro_generic_class_from_schema(avro_acct_schema);
+
+        avro_value_t avro_value = compose_avro(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
+                         &queue[j]->primitives, pbgp, pnat, pmpls, pcust, pvlen, queue[j]->bytes_counter,
+                         queue[j]->packet_counter, queue[j]->flow_counter, queue[j]->tcp_flags, NULL,
+                         queue[j]->stitch, avro_iface);
+
+        if (config.sql_table) {
+          if (avro_file_writer_append_value(avro_writer, &avro_value)) {
+            Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: failed writing the value: %s\n",
+                config.name, config.type, avro_strerror());
+            exit_plugin(EXIT_FAILURE);
+          }
+        }
+        else {
+          char *json_str;
+
+          if (avro_value_to_json(&avro_value, TRUE, &json_str)) {
+            Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: unable to value to JSON: %s\n",
+                config.name, config.type, avro_strerror());
+            exit_plugin(EXIT_FAILURE);
+          }
+
+          fprintf(f, "%s\n", json_str);
+          free(json_str);
+        }
+
+        avro_value_iface_decref(avro_iface);
+        avro_value_decref(&avro_value);
+#else
+        if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): compose_avro(): AVRO object not created due to missing --enable-avro\n", config.name, config.type);
+#endif
       }
     }
   }
 
-  if (f && config.print_markers) fprintf(f, "--END--\n");
+  duration = time(NULL)-start;
 
-  if (f && config.sql_table) {
+  if (f && config.print_markers) {
+    if ((config.print_output & PRINT_OUTPUT_CSV) || (config.print_output & PRINT_OUTPUT_FORMATTED))
+      fprintf(f, "--END (%u)--\n", writer_pid);
+    else if (config.print_output & PRINT_OUTPUT_JSON) {
+      void *json_obj;
+
+      json_obj = compose_purge_close_json(writer_pid, qn, saved_index, duration);
+      if (json_obj) write_and_free_json(f, json_obj);
+    }
+  }
+    
+  if (config.sql_table) {
+#ifdef WITH_AVRO
+    if (config.print_output & PRINT_OUTPUT_AVRO)
+      avro_file_writer_flush(avro_writer);
+#endif
+
     if (config.print_latest_file) {
       memset(tmpbuf, 0, LONGLONGSRVBUFLEN);
       handle_dynname_internal_strings(tmpbuf, LONGSRVBUFLEN, config.print_latest_file, &prim_ptrs);
       link_latest_output_file(tmpbuf, current_table);
     }
 
-    close_output_file(f);
+#ifdef WITH_AVRO
+    if (config.print_output & PRINT_OUTPUT_AVRO) {
+      avro_file_writer_close(avro_writer);
+    }
+#endif
+    else {
+      if (f) close_output_file(f);
+    }
   }
   else {
     /* writing to stdout: releasing lock */
@@ -1251,7 +1313,6 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   /* If we have pending queries then start again */
   if (pqq_ptr) goto start;
 
-  duration = time(NULL)-start;
   Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - END (PID: %u, QN: %u/%u, ET: %u) ***\n",
 		config.name, config.type, writer_pid, qn, saved_index, duration);
 
@@ -1274,10 +1335,6 @@ void P_write_stats_header_formatted(FILE *f, int is_event)
 #endif
   if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) fprintf(f, "SRC_AS      ");
   if (config.what_to_count & COUNT_DST_AS) fprintf(f, "DST_AS      ");
-  if (config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM)) fprintf(f, "COMMS                    ");
-  if (config.what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM)) fprintf(f, "SRC_COMMS                ");
-  if (config.what_to_count & COUNT_AS_PATH) fprintf(f, "AS_PATH                  ");
-  if (config.what_to_count & COUNT_SRC_AS_PATH) fprintf(f, "SRC_AS_PATH              ");
   if (config.what_to_count & COUNT_LOCAL_PREF) fprintf(f, "PREF     ");
   if (config.what_to_count & COUNT_SRC_LOCAL_PREF) fprintf(f, "SRC_PREF ");
   if (config.what_to_count & COUNT_MED) fprintf(f, "MED     ");
@@ -1392,8 +1449,20 @@ void P_write_stats_header_csv(FILE *f, int is_event)
 #endif
   if (config.what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) fprintf(f, "%sSRC_AS", write_sep(sep, &count));
   if (config.what_to_count & COUNT_DST_AS) fprintf(f, "%sDST_AS", write_sep(sep, &count));
-  if (config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM)) fprintf(f, "%sCOMMS", write_sep(sep, &count));
-  if (config.what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM)) fprintf(f, "%sSRC_COMMS", write_sep(sep, &count));
+  if (!config.tmp_comms_same_field) {
+    if (config.what_to_count & COUNT_STD_COMM) fprintf(f, "%sCOMMS", write_sep(sep, &count));
+    if (config.what_to_count & COUNT_EXT_COMM) fprintf(f, "%sECOMMS", write_sep(sep, &count));
+  }
+  else {
+    if (config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM)) fprintf(f, "%sCOMMS", write_sep(sep, &count));
+  }
+  if (!config.tmp_comms_same_field) {
+    if (config.what_to_count & COUNT_SRC_STD_COMM) fprintf(f, "%sSRC_COMMS", write_sep(sep, &count));
+    if (config.what_to_count & COUNT_SRC_EXT_COMM) fprintf(f, "%sSRC_ECOMMS", write_sep(sep, &count));
+  }
+  else {
+    if (config.what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM)) fprintf(f, "%sSRC_COMMS", write_sep(sep, &count));
+  }
   if (config.what_to_count & COUNT_AS_PATH) fprintf(f, "%sAS_PATH", write_sep(sep, &count));
   if (config.what_to_count & COUNT_SRC_AS_PATH) fprintf(f, "%sSRC_AS_PATH", write_sep(sep, &count));
   if (config.what_to_count & COUNT_LOCAL_PREF) fprintf(f, "%sPREF", write_sep(sep, &count));
@@ -1468,11 +1537,11 @@ void P_write_stats_header_csv(FILE *f, int is_event)
   else fprintf(f, "\n");
 }
 
-void P_fprintf_csv_label(FILE *f, struct pkt_vlen_hdr_primitives *pvlen, pm_cfgreg_t wtc, char *sep, char *empty_string)
+void P_fprintf_csv_string(FILE *f, struct pkt_vlen_hdr_primitives *pvlen, pm_cfgreg_t wtc, char *sep, char *empty_string)
 {
-  char *label_ptr = NULL;
+  char *string_ptr = NULL;
 
-  vlen_prims_get(pvlen, wtc, &label_ptr);
-  if (!label_ptr) label_ptr = empty_string;
-  fprintf(f, "%s%s", sep, label_ptr);
+  vlen_prims_get(pvlen, wtc, &string_ptr);
+  if (!string_ptr) string_ptr = empty_string;
+  fprintf(f, "%s%s", sep, string_ptr);
 }

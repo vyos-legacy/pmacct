@@ -1,10 +1,10 @@
 SUBDIRS = nfprobe_plugin sfprobe_plugin bgp tee_plugin isis bmp telemetry
-sbin_PROGRAMS = pmacctd nfacctd sfacctd pmtelemetryd
+sbin_PROGRAMS = pmacctd nfacctd sfacctd pmtelemetryd pmbgpd pmbmpd
 bin_PROGRAMS = pmacct @EXTRABIN@
 EXTRA_PROGRAMS =
 
-AM_LDFLAGS = @GEOIP_LIBS@ @GEOIPV2_LIBS@ @JANSSON_LIBS@
-AM_CFLAGS  = @GEOIP_CFLAGS@ @GEOIPV2_CFLAGS@ @JANSSON_CFLAGS@
+AM_LDFLAGS = @GEOIP_LIBS@ @GEOIPV2_LIBS@ @JANSSON_LIBS@ @AVRO_LIBS@
+AM_CFLAGS = $(PMACCT_CFLAGS)
 
 noinst_LTLIBRARIES = libdaemons.la libcommon.la
 libcommon_la_SOURCES = strlcpy.c addr.c jansson.c addr.h pmacct.h	\
@@ -21,7 +21,7 @@ libdaemons_la_SOURCES = signals.c util.c util.h plugin_hooks.c		\
         regmagic.h regsub.c conntrack.c conntrack.h xflow_status.c	\
         xflow_status.h plugin_common.c plugin_common.h preprocess.c	\
         preprocess-data.h preprocess.h ll.c nl.c jhash.h pmacct-dlt.h	\
-        sflow.h crc32.h
+        sflow.h crc32.h base64.c base64.h
 # Builtin plugins
 libdaemons_la_LIBADD  = nfprobe_plugin/libnfprobe_plugin.la
 libdaemons_la_LIBADD += sfprobe_plugin/libsfprobe_plugin.la
@@ -87,3 +87,9 @@ pmacct_LDADD = libcommon.la
 pmtelemetryd_SOURCES = pmtelemetryd.c pmtelemetryd.h
 pmtelemetryd_LDFLAGS = $(DEFS)
 pmtelemetryd_LDADD = libdaemons.la
+pmbgpd_SOURCES = pmbgpd.c pmbgpd.h
+pmbgpd_LDFLAGS = $(DEFS)
+pmbgpd_LDADD = libdaemons.la
+pmbmpd_SOURCES = pmbmpd.c pmbmpd.h
+pmbmpd_LDFLAGS = $(DEFS)
+pmbmpd_LDADD = libdaemons.la

@@ -24,6 +24,7 @@
 
 /* includes */
 #include "pmacct.h"
+#include "pmacct-data.h"
 #include "bgp.h"
 #if defined WITH_RABBITMQ
 #include "amqp_common.h"
@@ -171,7 +172,7 @@ struct bgp_info_extra *bgp_info_extra_new(struct bgp_info *ri)
 
   new = malloc(sizeof(struct bgp_info_extra));
   if (!new) {
-    Log(LOG_ERR, "ERROR ( %s/core/%s ): malloc() failed (bgp_info_extra_new). Exiting ..\n", config.name, bms->log_thread_str);
+    Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (bgp_info_extra_new). Exiting ..\n", config.name, bms->log_str);
     exit_all(1);
   }
   else memset(new, 0, sizeof (struct bgp_info_extra));
@@ -210,7 +211,7 @@ struct bgp_info *bgp_info_new(struct bgp_peer *peer)
 
   new = malloc(sizeof(struct bgp_info));
   if (!new) {
-    Log(LOG_ERR, "ERROR ( %s/core/%s ): malloc() failed (bgp_info_new). Exiting ..\n", config.name, bms->log_thread_str);
+    Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (bgp_info_new). Exiting ..\n", config.name, bms->log_str);
     exit_all(1);
   }
   else memset(new, 0, sizeof (struct bgp_info));
@@ -396,7 +397,7 @@ void bgp_attr_unintern(struct bgp_peer *peer, struct bgp_attr *attr)
   if (attr->refcnt == 0) {
     ret = (struct bgp_attr *) hash_release(inter_domain_routing_db->attrhash, attr);
     // assert (ret != NULL);
-    if (!ret) Log(LOG_INFO, "INFO ( %s/core/%s ): bgp_attr_unintern() hash lookup failed.\n", config.name, bms->log_thread_str);
+    if (!ret) Log(LOG_INFO, "INFO ( %s/%s ): bgp_attr_unintern() hash lookup failed.\n", config.name, bms->log_str);
     free(attr);
   }
 
@@ -445,7 +446,7 @@ int bgp_peer_init(struct bgp_peer *peer, int type)
   peer->buf.len = BGP_BUFFER_SIZE;
   peer->buf.base = malloc(peer->buf.len);
   if (!peer->buf.base) {
-    Log(LOG_ERR, "ERROR ( %s/core/%s ): malloc() failed (bgp_peer_init). Exiting ..\n", config.name, bms->log_thread_str);
+    Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (bgp_peer_init). Exiting ..\n", config.name, bms->log_str);
     exit_all(1);
   }
   else {
@@ -605,7 +606,10 @@ void evaluate_comm_patterns(char *dst, char *src, char **patterns, int dstlen)
   char local_ptr[MAX_BGP_STD_COMMS], *auxptr;
   int idx, i, j, srclen;
 
+  if (!src || !dst || !dstlen) return;
+
   srclen = strlen(src);
+  memset(dst, 0, dstlen);
 
   for (idx = 0, j = 0; patterns[idx]; idx++) {
     haystack = src;
@@ -653,7 +657,8 @@ void evaluate_comm_patterns(char *dst, char *src, char **patterns, int dstlen)
 
     /* If we don't have space anymore, let's finish it here */
     if (j >= dstlen) {
-      dst[dstlen-1] = '+';
+      dst[dstlen-2] = '+';
+      dst[dstlen-1] = '\0';
       break;
     }
 
@@ -725,6 +730,37 @@ as_t evaluate_first_asn(char *src)
   return asn;
 }
 
+void evaluate_bgp_aspath_radius(char *path, int len, int radius)
+{
+  int count, idx;
+
+  for (idx = 0, count = 0; idx < len; idx++) {
+    if (path[idx] == ' ') count++;
+    if (count == radius) {
+      path[idx] = '\0';
+      break;
+    }
+  }
+}
+
+void copy_stdcomm_to_asn(char *stdcomm, as_t *asn, int is_origin)
+{
+  char *delim, *delim2;
+  char *p1, *p2;
+
+  if (!stdcomm || !strlen(stdcomm) || (delim = strchr(stdcomm, ':')) == NULL) return;
+  if (validate_truefalse(is_origin)) return;
+
+  delim2 = strchr(stdcomm, ',');
+  *delim = '\0';
+  if (delim2) *delim2 = '\0';
+  p1 = stdcomm;
+  p2 = delim+1;
+
+  if (is_origin) *asn = atoi(p2);
+  else *asn = atoi(p1);
+}
+
 /* XXX: currently only BGP is supported due to use of peers struct */
 void write_neighbors_file(char *filename, int type)
 {
@@ -745,10 +781,10 @@ void write_neighbors_file(char *filename, int type)
   file = fopen(filename,"w");
   if (file) {
     if ((ret = chown(filename, owner, group)) == -1)
-      Log(LOG_WARNING, "WARN ( %s/core/%s ): [%s] Unable to chown() (%s).\n", config.name, bms->log_thread_str, filename, strerror(errno));
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Unable to chown() (%s).\n", config.name, bms->log_str, filename, strerror(errno));
 
     if (file_lock(fileno(file))) {
-      Log(LOG_ERR, "ERROR ( %s/core/%s ): [%s] Unable to obtain lock.\n", config.name, bms->log_thread_str, filename);
+      Log(LOG_ERR, "ERROR ( %s/%s ): [%s] Unable to obtain lock.\n", config.name, bms->log_str, filename);
       return;
     }
     for (idx = 0; idx < bms->max_peers; idx++) {
@@ -776,40 +812,54 @@ void write_neighbors_file(char *filename, int type)
     fclose(file);
   }
   else {
-    Log(LOG_ERR, "ERROR ( %s/core/%s ): [%s] fopen() failed.\n", config.name, bms->log_thread_str, filename);
+    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] fopen() failed.\n", config.name, bms->log_str, filename);
     return;
   }
 }
 
 void bgp_config_checks(struct configuration *c)
 {
-  if (c->what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
-			  COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|
-			  COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|
-			  COUNT_SRC_LOCAL_PREF|COUNT_MPLS_VPN_RD)) {
+  if (c->what_to_count & (COUNT_LOCAL_PREF|COUNT_MED|COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|
+			  COUNT_PEER_SRC_IP|COUNT_PEER_DST_IP|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
+			  COUNT_MPLS_VPN_RD)) {
     /* Sanitizing the aggregation method */
-    if ( ((c->what_to_count & COUNT_STD_COMM) && (c->what_to_count & COUNT_EXT_COMM)) ||
-         ((c->what_to_count & COUNT_SRC_STD_COMM) && (c->what_to_count & COUNT_SRC_EXT_COMM)) ) {
-      printf("ERROR: The use of STANDARD and EXTENDED BGP communitities is mutual exclusive.\n");
-      exit(1);
-    }
-    if ( (c->what_to_count & COUNT_SRC_STD_COMM && !c->nfacctd_bgp_src_std_comm_type) ||
-	 (c->what_to_count & COUNT_SRC_EXT_COMM && !c->nfacctd_bgp_src_ext_comm_type) ||
-	 (c->what_to_count & COUNT_SRC_AS_PATH && !c->nfacctd_bgp_src_as_path_type ) ||
-	 (c->what_to_count & COUNT_SRC_LOCAL_PREF && !c->nfacctd_bgp_src_local_pref_type ) ||
-	 (c->what_to_count & COUNT_SRC_MED && !c->nfacctd_bgp_src_med_type ) ||
-	 (c->what_to_count & COUNT_PEER_SRC_AS && !c->nfacctd_bgp_peer_as_src_type &&
-	  (config.acct_type != ACCT_SF && config.acct_type != ACCT_NF)) ) {
+      if ( (c->what_to_count & COUNT_SRC_LOCAL_PREF && !c->nfacctd_bgp_src_local_pref_type) ||
+	   (c->what_to_count & COUNT_SRC_MED && !c->nfacctd_bgp_src_med_type) ||
+	   (c->what_to_count & COUNT_PEER_SRC_AS && !c->nfacctd_bgp_peer_as_src_type &&
+	     (config.acct_type != ACCT_SF && config.acct_type != ACCT_NF)) ) {
       printf("ERROR: At least one of the following primitives is in use but its source type is not specified:\n");
       printf("       peer_src_as     =>  bgp_peer_src_as_type\n");
-      printf("       src_as_path     =>  bgp_src_as_path_type\n");
-      printf("       src_std_comm    =>  bgp_src_std_comm_type\n");
-      printf("       src_ext_comm    =>  bgp_src_ext_comm_type\n");
       printf("       src_local_pref  =>  bgp_src_local_pref_type\n");
       printf("       src_med         =>  bgp_src_med_type\n");
       exit(1);
     }
+
     c->data_type |= PIPE_TYPE_BGP;
+  }
+
+  if (c->what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_AS_PATH|COUNT_SRC_STD_COMM|
+			  COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH)) {
+    /* Sanitizing the aggregation method */
+    if (config.tmp_comms_same_field) {
+      if (((c->what_to_count & COUNT_STD_COMM) && (c->what_to_count & COUNT_EXT_COMM)) ||
+	  ((c->what_to_count & COUNT_SRC_STD_COMM) && (c->what_to_count & COUNT_SRC_EXT_COMM))) {
+        printf("ERROR: The use of STANDARD and EXTENDED BGP communitities is mutual exclusive.\n");
+        exit(1);
+      }
+    }
+
+    if ( (c->what_to_count & COUNT_SRC_AS_PATH && !c->nfacctd_bgp_src_as_path_type) ||
+         (c->what_to_count & COUNT_SRC_STD_COMM && !c->nfacctd_bgp_src_std_comm_type) ||
+	 (c->what_to_count & COUNT_SRC_EXT_COMM && !c->nfacctd_bgp_src_ext_comm_type) ) {
+      printf("ERROR: At least one of the following primitives is in use but its source type is not specified:\n");
+      printf("       src_as_path     =>  bgp_src_as_path_type\n");
+      printf("       src_std_comm    =>  bgp_src_std_comm_type\n");
+      printf("       src_ext_comm    =>  bgp_src_ext_comm_type\n");
+      exit(1);
+    }
+
+    if (c->type_id == PLUGIN_ID_MEMORY) c->data_type |= PIPE_TYPE_LBGP;
+    else c->data_type |= PIPE_TYPE_VLEN;
   }
 }
 
@@ -953,8 +1003,6 @@ void bgp_link_misc_structs(struct bgp_misc_structs *bms)
   bms->msglog_kafka_topic_rr = config.nfacctd_bgp_msglog_kafka_topic_rr;
   bms->peer_str = malloc(strlen("peer_ip_src") + 1);
   strcpy(bms->peer_str, "peer_ip_src");
-  bms->log_thread_str = malloc(strlen("BGP") + 1);
-  strcpy(bms->log_thread_str, "BGP");
   bms->bgp_peer_log_msg_extras = NULL;
 
   bms->table_peer_buckets = config.bgp_table_peer_buckets;

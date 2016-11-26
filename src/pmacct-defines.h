@@ -20,12 +20,14 @@
 */
 
 /* defines */
-#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:uRVa"
-#define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:v:o:O:uRVa"
-#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:v:o:O:uwWL:RVaz"
-#define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:v:o:O:uRg:L:Va"
+#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:o:t:O:uRVaA:E:"
+#define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:o:t:O:uRVaA:E:"
+#define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:o:t:O:uwWL:RVazA:E:"
+#define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:o:t:O:uRg:L:VaA:E:"
 #define ARGS_PMTELEMETRYD "hVL:l:f:dDS:F:"
-#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:O:E:uDVUoiI"
+#define ARGS_PMBGPD "hVL:l:f:dDS:F:"
+#define ARGS_PMBMPD "hVL:l:f:dDS:F:"
+#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:O:E:uDVUoiIx"
 #define N_PRIMITIVES 57
 #define N_FUNCS 10 
 #define MAX_N_PLUGINS 32
@@ -79,14 +81,14 @@
 #define PRIMITIVE_DESC_LEN	64
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.6.0"
-#define UACCTD_USAGE_HEADER "Linux NetFilter NFLOG Accounting Daemon, uacctd 1.6.0"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.6.0"
-#define PMMYPLAY_USAGE_HEADER "pmmyplay, pmacct MySQL logfile player 1.6.0"
-#define PMPGPLAY_USAGE_HEADER "pmpgplay, pmacct PGSQL logfile player 1.6.0"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.6.0"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.6.0"
-#define PMTELEMETRYD_USAGE_HEADER "Streamed Telemetry Accounting Daemon, pmtelemetryd 1.6.0"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.6.1"
+#define UACCTD_USAGE_HEADER "Linux NetFilter NFLOG Accounting Daemon, uacctd 1.6.1"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.6.1"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.6.1"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.6.1"
+#define PMTELEMETRYD_USAGE_HEADER "Streaming Network Telemetry Daemon, pmtelemetryd 1.6.1"
+#define PMBGPD_USAGE_HEADER "pmacct BGP Collector Daemon, pmbgpd 1.6.1"
+#define PMBMPD_USAGE_HEADER "pmacct BMP Collector Daemon, pmbmpd 1.6.1"
 #define PMACCT_COMPILE_ARGS COMPILE_ARGS
 #ifndef TRUE
 #define TRUE 1
@@ -118,13 +120,17 @@
 #define PATH_MAX 4096
 #endif
 
-/* acct_type */ 
-#define ACCT_PM		1	/* promiscuous mode */
-#define ACCT_NF		2	/* NetFlow */
-#define ACCT_SF		3	/* sFlow */
-#define ACCT_UL		4	/* Linux NetFilter NFLOG */
-#define ACCT_PMTELE	5	/* Telemetry */
-#define ACCT_MEMCLIENT	6	/* pmacct memroy client */
+/* Daemon identificator */ 
+#define ACCT_PM			1	/* promiscuous mode */
+#define ACCT_NF			2	/* NetFlow */
+#define ACCT_SF			3	/* sFlow */
+#define ACCT_UL			4	/* Linux NetFilter NFLOG */
+#define ACCT_FWPLANE_MAX	100	/* Max ID for forwarding-plane daemons */ 
+#define ACCT_PMBGP		101	/* standalone BGP daemon */
+#define ACCT_PMBMP		102	/* standalone BMP daemon */
+#define ACCT_CTLPLANE_MAX	200	/* Max ID for control-plane daemons */ 
+#define ACCT_PMTELE		201	/* Streaming Network Telemetry */
+#define ACCT_INFRA_MAX		300	/* Max ID for infrastructure daemons */ 
 
 /* map type */
 #define MAP_TAG 		0	/* pre_tag_map */
@@ -335,6 +341,7 @@
 #define PIPE_TYPE_NAT		0x00000020
 #define PIPE_TYPE_MPLS		0x00000040
 #define PIPE_TYPE_VLEN		0x00000080
+#define PIPE_TYPE_LBGP		0x00000100
 
 #define CHLD_WARNING		0x00000001
 #define CHLD_ALERT		0x00000002
@@ -349,6 +356,7 @@
 #define PRINT_OUTPUT_CSV	0x00000002
 #define PRINT_OUTPUT_JSON	0x00000004
 #define PRINT_OUTPUT_EVENT	0x00000008
+#define PRINT_OUTPUT_AVRO  	0x00000010
 
 #define DIRECTION_UNKNOWN	0x00000000
 #define DIRECTION_IN		0x00000001
@@ -374,6 +382,9 @@
 #define FUNC_TYPE_TELEMETRY		4
 #define FUNC_TYPE_MAX			5
 
+#define PM_MSG_BIN_COPY			0
+#define PM_MSG_STR_COPY			1
+
 typedef u_int32_t pm_class_t;
 typedef u_int64_t pm_id_t;
 typedef u_int64_t pm_cfgreg_t;
@@ -388,7 +399,7 @@ typedef struct {
 typedef struct {
   pm_cfgreg_t type;
   u_int32_t len;
-} pm_label_t;
+} __attribute__ ((packed)) pm_label_t;
 
 /* one-off: pt_ structures should all be defined in pretag.h */
 typedef struct {

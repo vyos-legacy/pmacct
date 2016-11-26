@@ -31,7 +31,7 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct pkt_msg *msg;
   unsigned char *pipebuf;
   struct pollfd pfd;
-  int timeout, refresh_timeout, amqp_timeout, err, ret, num;
+  int timeout, refresh_timeout, amqp_timeout, kafka_timeout, err, ret, num;
   int fd, pool_idx, recv_idx;
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
@@ -46,9 +46,14 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   int pollagain = TRUE;
   u_int32_t seq = 1, rg_err_count = 0;
   time_t now;
+  void *kafka_msg;
 
 #ifdef WITH_RABBITMQ
   struct p_amqp_host *amqp_host = &((struct channels_list_entry *)ptr)->amqp_host;
+#endif
+
+#ifdef WITH_KAFKA
+  struct p_kafka_host *kafka_host = &((struct channels_list_entry *)ptr)->kafka_host;
 #endif
 
   memcpy(&config, cfgptr, sizeof(struct configuration));
@@ -148,6 +153,13 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
 #endif
   }
+  else if (config.pipe_kafka) {
+    plugin_pipe_kafka_compile_check();
+#ifdef WITH_KAFKA
+    pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
+    kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+#endif
+  }
   else setnonblocking(pipe_fd);
 
   now = time(NULL);
@@ -170,21 +182,25 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       timeout = MIN(refresh_timeout, (amqp_timeout ? amqp_timeout : INT_MAX));
       ret = poll(&pfd, (pfd.fd == ERR ? 0 : 1), timeout);
     }
-    else {
-      /* Preps for Kafka support */
-      Log(LOG_ERR, "ERROR ( %s/%s ): plugin_pipe method not supported. Exiting ..\n", config.name, config.type);
-      exit_plugin(1);
+#ifdef WITH_KAFKA
+    else if (config.pipe_kafka) {
+      timeout = MIN(refresh_timeout, (kafka_timeout ? kafka_timeout : INT_MAX));
+      ret = p_kafka_consume_poller(kafka_host, &kafka_msg, timeout);
     }
+#endif
 
     if (ret < 0) goto poll_again;
 
     if (reload_map) {
-      int recvs_allocated = FALSE;
+      if (config.tee_receivers) {
+        int recvs_allocated = FALSE;
 
-      Tee_destroy_recvs();
-      load_id_file(MAP_TEE_RECVS, config.tee_receivers, NULL, &req, &recvs_allocated);
+        Tee_destroy_recvs();
+        load_id_file(MAP_TEE_RECVS, config.tee_receivers, NULL, &req, &recvs_allocated);
 
-      Tee_init_socks();
+        Tee_init_socks();
+      }
+
       reload_map = FALSE;
     }
 
@@ -197,6 +213,16 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
       else amqp_timeout = plugin_pipe_calc_retry_timeout_diff(&amqp_host->btimers, now);
+    }
+#endif
+
+#ifdef WITH_KAFKA
+    if (config.pipe_kafka && pipe_fd == ERR) {
+      if (timeout == kafka_timeout) {
+        pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
+        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+      }
+      else kafka_timeout = plugin_pipe_calc_retry_timeout_diff(&kafka_host->btimers, now);
     }
 #endif
 
@@ -232,6 +258,8 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
               Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
                         config.name, config.type);
             }
+
+	    rg->ptr = (rg->base + status->last_buf_off);
             seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
           }
         }
@@ -249,12 +277,23 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
 #endif
+#ifdef WITH_KAFKA
+      else if (config.pipe_kafka) {
+        ret = p_kafka_consume_data(kafka_host, kafka_msg, pipebuf, config.buffer_size);
+        if (ret) pipe_fd = ERR;
+
+        seq = ((struct ch_buf_hdr *)pipebuf)->seq;
+        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+      }
+#endif
 
       msg = (struct pkt_msg *) (pipebuf+sizeof(struct ch_buf_hdr));
+      msg->payload = (pipebuf+sizeof(struct ch_buf_hdr)+PmsgSz);
 
       if (config.debug_internal_msg) 
-        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u seq=%u num_entries=%u\n",
-                config.name, config.type, core_pid, seq, ((struct ch_buf_hdr *)pipebuf)->num);
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u len=%llu seq=%u num_entries=%u\n",
+                config.name, config.type, core_pid, ((struct ch_buf_hdr *)pipebuf)->len,
+                seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
       if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
@@ -276,8 +315,9 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         ((struct ch_buf_hdr *)pipebuf)->num--;
         if (((struct ch_buf_hdr *)pipebuf)->num) {
 	  dataptr = (unsigned char *) msg;
-          dataptr += PmsgSz;
+          dataptr += (PmsgSz + msg->len);
 	  msg = (struct pkt_msg *) dataptr;
+	  msg->payload = (dataptr + PmsgSz);
 	}
       }
       }
@@ -310,8 +350,9 @@ void Tee_send(struct pkt_msg *msg, struct sockaddr *target, int fd)
     sa_to_addr((struct sockaddr *)target, &r, &recv_port);
     addr_to_str(recv_addr, &r);
 
-    Log(LOG_DEBUG, "DEBUG ( %s/%s ): Sending NetFlow packet from [%s:%u] seqno [%u] to [%s]\n",
-                        config.name, config.type, agent_addr, agent_port, msg->seqno, recv_addr);
+    Log(LOG_DEBUG, "DEBUG ( %s/%s ): Sending NetFlow packet from [%s:%u] seqno [%u] to [%s:%u]\n",
+                        config.name, config.type, agent_addr, agent_port, msg->seqno, recv_addr,
+			recv_port);
   }
 
   if (!config.tee_transparent) {
@@ -326,8 +367,9 @@ void Tee_send(struct pkt_msg *msg, struct sockaddr *target, int fd)
       sa_to_addr((struct sockaddr *)target, &r, &recv_port);
       addr_to_str(recv_addr, &r);
 
-      Log(LOG_ERR, "ERROR ( %s/%s ): send() from [%s:%u] seqno [%u] to [%s] failed (%s)\n",
-			config.name, config.type, agent_addr, agent_port, msg->seqno, recv_addr, strerror(errno));
+      Log(LOG_ERR, "ERROR ( %s/%s ): send() from [%s:%u] seqno [%u] to [%s:%u] failed (%s)\n",
+			config.name, config.type, agent_addr, agent_port, msg->seqno, recv_addr,
+			recv_port, strerror(errno));
     }
   }
   else {
@@ -412,8 +454,9 @@ void Tee_send(struct pkt_msg *msg, struct sockaddr *target, int fd)
 	sa_to_addr((struct sockaddr *)target, &r, &recv_port);
 	addr_to_str(recv_addr, &r);
 
-        Log(LOG_ERR, "ERROR ( %s/%s ): raw send() from [%s:%u] seqno [%u] to [%s] failed (%s)\n",
-			config.name, config.type, agent_addr, agent_port, msg->seqno, recv_addr, strerror(errno));
+        Log(LOG_ERR, "ERROR ( %s/%s ): raw send() from [%s:%u] seqno [%u] to [%s:%u] failed (%s)\n",
+			config.name, config.type, agent_addr, agent_port, msg->seqno, recv_addr,
+			recv_port, strerror(errno));
       }
     }
     else {

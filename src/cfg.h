@@ -49,6 +49,7 @@ struct custom_primitive_entry {
   u_int16_t len;
   u_int16_t alloc_len;
   u_int8_t semantics;
+  u_int8_t repeat_id;
 
   /* generated internally */
   pm_cfgreg_t type;
@@ -91,6 +92,7 @@ struct configuration {
   int pipe_homegrown;
   u_int64_t pipe_size;
   u_int64_t buffer_size;
+  int buffer_immediate;
   int pipe_backlog;
   int pipe_check_core_pid;
   int pipe_amqp;
@@ -105,6 +107,8 @@ struct configuration {
   char *pipe_kafka_broker_host;
   char *pipe_kafka_topic;
   int pipe_kafka_partition;
+  char *pipe_kafka_partition_key;
+  int pipe_kafka_partition_keylen;
   int pipe_kafka_broker_port;
   int pipe_kafka_retry;
   int files_umask;
@@ -156,6 +160,9 @@ struct configuration {
   int timestamps_secs;
   int timestamps_since_epoch;
   int mongo_insert_batch;
+  int message_broker_output;
+  int avro_buffer_size;
+  char *avro_schema_output_file;
   char *amqp_exchange_type;
   int amqp_persistent_msg;
   u_int32_t amqp_frame_max;
@@ -164,6 +171,8 @@ struct configuration {
   int amqp_routing_key_rr;
   int kafka_broker_port;
   int kafka_partition;
+  char *kafka_partition_key;
+  int kafka_partition_keylen;
   int print_cache_entries;
   int print_markers;
   int print_output;
@@ -200,6 +209,8 @@ struct configuration {
   char *sfacctd_counter_kafka_broker_host;
   char *sfacctd_counter_kafka_topic;
   int sfacctd_counter_kafka_partition;
+  char *sfacctd_counter_kafka_partition_key;
+  int sfacctd_counter_kafka_partition_keylen;
   int sfacctd_counter_kafka_broker_port;
   int sfacctd_counter_kafka_retry;
   int nfacctd_disable_checks;
@@ -248,12 +259,16 @@ struct configuration {
   char *telemetry_msglog_kafka_topic;
   int telemetry_msglog_kafka_topic_rr;
   int telemetry_msglog_kafka_partition;
+  char *telemetry_msglog_kafka_partition_key;
+  int telemetry_msglog_kafka_partition_keylen;
   int telemetry_msglog_kafka_retry;
   char *telemetry_dump_kafka_broker_host;
   int telemetry_dump_kafka_broker_port;
   char *telemetry_dump_kafka_topic;
   int telemetry_dump_kafka_topic_rr;
   int telemetry_dump_kafka_partition;
+  char *telemetry_dump_kafka_partition_key;
+  int telemetry_dump_kafka_partition_keylen;
   int nfacctd_bgp;
   int nfacctd_bgp_msglog_output;
   char *nfacctd_bgp_msglog_file;
@@ -273,6 +288,8 @@ struct configuration {
   char *nfacctd_bgp_msglog_kafka_topic;
   int nfacctd_bgp_msglog_kafka_topic_rr;
   int nfacctd_bgp_msglog_kafka_partition;
+  char *nfacctd_bgp_msglog_kafka_partition_key;
+  int nfacctd_bgp_msglog_kafka_partition_keylen;
   int nfacctd_bgp_msglog_kafka_broker_port;
   int nfacctd_bgp_msglog_kafka_retry;
   char *nfacctd_bgp_ip;
@@ -302,6 +319,7 @@ struct configuration {
   char *nfacctd_flow_to_rd_map;
   int nfacctd_bgp_follow_default;
   struct prefix nfacctd_bgp_follow_nexthop[FOLLOW_BGP_NH_ENTRIES];
+  int nfacctd_bgp_follow_nexthop_external;
   char *nfacctd_bgp_neighbors_file;
   char *nfacctd_bgp_md5_file;
   int bgp_table_peer_buckets;
@@ -327,6 +345,8 @@ struct configuration {
   char *bgp_table_dump_kafka_topic;
   int bgp_table_dump_kafka_topic_rr;
   int bgp_table_dump_kafka_partition;
+  char *bgp_table_dump_kafka_partition_key;
+  int bgp_table_dump_kafka_partition_keylen;
   int bgp_table_dump_kafka_broker_port;
   int bmp_sock;
   int nfacctd_bmp;
@@ -356,6 +376,8 @@ struct configuration {
   char *nfacctd_bmp_msglog_kafka_topic;
   int nfacctd_bmp_msglog_kafka_topic_rr;
   int nfacctd_bmp_msglog_kafka_partition;
+  char *nfacctd_bmp_msglog_kafka_partition_key;
+  int nfacctd_bmp_msglog_kafka_partition_keylen;
   int nfacctd_bmp_msglog_kafka_broker_port;
   int nfacctd_bmp_msglog_kafka_retry;
   int bmp_table_peer_buckets;
@@ -381,6 +403,8 @@ struct configuration {
   char *bmp_dump_kafka_topic;
   int bmp_dump_kafka_topic_rr;
   int bmp_dump_kafka_partition;
+  char *bmp_dump_kafka_partition_key;
+  int bmp_dump_kafka_partition_keylen;
   int bmp_dump_kafka_broker_port;
   int nfacctd_isis;
   char *nfacctd_isis_ip;
@@ -436,6 +460,7 @@ struct configuration {
   struct id_table ptm;
   int ptm_alloc;
   int ptm_global;
+  int ptm_complex;
   pm_id_t post_tag;
   pm_id_t post_tag2;
   int ext_sampling_rate;
@@ -480,6 +505,8 @@ struct configuration {
   u_int16_t pkt_len_distrib_bins_lookup[ETHER_JUMBO_MTU+1];
   int use_ip_next_hop;
   int tmp_net_own_field;
+  int tmp_asa_bi_flow;
+  int tmp_comms_same_field;
   size_t thread_stack;
 };
 

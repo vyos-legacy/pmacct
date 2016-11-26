@@ -62,8 +62,8 @@ void usage_daemon(char *prog_name)
   printf("  -a  \tPrint list of supported aggregation primitives\n");
   printf("  -c  \tAggregation method, see full list of primitives with -a (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
-  printf("  -n  \tPath to a file containing Network definitions\n");
-  printf("  -o  \tPath to a file containing Port definitions\n");
+  printf("  -n  \tPath to a file containing networks and/or ASNs definitions\n");
+  printf("  -t  \tPath to a file containing ports definitions\n");
   printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | mongodb | amqp | kafka | tee ] \n\tActivate plugin\n"); 
   printf("  -d  \tEnable debug\n");
   printf("  -S  \t[ auth | mail | daemon | kern | user | local[0-7] ] \n\tLog to the specified syslog facility\n");
@@ -75,12 +75,12 @@ void usage_daemon(char *prog_name)
   printf("  -b  \tNumber of buckets\n");
   printf("  -m  \tNumber of memory pools\n");
   printf("  -s  \tMemory pool size\n");
-  printf("\nPostgreSQL (-P pgsql)/MySQL (-P mysql)/SQLite (-P sqlite3) plugin options:\n");
-  printf("  -r  \tRefresh time (in seconds)\n");
-  printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 ] \n\tTable version\n");
   printf("\nPrint plugin (-P print) plugin options:\n");
   printf("  -r  \tRefresh time (in seconds)\n");
-  printf("  -O  \t[ formatted | csv | json ] \n\tOutput format\n");
+  printf("  -O  \t[ formatted | csv | json | avro ] \n\tOutput format\n");
+  printf("  -o  \tPath to output file\n");
+  printf("  -A  \tAppend output (applies to -o)\n");
+  printf("  -E  \tCSV format serparator (applies to -O csv, DEFAULT: ',')\n");
   printf("\n");
   printf("  See QUICKSTART or visit http://wiki.pmacct.net/ for examples.\n");
   printf("\n");
@@ -199,7 +199,8 @@ int main(int argc,char **argv, char **envp)
 
   /* getting commandline values */
   while (!errflag && ((cp = getopt(argc, argv, ARGS_SFACCTD)) != -1)) {
-    cfg_cmdline[rows] = malloc(SRVBUFLEN);
+    if (!cfg_cmdline[rows]) cfg_cmdline[rows] = malloc(SRVBUFLEN);
+    memset(cfg_cmdline[rows], 0, SRVBUFLEN);
     switch (cp) {
     case 'L':
       strlcpy(cfg_cmdline[rows], "sfacctd_ip: ", SRVBUFLEN);
@@ -230,7 +231,7 @@ int main(int argc,char **argv, char **envp)
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
-    case 'o':
+    case 't':
       strlcpy(cfg_cmdline[rows], "ports_file: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
@@ -240,12 +241,29 @@ int main(int argc,char **argv, char **envp)
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
+    case 'o':
+      strlcpy(cfg_cmdline[rows], "print_output_file: ", SRVBUFLEN);
+      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
+    case 'A':
+      strlcpy(cfg_cmdline[rows], "print_output_file_append: ", SRVBUFLEN);
+      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
+    case 'E':
+      strlcpy(cfg_cmdline[rows], "print_output_separator: ", SRVBUFLEN);
+      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
     case 'u':
       strlcpy(cfg_cmdline[rows], "print_num_protos: true", SRVBUFLEN);
       rows++;
       break;
     case 'f':
       strlcpy(config_file, optarg, sizeof(config_file));
+      free(cfg_cmdline[rows]);
+      cfg_cmdline[rows] = NULL;
       break;
     case 'F':
       strlcpy(cfg_cmdline[rows], "pidfile: ", SRVBUFLEN);
@@ -274,11 +292,6 @@ int main(int argc,char **argv, char **envp)
       break;
     case 'r':
       strlcpy(cfg_cmdline[rows], "sql_refresh_time: ", SRVBUFLEN);
-      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
-      rows++;
-      break;
-    case 'v':
-      strlcpy(cfg_cmdline[rows], "sql_table_version: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
@@ -382,6 +395,9 @@ int main(int argc,char **argv, char **envp)
     else Log(LOG_INFO, "INFO ( %s/core ): proc_priority set to %d\n", config.name, getpriority(PRIO_PROCESS, 0));
   }
 
+  Log(LOG_INFO, "INFO ( %s/core ): %s (%s)\n", config.name, SFACCTD_USAGE_HEADER, PMACCT_BUILD);
+  Log(LOG_INFO, "INFO ( %s/core ): %s\n", config.name, PMACCT_COMPILE_ARGS);
+
   if (strlen(config_file)) {
     char canonical_path[PATH_MAX], *canonical_path_ptr;
 
@@ -474,6 +490,7 @@ int main(int argc,char **argv, char **envp)
 	  exit(1);
 	}
 
+	list->cfg.type_id = list->type.id;
 	bgp_config_checks(&list->cfg);
 
 	data_plugins++;
@@ -631,9 +648,10 @@ int main(int argc,char **argv, char **envp)
   }
 
   /* starting the BGP thread */
+  load_comm_patterns(&config.nfacctd_bgp_stdcomm_pattern, &config.nfacctd_bgp_extcomm_pattern, &config.nfacctd_bgp_stdcomm_pattern_to_asn);
+
   if (config.nfacctd_bgp) {
     req.bpf_filter = TRUE;
-    load_comm_patterns(&config.nfacctd_bgp_stdcomm_pattern, &config.nfacctd_bgp_extcomm_pattern, &config.nfacctd_bgp_stdcomm_pattern_to_asn);
 
     if (config.nfacctd_bgp_peer_as_src_type == BGP_SRC_PRIMITIVES_MAP) {
       if (config.nfacctd_bgp_peer_as_src_map) {
@@ -1240,6 +1258,7 @@ void process_SF_raw_packet(SFSample *spp, struct packet_ptrs_vector *pptrsv,
 			config.name, agent_addr, agent_port, spp->datagramVersion, pptrs->seqno);
   }
 
+  req->ptm_c.exec_ptm_res = FALSE;
   exec_plugins(pptrs, req);
 }
 
@@ -1253,6 +1272,7 @@ void compute_once()
   PmsgSz = sizeof(struct pkt_msg);
   PextrasSz = sizeof(struct pkt_extras);
   PbgpSz = sizeof(struct pkt_bgp_primitives);
+  PlbgpSz = sizeof(struct pkt_legacy_bgp_primitives);
   PnatSz = sizeof(struct pkt_nat_primitives);
   PmplsSz = sizeof(struct pkt_mpls_primitives);
   PvhdrSz = sizeof(struct pkt_vlen_hdr_primitives);
@@ -1728,12 +1748,12 @@ void readExtendedGateway(SFSample *sample)
         len_asn = strlen(asn_str);
 	len_tot = strlen(sample->dst_as_path);
 
-        if ((len_tot+len_asn) < MAX_BGP_ASPATH) {
+        if ((len_tot+len_asn) < LARGEBUFLEN) {
           strncat(sample->dst_as_path, asn_str, len_asn);
         }
         else {
-          sample->dst_as_path[MAX_BGP_ASPATH-2] = '+';
-          sample->dst_as_path[MAX_BGP_ASPATH-1] = '\0';
+          sample->dst_as_path[LARGEBUFLEN-2] = '+';
+          sample->dst_as_path[LARGEBUFLEN-1] = '\0';
         }
 
 	/* mark the first one as the dst_peer_as */
@@ -1742,12 +1762,13 @@ void readExtendedGateway(SFSample *sample)
 	/* mark the last one as the dst_as */
 	if (idx == (sample->dst_as_path_len - 1) && i == (seg_len - 1)) sample->dst_as = asNumber;
         else {
-          if (strlen(sample->dst_as_path) < (MAX_BGP_ASPATH-1))
+          if (strlen(sample->dst_as_path) < (LARGEBUFLEN-1))
             strncat(sample->dst_as_path, space, 1);
         }
       }
     }
   }
+  else sample->dst_as_path[0] = '\0';
 
   sample->communities_len = getData32(sample);
   /* just point at the communities array */
@@ -1778,20 +1799,21 @@ void readExtendedGateway(SFSample *sample)
       len_comm = strlen(comm_str);
       len_tot = strlen(sample->comms);
 
-      if ((len_tot+len_comm) < MAX_BGP_STD_COMMS) {
+      if ((len_tot+len_comm) < LARGEBUFLEN) {
         strncat(sample->comms, comm_str, len_comm);
       }
       else {
-        sample->comms[MAX_BGP_STD_COMMS-2] = '+';
-        sample->comms[MAX_BGP_STD_COMMS-1] = '\0';
+        sample->comms[LARGEBUFLEN-2] = '+';
+        sample->comms[LARGEBUFLEN-1] = '\0';
       }
 
       if (idx < (sample->communities_len - 1)) {
-        if (strlen(sample->comms) < (MAX_BGP_STD_COMMS-1))
+        if (strlen(sample->comms) < (LARGEBUFLEN-1))
           strncat(sample->comms, space, 1);
       }
     }
   }
+  else sample->comms[0] = '\0';
 
   sample->extended_data_tag |= SASAMPLE_EXTENDED_DATA_GATEWAY;
   sample->localpref = getData32(sample);
@@ -2895,7 +2917,7 @@ int SF_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_i
   return ret;
 }
 
-u_int16_t SF_evaluate_flow_type(struct packet_ptrs *pptrs)
+u_int8_t SF_evaluate_flow_type(struct packet_ptrs *pptrs)
 {
   SFSample *sample = (SFSample *)pptrs->f_data;
   u_int8_t ret = NF9_FTYPE_TRAFFIC;
@@ -3358,7 +3380,7 @@ int readCounters_vlan(struct bgp_peer *peer, SFSample *sample, char *event_type,
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
-  kv = json_pack("{sI}", "discards", (json_int_t)m32_3);
+  kv = json_pack("{sI}", "discards", (json_int_t)m32_4);
   json_object_update_missing(obj, kv);
   json_decref(kv);
 
@@ -3416,6 +3438,7 @@ int sfacctd_counter_init_kafka_host()
   p_kafka_set_broker(&sfacctd_counter_kafka_host, config.sfacctd_counter_kafka_broker_host, config.sfacctd_counter_kafka_broker_port);
   p_kafka_set_topic(&sfacctd_counter_kafka_host, config.sfacctd_counter_kafka_topic);
   p_kafka_set_partition(&sfacctd_counter_kafka_host, config.sfacctd_counter_kafka_partition);
+  p_kafka_set_key(&sfacctd_counter_kafka_host, config.sfacctd_counter_kafka_partition_key, config.sfacctd_counter_kafka_partition_keylen);
   p_kafka_set_content_type(&sfacctd_counter_kafka_host, PM_KAFKA_CNT_TYPE_STR);
   P_broker_timers_set_retry_interval(&sfacctd_counter_kafka_host.btimers, config.sfacctd_counter_kafka_retry);
 
@@ -3440,6 +3463,7 @@ void sf_cnt_link_misc_structs(struct bgp_misc_structs *bms)
   bms->msglog_file = config.sfacctd_counter_file;
   bms->msglog_amqp_routing_key = config.sfacctd_counter_amqp_routing_key;
   bms->msglog_kafka_topic = config.sfacctd_counter_kafka_topic;
+  bms->peer_str = malloc(strlen("peer_src_ip") + 1);
   strcpy(bms->peer_str, "peer_src_ip");
 
   /* dump not supported */

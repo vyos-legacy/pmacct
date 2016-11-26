@@ -52,6 +52,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   int rg_err_count = 0;
   int amqp_timeout = INT_MAX, ret;
   struct pkt_bgp_primitives *pbgp, empty_pbgp;
+  struct pkt_legacy_bgp_primitives *plbgp, empty_plbgp;
   struct pkt_nat_primitives *pnat, empty_pnat;
   struct pkt_mpls_primitives *pmpls, empty_pmpls;
   char *pcust, empty_pcust[] = "";
@@ -186,6 +187,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   signal(SIGCHLD, SIG_IGN); 
 
   memset(&empty_pbgp, 0, sizeof(empty_pbgp));
+  memset(&empty_plbgp, 0, sizeof(empty_plbgp));
   memset(&empty_pnat, 0, sizeof(empty_pnat));
   memset(&empty_pmpls, 0, sizeof(empty_pmpls));
   memset(&empty_pvlen, 0, sizeof(empty_pvlen));
@@ -414,8 +416,9 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 		config.name, config.type, config.buffer_size, config.pipe_size);
 	    Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
 		config.name, config.type);
-            seq = ((struct ch_buf_hdr *)pipebuf)->seq;
 	  }
+
+          seq = ((struct ch_buf_hdr *)pipebuf)->seq;
 	}
       }
 #ifdef WITH_RABBITMQ
@@ -440,16 +443,19 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 	data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
 	if (config.debug_internal_msg) 
-	  Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u seq=%u num_entries=%u\n",
-		config.name, config.type, core_pid, seq, ((struct ch_buf_hdr *)pipebuf)->num);
+	  Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u len=%llu seq=%u num_entries=%u\n",
+		config.name, config.type, core_pid, ((struct ch_buf_hdr *)pipebuf)->len,
+		seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
 	if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
 	while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
 
-	  // XXX: to be optimized: remove empty_* vars
           if (extras.off_pkt_bgp_primitives)
 	    pbgp = (struct pkt_bgp_primitives *) ((u_char *)data + extras.off_pkt_bgp_primitives);
 	  else pbgp = &empty_pbgp;
+          if (extras.off_pkt_lbgp_primitives)
+            plbgp = (struct pkt_legacy_bgp_primitives *) ((u_char *)data + extras.off_pkt_lbgp_primitives);
+          else plbgp = &empty_plbgp;
           if (extras.off_pkt_nat_primitives) 
             pnat = (struct pkt_nat_primitives *) ((u_char *)data + extras.off_pkt_nat_primitives);
           else pnat = &empty_pnat;
@@ -477,6 +483,7 @@ void imt_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
 	  prim_ptrs.data = data; 
 	  prim_ptrs.pbgp = pbgp; 
+	  prim_ptrs.plbgp = plbgp; 
 	  prim_ptrs.pnat = pnat;
 	  prim_ptrs.pmpls = pmpls;
 	  prim_ptrs.pcust = pcust;
@@ -570,7 +577,11 @@ void free_extra_allocs()
 
   for (idx = 0; idx < config.buckets; idx++) {
     if (!following_chain) acc_elem = (struct acc *) elem;
-    if (acc_elem->cbgp) free_cache_bgp_primitives(&acc_elem->cbgp);
+    if (acc_elem->pbgp) {
+      free(acc_elem->pbgp);
+      acc_elem->pbgp = NULL;
+    }
+    if (acc_elem->clbgp) free_cache_legacy_bgp_primitives(&acc_elem->clbgp);
     if (acc_elem->pnat) {
       free(acc_elem->pnat);
       acc_elem->pnat = NULL;

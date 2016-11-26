@@ -41,7 +41,7 @@ void load_plugins(struct plugin_requests *req)
   u_int64_t buf_pipe_ratio_sz = 0, pipe_idx = 0;
   int snd_buflen = 0, rcv_buflen = 0, socklen = 0, target_buflen = 0, ret;
 
-  int nfprobe_id = 0, min_sz = 0;
+  int nfprobe_id = 0, min_sz = 0, extra_sz = 0;
   struct plugins_list_entry *list = plugins_list;
   int l = sizeof(list->cfg.pipe_size), offset = 0;
   struct channels_list_entry *chptr = NULL;
@@ -58,25 +58,39 @@ void load_plugins(struct plugin_requests *req)
       }
 
       min_sz = ChBufHdrSz;
+      list->cfg.buffer_immediate = FALSE;
       if (list->cfg.data_type & PIPE_TYPE_METADATA) min_sz += PdataSz; 
       if (list->cfg.data_type & PIPE_TYPE_PAYLOAD) {
 	if (list->cfg.acct_type == ACCT_PM && list->cfg.snaplen) min_sz += (PpayloadSz+list->cfg.snaplen); 
 	else min_sz += (PpayloadSz+DEFAULT_PLOAD_SIZE); 
       }
       if (list->cfg.data_type & PIPE_TYPE_EXTRAS) min_sz += PextrasSz; 
-      if (list->cfg.data_type & PIPE_TYPE_MSG) min_sz += PmsgSz; 
+      if (list->cfg.data_type & PIPE_TYPE_MSG) {
+	min_sz += PmsgSz; 
+        if (!list->cfg.buffer_size) {
+          extra_sz = PKT_MSG_SIZE; 
+          list->cfg.buffer_immediate = TRUE;
+        }
+      }
       if (list->cfg.data_type & PIPE_TYPE_BGP) min_sz += sizeof(struct pkt_bgp_primitives);
+      if (list->cfg.data_type & PIPE_TYPE_LBGP) min_sz += sizeof(struct pkt_legacy_bgp_primitives);
       if (list->cfg.data_type & PIPE_TYPE_NAT) min_sz += sizeof(struct pkt_nat_primitives);
       if (list->cfg.data_type & PIPE_TYPE_MPLS) min_sz += sizeof(struct pkt_mpls_primitives);
       if (list->cfg.cpptrs.len) min_sz += list->cfg.cpptrs.len;
-      if (list->cfg.data_type & PIPE_TYPE_VLEN) min_sz += sizeof(struct pkt_vlen_hdr_primitives);
+      if (list->cfg.data_type & PIPE_TYPE_VLEN) {
+	min_sz += sizeof(struct pkt_vlen_hdr_primitives);
+	if (!list->cfg.buffer_size) {
+	  extra_sz = 1024; /* wild shot: 1Kb added for the actual variable-length data */
+	  list->cfg.buffer_immediate = TRUE;
+	}
+      }
 
       /* If nothing is supplied, let's hint some working default values */
       if (!list->cfg.pipe_size || !list->cfg.buffer_size) {
         if (!list->cfg.pipe_size) list->cfg.pipe_size = 4096000; /* 4Mb */
         if (!list->cfg.buffer_size) {
 	  if (list->cfg.pcap_savefile) list->cfg.buffer_size = 10240; /* 10Kb */
-	  else list->cfg.buffer_size = MIN(min_sz, 10240);
+	  else list->cfg.buffer_size = MIN((min_sz + extra_sz), 10240);
 	}
       }
 
@@ -174,6 +188,11 @@ void load_plugins(struct plugin_requests *req)
 	offset += sizeof(struct pkt_bgp_primitives);
       }
       else chptr->extras.off_pkt_bgp_primitives = 0; 
+      if (list->cfg.data_type & PIPE_TYPE_LBGP) {
+        chptr->extras.off_pkt_lbgp_primitives = offset;
+        offset += sizeof(struct pkt_legacy_bgp_primitives);
+      }
+      else chptr->extras.off_pkt_lbgp_primitives = 0;
       if (list->cfg.data_type & PIPE_TYPE_NAT) {
         chptr->extras.off_pkt_nat_primitives = offset;
         offset += sizeof(struct pkt_nat_primitives);
@@ -265,8 +284,18 @@ void load_plugins(struct plugin_requests *req)
             ptm_global = FALSE;
         }
 
+	if (list->cfg.type_id == PLUGIN_ID_TEE) {
+	  req->ptm_c.load_ptm_plugin = list->cfg.type_id;
+	  req->ptm_c.load_ptm_res = FALSE;
+	}
+
         load_pre_tag_map(config.acct_type, list->cfg.pre_tag_map, &list->cfg.ptm, req, &list->cfg.ptm_alloc,
                          list->cfg.maps_entries, list->cfg.maps_row_len);
+
+	if (list->cfg.type_id == PLUGIN_ID_TEE) {
+	  list->cfg.ptm_complex = req->ptm_c.load_ptm_res;
+	  if (req->ptm_c.load_ptm_res) req->ptm_c.exec_ptm_dissect = TRUE;
+	}
       }
 
       list = list->next;
@@ -374,7 +403,7 @@ void exec_plugins(struct packet_ptrs *pptrs, struct plugin_requests *req)
   pm_id_t saved_tag = 0, saved_tag2 = 0;
   pt_label_t saved_label;
 
-  int num, ret, fixed_size, already_reprocessed = 0;
+  int num, ret, fixed_size;
   u_int32_t savedptr;
   char *bptr;
   int index, got_tags = FALSE;
@@ -393,7 +422,14 @@ void exec_plugins(struct packet_ptrs *pptrs, struct plugin_requests *req)
   for (index = 0; channels_list[index].aggregation || channels_list[index].aggregation_2; index++) {
     struct plugins_list_entry *p = channels_list[index].plugin;
 
+    channels_list[index].already_reprocessed = FALSE;
+
     if (p->cfg.pre_tag_map && find_id_func) {
+      if (p->cfg.type_id == PLUGIN_ID_TEE) {
+	if ((req->ptm_c.exec_ptm_res && !p->cfg.ptm_complex) || (!req->ptm_c.exec_ptm_res && p->cfg.ptm_complex)) 
+	  continue;
+      }
+
       if (p->cfg.ptm_global && got_tags) {
         pptrs->tag = saved_tag;
         pptrs->tag2 = saved_tag2;
@@ -453,13 +489,14 @@ reprocess:
 
       if (channels_list[index].reprocess) {
         /* Let's check if we have an issue with the buffer size */
-        if (already_reprocessed) {
+        if (channels_list[index].already_reprocessed) {
           struct plugins_list_entry *list = channels_list[index].plugin;
 
           Log(LOG_ERR, "ERROR ( %s/%s ): plugin_buffer_size is too short.\n", list->name, list->type.string);
           exit_all(1);
         }
-        already_reprocessed = TRUE;
+
+        channels_list[index].already_reprocessed = TRUE;
 
 	/* Let's cheat the size in order to send out the current buffer */
 	fixed_size = channels_list[index].plugin->cfg.pipe_size;
@@ -469,20 +506,24 @@ reprocess:
         channels_list[index].bufptr += (fixed_size + channels_list[index].var_size);
       }
 
-      if ((channels_list[index].bufptr+fixed_size) > channels_list[index].bufend ||
-	  channels_list[index].hdr.num == INT_MAX) {
+      if (((channels_list[index].bufptr + fixed_size) > channels_list[index].bufend) ||
+	  (channels_list[index].hdr.num == INT_MAX) || channels_list[index].buffer_immediate) {
 	channels_list[index].hdr.seq++;
 	channels_list[index].hdr.seq %= MAX_SEQNUM;
 
 	/* let's commit the buffer we just finished writing */
+	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->len = channels_list[index].bufptr;
 	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->seq = channels_list[index].hdr.seq;
 	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->num = channels_list[index].hdr.num;
 	((struct ch_buf_hdr *)channels_list[index].rg.ptr)->core_pid = channels_list[index].core_pid;
 
+	channels_list[index].status->last_buf_off = (u_int64_t)(channels_list[index].rg.ptr - channels_list[index].rg.base);
+
         if (config.debug_internal_msg) {
 	  struct plugins_list_entry *list = channels_list[index].plugin;
-	  Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer released cpid=%u seq=%u num_entries=%u\n", list->name, list->type.string,
-		channels_list[index].core_pid, channels_list[index].hdr.seq, channels_list[index].hdr.num);
+	  Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer released cpid=%u len=%llu seq=%u num_entries=%u off=%llu\n",
+		list->name, list->type.string, channels_list[index].core_pid, channels_list[index].bufptr,
+		channels_list[index].hdr.seq, channels_list[index].hdr.num, channels_list[index].status->last_buf_off);
 	}
 
 	/* sending the buffer to the AMQP broker */
@@ -553,12 +594,24 @@ reprocess:
      ensure we reload it for all plugins and prevent any
      timing issues with pointers to labels */
   if (reload_map_exec_plugins) {
+    memset(&req->ptm_c, 0, sizeof(struct ptm_complex)); 
+
     for (index = 0; channels_list[index].aggregation || channels_list[index].aggregation_2; index++) {
       struct plugins_list_entry *p = channels_list[index].plugin;
 
       if (p->cfg.pre_tag_map && find_id_func) {
+        if (p->cfg.type_id == PLUGIN_ID_TEE) {
+          req->ptm_c.load_ptm_plugin = p->cfg.type_id;
+          req->ptm_c.load_ptm_res = FALSE;
+        }
+
         load_pre_tag_map(config.acct_type, p->cfg.pre_tag_map, &p->cfg.ptm, req, &p->cfg.ptm_alloc,
                          p->cfg.maps_entries, p->cfg.maps_row_len);
+
+        if (p->cfg.type_id == PLUGIN_ID_TEE) {
+          p->cfg.ptm_complex = req->ptm_c.load_ptm_res;
+          if (req->ptm_c.load_ptm_res) req->ptm_c.exec_ptm_dissect = TRUE;
+        }
       }
     }
   }
@@ -582,6 +635,7 @@ struct channels_list_entry *insert_pipe_channel(int plugin_type, struct configur
       chptr->agg_filter.table = cfg->bpfp_a_table;
       chptr->agg_filter.num = (int *) &cfg->bpfp_a_num; 
       chptr->bufsize = cfg->buffer_size;
+      chptr->buffer_immediate = cfg->buffer_immediate;
       chptr->core_pid = getpid();
       chptr->tag = cfg->post_tag;
       chptr->tag2 = cfg->post_tag2;
@@ -842,14 +896,14 @@ int check_pipe_buffer_space(struct channels_list_entry *mychptr, struct pkt_vlen
 {
   int buf_space = 0;
 
-  if (!mychptr || !pvlen) return ERR;
+  if (!mychptr) return ERR;
 
   /* init to base of current element */
   buf_space = mychptr->bufend - mychptr->bufptr;
 
   /* subtract fixed part, current variable part and new var part (len) */
   buf_space -= mychptr->datasize;
-  buf_space -= pvlen->tot_len;
+  if (pvlen) buf_space -= pvlen->tot_len;
   buf_space -= len;
 
   /* return virdict. if positive fix sizes. if negative take care of triggering a reprocess */
@@ -1123,6 +1177,7 @@ int plugin_pipe_kafka_init_host(struct p_kafka_host *kafka_host, struct plugins_
     p_kafka_set_broker(kafka_host, list->cfg.pipe_kafka_broker_host, list->cfg.pipe_kafka_broker_port);
     p_kafka_set_topic(kafka_host, list->cfg.pipe_kafka_topic);
     p_kafka_set_partition(kafka_host, list->cfg.pipe_kafka_partition);
+    p_kafka_set_key(kafka_host, list->cfg.pipe_kafka_partition_key, list->cfg.pipe_kafka_partition_keylen);
     p_kafka_set_content_type(kafka_host, PM_KAFKA_CNT_TYPE_BIN);
     P_broker_timers_set_retry_interval(&kafka_host->btimers, list->cfg.pipe_kafka_retry);
   }

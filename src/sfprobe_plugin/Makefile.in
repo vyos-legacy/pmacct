@@ -121,6 +121,8 @@ AR = @AR@
 AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
+AVRO_CFLAGS = @AVRO_CFLAGS@
+AVRO_LIBS = @AVRO_LIBS@
 AWK = @AWK@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
@@ -192,6 +194,7 @@ PGSQL_LIBS = @PGSQL_LIBS@
 PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
+PMACCT_CFLAGS = @PMACCT_CFLAGS@
 RABBITMQ_CFLAGS = @RABBITMQ_CFLAGS@
 RABBITMQ_LIBS = @RABBITMQ_LIBS@
 RANLIB = @RANLIB@
@@ -254,12 +257,13 @@ target_alias = @target_alias@
 top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
+AM_CFLAGS = $(PMACCT_CFLAGS)
 noinst_LTLIBRARIES = libsfprobe_plugin.la
 libsfprobe_plugin_la_SOURCES = sflow_agent.c sflow_poller.c		\
 	sflow_receiver.c sflow_sampler.c sfprobe_plugin.c sflow_api.h	\
 	sflow.h
 
-libsfprobe_plugin_la_CFLAGS = -I$(srcdir)/..
+libsfprobe_plugin_la_CFLAGS = -I$(srcdir)/.. $(AM_CFLAGS)
 all: all-am
 
 .SUFFIXES:

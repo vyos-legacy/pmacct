@@ -1373,7 +1373,7 @@ void nfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct timezone tz;
   unsigned char *pipebuf;
   time_t now, refresh_deadline;
-  int refresh_timeout, amqp_timeout, ret, num;
+  int refresh_timeout, amqp_timeout, kafka_timeout, ret, num;
   char default_receiver[] = "127.0.0.1:2100";
   char default_engine[] = "0:0";
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
@@ -1400,12 +1400,16 @@ void nfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   struct extra_primitives extras;
   struct primitives_ptrs prim_ptrs;
+  void *kafka_msg;
 
 #ifdef WITH_RABBITMQ
   struct p_amqp_host *amqp_host = &((struct channels_list_entry *)ptr)->amqp_host;
 #endif
 
-  /* XXX: glue */
+#ifdef WITH_KAFKA
+  struct p_kafka_host *kafka_host = &((struct channels_list_entry *)ptr)->kafka_host;
+#endif
+
   memcpy(&config, cfgptr, sizeof(struct configuration));
   memcpy(&extras, &((struct channels_list_entry *)ptr)->extras, sizeof(struct extra_primitives));
   recollect_pipe_memory(ptr);
@@ -1520,6 +1524,13 @@ sort_version:
     amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
 #endif
   }
+  else if (config.pipe_kafka) {
+    plugin_pipe_kafka_compile_check();
+#ifdef WITH_KAFKA
+    pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
+    kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+#endif
+  }
   else setnonblocking(pipe_fd);
 
   memset(&prim_ptrs, 0, sizeof(prim_ptrs));
@@ -1551,11 +1562,12 @@ poll_again:
       timeout = MIN(refresh_timeout, (amqp_timeout ? amqp_timeout : INT_MAX));
       ret = poll(&pfd, (pfd.fd == ERR ? 0 : 1), timeout);
     }
-    else {
-      /* Preps for Kafka support */
-      Log(LOG_ERR, "ERROR ( %s/%s ): plugin_pipe method not supported. Exiting ..\n", config.name, config.type);
-      exit_plugin(1);
+#ifdef WITH_KAFKA
+    else if (config.pipe_kafka) {
+      timeout = MIN(refresh_timeout, (kafka_timeout ? kafka_timeout : INT_MAX));
+      ret = p_kafka_consume_poller(kafka_host, &kafka_msg, timeout);
     }
+#endif
 
     if (ret < 0) goto poll_again;
 
@@ -1580,6 +1592,16 @@ poll_again:
         amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
       else amqp_timeout = plugin_pipe_calc_retry_timeout_diff(&amqp_host->btimers, now);
+    }
+#endif
+
+#ifdef WITH_KAFKA
+    if (config.pipe_kafka && pipe_fd == ERR) {
+      if (timeout == kafka_timeout) {
+        pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
+        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+      }
+      else kafka_timeout = plugin_pipe_calc_retry_timeout_diff(&kafka_host->btimers, now);
     }
 #endif
 
@@ -1611,6 +1633,8 @@ read_data:
               Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
                         config.name, config.type);
   	    }
+
+	    rg->ptr = (rg->base + status->last_buf_off);
   	    seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
   	  }
         }
@@ -1628,12 +1652,22 @@ read_data:
         amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
       }
 #endif
+#ifdef WITH_KAFKA
+      else if (config.pipe_kafka) {
+        ret = p_kafka_consume_data(kafka_host, kafka_msg, pipebuf, config.buffer_size);
+        if (ret) pipe_fd = ERR;
+
+        seq = ((struct ch_buf_hdr *)pipebuf)->seq;
+        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+      }
+#endif
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
       if (config.debug_internal_msg) 
-        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u seq=%u num_entries=%u\n",
-                config.name, config.type, core_pid, seq, ((struct ch_buf_hdr *)pipebuf)->num);
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u len=%llu seq=%u num_entries=%u\n",
+                config.name, config.type, core_pid, ((struct ch_buf_hdr *)pipebuf)->len,
+                seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
       if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {

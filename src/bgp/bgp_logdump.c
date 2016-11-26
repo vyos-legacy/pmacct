@@ -73,16 +73,12 @@ int bgp_peer_log_msg(struct bgp_node *route, struct bgp_info *ri, safi_t safi, c
     char prefix_str[INET6_ADDRSTRLEN], nexthop_str[INET6_ADDRSTRLEN];
     char *aspath;
 
-    /* no need for seq and timestamp for "dump" event_type */
+    /* no need for seq for "dump" event_type */
     if (etype == BGP_LOGDUMP_ET_LOG) {
       kv = json_pack("{sI}", "seq", (json_int_t)bms->log_seq);
       json_object_update_missing(obj, kv);
       json_decref(kv);
       bgp_peer_log_seq_increment(&bms->log_seq);
-
-      kv = json_pack("{ss}", "timestamp", bms->log_tstamp_str);
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
 
       switch (log_type) {
       case BGP_LOG_TYPE_UPDATE:
@@ -98,6 +94,17 @@ int bgp_peer_log_msg(struct bgp_node *route, struct bgp_info *ri, safi_t safi, c
 	kv = json_pack("{sI}", "log_type", (json_int_t)log_type);
 	break;
       }
+      json_object_update_missing(obj, kv);
+      json_decref(kv);
+    }
+
+    if (etype == BGP_LOGDUMP_ET_LOG) {
+      kv = json_pack("{ss}", "timestamp", bms->log_tstamp_str);
+      json_object_update_missing(obj, kv);
+      json_decref(kv);
+    }
+    else if (etype == BGP_LOGDUMP_ET_DUMP) {
+      kv = json_pack("{ss}", "timestamp", bms->dump.tstamp_str);
       json_object_update_missing(obj, kv);
       json_decref(kv);
     }
@@ -455,9 +462,6 @@ int bgp_peer_dump_init(struct bgp_peer *peer, int output, int type)
 
   if (!bms || !peer || !peer->log) return ERR;
 
-  gettimeofday(&bms->log_tstamp, NULL);
-  compose_timestamp(bms->log_tstamp_str, SRVBUFLEN, &bms->log_tstamp, TRUE, config.timestamps_since_epoch);
-
 #ifdef WITH_RABBITMQ
   if (bms->dump_amqp_routing_key)
     p_amqp_set_routing_key(peer->log->amqp_host, peer->log->filename);
@@ -483,7 +487,7 @@ int bgp_peer_dump_init(struct bgp_peer *peer, int output, int type)
     char ip_address[INET6_ADDRSTRLEN];
     json_t *obj = json_object(), *kv;
 
-    kv = json_pack("{ss}", "timestamp", bms->log_tstamp_str);
+    kv = json_pack("{ss}", "timestamp", bms->dump.tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
@@ -493,6 +497,10 @@ int bgp_peer_dump_init(struct bgp_peer *peer, int output, int type)
     json_decref(kv);
 
     kv = json_pack("{ss}", "event_type", event_type);
+    json_object_update_missing(obj, kv);
+    json_decref(kv);
+
+    kv = json_pack("{sI}", "dump_period", (json_int_t)bms->dump.period);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
@@ -526,9 +534,6 @@ int bgp_peer_dump_close(struct bgp_peer *peer, struct bgp_dump_stats *bds, int o
 
   if (!bms || !peer || !peer->log) return ERR;
 
-  gettimeofday(&bms->log_tstamp, NULL);
-  compose_timestamp(bms->log_tstamp_str, SRVBUFLEN, &bms->log_tstamp, TRUE, config.timestamps_since_epoch);
-
 #ifdef WITH_RABBITMQ
   if (bms->dump_amqp_routing_key)
     p_amqp_set_routing_key(peer->log->amqp_host, peer->log->filename);
@@ -544,7 +549,7 @@ int bgp_peer_dump_close(struct bgp_peer *peer, struct bgp_dump_stats *bds, int o
     char ip_address[INET6_ADDRSTRLEN];
     json_t *obj = json_object(), *kv;
 
-    kv = json_pack("{ss}", "timestamp", bms->log_tstamp_str);
+    kv = json_pack("{ss}", "timestamp", bms->dump.tstamp_str);
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
@@ -616,7 +621,7 @@ void bgp_handle_dump_event()
     /* we have to ignore signals to avoid loops: because we are already forked */
     signal(SIGINT, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
-    pm_setproctitle("%s %s [%s]", config.type, "Core Process -- BGP Dump Writer", config.name);
+    pm_setproctitle("%s %s [%s]", config.type, "Core Process -- BGP Dump Writer", config.name, bms->log_str);
     memset(last_filename, 0, sizeof(last_filename));
     memset(current_filename, 0, sizeof(current_filename));
     memset(&peer_log, 0, sizeof(struct bgp_peer_log));
@@ -639,7 +644,7 @@ void bgp_handle_dump_event()
 #endif
 
     dumper_pid = getpid();
-    Log(LOG_INFO, "INFO ( %s/core/BGP ): *** Dumping BGP tables - START (PID: %u) ***\n", config.name, dumper_pid);
+    Log(LOG_INFO, "INFO ( %s/%s ): *** Dumping BGP tables - START (PID: %u) ***\n", config.name, bms->log_str, dumper_pid);
     start = time(NULL);
     tables_num = 0;
 
@@ -657,7 +662,7 @@ void bgp_handle_dump_event()
 	if (config.bgp_table_dump_kafka_topic)
 	  bgp_peer_log_dynname(current_filename, SRVBUFLEN, config.bgp_table_dump_kafka_topic, peer);
 
-	strftime_same(current_filename, SRVBUFLEN, tmpbuf, &bms->log_tstamp.tv_sec);
+	strftime_same(current_filename, SRVBUFLEN, tmpbuf, &bms->dump.tstamp.tv_sec);
 
 	/*
 	   we close last_filename and open current_filename in case they differ;
@@ -677,7 +682,7 @@ void bgp_handle_dump_event()
 	    peer->log->fd = open_output_file(current_filename, "w", TRUE);
 	    if (fd_buf) {
 	      if (setvbuf(peer->log->fd, fd_buf, _IOFBF, OUTPUT_FILE_BUFSZ))
-		Log(LOG_WARNING, "WARN ( %s/core/BGP ): [%s] setvbuf() failed: %s\n", config.name, current_filename, errno);
+		Log(LOG_WARNING, "WARN ( %s/%s ): [%s] setvbuf() failed: %s\n", config.name, bms->log_str, current_filename, errno);
 	      else memset(fd_buf, 0, OUTPUT_FILE_BUFSZ); 
 	    }
 	  }
@@ -757,13 +762,13 @@ void bgp_handle_dump_event()
     }
 
     duration = time(NULL)-start;
-    Log(LOG_INFO, "INFO ( %s/core/BGP ): *** Dumping BGP tables - END (PID: %u, TABLES: %u ET: %u) ***\n",
-		config.name, dumper_pid, tables_num, duration);
+    Log(LOG_INFO, "INFO ( %s/%s ): *** Dumping BGP tables - END (PID: %u, TABLES: %u ET: %u) ***\n",
+		config.name, bms->log_str, dumper_pid, tables_num, duration);
 
     exit(0);
   default: /* Parent */
     if (ret == -1) { /* Something went wrong */
-      Log(LOG_WARNING, "WARN ( %s/core/BGP ): Unable to fork BGP table dump writer: %s\n", config.name, strerror(errno));
+      Log(LOG_WARNING, "WARN ( %s/%s ): Unable to fork BGP table dump writer: %s\n", config.name, bms->log_str, strerror(errno));
     }
 
     break;
@@ -845,6 +850,7 @@ int bgp_daemon_msglog_init_kafka_host()
   p_kafka_set_broker(&bgp_daemon_msglog_kafka_host, config.nfacctd_bgp_msglog_kafka_broker_host, config.nfacctd_bgp_msglog_kafka_broker_port);
   p_kafka_set_topic(&bgp_daemon_msglog_kafka_host, config.nfacctd_bgp_msglog_kafka_topic);
   p_kafka_set_partition(&bgp_daemon_msglog_kafka_host, config.nfacctd_bgp_msglog_kafka_partition);
+  p_kafka_set_key(&bgp_daemon_msglog_kafka_host, config.nfacctd_bgp_msglog_kafka_partition_key, config.nfacctd_bgp_msglog_kafka_partition_keylen);
   p_kafka_set_content_type(&bgp_daemon_msglog_kafka_host, PM_KAFKA_CNT_TYPE_STR);
   P_broker_timers_set_retry_interval(&bgp_daemon_msglog_kafka_host.btimers, config.nfacctd_bgp_msglog_kafka_retry);
 
@@ -871,6 +877,7 @@ int bgp_table_dump_init_kafka_host()
   p_kafka_set_broker(&bgp_table_dump_kafka_host, config.bgp_table_dump_kafka_broker_host, config.bgp_table_dump_kafka_broker_port);
   p_kafka_set_topic(&bgp_table_dump_kafka_host, config.bgp_table_dump_kafka_topic);
   p_kafka_set_partition(&bgp_table_dump_kafka_host, config.bgp_table_dump_kafka_partition);
+  p_kafka_set_key(&bgp_table_dump_kafka_host, config.bgp_table_dump_kafka_partition_key, config.bgp_table_dump_kafka_partition_keylen);
   p_kafka_set_content_type(&bgp_table_dump_kafka_host, PM_KAFKA_CNT_TYPE_STR);
 
   return ret;

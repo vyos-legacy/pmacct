@@ -78,6 +78,12 @@
 #define MAX_BGP_COMM_PATTERNS 16
 
 /* structures */
+struct bgp_dump_event {
+  struct timeval tstamp;
+  char tstamp_str[SRVBUFLEN];
+  int period;
+};
+
 struct bgp_rt_structs {
   struct hash *attrhash;
   struct hash *ashash;
@@ -91,8 +97,10 @@ struct bgp_misc_structs {
   u_int64_t log_seq;
   struct timeval log_tstamp;
   char log_tstamp_str[SRVBUFLEN];
+  struct bgp_dump_event dump;
   char *peer_str; /* "bmp_router", "peer_src_ip", "peer_ip", etc. */
-  char *log_thread_str; /* "BGP", "BMP" */
+  char *log_str; /* BGP, BMP, thread, daemon, etc. */
+  int is_thread;
 
 #if defined WITH_RABBITMQ
   struct p_amqp_host *msglog_amqp_host;
@@ -128,6 +136,14 @@ struct bgp_misc_structs {
   int dump_backend_methods;
 };
 
+struct bgp_peer_stats {
+    u_int32_t packets; /* Datagrams received */
+    u_int32_t packet_bytes; /* Bytes read off the socket */
+    u_int32_t msg_bytes; /* Bytes in the decoded messages */
+    u_int32_t msg_errors; /* Errors detected in message content */
+    time_t last_check; /* Timestamp when stats were last checked */
+};
+
 struct bgp_peer_buf {
   char *base;
   u_int32_t len;
@@ -151,6 +167,7 @@ struct bgp_peer {
   char *cap_4as;
   u_int8_t cap_add_paths;
   u_int32_t msglen;
+  struct bgp_peer_stats stats;
   struct bgp_peer_buf buf;
   struct bgp_peer_log *log;
 
@@ -216,6 +233,8 @@ struct bgp_comm_range {
 #endif
 EXT void nfacctd_bgp_wrapper();
 EXT void skinny_bgp_daemon();
+EXT void bgp_prepare_thread();
+EXT void bgp_prepare_daemon();
 #undef EXT
 
 /* global variables */

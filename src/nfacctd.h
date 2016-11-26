@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -518,6 +518,10 @@ struct data_hdr_v9 {
 #define NF9_FIRST_SWITCHED_MSEC		152
 #define NF9_LAST_SWITCHED_MSEC		153
 /* ... */
+#define NF9_FIRST_SWITCHED_DELTA_MICRO	158
+#define NF9_LAST_SWITCHED_DELTA_MICRO	159
+#define NF9_SYS_UPTIME_MSEC		160
+/* ... */
 #define NF9_IPV6_DST_PREFIX		169
 #define NF9_IPV6_SRC_PREFIX		170
 /* ... */
@@ -532,6 +536,9 @@ struct data_hdr_v9 {
 #define NF9_POST_NAT_IPV4_DST_PORT	228
 /* ... */
 #define NF9_NAT_EVENT			230
+/* ... */
+#define NF9_INITIATOR_OCTETS		231
+#define NF9_RESPONDER_OCTETS		232
 /* ... */
 #define NF9_INGRESS_VRFID		234
 #define NF9_EGRESS_VRFID		235
@@ -709,6 +716,7 @@ struct utpl_field {
   u_int16_t off;
   u_int16_t len;
   u_int16_t tpl_len;
+  u_int8_t repeat_id;
 };
 
 /* Template field database */
@@ -760,7 +768,7 @@ EXT void process_v7_packet(unsigned char *, u_int16_t, struct packet_ptrs *, str
 EXT void process_v8_packet(unsigned char *, u_int16_t, struct packet_ptrs *, struct plugin_requests *);
 EXT void process_v9_packet(unsigned char *, u_int16_t, struct packet_ptrs_vector *, struct plugin_requests *, u_int16_t);
 EXT void process_raw_packet(unsigned char *, u_int16_t, struct packet_ptrs_vector *, struct plugin_requests *);
-EXT u_int16_t NF_evaluate_flow_type(struct template_cache_entry *, struct packet_ptrs *);
+EXT u_int8_t NF_evaluate_flow_type(struct template_cache_entry *, struct packet_ptrs *);
 EXT u_int16_t NF_evaluate_direction(struct template_cache_entry *, struct packet_ptrs *);
 EXT pm_class_t NF_evaluate_classifiers(struct xflow_status_entry_class *, pm_class_t *, struct xflow_status_entry *);
 EXT void reset_mac(struct packet_ptrs *);
@@ -793,11 +801,11 @@ EXT struct template_cache_entry *refresh_template(struct template_hdr_v9 *, stru
 EXT void log_template_header(struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t);
 EXT void log_opt_template_field(u_int16_t, u_int16_t, u_int16_t, u_int8_t);
 EXT void log_template_field(u_int8_t, u_int32_t *, u_int16_t, u_int16_t, u_int16_t, u_int8_t);
-EXT void log_template_footer(u_int16_t, u_int8_t);
+EXT void log_template_footer(struct template_cache_entry *, u_int16_t, u_int8_t);
 EXT struct template_cache_entry *insert_opt_template(void *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t, u_int16_t, u_int32_t);
 EXT struct template_cache_entry *refresh_opt_template(void *, struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t, u_int16_t, u_int32_t);
-EXT struct utpl_field *ext_db_get_ie(struct template_cache_entry *, u_int32_t, u_int16_t);
-EXT struct utpl_field *ext_db_get_next_ie(struct template_cache_entry *, u_int16_t);
+EXT struct utpl_field *ext_db_get_ie(struct template_cache_entry *, u_int32_t, u_int16_t, u_int8_t);
+EXT struct utpl_field *ext_db_get_next_ie(struct template_cache_entry *, u_int16_t, u_int8_t *);
 
 EXT void resolve_vlen_template(char *, struct template_cache_entry *);
 EXT u_int8_t get_ipfix_vlen(char *, u_int16_t *);
@@ -808,5 +816,5 @@ EXT u_int8_t get_ipfix_vlen(char *, u_int16_t *);
 #else
 #define EXT
 #endif
-EXT struct utpl_field *(*get_ext_db_ie_by_type)(struct template_cache_entry *, u_int32_t, u_int16_t);
+EXT struct utpl_field *(*get_ext_db_ie_by_type)(struct template_cache_entry *, u_int32_t, u_int16_t, u_int8_t);
 #undef EXT

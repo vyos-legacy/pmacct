@@ -230,7 +230,7 @@ struct my_icmphdr
     u_int32_t   gateway;        /* gateway address */
     struct
     {
-      u_int16_t __unused;
+      u_int16_t _unused;
       u_int16_t mtu;
     } frag;                     /* path mtu discovery */
   } un;
@@ -474,7 +474,7 @@ struct pkt_payload {
 struct pkt_vlen_hdr_primitives {
   u_int16_t tot_len;
   u_int16_t num;
-};
+} __attribute__ ((packed));
 
 // XXX: eventually deprecate pkt_extras
 struct pkt_extras {
@@ -489,7 +489,7 @@ struct pkt_msg {
   struct sockaddr agent;
   u_int32_t seqno;
   u_int16_t len;
-  u_char payload[PKT_MSG_SIZE];
+  char *payload;
   pm_id_t tag;
   pm_id_t tag2;
   u_int16_t pad;
@@ -507,6 +507,7 @@ struct pkt_stitching {
 
 struct extra_primitives {
   u_int16_t off_pkt_bgp_primitives;
+  u_int16_t off_pkt_lbgp_primitives;
   u_int16_t off_pkt_nat_primitives;
   u_int16_t off_pkt_mpls_primitives;
   u_int16_t off_custom_primitives;
@@ -517,6 +518,7 @@ struct extra_primitives {
 struct primitives_ptrs {
   struct pkt_data *data;
   struct pkt_bgp_primitives *pbgp;
+  struct pkt_legacy_bgp_primitives *plbgp;
   struct pkt_nat_primitives *pnat;
   struct pkt_mpls_primitives *pmpls;
   char *pcust;
@@ -533,17 +535,20 @@ struct pkt_bgp_primitives {
   as_t peer_dst_as;
   struct host_addr peer_src_ip;
   struct host_addr peer_dst_ip;
-  char std_comms[MAX_BGP_STD_COMMS];
-  char ext_comms[MAX_BGP_EXT_COMMS];
-  char as_path[MAX_BGP_ASPATH];
   u_int32_t local_pref;
   u_int32_t med;
-  char src_std_comms[MAX_BGP_STD_COMMS];
-  char src_ext_comms[MAX_BGP_EXT_COMMS];
-  char src_as_path[MAX_BGP_ASPATH];
   u_int32_t src_local_pref;
   u_int32_t src_med;
   rd_t mpls_vpn_rd;
+};
+
+struct pkt_legacy_bgp_primitives {
+  char std_comms[MAX_BGP_STD_COMMS];
+  char ext_comms[MAX_BGP_EXT_COMMS];
+  char as_path[MAX_BGP_ASPATH];
+  char src_std_comms[MAX_BGP_STD_COMMS];
+  char src_ext_comms[MAX_BGP_EXT_COMMS];
+  char src_as_path[MAX_BGP_ASPATH];
 };
 
 struct pkt_nat_primitives {
@@ -563,23 +568,14 @@ struct pkt_mpls_primitives {
   u_int8_t mpls_stack_depth;
 };
 
-/* same as above but pointers in place of strings */
-struct cache_bgp_primitives {
-  as_t peer_src_as;
-  as_t peer_dst_as;
-  struct host_addr peer_src_ip;
-  struct host_addr peer_dst_ip;
+/* same as pkt_legacy_bgp_primitives but pointers in place of strings */
+struct cache_legacy_bgp_primitives {
   char *std_comms;
   char *ext_comms;
   char *as_path;
-  u_int32_t local_pref;
-  u_int32_t med;
   char *src_std_comms;
   char *src_ext_comms;
   char *src_as_path;
-  u_int32_t src_local_pref;
-  u_int32_t src_med;
-  rd_t mpls_vpn_rd;
 };
 /* END: BGP section */
 
@@ -631,7 +627,7 @@ struct tunnel_entry {
 };
 
 /* global variables */
-#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C) && (!defined __PMTELEMETRYD_C)
+#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C) && (!defined __PMTELEMETRYD_C) && (!defined __PMBGPD_C) && (!defined __PMBMPD_C)
 #define EXT extern
 #else
 #define EXT

@@ -175,6 +175,14 @@
 
 /* structure to pass requests: probably plugin_requests
    name outdated at this point .. */
+
+struct ptm_complex {
+  int load_ptm_plugin;		/* load_pre_tag_map(): input plugin type ID */
+  int load_ptm_res;		/* load_pre_tag_map(): result */
+  int exec_ptm_dissect;		/* exec_plugins(): TRUE if at least one plugin returned load_ptm_res == TRUE */
+  int exec_ptm_res;		/* exec_plugins(): input to be matched against list->cfg.ptm_complex */ 
+};
+
 struct plugin_requests {
   u_int8_t bpf_filter;		/* On-request packet copy for BPF purposes */
 
@@ -183,6 +191,7 @@ struct plugin_requests {
   int line_num;			/* line number being processed */
   int map_entries;		/* number of map entries: wins over global setting */
   int map_row_len;		/* map row length: wins over global setting */
+  struct ptm_complex ptm_c;	/* flags a map that requires parsing of the records (ie. tee plugin) */
 };
 
 typedef struct {
@@ -259,6 +268,8 @@ struct _primitives_matrix_struct {
   u_int8_t nfacctd;
   u_int8_t sfacctd;
   u_int8_t pmtelemetryd;
+  u_int8_t pmbgpd;
+  u_int8_t pmbgmd;
   char desc[PRIMITIVE_DESC_LEN];
 };
 
@@ -277,6 +288,13 @@ struct largebuf {
 struct child_ctl {
   u_int16_t active;
   u_int16_t retired;
+  u_int32_t flags;
+};
+
+struct child_ctl2 {
+  pid_t *list;
+  u_int16_t active;
+  u_int16_t max;
   u_int32_t flags;
 };
 
@@ -342,7 +360,7 @@ int json_object_update_missing(json_t *, json_t *);
 #endif
 
 /* global variables */
-#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C) && (!defined __PMTELEMETRYD_C)
+#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C) && (!defined __PMTELEMETRYD_C) && (!defined __PMBGPD_C) && (!defined __PMBMPD_C)
 #define EXT extern
 #else
 #define EXT
@@ -354,6 +372,7 @@ EXT int reload_log_sf_cnt, reload_log_telemetry_thread;
 EXT int data_plugins, tee_plugins;
 EXT struct timeval reload_map_tstamp;
 EXT struct child_ctl sql_writers;
+EXT struct child_ctl2 dump_writers;
 EXT int debug;
 EXT struct configuration config; /* global configuration structure */
 EXT struct plugins_list_entry *plugins_list; /* linked list of each plugin configuration */
