@@ -46,9 +46,10 @@ char *pmc_extract_token(char **, int);
 int pmc_bgp_rd2str(char *, rd_t *);
 int pmc_bgp_str2rd(rd_t *, char *);
 char *pmc_compose_json(u_int64_t, u_int64_t, u_int8_t, struct pkt_primitives *,
-			struct pkt_bgp_primitives *, struct pkt_nat_primitives *,
-			struct pkt_mpls_primitives *, char *, struct pkt_vlen_hdr_primitives *,
-			pm_counter_t, pm_counter_t, pm_counter_t, u_int32_t, struct timeval *);
+			struct pkt_bgp_primitives *, struct pkt_legacy_bgp_primitives *,
+			struct pkt_nat_primitives *, struct pkt_mpls_primitives *, char *,
+			struct pkt_vlen_hdr_primitives *, pm_counter_t, pm_counter_t,
+			pm_counter_t, u_int32_t, struct timeval *);
 void pmc_compose_timestamp(char *, int, struct timeval *, int, int);
 void pmc_custom_primitive_header_print(char *, int, struct imt_custom_primitive_entry *, int);
 void pmc_custom_primitive_value_print(char *, int, char *, struct imt_custom_primitive_entry *, int);
@@ -60,7 +61,7 @@ void pmc_lower_string(char *);
 struct imt_custom_primitives pmc_custom_primitives_registry;
 struct stripped_class *class_table = NULL;
 char *pkt_len_distrib_table[MAX_PKT_LEN_DISTRIB_BINS];
-int want_ipproto_num, tmp_net_own_field, want_tstamp_since_epoch;
+int want_ipproto_num, tmp_net_own_field, tmp_comms_same_field, want_tstamp_since_epoch;
 
 /* functions */
 int CHECK_Q_TYPE(int type)
@@ -101,6 +102,7 @@ void usage_client(char *prog)
   printf("  -I\tSet timestamps in 'since Epoch' format\n");
   printf("  -u\tLeave IP protocols in numerical format\n");
   printf("  -o\tPrint IP prefixes in the same field as IP addresses (temporary, 1.5 compatible)\n");
+  printf("  -x\tPrint BGP communities (standard, extended) in the same field (temporary, 1.5 and 1.6.0 compatible)\n");
   printf("  -V\tPrint version and exit\n");
   printf("\n");
   printf("  See QUICKSTART file in the distribution for examples\n");
@@ -267,10 +269,22 @@ void write_stats_header_formatted(pm_cfgreg_t what_to_count, pm_cfgreg_t what_to
 #endif
     if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("SRC_AS      ");
     if (what_to_count & COUNT_DST_AS) printf("DST_AS      "); 
-    if (what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM))
-      printf("COMMS                   ");
-    if (what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM))
-      printf("SRC_COMMS               ");
+    if (!tmp_comms_same_field) {
+      if (what_to_count & COUNT_STD_COMM) printf("COMMS                   ");
+      if (what_to_count & COUNT_EXT_COMM) printf("ECOMMS                  ");
+    }
+    else {
+      if (what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM))
+	printf("COMMS                   ");
+    }
+    if (!tmp_comms_same_field) {
+      if (what_to_count & COUNT_SRC_STD_COMM) printf("SRC_COMMS               ");
+      if (what_to_count & COUNT_SRC_EXT_COMM) printf("SRC_ECOMMS              ");
+    }
+    else {
+      if (what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM))
+	printf("SRC_COMMS               ");
+    }
     if (what_to_count & COUNT_AS_PATH) printf("AS_PATH                  ");
     if (what_to_count & COUNT_SRC_AS_PATH) printf("SRC_AS_PATH              ");
     if (what_to_count & COUNT_LOCAL_PREF) printf("PREF     ");
@@ -493,10 +507,22 @@ void write_stats_header_csv(pm_cfgreg_t what_to_count, pm_cfgreg_t what_to_count
 #endif
     if (what_to_count & (COUNT_SRC_AS|COUNT_SUM_AS)) printf("%sSRC_AS", write_sep(sep, &count));
     if (what_to_count & COUNT_DST_AS) printf("%sDST_AS", write_sep(sep, &count)); 
-    if (what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM))
-      printf("%sCOMMS", write_sep(sep, &count));
-    if (what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM))
-      printf("%sSRC_COMMS", write_sep(sep, &count));
+    if (!tmp_comms_same_field) {
+      if (what_to_count & COUNT_STD_COMM) printf("%sCOMMS", write_sep(sep, &count));
+      if (what_to_count & COUNT_EXT_COMM) printf("%sECOMMS", write_sep(sep, &count));
+    }
+    else {
+      if (what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM))
+        printf("%sCOMMS", write_sep(sep, &count));
+    }
+    if (!tmp_comms_same_field) {
+      if (what_to_count & COUNT_SRC_STD_COMM) printf("%sSRC_COMMS", write_sep(sep, &count));
+      if (what_to_count & COUNT_SRC_EXT_COMM) printf("%sSRC_ECOMMS", write_sep(sep, &count));
+    }
+    else {
+      if (what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM))
+        printf("%sSRC_COMMS", write_sep(sep, &count));
+    }
     if (what_to_count & COUNT_AS_PATH) printf("%sAS_PATH", write_sep(sep, &count));
     if (what_to_count & COUNT_SRC_AS_PATH) printf("%sSRC_AS_PATH", write_sep(sep, &count));
     if (what_to_count & COUNT_LOCAL_PREF) printf("%sPREF", write_sep(sep, &count));
@@ -635,11 +661,13 @@ int main(int argc,char **argv)
   struct query_header q; 
   struct pkt_primitives empty_addr;
   struct pkt_bgp_primitives empty_pbgp;
+  struct pkt_legacy_bgp_primitives empty_plbgp;
   struct pkt_nat_primitives empty_pnat;
   struct pkt_mpls_primitives empty_pmpls;
   struct pkt_vlen_hdr_primitives empty_pvlen;
   struct query_entry request;
   struct pkt_bgp_primitives *pbgp = NULL;
+  struct pkt_legacy_bgp_primitives *plbgp = NULL;
   struct pkt_nat_primitives *pnat = NULL;
   struct pkt_mpls_primitives *pmpls = NULL;
   struct pkt_vlen_hdr_primitives *pvlen = NULL;
@@ -682,6 +710,7 @@ int main(int argc,char **argv)
   memset(&q, 0, sizeof(struct query_header));
   memset(&empty_addr, 0, sizeof(struct pkt_primitives));
   memset(&empty_pbgp, 0, sizeof(struct pkt_bgp_primitives));
+  memset(&empty_plbgp, 0, sizeof(struct pkt_legacy_bgp_primitives));
   memset(&empty_pnat, 0, sizeof(struct pkt_nat_primitives));
   memset(&empty_pmpls, 0, sizeof(struct pkt_mpls_primitives));
   memset(&empty_pvlen, 0, sizeof(struct pkt_vlen_hdr_primitives));
@@ -713,6 +742,7 @@ int main(int argc,char **argv)
   topN_counter = FALSE;
   topN_howmany = FALSE;
   tmp_net_own_field = TRUE;
+  tmp_comms_same_field = FALSE;
   sum_counters = FALSE;
   num_counters = FALSE;
   fetch_from_file = FALSE;
@@ -1103,6 +1133,9 @@ int main(int argc,char **argv)
     case 'o':
       tmp_net_own_field = FALSE;
       break;
+    case 'x':
+      tmp_comms_same_field = TRUE;
+      break;
     case 'r':
       q.type |= WANT_RESET;
       want_reset = TRUE;
@@ -1272,11 +1305,11 @@ int main(int argc,char **argv)
 
   /* Sanitizing the aggregation method */ 
   if (what_to_count || what_to_count_2) {
-    if (what_to_count & COUNT_STD_COMM && what_to_count & COUNT_EXT_COMM) {
+    if (tmp_comms_same_field && what_to_count & COUNT_STD_COMM && what_to_count & COUNT_EXT_COMM) {
       printf("ERROR: The use of STANDARD and EXTENDED BGP communitities is mutual exclusive.\n");
       exit(1);
     }
-    if (what_to_count & COUNT_SRC_STD_COMM && what_to_count & COUNT_SRC_EXT_COMM) {
+    if (tmp_comms_same_field && what_to_count & COUNT_SRC_STD_COMM && what_to_count & COUNT_SRC_EXT_COMM) {
       printf("ERROR: The use of STANDARD and EXTENDED BGP communitities is mutual exclusive.\n");
       exit(1);
     }
@@ -1657,72 +1690,72 @@ int main(int argc,char **argv)
 	}
         else if (!strcmp(count_token[match_string_index], "std_comm")) {
 	  if (!strcmp(match_string_token, "0"))
-	    memset(request.pbgp.std_comms, 0, MAX_BGP_STD_COMMS);
+	    memset(request.plbgp.std_comms, 0, MAX_BGP_STD_COMMS);
 	  else {
-            strlcpy(request.pbgp.std_comms, match_string_token, MAX_BGP_STD_COMMS);
-	    bgp_comm = request.pbgp.std_comms;
+            strlcpy(request.plbgp.std_comms, match_string_token, MAX_BGP_STD_COMMS);
+	    bgp_comm = request.plbgp.std_comms;
 	    while (bgp_comm) {
-	      bgp_comm = strchr(request.pbgp.std_comms, '_');
+	      bgp_comm = strchr(request.plbgp.std_comms, '_');
 	      if (bgp_comm) *bgp_comm = ' ';
 	    }
 	  }
 	}
         else if (!strcmp(count_token[match_string_index], "src_std_comm")) {
           if (!strcmp(match_string_token, "0"))
-            memset(request.pbgp.src_std_comms, 0, MAX_BGP_STD_COMMS);
+            memset(request.plbgp.src_std_comms, 0, MAX_BGP_STD_COMMS);
           else {
-            strlcpy(request.pbgp.src_std_comms, match_string_token, MAX_BGP_STD_COMMS);
-            bgp_comm = request.pbgp.src_std_comms;
+            strlcpy(request.plbgp.src_std_comms, match_string_token, MAX_BGP_STD_COMMS);
+            bgp_comm = request.plbgp.src_std_comms;
             while (bgp_comm) {
-              bgp_comm = strchr(request.pbgp.src_std_comms, '_');
+              bgp_comm = strchr(request.plbgp.src_std_comms, '_');
               if (bgp_comm) *bgp_comm = ' ';
             }
           }
         }
         else if (!strcmp(count_token[match_string_index], "ext_comm")) {
           if (!strcmp(match_string_token, "0"))
-            memset(request.pbgp.ext_comms, 0, MAX_BGP_EXT_COMMS);
+            memset(request.plbgp.ext_comms, 0, MAX_BGP_EXT_COMMS);
           else {
-            strlcpy(request.pbgp.ext_comms, match_string_token, MAX_BGP_EXT_COMMS);
-            bgp_comm = request.pbgp.ext_comms;
+            strlcpy(request.plbgp.ext_comms, match_string_token, MAX_BGP_EXT_COMMS);
+            bgp_comm = request.plbgp.ext_comms;
             while (bgp_comm) {
-              bgp_comm = strchr(request.pbgp.ext_comms, '_');
+              bgp_comm = strchr(request.plbgp.ext_comms, '_');
               if (bgp_comm) *bgp_comm = ' ';
             }
 	  }
 	}
         else if (!strcmp(count_token[match_string_index], "src_ext_comm")) {
           if (!strcmp(match_string_token, "0"))
-            memset(request.pbgp.src_ext_comms, 0, MAX_BGP_EXT_COMMS);
+            memset(request.plbgp.src_ext_comms, 0, MAX_BGP_EXT_COMMS);
           else {
-            strlcpy(request.pbgp.src_ext_comms, match_string_token, MAX_BGP_EXT_COMMS);
-            bgp_comm = request.pbgp.src_ext_comms;
+            strlcpy(request.plbgp.src_ext_comms, match_string_token, MAX_BGP_EXT_COMMS);
+            bgp_comm = request.plbgp.src_ext_comms;
             while (bgp_comm) {
-              bgp_comm = strchr(request.pbgp.src_ext_comms, '_');
+              bgp_comm = strchr(request.plbgp.src_ext_comms, '_');
               if (bgp_comm) *bgp_comm = ' ';
             }
           }
         }
         else if (!strcmp(count_token[match_string_index], "as_path")) {
 	  if (!strcmp(match_string_token, "^$"))
-	    memset(request.pbgp.as_path, 0, MAX_BGP_ASPATH);
+	    memset(request.plbgp.as_path, 0, MAX_BGP_ASPATH);
 	  else {
-            strlcpy(request.pbgp.as_path, match_string_token, MAX_BGP_ASPATH);
-            as_path = request.pbgp.as_path;
+            strlcpy(request.plbgp.as_path, match_string_token, MAX_BGP_ASPATH);
+            as_path = request.plbgp.as_path;
             while (as_path) {
-              as_path = strchr(request.pbgp.as_path, '_');
+              as_path = strchr(request.plbgp.as_path, '_');
               if (as_path) *as_path = ' ';
             }
 	  }
 	}
         else if (!strcmp(count_token[match_string_index], "src_as_path")) {
           if (!strcmp(match_string_token, "^$"))
-            memset(request.pbgp.src_as_path, 0, MAX_BGP_ASPATH);
+            memset(request.plbgp.src_as_path, 0, MAX_BGP_ASPATH);
           else {
-            strlcpy(request.pbgp.src_as_path, match_string_token, MAX_BGP_ASPATH);
-            as_path = request.pbgp.src_as_path;
+            strlcpy(request.plbgp.src_as_path, match_string_token, MAX_BGP_ASPATH);
+            as_path = request.plbgp.src_as_path;
             while (as_path) {
-              as_path = strchr(request.pbgp.src_as_path, '_');
+              as_path = strchr(request.plbgp.src_as_path, '_');
               if (as_path) *as_path = ' ';
             }
           }
@@ -2026,6 +2059,9 @@ int main(int argc,char **argv)
       if (extras.off_pkt_bgp_primitives) pbgp = (struct pkt_bgp_primitives *) ((u_char *)elem + extras.off_pkt_bgp_primitives);
       else pbgp = &empty_pbgp;
 
+      if (extras.off_pkt_lbgp_primitives) plbgp = (struct pkt_legacy_bgp_primitives *) ((u_char *)elem + extras.off_pkt_lbgp_primitives);
+      else plbgp = &empty_plbgp;
+
       if (extras.off_pkt_nat_primitives) pnat = (struct pkt_nat_primitives *) ((u_char *)elem + extras.off_pkt_nat_primitives);
       else pnat = &empty_pnat;
 
@@ -2040,6 +2076,7 @@ int main(int argc,char **argv)
 
       if (memcmp(&acc_elem, &empty_addr, sizeof(struct pkt_primitives)) != 0 || 
 	  memcmp(pbgp, &empty_pbgp, sizeof(struct pkt_bgp_primitives)) != 0 ||
+	  memcmp(plbgp, &empty_plbgp, sizeof(struct pkt_legacy_bgp_primitives)) != 0 ||
 	  memcmp(pnat, &empty_pnat, sizeof(struct pkt_nat_primitives)) != 0 ||
 	  memcmp(pmpls, &empty_pmpls, sizeof(struct pkt_mpls_primitives)) != 0 ||
 	  pmc_custom_primitives_registry.len ||
@@ -2113,17 +2150,15 @@ int main(int argc,char **argv)
           else if (want_output & PRINT_OUTPUT_CSV) printf("%s%u", write_sep(sep_ptr, &count), acc_elem->primitives.dst_as);
         }
 
-	/* Slightly special "!have_wtc" handling due to standard and
-	   extended BGP communities being mutual exclusive */
-	if ((!have_wtc && !(what_to_count & COUNT_EXT_COMM)) || (what_to_count & COUNT_STD_COMM)) {
-	  bgp_comm = pbgp->std_comms;
+	if (!have_wtc || (what_to_count & COUNT_STD_COMM)) {
+	  bgp_comm = plbgp->std_comms;
 	  while (bgp_comm) {
-	    bgp_comm = strchr(pbgp->std_comms, ' ');
+	    bgp_comm = strchr(plbgp->std_comms, ' ');
 	    if (bgp_comm) *bgp_comm = '_';
 	  }
-          if (strlen(pbgp->std_comms)) {
-	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", pbgp->std_comms);
-	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), pbgp->std_comms);
+          if (strlen(plbgp->std_comms)) {
+	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", plbgp->std_comms);
+	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), plbgp->std_comms);
 	  }
 	  else {
 	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22u   ", 0);
@@ -2131,15 +2166,15 @@ int main(int argc,char **argv)
 	  }
         }
 
-	if ((!have_wtc && !(what_to_count & COUNT_SRC_EXT_COMM)) || (what_to_count & COUNT_SRC_STD_COMM)) {
-	  bgp_comm = pbgp->src_std_comms;
+	if (!have_wtc || (what_to_count & COUNT_SRC_STD_COMM)) {
+	  bgp_comm = plbgp->src_std_comms;
 	  while (bgp_comm) {
-	    bgp_comm = strchr(pbgp->src_std_comms, ' ');
+	    bgp_comm = strchr(plbgp->src_std_comms, ' ');
 	    if (bgp_comm) *bgp_comm = '_';
 	  }
-          if (strlen(pbgp->src_std_comms)) {
-	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", pbgp->src_std_comms);
-	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), pbgp->src_std_comms);
+          if (strlen(plbgp->src_std_comms)) {
+	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", plbgp->src_std_comms);
+	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), plbgp->src_std_comms);
 	  }
 	  else {
             if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22u   ", 0);
@@ -2148,14 +2183,14 @@ int main(int argc,char **argv)
         }
 
         if (what_to_count & COUNT_EXT_COMM) {
-          bgp_comm = pbgp->ext_comms;
+          bgp_comm = plbgp->ext_comms;
           while (bgp_comm) {
-            bgp_comm = strchr(pbgp->ext_comms, ' ');
+            bgp_comm = strchr(plbgp->ext_comms, ' ');
             if (bgp_comm) *bgp_comm = '_';
           }
-          if (strlen(pbgp->ext_comms)) {
-	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", pbgp->ext_comms);
-	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), pbgp->ext_comms);
+          if (strlen(plbgp->ext_comms)) {
+	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", plbgp->ext_comms);
+	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), plbgp->ext_comms);
 	  }
 	  else {
             if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22u   ", 0);
@@ -2164,14 +2199,14 @@ int main(int argc,char **argv)
         }
 
         if (what_to_count & COUNT_SRC_EXT_COMM) {
-          bgp_comm = pbgp->src_ext_comms;
+          bgp_comm = plbgp->src_ext_comms;
           while (bgp_comm) {
-            bgp_comm = strchr(pbgp->src_ext_comms, ' ');
+            bgp_comm = strchr(plbgp->src_ext_comms, ' ');
             if (bgp_comm) *bgp_comm = '_';
           }
-          if (strlen(pbgp->src_ext_comms)) {
-            if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", pbgp->src_ext_comms);
-            else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), pbgp->src_ext_comms);
+          if (strlen(plbgp->src_ext_comms)) {
+            if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", plbgp->src_ext_comms);
+            else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), plbgp->src_ext_comms);
 	  }
           else {
             if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22u   ", 0);
@@ -2180,34 +2215,34 @@ int main(int argc,char **argv)
         }
 
         if (!have_wtc || (what_to_count & COUNT_AS_PATH)) {
-	  as_path = pbgp->as_path;
+	  as_path = plbgp->as_path;
 	  while (as_path) {
-	    as_path = strchr(pbgp->as_path, ' ');
+	    as_path = strchr(plbgp->as_path, ' ');
 	    if (as_path) *as_path = '_';
 	  }
-          if (strlen(pbgp->as_path)) {
-	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", pbgp->as_path);
-	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), pbgp->as_path);
+          if (strlen(plbgp->as_path)) {
+	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", plbgp->as_path);
+	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), plbgp->as_path);
 	  }
 	  else {
 	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", empty_aspath); 
-	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), pbgp->as_path); 
+	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), plbgp->as_path); 
 	  }
         }
 
         if (!have_wtc || (what_to_count & COUNT_SRC_AS_PATH)) {
-	  as_path = pbgp->src_as_path;
+	  as_path = plbgp->src_as_path;
 	  while (as_path) {
-	    as_path = strchr(pbgp->src_as_path, ' ');
+	    as_path = strchr(plbgp->src_as_path, ' ');
 	    if (as_path) *as_path = '_';
 	  }
-          if (strlen(pbgp->src_as_path)) {
-	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", pbgp->src_as_path);
-	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), pbgp->src_as_path);
+          if (strlen(plbgp->src_as_path)) {
+	    if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", plbgp->src_as_path);
+	    else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), plbgp->src_as_path);
 	  }
           else {
             if (want_output & PRINT_OUTPUT_FORMATTED) printf("%-22s   ", empty_aspath);
-            else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), pbgp->src_as_path);
+            else if (want_output & PRINT_OUTPUT_CSV) printf("%s%s", write_sep(sep_ptr, &count), plbgp->src_as_path);
           }
         }
 
@@ -2629,7 +2664,7 @@ int main(int argc,char **argv)
 	  char *json_str;
 
 	  json_str = pmc_compose_json(what_to_count, what_to_count_2, acc_elem->flow_type,
-				      &acc_elem->primitives, pbgp, pnat, pmpls, pcust, pvlen, acc_elem->pkt_len,
+				      &acc_elem->primitives, pbgp, plbgp, pnat, pmpls, pcust, pvlen, acc_elem->pkt_len,
 				      acc_elem->pkt_num, acc_elem->flo_num, acc_elem->tcp_flags, NULL);
 
 	  if (json_str) {
@@ -3120,7 +3155,8 @@ int pmc_bgp_str2rd(rd_t *output, char *value)
 
 #ifdef WITH_JANSSON 
 char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
-		  struct pkt_bgp_primitives *pbgp, struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
+		  struct pkt_bgp_primitives *pbgp, struct pkt_legacy_bgp_primitives *plbgp,
+		  struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
 		  char *pcust, struct pkt_vlen_hdr_primitives *pvlen, pm_counter_t bytes_counter,
 		  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime)
 {
@@ -3205,14 +3241,14 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
   }
 
   if (wtc & COUNT_STD_COMM) {
-    bgp_comm = pbgp->std_comms;
+    bgp_comm = plbgp->std_comms;
     while (bgp_comm) {
-      bgp_comm = strchr(pbgp->std_comms, ' ');
+      bgp_comm = strchr(plbgp->std_comms, ' ');
       if (bgp_comm) *bgp_comm = '_';
     }
 
-    if (strlen(pbgp->std_comms))
-      kv = json_pack("{ss}", "comms", pbgp->std_comms);
+    if (strlen(plbgp->std_comms))
+      kv = json_pack("{ss}", "comms", plbgp->std_comms);
     else
       kv = json_pack("{ss}", "comms", empty_string);
 
@@ -3220,30 +3256,38 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
     json_decref(kv);
   }
 
-  if (wtc & COUNT_EXT_COMM && !(wtc & COUNT_STD_COMM)) {
-    bgp_comm = pbgp->ext_comms;
+  if (wtc & COUNT_EXT_COMM) {
+    bgp_comm = plbgp->ext_comms;
     while (bgp_comm) {
-      bgp_comm = strchr(pbgp->ext_comms, ' ');
+      bgp_comm = strchr(plbgp->ext_comms, ' ');
       if (bgp_comm) *bgp_comm = '_';
     }
 
-    if (strlen(pbgp->ext_comms))
-      kv = json_pack("{ss}", "comms", pbgp->ext_comms);
-    else
-      kv = json_pack("{ss}", "comms", empty_string);
+    if (!tmp_comms_same_field) {
+      if (strlen(plbgp->ext_comms))
+	kv = json_pack("{ss}", "ecomms", plbgp->ext_comms);
+      else
+	kv = json_pack("{ss}", "ecomms", empty_string);
+    }
+    else {
+      if (strlen(plbgp->ext_comms))
+	kv = json_pack("{ss}", "comms", plbgp->ext_comms);
+      else
+	kv = json_pack("{ss}", "comms", empty_string);
+    }
 
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_AS_PATH) {
-    as_path = pbgp->as_path;
+    as_path = plbgp->as_path;
     while (as_path) {
-      as_path = strchr(pbgp->as_path, ' ');
+      as_path = strchr(plbgp->as_path, ' ');
       if (as_path) *as_path = '_';
     }
-    if (strlen(pbgp->as_path))
-      kv = json_pack("{ss}", "as_path", pbgp->as_path);
+    if (strlen(plbgp->as_path))
+      kv = json_pack("{ss}", "as_path", plbgp->as_path);
     else
       kv = json_pack("{ss}", "as_path", empty_string);
 
@@ -3290,14 +3334,14 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
   }
 
   if (wtc & COUNT_SRC_STD_COMM) {
-    bgp_comm = pbgp->src_std_comms;
+    bgp_comm = plbgp->src_std_comms;
     while (bgp_comm) {
-      bgp_comm = strchr(pbgp->src_std_comms, ' ');
+      bgp_comm = strchr(plbgp->src_std_comms, ' ');
       if (bgp_comm) *bgp_comm = '_';
     }
 
-    if (strlen(pbgp->src_std_comms))
-      kv = json_pack("{ss}", "src_comms", pbgp->src_std_comms);
+    if (strlen(plbgp->src_std_comms))
+      kv = json_pack("{ss}", "src_comms", plbgp->src_std_comms);
     else
       kv = json_pack("{ss}", "src_comms", empty_string);
 
@@ -3305,30 +3349,38 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
     json_decref(kv);
   }
 
-  if (wtc & COUNT_SRC_EXT_COMM && !(wtc & COUNT_SRC_STD_COMM)) {
-    bgp_comm = pbgp->src_ext_comms;
+  if (wtc & COUNT_SRC_EXT_COMM) {
+    bgp_comm = plbgp->src_ext_comms;
     while (bgp_comm) {
-      bgp_comm = strchr(pbgp->src_ext_comms, ' ');
+      bgp_comm = strchr(plbgp->src_ext_comms, ' ');
       if (bgp_comm) *bgp_comm = '_';
     }
 
-    if (strlen(pbgp->src_ext_comms))
-      kv = json_pack("{ss}", "src_comms", pbgp->src_ext_comms);
-    else
-      kv = json_pack("{ss}", "src_comms", empty_string);
+    if (!tmp_comms_same_field) {
+      if (strlen(plbgp->src_ext_comms))
+        kv = json_pack("{ss}", "src_ecomms", plbgp->src_ext_comms);
+      else
+        kv = json_pack("{ss}", "src_ecomms", empty_string);
+    }
+    else {
+      if (strlen(plbgp->src_ext_comms))
+        kv = json_pack("{ss}", "src_comms", plbgp->src_ext_comms);
+      else
+        kv = json_pack("{ss}", "src_comms", empty_string);
+    }
 
     json_object_update_missing(obj, kv);
     json_decref(kv);
   }
 
   if (wtc & COUNT_SRC_AS_PATH) {
-    as_path = pbgp->src_as_path;
+    as_path = plbgp->src_as_path;
     while (as_path) {
-      as_path = strchr(pbgp->src_as_path, ' ');
+      as_path = strchr(plbgp->src_as_path, ' ');
       if (as_path) *as_path = '_';
     }
-    if (strlen(pbgp->src_as_path))
-      kv = json_pack("{ss}", "src_as_path", pbgp->src_as_path);
+    if (strlen(plbgp->src_as_path))
+      kv = json_pack("{ss}", "src_as_path", plbgp->src_as_path);
     else
       kv = json_pack("{ss}", "src_as_path", empty_string);
 
@@ -3624,14 +3676,15 @@ char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struc
     json_decref(kv);
   }
 
-  tmpbuf = json_dumps(obj, 0);
+  tmpbuf = json_dumps(obj, JSON_PRESERVE_ORDER);
   json_decref(obj);
 
   return tmpbuf;
 }
 #else
 char *pmc_compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
-                  struct pkt_bgp_primitives *pbgp, struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
+                  struct pkt_bgp_primitives *pbgp, struct pkt_legacy_bgp_primitives *plbgp,
+		  struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
 		  char *pcust, struct pkt_vlen_hdr_primitives *pvlen, pm_counter_t bytes_counter,
 		  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime)
 {

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -102,6 +102,10 @@ const struct _map_dictionary_line tag_map_tee_dictionary[] = {
   {"set_tag", PT_map_id_handler},
   {"set_tag2", PT_map_id2_handler},
   {"ip", PT_map_ip_handler},
+  {"in", PT_map_input_handler},
+  {"out", PT_map_output_handler},
+  {"src_mac", PT_map_src_mac_handler},
+  {"dst_mac", PT_map_dst_mac_handler},
   {"label", PT_map_entry_label_handler},
   {"jeq", PT_map_jeq_handler},
   {"return", PT_map_return_handler},
@@ -113,6 +117,7 @@ const struct _map_dictionary_line bpas_map_dictionary[] = {
   {"id", PT_map_id_handler},
   {"ip", PT_map_ip_handler},
   {"in", PT_map_input_handler},
+  {"out", PT_map_output_handler},
   {"bgp_nexthop", BPAS_map_bgp_nexthop_handler},
   {"peer_dst_as", BPAS_map_bgp_peer_dst_as_handler},
   {"src_mac", PT_map_src_mac_handler},
@@ -125,6 +130,8 @@ const struct _map_dictionary_line bta_map_dictionary[] = {
   {"bgp_ip", PT_map_id_handler},
   {"bgp_port", BTA_map_lookup_bgp_port_handler},
   {"ip", PT_map_ip_handler},
+  {"in", PT_map_input_handler},
+  {"out", PT_map_output_handler},
   {"filter", PT_map_filter_handler},
   {"", NULL}
 };

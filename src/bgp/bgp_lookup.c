@@ -426,7 +426,10 @@ void bgp_follow_nexthop_lookup(struct packet_ptrs *pptrs, int type)
 	  ttl--;
           goto start_again;
         }
-	else goto end;
+	else {
+	  if (config.nfacctd_bgp_follow_nexthop_external) saved_info = (char *) info;
+	  goto end;
+	}
       }
 #if defined ENABLE_IPV6
       else if (info->attr->mp_nexthop.family == AF_INET6) {
@@ -450,7 +453,10 @@ void bgp_follow_nexthop_lookup(struct packet_ptrs *pptrs, int type)
 	  ttl--;
           goto start_again;
 	}
-	else goto end;
+	else {
+	  if (config.nfacctd_bgp_follow_nexthop_external) saved_info = (char *) info;
+	  goto end;
+	}
       }
 #endif
       else {
@@ -474,7 +480,10 @@ void bgp_follow_nexthop_lookup(struct packet_ptrs *pptrs, int type)
 	  ttl--;
           goto start_again;
 	}
-	else goto end;
+	else {
+	  if (config.nfacctd_bgp_follow_nexthop_external) saved_info = (char *) info;
+	  goto end;
+	}
       }
     }
   }
@@ -559,140 +568,129 @@ int bgp_lookup_node_match_cmp_bgp(struct bgp_info *info, struct node_match_cmp_t
   return TRUE;
 }
 
-void pkt_to_cache_bgp_primitives(struct cache_bgp_primitives *c, struct pkt_bgp_primitives *p, pm_cfgreg_t what_to_count)
+void pkt_to_cache_legacy_bgp_primitives(struct cache_legacy_bgp_primitives *c, struct pkt_legacy_bgp_primitives *p, pm_cfgreg_t what_to_count)
 {
   if (c && p) {
-    c->peer_src_as = p->peer_src_as;
-    c->peer_dst_as = p->peer_dst_as;
-    memcpy(&c->peer_src_ip, &p->peer_src_ip, HostAddrSz);
-    memcpy(&c->peer_dst_ip, &p->peer_dst_ip, HostAddrSz);
     if (what_to_count & COUNT_STD_COMM) {
       if (!c->std_comms) {
-	c->std_comms = malloc(MAX_BGP_STD_COMMS);
-	if (!c->std_comms) goto malloc_failed;
+        c->std_comms = malloc(MAX_BGP_STD_COMMS);
+        if (!c->std_comms) goto malloc_failed;
       }
       memcpy(c->std_comms, p->std_comms, MAX_BGP_STD_COMMS);
     }
     else {
       if (c->std_comms) {
-	free(c->std_comms);
-	c->std_comms = NULL;
+        free(c->std_comms);
+        c->std_comms = NULL;
       }
     }
+
     if (what_to_count & COUNT_EXT_COMM) {
       if (!c->ext_comms) {
-	c->ext_comms = malloc(MAX_BGP_EXT_COMMS);
-	if (!c->ext_comms) goto malloc_failed;
+        c->ext_comms = malloc(MAX_BGP_EXT_COMMS);
+        if (!c->ext_comms) goto malloc_failed;
       }
       memcpy(c->ext_comms, p->ext_comms, MAX_BGP_EXT_COMMS);
     }
     else {
       if (c->ext_comms) {
-	free(c->ext_comms);
-	c->ext_comms = NULL;
+        free(c->ext_comms);
+        c->ext_comms = NULL;
       }
     }
+
     if (what_to_count & COUNT_AS_PATH) {
       if (!c->as_path) {
-	c->as_path = malloc(MAX_BGP_ASPATH);
-	if (!c->as_path) goto malloc_failed;
+        c->as_path = malloc(MAX_BGP_ASPATH);
+        if (!c->as_path) goto malloc_failed;
       }
       memcpy(c->as_path, p->as_path, MAX_BGP_ASPATH);
     }
     else {
       if (c->as_path) {
-	free(c->as_path);
-	c->as_path = NULL;
+        free(c->as_path);
+        c->as_path = NULL;
       }
     }
-    c->local_pref = p->local_pref;
-    c->med = p->med;
+
     if (what_to_count & COUNT_SRC_STD_COMM) {
       if (!c->src_std_comms) {
-	c->src_std_comms = malloc(MAX_BGP_STD_COMMS);
-	if (!c->src_std_comms) goto malloc_failed;
+        c->src_std_comms = malloc(MAX_BGP_STD_COMMS);
+        if (!c->src_std_comms) goto malloc_failed;
       }
       memcpy(c->src_std_comms, p->src_std_comms, MAX_BGP_STD_COMMS);
     }
     else {
       if (c->src_std_comms) {
-	free(c->src_std_comms);
-	c->src_std_comms = NULL;
+        free(c->src_std_comms);
+        c->src_std_comms = NULL;
       }
     }
+
     if (what_to_count & COUNT_SRC_EXT_COMM) {
       if (!c->src_ext_comms) {
-	c->src_ext_comms = malloc(MAX_BGP_EXT_COMMS);
-	if (!c->src_ext_comms) goto malloc_failed;
+        c->src_ext_comms = malloc(MAX_BGP_EXT_COMMS);
+        if (!c->src_ext_comms) goto malloc_failed;
       }
       memcpy(c->src_ext_comms, p->src_ext_comms, MAX_BGP_EXT_COMMS);
     }
     else {
       if (c->src_ext_comms) {
-	free(c->src_ext_comms);
-	c->src_ext_comms = NULL;
+        free(c->src_ext_comms);
+        c->src_ext_comms = NULL;
       }
     }
+
     if (what_to_count & COUNT_SRC_AS_PATH) {
       if (!c->src_as_path) {
-	c->src_as_path = malloc(MAX_BGP_ASPATH);
-	if (!c->src_as_path) goto malloc_failed;
+        c->src_as_path = malloc(MAX_BGP_ASPATH);
+        if (!c->src_as_path) goto malloc_failed;
       }
       memcpy(c->src_as_path, p->src_as_path, MAX_BGP_ASPATH);
     }
     else {
       if (c->src_as_path) {
-	free(c->src_as_path);
-	c->src_as_path = NULL;
+        free(c->src_as_path);
+        c->src_as_path = NULL;
       }
     }
-    c->src_local_pref = p->src_local_pref;
-    c->src_med = p->src_med;
-    memcpy(&c->mpls_vpn_rd, &p->mpls_vpn_rd, sizeof(rd_t));
 
     return;
 
     malloc_failed:
-    Log(LOG_WARNING, "WARN ( %s/%s ): malloc() failed (pkt_to_cache_bgp_primitives).\n", config.name, config.type);
+    Log(LOG_WARNING, "WARN ( %s/%s ): malloc() failed (pkt_to_cache_legacy_bgp_primitives).\n", config.name, config.type);
   }
 }
 
-void cache_to_pkt_bgp_primitives(struct pkt_bgp_primitives *p, struct cache_bgp_primitives *c)
+void cache_to_pkt_legacy_bgp_primitives(struct pkt_legacy_bgp_primitives *p, struct cache_legacy_bgp_primitives *c)
 {
   if (c && p) {
-    memset(p, 0, PbgpSz);
+    memset(p, 0, PlbgpSz);
 
-    p->peer_src_as = c->peer_src_as;
-    p->peer_dst_as = c->peer_dst_as;
-    memcpy(&p->peer_src_ip, &c->peer_src_ip, HostAddrSz);
-    memcpy(&p->peer_dst_ip, &c->peer_dst_ip, HostAddrSz);
     if (c->std_comms) memcpy(p->std_comms, c->std_comms, MAX_BGP_STD_COMMS);
     if (c->ext_comms) memcpy(p->ext_comms, c->ext_comms, MAX_BGP_EXT_COMMS);
     if (c->as_path) memcpy(p->as_path, c->as_path, MAX_BGP_ASPATH);
-    p->local_pref = c->local_pref;
-    p->med = c->med;
+
     if (c->src_std_comms) memcpy(p->src_std_comms, c->src_std_comms, MAX_BGP_STD_COMMS);
     if (c->src_ext_comms) memcpy(p->src_ext_comms, c->src_ext_comms, MAX_BGP_EXT_COMMS);
     if (c->src_as_path) memcpy(p->src_as_path, c->src_as_path, MAX_BGP_ASPATH);
-    p->src_local_pref = c->src_local_pref;
-    p->src_med = c->src_med;
-    memcpy(&p->mpls_vpn_rd, &c->mpls_vpn_rd, sizeof(rd_t));
   }
 }
 
-void free_cache_bgp_primitives(struct cache_bgp_primitives **c)
+void free_cache_legacy_bgp_primitives(struct cache_legacy_bgp_primitives **c)
 {
-  struct cache_bgp_primitives *cbgp = *c;
+  struct cache_legacy_bgp_primitives *clbgp = *c;
 
   if (c && *c) {
-    if (cbgp->std_comms) free(cbgp->std_comms);
-    if (cbgp->ext_comms) free(cbgp->ext_comms);
-    if (cbgp->as_path) free(cbgp->as_path);
-    if (cbgp->src_std_comms) free(cbgp->src_std_comms);
-    if (cbgp->src_ext_comms) free(cbgp->src_ext_comms);
-    if (cbgp->src_as_path) free(cbgp->src_as_path);
+    if (clbgp->std_comms) free(clbgp->std_comms);
+    if (clbgp->ext_comms) free(clbgp->ext_comms);
+    if (clbgp->as_path) free(clbgp->as_path);
 
-    memset(cbgp, 0, sizeof(struct cache_bgp_primitives));
+    if (clbgp->src_std_comms) free(clbgp->src_std_comms);
+    if (clbgp->src_ext_comms) free(clbgp->src_ext_comms);
+    if (clbgp->src_as_path) free(clbgp->src_as_path);
+
+    memset(clbgp, 0, sizeof(struct cache_legacy_bgp_primitives));
     free(*c);
     *c = NULL;
   }

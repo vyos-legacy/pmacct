@@ -120,8 +120,8 @@ void usage_daemon(char *prog_name)
   printf("  -a  \tPrint list of supported aggregation primitives\n");
   printf("  -c  \tAggregation method, see full list of primitives with -a (DEFAULT: src_host)\n");
   printf("  -D  \tDaemonize\n"); 
-  printf("  -n  \tPath to a file containing Network definitions\n");
-  printf("  -o  \tPath to a file containing Port definitions\n");
+  printf("  -n  \tPath to a file containing networks and/or ASNs definitions\n");
+  printf("  -t  \tPath to a file containing ports definitions\n");
   printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | mongodb | amqp | kafka | nfprobe | sfprobe ] \n\tActivate plugin\n"); 
   printf("  -d  \tEnable debug\n");
   printf("  -S  \t[ auth | mail | daemon | kern | user | local[0-7] ] \n\tLog to the specified syslog facility\n");
@@ -135,12 +135,12 @@ void usage_daemon(char *prog_name)
   printf("  -b  \tNumber of buckets\n");
   printf("  -m  \tNumber of memory pools\n");
   printf("  -s  \tMemory pool size\n");
-  printf("\nPostgreSQL (-P pgsql)/MySQL (-P mysql)/SQLite (-P sqlite3) plugin options:\n");
-  printf("  -r  \tRefresh time (in seconds)\n");
-  printf("  -v  \t[ 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 ] \n\tTable version\n");
   printf("\nPrint plugin (-P print) plugin options:\n");
   printf("  -r  \tRefresh time (in seconds)\n");
-  printf("  -O  \t[ formatted | csv | json ] \n\tOutput format\n");
+  printf("  -O  \t[ formatted | csv | json | avro ] \n\tOutput format\n");
+  printf("  -o  \tPath to output file\n");
+  printf("  -A  \tAppend output (applies to -o)\n");
+  printf("  -E  \tCSV format serparator (applies to -O csv, DEFAULT: ',')\n");
   printf("\n");
   printf("  See QUICKSTART or visit http://wiki.pmacct.net/ for examples.\n");
   printf("\n");
@@ -229,7 +229,8 @@ int main(int argc,char **argv, char **envp)
 
   /* getting commandline values */
   while (!errflag && ((cp = getopt(argc, argv, ARGS_UACCTD)) != -1)) {
-    cfg_cmdline[rows] = malloc(SRVBUFLEN);
+    if (!cfg_cmdline[rows]) cfg_cmdline[rows] = malloc(SRVBUFLEN);
+    memset(cfg_cmdline[rows], 0, SRVBUFLEN);
     switch (cp) {
     case 'P':
       strlcpy(cfg_cmdline[rows], "plugins: ", SRVBUFLEN);
@@ -250,7 +251,7 @@ int main(int argc,char **argv, char **envp)
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
-    case 'o':
+    case 't':
       strlcpy(cfg_cmdline[rows], "ports_file: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
@@ -260,12 +261,29 @@ int main(int argc,char **argv, char **envp)
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
+    case 'o':
+      strlcpy(cfg_cmdline[rows], "print_output_file: ", SRVBUFLEN);
+      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
+    case 'A':
+      strlcpy(cfg_cmdline[rows], "print_output_file_append: ", SRVBUFLEN);
+      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
+    case 'E':
+      strlcpy(cfg_cmdline[rows], "print_output_separator: ", SRVBUFLEN);
+      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
+      rows++;
+      break;
     case 'u':
       strlcpy(cfg_cmdline[rows], "print_num_protos: true", SRVBUFLEN);
       rows++;
       break;
     case 'f':
       strlcpy(config_file, optarg, sizeof(config_file));
+      free(cfg_cmdline[rows]);
+      cfg_cmdline[rows] = NULL;
       break;
     case 'F':
       strlcpy(cfg_cmdline[rows], "pidfile: ", SRVBUFLEN);
@@ -294,11 +312,6 @@ int main(int argc,char **argv, char **envp)
       break;
     case 'r':
       strlcpy(cfg_cmdline[rows], "sql_refresh_time: ", SRVBUFLEN);
-      strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
-      rows++;
-      break;
-    case 'v':
-      strlcpy(cfg_cmdline[rows], "sql_table_version: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
@@ -431,6 +444,9 @@ int main(int argc,char **argv, char **envp)
     if (ret) Log(LOG_WARNING, "WARN ( %s/core ): proc_priority failed (errno: %d)\n", config.name, errno);
     else Log(LOG_INFO, "INFO ( %s/core ): proc_priority set to %d\n", config.name, getpriority(PRIO_PROCESS, 0));
   }
+
+  Log(LOG_INFO, "INFO ( %s/core ): %s (%s)\n", config.name, UACCTD_USAGE_HEADER, PMACCT_BUILD);
+  Log(LOG_INFO, "INFO ( %s/core ): %s\n", config.name, PMACCT_COMPILE_ARGS);
 
   if (strlen(config_file)) {
     char canonical_path[PATH_MAX], *canonical_path_ptr;
@@ -645,6 +661,7 @@ int main(int argc,char **argv, char **envp)
 	  exit(1);
 	}
 
+	list->cfg.type_id = list->type.id;
 	bgp_config_checks(&list->cfg);
 
 	list->cfg.what_to_count |= COUNT_COUNTERS;

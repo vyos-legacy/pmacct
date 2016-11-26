@@ -53,7 +53,8 @@ POST_UNINSTALL = :
 build_triplet = @build@
 host_triplet = @host@
 sbin_PROGRAMS = pmacctd$(EXEEXT) nfacctd$(EXEEXT) sfacctd$(EXEEXT) \
-	pmtelemetryd$(EXEEXT) $(am__EXEEXT_1)
+	pmtelemetryd$(EXEEXT) pmbgpd$(EXEEXT) pmbmpd$(EXEEXT) \
+	$(am__EXEEXT_1)
 bin_PROGRAMS = pmacct$(EXEEXT) @EXTRABIN@
 EXTRA_PROGRAMS =
 @WITH_MYSQL_TRUE@am__append_1 = mysql_plugin.c mysql_plugin.h
@@ -117,12 +118,12 @@ am__libdaemons_la_SOURCES_DIST = signals.c util.c util.h \
 	regmagic.h regsub.c conntrack.c conntrack.h xflow_status.c \
 	xflow_status.h plugin_common.c plugin_common.h preprocess.c \
 	preprocess-data.h preprocess.h ll.c nl.c jhash.h pmacct-dlt.h \
-	sflow.h crc32.h mysql_plugin.c mysql_plugin.h pgsql_plugin.c \
-	pgsql_plugin.h mongodb_plugin.c mongodb_plugin.h \
-	sqlite3_plugin.c amqp_common.c amqp_common.h amqp_plugin.c \
-	amqp_plugin.h kafka_common.c kafka_common.h kafka_plugin.c \
-	kafka_plugin.h sql_common.c sql_handlers.c sql_common.h \
-	thread_pool.c thread_pool.h
+	sflow.h crc32.h base64.c base64.h mysql_plugin.c \
+	mysql_plugin.h pgsql_plugin.c pgsql_plugin.h mongodb_plugin.c \
+	mongodb_plugin.h sqlite3_plugin.c amqp_common.c amqp_common.h \
+	amqp_plugin.c amqp_plugin.h kafka_common.c kafka_common.h \
+	kafka_plugin.c kafka_plugin.h sql_common.c sql_handlers.c \
+	sql_common.h thread_pool.c thread_pool.h
 @WITH_MYSQL_TRUE@am__objects_1 = libdaemons_la-mysql_plugin.lo
 @WITH_PGSQL_TRUE@am__objects_2 = libdaemons_la-pgsql_plugin.lo
 @WITH_MONGODB_TRUE@am__objects_3 = libdaemons_la-mongodb_plugin.lo
@@ -149,10 +150,10 @@ am_libdaemons_la_OBJECTS = libdaemons_la-signals.lo \
 	libdaemons_la-regexp.lo libdaemons_la-regsub.lo \
 	libdaemons_la-conntrack.lo libdaemons_la-xflow_status.lo \
 	libdaemons_la-plugin_common.lo libdaemons_la-preprocess.lo \
-	libdaemons_la-ll.lo libdaemons_la-nl.lo $(am__objects_1) \
-	$(am__objects_2) $(am__objects_3) $(am__objects_4) \
-	$(am__objects_5) $(am__objects_6) $(am__objects_7) \
-	$(am__objects_8)
+	libdaemons_la-ll.lo libdaemons_la-nl.lo \
+	libdaemons_la-base64.lo $(am__objects_1) $(am__objects_2) \
+	$(am__objects_3) $(am__objects_4) $(am__objects_5) \
+	$(am__objects_6) $(am__objects_7) $(am__objects_8)
 libdaemons_la_OBJECTS = $(am_libdaemons_la_OBJECTS)
 libdaemons_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
 	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(libdaemons_la_CFLAGS) \
@@ -170,6 +171,18 @@ pmacct_DEPENDENCIES = libcommon.la
 am_pmacctd_OBJECTS = pmacctd.$(OBJEXT)
 pmacctd_OBJECTS = $(am_pmacctd_OBJECTS)
 pmacctd_DEPENDENCIES = libdaemons.la
+am_pmbgpd_OBJECTS = pmbgpd.$(OBJEXT)
+pmbgpd_OBJECTS = $(am_pmbgpd_OBJECTS)
+pmbgpd_DEPENDENCIES = libdaemons.la
+pmbgpd_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
+	$(pmbgpd_LDFLAGS) $(LDFLAGS) -o $@
+am_pmbmpd_OBJECTS = pmbmpd.$(OBJEXT)
+pmbmpd_OBJECTS = $(am_pmbmpd_OBJECTS)
+pmbmpd_DEPENDENCIES = libdaemons.la
+pmbmpd_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) \
+	$(LIBTOOLFLAGS) --mode=link $(CCLD) $(AM_CFLAGS) $(CFLAGS) \
+	$(pmbmpd_LDFLAGS) $(LDFLAGS) -o $@
 am_pmtelemetryd_OBJECTS = pmtelemetryd.$(OBJEXT)
 pmtelemetryd_OBJECTS = $(am_pmtelemetryd_OBJECTS)
 pmtelemetryd_DEPENDENCIES = libdaemons.la
@@ -214,11 +227,13 @@ am__v_GEN_ = $(am__v_GEN_@AM_DEFAULT_V@)
 am__v_GEN_0 = @echo "  GEN   " $@;
 SOURCES = $(libcommon_la_SOURCES) $(libdaemons_la_SOURCES) \
 	$(nfacctd_SOURCES) $(pmacct_SOURCES) $(pmacctd_SOURCES) \
-	$(pmtelemetryd_SOURCES) $(sfacctd_SOURCES) $(uacctd_SOURCES)
+	$(pmbgpd_SOURCES) $(pmbmpd_SOURCES) $(pmtelemetryd_SOURCES) \
+	$(sfacctd_SOURCES) $(uacctd_SOURCES)
 DIST_SOURCES = $(libcommon_la_SOURCES) \
 	$(am__libdaemons_la_SOURCES_DIST) $(nfacctd_SOURCES) \
-	$(pmacct_SOURCES) $(pmacctd_SOURCES) $(pmtelemetryd_SOURCES) \
-	$(sfacctd_SOURCES) $(am__uacctd_SOURCES_DIST)
+	$(pmacct_SOURCES) $(pmacctd_SOURCES) $(pmbgpd_SOURCES) \
+	$(pmbmpd_SOURCES) $(pmtelemetryd_SOURCES) $(sfacctd_SOURCES) \
+	$(am__uacctd_SOURCES_DIST)
 RECURSIVE_TARGETS = all-recursive check-recursive dvi-recursive \
 	html-recursive info-recursive install-data-recursive \
 	install-dvi-recursive install-exec-recursive \
@@ -272,6 +287,8 @@ AR = @AR@
 AUTOCONF = @AUTOCONF@
 AUTOHEADER = @AUTOHEADER@
 AUTOMAKE = @AUTOMAKE@
+AVRO_CFLAGS = @AVRO_CFLAGS@
+AVRO_LIBS = @AVRO_LIBS@
 AWK = @AWK@
 CC = @CC@
 CCDEPMODE = @CCDEPMODE@
@@ -343,6 +360,7 @@ PGSQL_LIBS = @PGSQL_LIBS@
 PKG_CONFIG = @PKG_CONFIG@
 PKG_CONFIG_LIBDIR = @PKG_CONFIG_LIBDIR@
 PKG_CONFIG_PATH = @PKG_CONFIG_PATH@
+PMACCT_CFLAGS = @PMACCT_CFLAGS@
 RABBITMQ_CFLAGS = @RABBITMQ_CFLAGS@
 RABBITMQ_LIBS = @RABBITMQ_LIBS@
 RANLIB = @RANLIB@
@@ -406,8 +424,8 @@ top_build_prefix = @top_build_prefix@
 top_builddir = @top_builddir@
 top_srcdir = @top_srcdir@
 SUBDIRS = nfprobe_plugin sfprobe_plugin bgp tee_plugin isis bmp telemetry
-AM_LDFLAGS = @GEOIP_LIBS@ @GEOIPV2_LIBS@ @JANSSON_LIBS@
-AM_CFLAGS = @GEOIP_CFLAGS@ @GEOIPV2_CFLAGS@ @JANSSON_CFLAGS@
+AM_LDFLAGS = @GEOIP_LIBS@ @GEOIPV2_LIBS@ @JANSSON_LIBS@ @AVRO_LIBS@
+AM_CFLAGS = $(PMACCT_CFLAGS)
 noinst_LTLIBRARIES = libdaemons.la libcommon.la
 libcommon_la_SOURCES = strlcpy.c addr.c jansson.c addr.h pmacct.h	\
 	pmacct-build.h pmacct-data.h pmacct-defines.h mpls.h network.h once.h
@@ -424,9 +442,10 @@ libdaemons_la_SOURCES = signals.c util.c util.h plugin_hooks.c \
 	regmagic.h regsub.c conntrack.c conntrack.h xflow_status.c \
 	xflow_status.h plugin_common.c plugin_common.h preprocess.c \
 	preprocess-data.h preprocess.h ll.c nl.c jhash.h pmacct-dlt.h \
-	sflow.h crc32.h $(am__append_1) $(am__append_4) \
-	$(am__append_7) $(am__append_10) $(am__append_13) \
-	$(am__append_16) $(am__append_19) $(am__append_21)
+	sflow.h crc32.h base64.c base64.h $(am__append_1) \
+	$(am__append_4) $(am__append_7) $(am__append_10) \
+	$(am__append_13) $(am__append_16) $(am__append_19) \
+	$(am__append_21)
 # Builtin plugins
 libdaemons_la_LIBADD = nfprobe_plugin/libnfprobe_plugin.la \
 	sfprobe_plugin/libsfprobe_plugin.la bmp/libbmp.la \
@@ -451,6 +470,12 @@ pmacct_LDADD = libcommon.la
 pmtelemetryd_SOURCES = pmtelemetryd.c pmtelemetryd.h
 pmtelemetryd_LDFLAGS = $(DEFS)
 pmtelemetryd_LDADD = libdaemons.la
+pmbgpd_SOURCES = pmbgpd.c pmbgpd.h
+pmbgpd_LDFLAGS = $(DEFS)
+pmbgpd_LDADD = libdaemons.la
+pmbmpd_SOURCES = pmbmpd.c pmbmpd.h
+pmbmpd_LDFLAGS = $(DEFS)
+pmbmpd_LDADD = libdaemons.la
 all: all-recursive
 
 .SUFFIXES:
@@ -599,6 +624,12 @@ pmacct$(EXEEXT): $(pmacct_OBJECTS) $(pmacct_DEPENDENCIES) $(EXTRA_pmacct_DEPENDE
 pmacctd$(EXEEXT): $(pmacctd_OBJECTS) $(pmacctd_DEPENDENCIES) $(EXTRA_pmacctd_DEPENDENCIES) 
 	@rm -f pmacctd$(EXEEXT)
 	$(AM_V_CCLD)$(LINK) $(pmacctd_OBJECTS) $(pmacctd_LDADD) $(LIBS)
+pmbgpd$(EXEEXT): $(pmbgpd_OBJECTS) $(pmbgpd_DEPENDENCIES) $(EXTRA_pmbgpd_DEPENDENCIES) 
+	@rm -f pmbgpd$(EXEEXT)
+	$(AM_V_CCLD)$(pmbgpd_LINK) $(pmbgpd_OBJECTS) $(pmbgpd_LDADD) $(LIBS)
+pmbmpd$(EXEEXT): $(pmbmpd_OBJECTS) $(pmbmpd_DEPENDENCIES) $(EXTRA_pmbmpd_DEPENDENCIES) 
+	@rm -f pmbmpd$(EXEEXT)
+	$(AM_V_CCLD)$(pmbmpd_LINK) $(pmbmpd_OBJECTS) $(pmbmpd_LDADD) $(LIBS)
 pmtelemetryd$(EXEEXT): $(pmtelemetryd_OBJECTS) $(pmtelemetryd_DEPENDENCIES) $(EXTRA_pmtelemetryd_DEPENDENCIES) 
 	@rm -f pmtelemetryd$(EXEEXT)
 	$(AM_V_CCLD)$(pmtelemetryd_LINK) $(pmtelemetryd_OBJECTS) $(pmtelemetryd_LDADD) $(LIBS)
@@ -620,6 +651,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libdaemons_la-acct.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libdaemons_la-amqp_common.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libdaemons_la-amqp_plugin.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libdaemons_la-base64.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libdaemons_la-bpf_filter.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libdaemons_la-cfg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/libdaemons_la-cfg_handlers.Plo@am__quote@
@@ -662,6 +694,8 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/nfv9_template.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pmacct.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pmacctd.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pmbgpd.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pmbmpd.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pmtelemetryd.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sfacctd.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sfv5_module.Po@am__quote@
@@ -891,6 +925,13 @@ libdaemons_la-nl.lo: nl.c
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='nl.c' object='libdaemons_la-nl.lo' libtool=yes @AMDEPBACKSLASH@
 @AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
 @am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libdaemons_la_CFLAGS) $(CFLAGS) -c -o libdaemons_la-nl.lo `test -f 'nl.c' || echo '$(srcdir)/'`nl.c
+
+libdaemons_la-base64.lo: base64.c
+@am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libdaemons_la_CFLAGS) $(CFLAGS) -MT libdaemons_la-base64.lo -MD -MP -MF $(DEPDIR)/libdaemons_la-base64.Tpo -c -o libdaemons_la-base64.lo `test -f 'base64.c' || echo '$(srcdir)/'`base64.c
+@am__fastdepCC_TRUE@	$(AM_V_at)$(am__mv) $(DEPDIR)/libdaemons_la-base64.Tpo $(DEPDIR)/libdaemons_la-base64.Plo
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	$(AM_V_CC)source='base64.c' object='libdaemons_la-base64.lo' libtool=yes @AMDEPBACKSLASH@
+@AMDEP_TRUE@@am__fastdepCC_FALSE@	DEPDIR=$(DEPDIR) $(CCDEPMODE) $(depcomp) @AMDEPBACKSLASH@
+@am__fastdepCC_FALSE@	$(AM_V_CC@am__nodep@)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libdaemons_la_CFLAGS) $(CFLAGS) -c -o libdaemons_la-base64.lo `test -f 'base64.c' || echo '$(srcdir)/'`base64.c
 
 libdaemons_la-mysql_plugin.lo: mysql_plugin.c
 @am__fastdepCC_TRUE@	$(AM_V_CC)$(LIBTOOL) $(AM_V_lt) --tag=CC $(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=compile $(CC) $(DEFS) $(DEFAULT_INCLUDES) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(libdaemons_la_CFLAGS) $(CFLAGS) -MT libdaemons_la-mysql_plugin.lo -MD -MP -MF $(DEPDIR)/libdaemons_la-mysql_plugin.Tpo -c -o libdaemons_la-mysql_plugin.lo `test -f 'mysql_plugin.c' || echo '$(srcdir)/'`mysql_plugin.c

@@ -1,7 +1,7 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl configuration file for pmacct 
 
-AC_INIT([pmacct], [1.6.0], [paolo@pmacct.net])
+AC_INIT([pmacct], [1.6.1], [paolo@pmacct.net])
 AM_INIT_AUTOMAKE([foreign])
 AC_CONFIG_MACRO_DIR([m4])
 LT_INIT
@@ -508,6 +508,7 @@ dnl Unfortunately, no pkg-config support for MySQL
     PLUGINS="${PLUGINS} mysql"
     USING_SQL="yes"
     USING_MYSQL="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $MYSQL_CFLAGS"
     AC_DEFINE(WITH_MYSQL, 1)
     ;;
   no)
@@ -543,7 +544,10 @@ AC_ARG_ENABLE(pgsql,
 		AC_MSG_RESULT([found in /usr/local/pgsql/lib])
 	else
 		AC_MSG_RESULT([not found])
+		_save_LIBS="$LIBS"
+		LIBS="$LIBS $PGSQL_LIBS"
 		AC_CHECK_LIB([pq], [PQconnectdb], [], [AC_MSG_ERROR([ERROR: missing PQ library. Refer to: http://www.postgresql.org/])])
+		LIBS="$_save_LIBS"
 	fi
 
 	AC_MSG_CHECKING([default locations for libpq-fe.h])
@@ -561,12 +565,16 @@ AC_ARG_ENABLE(pgsql,
 		AC_MSG_RESULT([found in /usr/local/pgsql/include])
 	else
 		AC_MSG_RESULT([not found])
+		_save_CFLAGS="$CFLAGS"
+		CFLAGS="$CFLAGS $PGSQL_CFLAGS"
 		AC_CHECK_HEADER([libpq-fe.h], [], [AC_MSG_ERROR(ERROR: missing PostgreSQL headers)])
+		CFLAGS="$_save_CFLAGS"
 	fi
     ])
     PLUGINS="${PLUGINS} pgsql"
     USING_SQL="yes"
     USING_PGSQL="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $PGSQL_CFLAGS"
     AC_DEFINE(WITH_PGSQL, 1)
     ;;
   no)
@@ -599,9 +607,12 @@ AC_ARG_ENABLE(mongodb,
 		AC_MSG_RESULT([found in /usr/local/lib])
 	else
 		AC_MSG_RESULT([not found])
+                _save_LIBS="$LIBS"
+                LIBS="$LIBS $MONGODB_LIBS"
 		AC_CHECK_LIB([mongoc], [mongo_connect], [], [AC_MSG_ERROR([
 			ERROR: missing MongoDB library (0.8 version). Refer to: https://github.com/mongodb/mongo-c-driver-legacy
 		])])
+                LIBS="$_save_LIBS"
 	fi
 
 	AC_MSG_CHECKING([default locations for mongo.h])
@@ -613,11 +624,15 @@ AC_ARG_ENABLE(mongodb,
 		AC_MSG_RESULT([found in /usr/local/include])
 	else
 		AC_MSG_RESULT([not found])
+                _save_CFLAGS="$CFLAGS"
+                CFLAGS="$CFLAGS $MONGODB_CFLAGS"
 		AC_CHECK_HEADER([mongo.h], [], [AC_MSG_ERROR(ERROR: missing MongoDB headers)])
+                CFLAGS="$_save_CFLAGS"
 	fi
     ])
     PLUGINS="${PLUGINS} mongodb"
     USING_MONGODB="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $MONGODB_CFLAGS"
     AC_DEFINE(WITH_MONGODB, 1)
     ;;
   no)
@@ -641,6 +656,7 @@ AC_ARG_ENABLE(sqlite3,
     PLUGINS="${PLUGINS} sqlite3"
     USING_SQL="yes"
     USING_SQLITE3="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $SQLITE3_CFLAGS"
     AC_DEFINE(WITH_SQLITE3, 1)
     ;;
   no)
@@ -664,6 +680,7 @@ AC_ARG_ENABLE(rabbitmq,
     PKG_CHECK_MODULES([RABBITMQ], [librabbitmq])
     PLUGINS="${PLUGINS} rabbitmq"
     USING_RABBITMQ="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $RABBITMQ_CFLAGS"
     AC_DEFINE(WITH_RABBITMQ, 1)
     ;;
   no)
@@ -697,9 +714,12 @@ AC_ARG_ENABLE(kafka,
 		AC_MSG_RESULT([found in /usr/local/lib])
 	else
 		AC_MSG_RESULT([not found])
+                _save_LIBS="$LIBS"
+                LIBS="$LIBS $KAFKA_LIBS"
 		AC_CHECK_LIB([rdkafka], [rd_kafka_new], [], [AC_MSG_ERROR([
 			ERROR: missing Kafka library. Refer to: https://github.com/edenhill/librdkafka/
 		])])
+                LIBS="$_save_LIBS"
 	fi
 
 	AC_MSG_CHECKING([default locations for rdkafka.h])
@@ -711,11 +731,15 @@ AC_ARG_ENABLE(kafka,
 		AC_MSG_RESULT([found in /usr/local/include])
 	else
 		AC_MSG_RESULT([not found])
+                _save_CFLAGS="$CFLAGS"
+                CFLAGS="$CFLAGS $KAFKA_CFLAGS"
 		AC_CHECK_HEADER([rdkafka.h], [], [AC_MSG_ERROR(ERROR: missing Kafka headers)])
+                CFLAGS="$_save_CFLAGS"
 	fi
     ])
     PLUGINS="${PLUGINS} kafka"
     USING_KAFKA="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $KAFKA_CFLAGS"
     AC_DEFINE(WITH_KAFKA, 1)
     ;;
   no)
@@ -739,6 +763,7 @@ AC_ARG_ENABLE(geoip,
     PKG_CHECK_MODULES([GEOIP], [geoip >= 1.0.0])
     PLUGINS="${PLUGINS} geoip"
     USING_MMGEOIP="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $GEOIP_CFLAGS"
     AC_DEFINE(WITH_GEOIP, 1)
     ;;
   no)
@@ -769,9 +794,12 @@ AC_ARG_ENABLE(geoipv2,
 		AC_MSG_RESULT([found in /usr/local/lib])
 	else
 		AC_MSG_RESULT([not found])
+                _save_LIBS="$LIBS"
+                LIBS="$LIBS $GEOIPV2_LIBS"
 		AC_CHECK_LIB([maxminddb], [MMDB_open], [], [AC_MSG_ERROR([
 			ERROR: missing Maxmind libmaxminddb library. Refer to: http://www.maxmind.com/download/geoip/api/c/
 		])])
+                LIBS="$_save_LIBS"
 	fi
 
 	AC_MSG_CHECKING([default locations for maxminddb.h])
@@ -783,11 +811,15 @@ AC_ARG_ENABLE(geoipv2,
 		AC_MSG_RESULT([found in /usr/local/include])
 	else
 		AC_MSG_RESULT([not found])
+                _save_CFLAGS="$CFLAGS"
+                CFLAGS="$CFLAGS $GEOIPV2_CFLAGS"
 		AC_CHECK_HEADER([maxminddb.h], [], [AC_MSG_ERROR(ERROR: missing Maxmind libmaxminddb headers)])
+                CFLAGS="$_save_CFLAGS"
 	fi
     ])
     PLUGINS="${PLUGINS} geoipv2"
     USING_MMGEOIPV2="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $GEOIPV2_CFLAGS"
     AC_DEFINE(WITH_GEOIPV2, 1)
     ;;
   no)
@@ -811,8 +843,13 @@ AC_ARG_ENABLE(jansson,
     PKG_CHECK_MODULES([JANSSON], [jansson >= 2.2])
     PLUGINS="${PLUGINS} jansson"
     USING_JANSSON="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $JANSSON_CFLAGS"
     AC_DEFINE(WITH_JANSSON, 1)
+    _save_LIBS="$LIBS"
+    LIBS="$LIBS $JANSSON_LIBS"
     AC_CHECK_LIB(jansson, json_object, [], [])
+    AC_CHECK_FUNCS([json_object_update_missing])
+    LIBS="$_save_LIBS"
     ;;
   no)
     AC_MSG_RESULT(no)
@@ -823,6 +860,32 @@ AC_ARG_ENABLE(jansson,
   ]
 )
 dnl finish: Jansson handling
+
+dnl start: Avro handling
+AC_MSG_CHECKING(whether to enable Avro support)
+AC_ARG_ENABLE(avro,
+  [  --enable-avro                    Enable avro support (default: no)],
+  [ case "$enableval" in
+  yes)
+    AC_MSG_RESULT(yes)
+    PKG_CHECK_MODULES([AVRO], [avro-c >= 1.8])
+    USING_AVRO="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $AVRO_CFLAGS"
+    AC_DEFINE(WITH_AVRO, 1)
+    _save_LIBS="$LIBS"
+    LIBS="$LIBS $AVRO_LIBS"
+    AC_CHECK_LIB(avro, avro_record_get, [], [])
+    LIBS="$_save_LIBS"
+    ;;
+  no)
+    AC_MSG_RESULT(no)
+    ;;
+  esac ],
+  [
+    AC_MSG_RESULT(no)
+  ]
+)
+dnl finish: Avro handling
 
 if test x"$USING_DLOPEN" = x"yes"; then
 	AC_DEFINE(HAVE_DLOPEN, 1)
@@ -930,7 +993,7 @@ AC_MSG_RESULT(no))
 dnl Checks for library functions.
 AC_TYPE_SIGNAL
 
-AC_CHECK_FUNCS([strlcpy vsnprintf setproctitle mallopt json_object_update_missing tdestroy])
+AC_CHECK_FUNCS([strlcpy vsnprintf setproctitle mallopt tdestroy])
 
 dnl final checks
 dnl trivial solution to portability issue 
@@ -948,14 +1011,20 @@ PLUGINS ...... : ${PLUGINS}
 
 Now type 'make' to compile the source code.
 
-Are you willing to get in touch with other pmacct users?
-Join the pmacct mailing-list by sending a message to pmacct-discussion-subscribe@pmacct.net
+Wanting to get in touch with other pmacct users?
+Join the pmacct mailing-list with an email to pmacct-discussion-subscribe@pmacct.net
 
 Need for documentation and examples?
-Read the README file or go to http://wiki.pmacct.net/
+Start by reading the README.md file
+
+Star, watch or contribute to the project on GitHub:
+https://github.com/pmacct/pmacct
 
 "
+
 AC_SUBST([EXTRABIN])
+AC_SUBST([PMACCT_CFLAGS])
+
 AM_CONDITIONAL([WITH_MYSQL], [test x"$USING_MYSQL" = x"yes"])
 AM_CONDITIONAL([WITH_PGSQL], [test x"$USING_PGSQL" = x"yes"])
 AM_CONDITIONAL([WITH_MONGODB], [test x"$USING_MONGODB" = x"yes"])
@@ -965,6 +1034,7 @@ AM_CONDITIONAL([WITH_KAFKA], [test x"$USING_KAFKA" = x"yes"])
 AM_CONDITIONAL([USING_SQL], [test x"$USING_SQL" = x"yes"])
 AM_CONDITIONAL([USING_THREADPOOL], [test x"$USING_THREADPOOL" = x"yes"])
 AM_CONDITIONAL([WITH_NFLOG], [test x"$USING_NFLOG" = x"yes"])
+AM_CONDITIONAL([WITH_AVRO], [test x"$USING_AVRO" = x"yes"])
 AC_OUTPUT([ Makefile \
 	    src/Makefile src/nfprobe_plugin/Makefile \
 	    src/sfprobe_plugin/Makefile src/bgp/Makefile \

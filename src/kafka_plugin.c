@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -29,6 +29,9 @@
 #include "kafka_plugin.h"
 #ifndef WITH_JANSSON
 #error "--enable-kafka requires --enable-jansson"
+#endif
+#ifdef WITH_AVRO
+#include <avro.h>
 #endif
 
 /* Functions */
@@ -73,6 +76,37 @@ void kafka_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   memset(pipebuf, 0, config.buffer_size);
 
   timeout = config.sql_refresh_time*1000;
+
+  if (!config.message_broker_output) config.message_broker_output = PRINT_OUTPUT_JSON;
+
+  if (config.message_broker_output & PRINT_OUTPUT_AVRO) {
+#ifdef WITH_AVRO
+    Log(LOG_INFO, "INFO ( %s/%s ): AVRO: building schema.\n", config.name, config.type);
+    avro_acct_schema = build_avro_schema(config.what_to_count, config.what_to_count_2);
+
+    if (config.avro_schema_output_file) {
+      FILE *avro_fp = open_output_file(config.avro_schema_output_file, "w", TRUE);
+      avro_writer_t avro_schema_writer = avro_writer_file(avro_fp);
+
+      if (avro_schema_to_json(avro_acct_schema, avro_schema_writer)) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: unable to dump schema: %s\n",
+            config.name, config.type, avro_strerror());
+        exit_plugin(EXIT_FAILURE);
+      }
+
+      close_output_file(avro_fp);
+    }
+
+    if (!config.avro_buffer_size) config.avro_buffer_size = LARGEBUFLEN;
+
+    avro_buf = malloc(config.avro_buffer_size);
+
+    if (!avro_buf) {
+      Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (avro_buf). Exiting ..\n", config.name, config.type);
+      exit_plugin(EXIT_FAILURE);
+    }
+#endif
+  }
 
   if ((config.sql_table && strchr(config.sql_table, '$')) && config.sql_multi_values) {
     Log(LOG_ERR, "ERROR ( %s/%s ): dynamic 'kafka_topic' is not compatible with 'kafka_multi_values'. Exiting.\n", config.name, config.type);
@@ -214,6 +248,8 @@ void kafka_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
               Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
                         config.name, config.type);
             }
+
+	    rg->ptr = (rg->base + status->last_buf_off);
             seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
           }
         }
@@ -238,8 +274,9 @@ void kafka_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
       if (config.debug_internal_msg) 
-        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u seq=%u num_entries=%u\n",
-                config.name, config.type, core_pid, seq, ((struct ch_buf_hdr *)pipebuf)->num);
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u len=%llu seq=%u num_entries=%u\n",
+                config.name, config.type, core_pid, ((struct ch_buf_hdr *)pipebuf)->len,
+                seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
       if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
       while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
@@ -299,6 +336,11 @@ void kafka_cache_purge(struct chained_cache *queue[], int index)
   json_t *array = json_array();
 #endif
 
+#ifdef WITH_AVRO
+  avro_writer_t avro_writer;
+  int avro_buffer_full = FALSE;
+#endif
+
   p_kafka_init_host(&kafkap_kafka_host);
 
   /* setting some defaults */
@@ -336,6 +378,7 @@ void kafka_cache_purge(struct chained_cache *queue[], int index)
   p_kafka_set_broker(&kafkap_kafka_host, config.sql_host, config.kafka_broker_port);
   p_kafka_set_topic(&kafkap_kafka_host, config.sql_table);
   p_kafka_set_partition(&kafkap_kafka_host, config.kafka_partition);
+  p_kafka_set_key(&kafkap_kafka_host, config.kafka_partition_key, config.kafka_partition_keylen);
   p_kafka_set_content_type(&kafkap_kafka_host, PM_KAFKA_CNT_TYPE_STR);
 
   for (j = 0, stop = 0; (!stop) && P_preprocess_funcs[j]; j++)
@@ -343,6 +386,29 @@ void kafka_cache_purge(struct chained_cache *queue[], int index)
 
   Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - START (PID: %u) ***\n", config.name, config.type, writer_pid);
   start = time(NULL);
+
+  if (config.print_markers) {
+    if (config.message_broker_output & PRINT_OUTPUT_JSON) {
+      void *json_obj;
+      char *json_str;
+
+      json_obj = compose_purge_init_json(writer_pid);
+      if (json_obj) json_str = compose_json_str(json_obj);
+      if (json_str) {
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
+        ret = p_kafka_produce_data(&kafkap_kafka_host, json_str, strlen(json_str));
+
+        free(json_str);
+        json_str = NULL;
+      }
+    }
+  }
+
+#ifdef WITH_AVRO
+  if (config.message_broker_output & PRINT_OUTPUT_AVRO) {
+    avro_writer = avro_writer_memory(avro_buf, config.avro_buffer_size);
+  }
+#endif
 
   for (j = 0; j < index; j++) {
     void *json_obj;
@@ -368,90 +434,184 @@ void kafka_cache_purge(struct chained_cache *queue[], int index)
 
     if (queue[j]->valid == PRINT_CACHE_FREE) continue;
 
-    json_obj = compose_json(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
-                         &queue[j]->primitives, pbgp, pnat, pmpls, pcust, pvlen, queue[j]->bytes_counter,
-			 queue[j]->packet_counter, queue[j]->flow_counter, queue[j]->tcp_flags,
-			 &queue[j]->basetime, queue[j]->stitch);
+    if (config.message_broker_output & PRINT_OUTPUT_JSON) {
+      json_obj = compose_json(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
+                           &queue[j]->primitives, pbgp, pnat, pmpls, pcust, pvlen, queue[j]->bytes_counter,
+                           queue[j]->packet_counter, queue[j]->flow_counter, queue[j]->tcp_flags,
+                           &queue[j]->basetime, queue[j]->stitch);
 
-    json_str = compose_json_str(json_obj);
+      json_str = compose_json_str(json_obj);
+    }
+    else if (config.message_broker_output & PRINT_OUTPUT_AVRO) {
+#ifdef WITH_AVRO
+      avro_value_iface_t *avro_iface = avro_generic_class_from_schema(avro_acct_schema);
+      avro_value_t avro_value = compose_avro(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
+                           &queue[j]->primitives, pbgp, pnat, pmpls, pcust, pvlen, queue[j]->bytes_counter,
+                           queue[j]->packet_counter, queue[j]->flow_counter, queue[j]->tcp_flags,
+                           &queue[j]->basetime, queue[j]->stitch, avro_iface);
+      size_t avro_value_size;
 
+      avro_value_sizeof(&avro_value, &avro_value_size);
+
+      if (avro_value_size > config.avro_buffer_size) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: insufficient buffer size (avro_buffer_size=%u)\n",
+            config.name, config.type, config.avro_buffer_size);
+        Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: increase value or look for avro_buffer_size in CONFIG-KEYS document.\n\n",
+            config.name, config.type);
+        exit_plugin(EXIT_FAILURE);
+      }
+      else if (avro_value_size >= (config.avro_buffer_size - avro_writer_tell(avro_writer))) {
+        avro_buffer_full = TRUE;
+        j--;
+      }
+      else if (avro_value_write(avro_writer, &avro_value)) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: unable to write value: %s\n",
+            config.name, config.type, avro_strerror());
+        exit_plugin(EXIT_FAILURE);
+      }
+      else {
+        mv_num++;
+      }
+
+      avro_value_decref(&avro_value);
+      avro_value_iface_decref(avro_iface);
+#else
+      if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): compose_avro(): AVRO object not created due to missing --enable-avro\n", config.name, config.type);
+#endif
+    }
+
+    if (config.message_broker_output & PRINT_OUTPUT_JSON) {
 #ifdef WITH_JANSSON
-    if (json_str && config.sql_multi_values) {
-      json_t *elem = NULL;
-      char *tmp_str = json_str;
-      int do_free = FALSE;
+      if (json_str && config.sql_multi_values) {
+        json_t *elem = NULL;
+        char *tmp_str = json_str;
+        int do_free = FALSE;
 
-      if (json_array_size(array) >= config.sql_multi_values) {
-	json_str = json_dumps(array, 0);
-	json_array_clear(array);
+        if (json_array_size(array) >= config.sql_multi_values) {
+          json_str = json_dumps(array, JSON_PRESERVE_ORDER);
+          json_array_clear(array);
+          mv_num_save = mv_num;
+          mv_num = 0;
+        }
+        else do_free = TRUE;
+
+        elem = json_loads(tmp_str, 0, NULL);
+        json_array_append_new(array, elem);
+        mv_num++;
+
+        if (do_free) {
+          free(json_str);
+          json_str = NULL;
+        }
+      }
+#endif
+
+      if (json_str) {
+        if (is_topic_dyn) {
+          P_handle_table_dyn_strings(dyn_kafka_topic, SRVBUFLEN, orig_kafka_topic, queue[j]);
+          p_kafka_set_topic(&kafkap_kafka_host, dyn_kafka_topic);
+        }
+
+        if (config.amqp_routing_key_rr) {
+          P_handle_table_dyn_rr(dyn_kafka_topic, SRVBUFLEN, orig_kafka_topic, &kafkap_kafka_host.topic_rr);
+          p_kafka_set_topic(&kafkap_kafka_host, dyn_kafka_topic);
+        }
+
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
+        ret = p_kafka_produce_data(&kafkap_kafka_host, json_str, strlen(json_str));
+
+        free(json_str);
+        json_str = NULL;
+
+        if (!ret) {
+          if (!config.sql_multi_values) qn++;
+          else qn += mv_num_save;
+        }
+        else break;
+      }
+    }
+    else if (config.message_broker_output & PRINT_OUTPUT_AVRO) {
+#ifdef WITH_AVRO
+      if (!config.sql_multi_values || (mv_num >= config.sql_multi_values) || avro_buffer_full) {
+        if (is_topic_dyn) {
+          P_handle_table_dyn_strings(dyn_kafka_topic, SRVBUFLEN, orig_kafka_topic, queue[j]);
+          p_kafka_set_topic(&kafkap_kafka_host, dyn_kafka_topic);
+        }
+
+        if (config.amqp_routing_key_rr) {
+          P_handle_table_dyn_rr(dyn_kafka_topic, SRVBUFLEN, orig_kafka_topic, &kafkap_kafka_host.topic_rr);
+          p_kafka_set_topic(&kafkap_kafka_host, dyn_kafka_topic);
+        }
+
+        ret = p_kafka_produce_data(&kafkap_kafka_host, avro_buf, avro_writer_tell(avro_writer));
+        avro_writer_reset(avro_writer);
+        avro_buffer_full = FALSE;
         mv_num_save = mv_num;
         mv_num = 0;
+
+        if (!ret) qn += mv_num_save;
+        else break;
       }
-      else do_free = TRUE;
+#endif
+    }
+  }
 
-      elem = json_loads(tmp_str, 0, NULL);
-      json_array_append_new(array, elem);
-      mv_num++;
+  if (config.sql_multi_values) {
+    if (config.message_broker_output & PRINT_OUTPUT_JSON) {
+#ifdef WITH_JANSSON
+      if (json_array_size(array)) {
+	char *json_str;
 
-      if (do_free) {
+	json_str = json_dumps(array, JSON_PRESERVE_ORDER);
+	json_array_clear(array);
+	json_decref(array);
+
+	if (json_str) {
+	  /* no handling of dyn routing keys here: not compatible */
+	  Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
+	  ret = p_kafka_produce_data(&kafkap_kafka_host, json_str, strlen(json_str));
+
+	  free(json_str);
+	  json_str = NULL;
+
+	  if (!ret) qn += mv_num;
+	}
+      }
+#endif
+    }
+    else if (config.message_broker_output & PRINT_OUTPUT_AVRO) {
+#ifdef WITH_AVRO
+      if (avro_writer_tell(avro_writer)) {
+        ret = p_kafka_produce_data(&kafkap_kafka_host, avro_buf, avro_writer_tell(avro_writer));
+        avro_writer_free(avro_writer);
+
+        if (!ret) qn += mv_num;
+      }
+#endif
+    }
+  }
+
+  duration = time(NULL)-start;
+
+  if (config.print_markers) {
+    if (config.message_broker_output & PRINT_OUTPUT_JSON) {
+      void *json_obj;
+      char *json_str;
+
+      json_obj = compose_purge_close_json(writer_pid, qn, saved_index, duration);
+      if (json_obj) json_str = compose_json_str(json_obj);
+      if (json_str) {
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
+        ret = p_kafka_produce_data(&kafkap_kafka_host, json_str, strlen(json_str));
+
         free(json_str);
         json_str = NULL;
       }
     }
-#endif
-
-    if (json_str) {
-      if (is_topic_dyn) {
-	P_handle_table_dyn_strings(dyn_kafka_topic, SRVBUFLEN, orig_kafka_topic, queue[j]);
-	p_kafka_set_topic(&kafkap_kafka_host, dyn_kafka_topic);
-      }
-
-      if (config.amqp_routing_key_rr) {
-        P_handle_table_dyn_rr(dyn_kafka_topic, SRVBUFLEN, orig_kafka_topic, &kafkap_kafka_host.topic_rr);
-	p_kafka_set_topic(&kafkap_kafka_host, dyn_kafka_topic);
-      }
-
-      Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
-      ret = p_kafka_produce_data(&kafkap_kafka_host, json_str, strlen(json_str));
-
-      free(json_str);
-      json_str = NULL;
-
-      if (!ret) {
-	if (!config.sql_multi_values) qn++;
-	else qn += mv_num_save;
-      }
-      else break;
-    }
   }
 
-#ifdef WITH_JANSSON
-  if (config.sql_multi_values && json_array_size(array)) {
-    char *json_str;
+  p_kafka_close(&kafkap_kafka_host, FALSE);
 
-    json_str = json_dumps(array, 0);
-    json_array_clear(array);
-    json_decref(array);
-
-    if (json_str) {
-      /* no handling of dyn routing keys here: not compatible */
-      Log(LOG_DEBUG, "DEBUG ( %s/%s ): %s\n\n", config.name, config.type, json_str);
-      ret = p_kafka_produce_data(&kafkap_kafka_host, json_str, strlen(json_str));
-
-      free(json_str);
-      json_str = NULL;
-
-      if (!ret) qn += mv_num;
-    }
-  }
-#endif
-
-  ret = p_kafka_check_outq_len(&kafkap_kafka_host);
-
-  if (!ret) p_kafka_close(&kafkap_kafka_host, FALSE);
-  else qn -= ret;
-
-  duration = time(NULL)-start;
   Log(LOG_INFO, "INFO ( %s/%s ): *** Purging cache - END (PID: %u, QN: %u/%u, ET: %u) ***\n",
 		config.name, config.type, writer_pid, qn, saved_index, duration);
 

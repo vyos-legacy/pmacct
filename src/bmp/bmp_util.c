@@ -126,8 +126,6 @@ void bmp_link_misc_structs(struct bgp_misc_structs *bms)
   bms->msglog_kafka_topic_rr = config.nfacctd_bmp_msglog_kafka_topic_rr;
   bms->peer_str = malloc(strlen("bmp_router") + 1);
   strcpy(bms->peer_str, "bmp_router");
-  bms->log_thread_str = malloc(strlen("BMP") + 1);
-  strcpy(bms->log_thread_str, "BMP");
   bms->bgp_peer_log_msg_extras = bgp_peer_log_msg_extras_bmp;
 
   bms->table_peer_buckets = config.bmp_table_peer_buckets;
@@ -202,15 +200,19 @@ void bmp_bmpp_bgp_peers_free(void *a)
 
 void bmp_bmpp_bgp_peers_walk_print(const void *nodep, const VISIT which, const int depth)
 {
+  struct bgp_misc_structs *bms;
   struct bgp_peer *peer;
   char peer_str[INET6_ADDRSTRLEN];
 
   peer = (*(struct bgp_peer **) nodep);
+  bms = bgp_select_misc_db(peer->type);
 
-  if (!peer) Log(LOG_INFO, "INFO ( %s/core/BMP ): bmp_bmpp_bgp_peers_walk_print(): null\n", config.name);
+  if (!bms) return;
+
+  if (!peer) Log(LOG_INFO, "INFO ( %s/%s ): bmp_bmpp_bgp_peers_walk_print(): null\n", config.name, bms->log_str);
   else {
     addr_to_str(peer_str, &peer->addr);
-    Log(LOG_INFO, "INFO ( %s/core/BMP ): bmp_bmpp_bgp_peers_walk_print(): %s\n", config.name, peer_str);
+    Log(LOG_INFO, "INFO ( %s/%s ): bmp_bmpp_bgp_peers_walk_print(): %s\n", config.name, bms->log_str, peer_str);
   }
 }
 

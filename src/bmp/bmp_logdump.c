@@ -34,7 +34,7 @@
 #include "kafka_common.h"
 #endif
 
-int bmp_log_msg(struct bgp_peer *peer, struct bmp_data *bdata, void *log_data, char *event_type, int output, int log_type)
+int bmp_log_msg(struct bgp_peer *peer, struct bmp_data *bdata, void *log_data, u_int64_t log_seq, char *event_type, int output, int log_type)
 {
   struct bgp_misc_structs *bms = bgp_select_misc_db(FUNC_TYPE_BMP);
   int ret = 0, amqp_ret = 0, kafka_ret = 0, etype = BGP_LOGDUMP_ET_NONE;
@@ -65,18 +65,26 @@ int bmp_log_msg(struct bgp_peer *peer, struct bmp_data *bdata, void *log_data, c
     json_object_update_missing(obj, kv);
     json_decref(kv);
 
-    /* no need for seq for "dump" event_type */
-    if (etype == BGP_LOGDUMP_ET_LOG) {
-      kv = json_pack("{sI}", "seq", (json_int_t)bms->log_seq);
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
-      bgp_peer_log_seq_increment(&bms->log_seq);
-    }
-
-    compose_timestamp(tstamp_str, SRVBUFLEN, &bdata->tstamp, TRUE, config.timestamps_since_epoch);
-    kv = json_pack("{ss}", "timestamp", tstamp_str);
+    kv = json_pack("{sI}", "seq", (json_int_t)log_seq);
     json_object_update_missing(obj, kv);
     json_decref(kv);
+
+    if (etype == BGP_LOGDUMP_ET_LOG) {
+      compose_timestamp(tstamp_str, SRVBUFLEN, &bdata->tstamp, TRUE, config.timestamps_since_epoch);
+      kv = json_pack("{ss}", "timestamp", tstamp_str);
+      json_object_update_missing(obj, kv);
+      json_decref(kv);
+    }
+    else if (etype == BGP_LOGDUMP_ET_DUMP) {
+      kv = json_pack("{ss}", "timestamp", bms->dump.tstamp_str);
+      json_object_update_missing(obj, kv);
+      json_decref(kv);
+
+      compose_timestamp(tstamp_str, SRVBUFLEN, &bdata->tstamp, TRUE, config.timestamps_since_epoch);
+      kv = json_pack("{ss}", "event_timestamp", tstamp_str);
+      json_object_update_missing(obj, kv);
+      json_decref(kv);
+    }
 
     kv = json_pack("{ss}", "bmp_router", peer->addr_str);
     json_object_update_missing(obj, kv);
@@ -359,7 +367,7 @@ void bmp_dump_init_peer(struct bgp_peer *peer)
 
   peer->bmp_se = malloc(sizeof(struct bmp_dump_se_ll));
   if (!peer->bmp_se) {
-    Log(LOG_ERR, "ERROR ( %s/core/%s ): Unable to malloc() bmp_se structure. Terminating thread.\n", config.name, bms->log_thread_str);
+    Log(LOG_ERR, "ERROR ( %s/%s ): Unable to malloc() bmp_se structure. Terminating thread.\n", config.name, bms->log_str);
     exit_all(1);
   }
 
@@ -382,6 +390,7 @@ void bmp_dump_close_peer(struct bgp_peer *peer)
 
 void bmp_dump_se_ll_append(struct bgp_peer *peer, struct bmp_data *bdata, void *extra, int log_type)
 {
+  struct bgp_misc_structs *bms = bgp_select_misc_db(FUNC_TYPE_BMP);
   struct bmp_dump_se_ll *se_ll;
   struct bmp_dump_se_ll_elem *se_ll_elem;
 
@@ -391,7 +400,7 @@ void bmp_dump_se_ll_append(struct bgp_peer *peer, struct bmp_data *bdata, void *
 
   se_ll_elem = malloc(sizeof(struct bmp_dump_se_ll_elem));
   if (!se_ll_elem) {
-    Log(LOG_ERR, "ERROR ( %s/core/BMP ): Unable to malloc() se_ll_elem structure. Terminating thread.\n", config.name);
+    Log(LOG_ERR, "ERROR ( %s/%s ): Unable to malloc() se_ll_elem structure. Terminating thread.\n", config.name, bms->log_str);
     exit_all(1);
   }
 
@@ -420,6 +429,7 @@ void bmp_dump_se_ll_append(struct bgp_peer *peer, struct bmp_data *bdata, void *
     }
   }
 
+  se_ll_elem->rec.seq = bms->log_seq;;
   se_ll_elem->rec.se_type = log_type;
   se_ll_elem->next = NULL; /* pedantic */
 
@@ -510,7 +520,7 @@ void bmp_handle_dump_event()
 #endif
 
     dumper_pid = getpid();
-    Log(LOG_INFO, "INFO ( %s/core/BMP ): *** Dumping BMP tables - START (PID: %u) ***\n", config.name, dumper_pid);
+    Log(LOG_INFO, "INFO ( %s/%s ): *** Dumping BMP tables - START (PID: %u) ***\n", config.name, bms->log_str, dumper_pid);
     start = time(NULL);
     tables_num = 0;
 
@@ -525,7 +535,7 @@ void bmp_handle_dump_event()
         if (config.bmp_dump_amqp_routing_key) bgp_peer_log_dynname(current_filename, SRVBUFLEN, config.bmp_dump_amqp_routing_key, peer);
         if (config.bmp_dump_kafka_topic) bgp_peer_log_dynname(current_filename, SRVBUFLEN, config.bmp_dump_kafka_topic, peer);
 
-        strftime_same(current_filename, SRVBUFLEN, tmpbuf, &bms->log_tstamp.tv_sec);
+        strftime_same(current_filename, SRVBUFLEN, tmpbuf, &bms->dump.tstamp.tv_sec);
 
         /*
 	  we close last_filename and open current_filename in case they differ;
@@ -545,7 +555,7 @@ void bmp_handle_dump_event()
             peer->log->fd = open_output_file(current_filename, "w", TRUE);
             if (fd_buf) {
               if (setvbuf(peer->log->fd, fd_buf, _IOFBF, OUTPUT_FILE_BUFSZ))
-		Log(LOG_WARNING, "WARN ( %s/core/BMP ): [%s] setvbuf() failed: %s\n", config.name, current_filename, errno);
+		Log(LOG_WARNING, "WARN ( %s/%s ): [%s] setvbuf() failed: %s\n", config.name, bms->log_str, current_filename, errno);
               else memset(fd_buf, 0, OUTPUT_FILE_BUFSZ);
             }
           }
@@ -613,19 +623,19 @@ void bmp_handle_dump_event()
 	  for (se_ll_elem = bdsell->start; se_ll_elem; se_ll_elem = se_ll_elem->next) {
 	    switch (se_ll_elem->rec.se_type) {
 	    case BMP_LOG_TYPE_STATS:
-	      bmp_log_msg(peer, &se_ll_elem->rec.bdata, &se_ll_elem->rec.se.stats, event_type, config.bmp_dump_output, BMP_LOG_TYPE_STATS);
+	      bmp_log_msg(peer, &se_ll_elem->rec.bdata, &se_ll_elem->rec.se.stats, se_ll_elem->rec.seq, event_type, config.bmp_dump_output, BMP_LOG_TYPE_STATS);
 	      break;
 	    case BMP_LOG_TYPE_INIT:
-	      bmp_log_msg(peer, &se_ll_elem->rec.bdata, &se_ll_elem->rec.se.init, event_type, config.bmp_dump_output, BMP_LOG_TYPE_INIT);
+	      bmp_log_msg(peer, &se_ll_elem->rec.bdata, &se_ll_elem->rec.se.init, se_ll_elem->rec.seq, event_type, config.bmp_dump_output, BMP_LOG_TYPE_INIT);
 	      break;
 	    case BMP_LOG_TYPE_TERM:
-	      bmp_log_msg(peer, &se_ll_elem->rec.bdata, &se_ll_elem->rec.se.term, event_type, config.bmp_dump_output, BMP_LOG_TYPE_TERM);
+	      bmp_log_msg(peer, &se_ll_elem->rec.bdata, &se_ll_elem->rec.se.term, se_ll_elem->rec.seq, event_type, config.bmp_dump_output, BMP_LOG_TYPE_TERM);
 	      break;
 	    case BMP_LOG_TYPE_PEER_UP:
-	      bmp_log_msg(peer, &se_ll_elem->rec.bdata, &se_ll_elem->rec.se.peer_up, event_type, config.bmp_dump_output, BMP_LOG_TYPE_PEER_UP);
+	      bmp_log_msg(peer, &se_ll_elem->rec.bdata, &se_ll_elem->rec.se.peer_up, se_ll_elem->rec.seq, event_type, config.bmp_dump_output, BMP_LOG_TYPE_PEER_UP);
 	      break;
 	    case BMP_LOG_TYPE_PEER_DOWN:
-	      bmp_log_msg(peer, &se_ll_elem->rec.bdata, &se_ll_elem->rec.se.peer_down, event_type, config.bmp_dump_output, BMP_LOG_TYPE_PEER_DOWN);
+	      bmp_log_msg(peer, &se_ll_elem->rec.bdata, &se_ll_elem->rec.se.peer_down, se_ll_elem->rec.seq, event_type, config.bmp_dump_output, BMP_LOG_TYPE_PEER_DOWN);
 	      break;
 	    default:
 	      break;
@@ -657,13 +667,14 @@ void bmp_handle_dump_event()
     }
 
     duration = time(NULL)-start;
-    Log(LOG_INFO, "INFO ( %s/core/BMP ): *** Dumping BMP tables - END (PID: %u, TABLES: %u ET: %u) ***\n",
-                config.name, dumper_pid, tables_num, duration);
+    Log(LOG_INFO, "INFO ( %s/%s ): *** Dumping BMP tables - END (PID: %u, TABLES: %u ET: %u) ***\n",
+                config.name, bms->log_str, dumper_pid, tables_num, duration);
 
     exit(0);
   default: /* Parent */
     if (ret == -1) { /* Something went wrong */
-      Log(LOG_WARNING, "WARN ( %s/core/BMP ): Unable to fork BMP table dump writer: %s\n", config.name, strerror(errno));
+      Log(LOG_WARNING, "WARN ( %s/%s ): Unable to fork BMP table dump writer: %s\n",
+		config.name, bms->log_str, strerror(errno));
     }
 
     /* destroy bmp_se linked-list content after dump event */
@@ -756,6 +767,7 @@ int bmp_daemon_msglog_init_kafka_host()
   p_kafka_set_broker(&bmp_daemon_msglog_kafka_host, config.nfacctd_bmp_msglog_kafka_broker_host, config.nfacctd_bmp_msglog_kafka_broker_port);
   p_kafka_set_topic(&bmp_daemon_msglog_kafka_host, config.nfacctd_bmp_msglog_kafka_topic);
   p_kafka_set_partition(&bmp_daemon_msglog_kafka_host, config.nfacctd_bmp_msglog_kafka_partition);
+  p_kafka_set_key(&bmp_daemon_msglog_kafka_host, config.nfacctd_bmp_msglog_kafka_partition_key, config.nfacctd_bmp_msglog_kafka_partition_keylen);
   p_kafka_set_content_type(&bmp_daemon_msglog_kafka_host, PM_KAFKA_CNT_TYPE_STR);
   P_broker_timers_set_retry_interval(&bmp_daemon_msglog_kafka_host.btimers, config.nfacctd_bmp_msglog_kafka_retry);
 
@@ -782,6 +794,7 @@ int bmp_dump_init_kafka_host()
   p_kafka_set_broker(&bmp_dump_kafka_host, config.bmp_dump_kafka_broker_host, config.bmp_dump_kafka_broker_port);
   p_kafka_set_topic(&bmp_dump_kafka_host, config.bmp_dump_kafka_topic);
   p_kafka_set_partition(&bmp_dump_kafka_host, config.bmp_dump_kafka_partition);
+  p_kafka_set_key(&bmp_dump_kafka_host, config.bmp_dump_kafka_partition_key, config.bmp_dump_kafka_partition_keylen);
   p_kafka_set_content_type(&bmp_dump_kafka_host, PM_KAFKA_CNT_TYPE_STR);
 
   return ret;

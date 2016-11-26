@@ -426,7 +426,7 @@ int sql_cache_flush_pending(struct db_cache *queue[], int index, struct insert_d
             Cursor->lru_next = NULL;
 
 	    /* unlinking pointers from PendingElem to prevent free-up (linked by Cursor) */
-	    PendingElem->cbgp = NULL;
+	    PendingElem->pbgp = NULL;
 	    PendingElem->pnat = NULL;
 	    PendingElem->pmpls = NULL;
 	    PendingElem->pcust = NULL;
@@ -437,7 +437,7 @@ int sql_cache_flush_pending(struct db_cache *queue[], int index, struct insert_d
             queue[j] = Cursor;
 
 	    /* freeing stale allocations */
-	    if (SavedCursor.cbgp) free_cache_bgp_primitives(&SavedCursor.cbgp);
+	    if (SavedCursor.pbgp) free(SavedCursor.pbgp);
 	    if (SavedCursor.pnat) free(SavedCursor.pnat);
 	    if (SavedCursor.pmpls) free(SavedCursor.pmpls);
 	    if (SavedCursor.pcust) free(SavedCursor.pcust);
@@ -547,13 +547,9 @@ struct db_cache *sql_cache_search(struct primitives_ptrs *prim_ptrs, time_t base
     if (Cursor->valid == SQL_CACHE_INUSE) {
       /* checks: pkt_primitives and pkt_bgp_primitives */
       res_data = memcmp(&Cursor->primitives, data, sizeof(struct pkt_primitives));
-      if (pbgp) {
-	if (Cursor->cbgp) {
-	  struct pkt_bgp_primitives tmp_pbgp;
 
-	  cache_to_pkt_bgp_primitives(&tmp_pbgp, Cursor->cbgp);
-	  res_bgp = memcmp(&tmp_pbgp, pbgp, sizeof(struct pkt_bgp_primitives));
-	}
+      if (pbgp && Cursor->pbgp) {
+        res_bgp = memcmp(Cursor->pbgp, pbgp, sizeof(struct pkt_bgp_primitives));
       }
       else res_bgp = FALSE;
 
@@ -601,7 +597,6 @@ void sql_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
   time_t basetime = idata->basetime, timeslot = idata->timeslot;
   struct pkt_primitives *srcdst = &data->primitives;
   struct db_cache *Cursor, *newElem, *SafePtr = NULL, *staleElem = NULL;
-  unsigned int cb_size = sizeof(struct cache_bgp_primitives);
   int ret, insert_status;
 
   /* pro_rating vars */
@@ -731,13 +726,8 @@ void sql_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
       /* checks: pkt_primitives and pkt_bgp_primitives */
       res_data = memcmp(&Cursor->primitives, srcdst, sizeof(struct pkt_primitives));
 
-      if (pbgp) {
-        if (Cursor->cbgp) {
-	  struct pkt_bgp_primitives tmp_pbgp;
-
-	  cache_to_pkt_bgp_primitives(&tmp_pbgp, Cursor->cbgp);
-	  res_bgp = memcmp(&tmp_pbgp, pbgp, sizeof(struct pkt_bgp_primitives));
-	}
+      if (pbgp && Cursor->pbgp) {
+        res_bgp = memcmp(Cursor->pbgp, pbgp, sizeof(struct pkt_bgp_primitives));
       }
       else res_bgp = FALSE;
 
@@ -786,19 +776,17 @@ void sql_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
     memcpy(&Cursor->primitives, srcdst, sizeof(struct pkt_primitives));
   
     if (pbgp) {
-      /* releasing stale information and starting from scratch */
-      if (!Cursor->cbgp) {
-        Cursor->cbgp = (struct cache_bgp_primitives *) malloc(cb_size);
-        if (!Cursor->cbgp) goto safe_action;
-        memset(Cursor->cbgp, 0, cb_size);
+      if (!Cursor->pbgp) {
+        Cursor->pbgp = (struct pkt_bgp_primitives *) malloc(pb_size);
+        if (!Cursor->pbgp) goto safe_action;
       }
-  
-      pkt_to_cache_bgp_primitives(Cursor->cbgp, pbgp, config.what_to_count);
+      memcpy(Cursor->pbgp, pbgp, pb_size);
     }
     else {
-      if (Cursor->cbgp) free_cache_bgp_primitives(&Cursor->cbgp);
+      if (Cursor->pbgp) free(Cursor->pbgp);
+      Cursor->pbgp = NULL;
     }
-  
+
     if (pnat) {
       if (!Cursor->pnat) {
         Cursor->pnat = (struct pkt_nat_primitives *) malloc(pn_size);
@@ -1644,7 +1632,7 @@ int sql_evaluate_primitives(int primitive)
     primitive++;
   }
 
-  if (what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM)) {
+  if (what_to_count & COUNT_STD_COMM) {
     int count_it = FALSE;
 
     if ((config.sql_table_version < SQL_TABLE_VERSION_BGP) && !assume_custom_table) {
@@ -1662,19 +1650,45 @@ int sql_evaluate_primitives(int primitive)
       strncat(insert_clause, "comms", SPACELEFT(insert_clause));
       strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
       strncat(where[primitive].string, "comms=\'%s\'", SPACELEFT(where[primitive].string));
-      if (what_to_count & COUNT_STD_COMM) {
-        values[primitive].type = where[primitive].type = COUNT_INT_STD_COMM;
-        values[primitive].handler = where[primitive].handler = count_std_comm_handler;
-      }
-      else if (what_to_count & COUNT_EXT_COMM) {
-        values[primitive].type = where[primitive].type = COUNT_INT_EXT_COMM;
-        values[primitive].handler = where[primitive].handler = count_ext_comm_handler;
-      }
+      values[primitive].type = where[primitive].type = COUNT_INT_STD_COMM;
+      values[primitive].handler = where[primitive].handler = count_std_comm_handler;
       primitive++;
     }
   }
 
-  if (what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM)) {
+  if (what_to_count & COUNT_EXT_COMM) {
+    int count_it = FALSE;
+
+    if ((config.sql_table_version < SQL_TABLE_VERSION_BGP) && !assume_custom_table) {
+      Log(LOG_ERR, "ERROR ( %s/%s ): BGP accounting not supported for selected sql_table_version/_type. Read about SQL table versioning or consider using sql_optimize_clauses.\n", config.name, config.type);
+      exit_plugin(1);
+    }
+    else count_it = TRUE;
+
+    if (count_it) {
+      if (primitive) {
+        strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+        strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+        strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
+      }
+
+      if (!config.tmp_comms_same_field) {
+        strncat(insert_clause, "ecomms", SPACELEFT(insert_clause));
+        strncat(where[primitive].string, "ecomms=\'%s\'", SPACELEFT(where[primitive].string));
+      }
+      else {
+        strncat(insert_clause, "comms", SPACELEFT(insert_clause));
+        strncat(where[primitive].string, "comms=\'%s\'", SPACELEFT(where[primitive].string));
+      }
+
+      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_INT_EXT_COMM;
+      values[primitive].handler = where[primitive].handler = count_ext_comm_handler;
+      primitive++;
+    }
+  }
+
+  if (what_to_count & COUNT_SRC_STD_COMM) {
     if (primitive) {
       strncat(insert_clause, ", ", SPACELEFT(insert_clause));
       strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
@@ -1683,14 +1697,28 @@ int sql_evaluate_primitives(int primitive)
     strncat(insert_clause, "comms_src", SPACELEFT(insert_clause));
     strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
     strncat(where[primitive].string, "comms_src=\'%s\'", SPACELEFT(where[primitive].string));
-    if (what_to_count & COUNT_SRC_STD_COMM) {
-      values[primitive].type = where[primitive].type = COUNT_INT_SRC_STD_COMM;
-      values[primitive].handler = where[primitive].handler = count_src_std_comm_handler;
+    values[primitive].type = where[primitive].type = COUNT_INT_SRC_STD_COMM;
+    values[primitive].handler = where[primitive].handler = count_src_std_comm_handler;
+    primitive++;
+  }
+
+  if (what_to_count & COUNT_SRC_EXT_COMM) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
     }
-    else if (what_to_count & COUNT_SRC_EXT_COMM) {
-      values[primitive].type = where[primitive].type = COUNT_INT_SRC_EXT_COMM;
-      values[primitive].handler = where[primitive].handler = count_src_ext_comm_handler;
+    if (!config.tmp_comms_same_field) {
+      strncat(insert_clause, "ecomms_src", SPACELEFT(insert_clause));
+      strncat(where[primitive].string, "ecomms_src=\'%s\'", SPACELEFT(where[primitive].string));
     }
+    else {
+      strncat(insert_clause, "comms_src", SPACELEFT(insert_clause));
+      strncat(where[primitive].string, "comms_src=\'%s\'", SPACELEFT(where[primitive].string));
+    }
+    strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_INT_SRC_EXT_COMM;
+    values[primitive].handler = where[primitive].handler = count_src_ext_comm_handler;
     primitive++;
   }
 
@@ -3159,7 +3187,7 @@ void primptrs_set_all_from_db_cache(struct primitives_ptrs *prim_ptrs, struct db
   if (prim_ptrs && data && entry) {
     memset(data, 0, PdataSz);
     data->primitives = entry->primitives;
-    prim_ptrs->pbgp = (struct pkt_bgp_primitives *) entry->cbgp;
+    prim_ptrs->pbgp = entry->pbgp;
     prim_ptrs->pnat = entry->pnat;
     prim_ptrs->pmpls = entry->pmpls;
     prim_ptrs->pcust = entry->pcust;

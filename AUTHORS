@@ -1,4 +1,4 @@
-pmacct (Promiscuous mode IP Accounting package) v1.6.0
+pmacct (Promiscuous mode IP Accounting package) v1.6.1
 pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 
 Founder:
@@ -23,6 +23,7 @@ Thanks to the following people for their strong support along the time:
 	Vincent Bernat
 	Robert Blechinger
 	Stefano Birmani
+	Codethink.co.uk
 	Arnaud De-Bermingham
 	Francois Deppierraz 
 	Marcello Di Leonardo
@@ -32,6 +33,7 @@ Thanks to the following people for their strong support along the time:
 	Gianluca Guida
         Elisa Jasinska
 	Wim Kerkhoff
+	Tim LaBerge
 	Paul Mabey
 	Peter Nixon
 	Karl O. Pinc

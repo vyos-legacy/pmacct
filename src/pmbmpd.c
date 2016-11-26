@@ -20,12 +20,13 @@
 */
 
 /* defines */
-#define __PMTELEMETRYD_C
+#define __PMBMPD_C
 
 /* includes */
 #include "pmacct.h"
-#include "telemetry/telemetry.h"
-#include "pmtelemetryd.h"
+#include "bgp/bgp.h"
+#include "bmp/bmp.h"
+#include "pmbmpd.h"
 #include "pretag_handlers.h"
 #include "pmacct-data.h"
 #include "plugin_hooks.h"
@@ -40,7 +41,7 @@ struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channe
 /* Functions */
 void usage_daemon(char *prog_name)
 {
-  printf("%s (%s)\n", PMTELEMETRYD_USAGE_HEADER, PMACCT_BUILD);
+  printf("%s (%s)\n", PMBMPD_USAGE_HEADER, PMACCT_BUILD);
   printf("Usage: %s [ -D | -d ] [ -L IP address ] [ -l port ] ]\n", prog_name);
   printf("       %s [ -f config_file ]\n", prog_name);
   printf("       %s [ -h ]\n", prog_name);
@@ -67,7 +68,6 @@ void compute_once()
 
 int main(int argc,char **argv, char **envp)
 {
-  struct telemetry_data t_data;
   struct plugins_list_entry *list;
   char config_file[SRVBUFLEN];
   int logf;
@@ -89,7 +89,7 @@ int main(int argc,char **argv, char **envp)
   memset(&config_file, 0, sizeof(config_file));
 
   log_notifications_init(&log_notifications);
-  config.acct_type = ACCT_PMTELE;
+  config.acct_type = ACCT_PMBMP;
 
   find_id_func = NULL;
   plugins_list = NULL;
@@ -97,16 +97,16 @@ int main(int argc,char **argv, char **envp)
   rows = 0;
 
   /* getting commandline values */
-  while (!errflag && ((cp = getopt(argc, argv, ARGS_PMTELEMETRYD)) != -1)) {
+  while (!errflag && ((cp = getopt(argc, argv, ARGS_PMBMPD)) != -1)) {
     cfg_cmdline[rows] = malloc(SRVBUFLEN);
     switch (cp) {
     case 'L':
-      strlcpy(cfg_cmdline[rows], "pmtelemetryd_ip: ", SRVBUFLEN);
+      strlcpy(cfg_cmdline[rows], "bmp_daemon_ip: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
     case 'l':
-      strlcpy(cfg_cmdline[rows], "pmtelemetryd_port: ", SRVBUFLEN);
+      strlcpy(cfg_cmdline[rows], "bmp_daemon_port: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
       break;
@@ -137,7 +137,7 @@ int main(int argc,char **argv, char **envp)
       exit(0);
       break;
     case 'V':
-      version_daemon(PMTELEMETRYD_USAGE_HEADER);
+      version_daemon(PMBMPD_USAGE_HEADER);
       exit(0);
       break;
     default:
@@ -160,7 +160,7 @@ int main(int argc,char **argv, char **envp)
 
   list = plugins_list;
   while (list) {
-    list->cfg.acct_type = ACCT_PMTELE;
+    list->cfg.acct_type = ACCT_PMBMP;
     set_default_preferences(&list->cfg);
     if (!strcmp(list->type.string, "core")) {
       memcpy(&config, &list->cfg, sizeof(struct configuration));
@@ -223,6 +223,8 @@ int main(int argc,char **argv, char **envp)
   signal(SIGUSR2, reload_maps); /* sets to true the reload_maps flag */
   signal(SIGPIPE, SIG_IGN); /* we want to exit gracefully when a pipe is broken */
 
-  telemetry_prepare_daemon(&t_data);
-  telemetry_daemon(&t_data);
+  if (!config.nfacctd_bmp_port) config.nfacctd_bmp_port = BMP_TCP_PORT;
+
+  bmp_prepare_daemon();
+  skinny_bmp_daemon();
 }
