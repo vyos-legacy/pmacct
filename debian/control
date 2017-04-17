@@ -2,7 +2,7 @@ Source: pmacct
 Section: net
 Priority: optional
 Maintainer: VyOS Package Maintainers <maintainers@vyos.net>
-Build-Depends: debhelper (>= 5), zlib1g-dev, libpcap0.8-dev
+Build-Depends: debhelper (>= 5), zlib1g-dev, libpcap0.8-dev, pkg-config, dh-autoreconf
 Standards-Version: 3.7.2
 
 Package: pmacct

@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -24,6 +24,9 @@
 
 /* includes */
 #include "pmacct.h"
+#include "pmacct-data.h"
+#include "plugin_hooks.h"
+#include "bgp/bgp.h"
 
 /* extern */
 extern struct plugins_list_entry *plugin_list;
@@ -58,12 +61,13 @@ void handle_falling_child()
     if (failed_plugins[j]) { 
       list = search_plugin_by_pid(failed_plugins[j]);
       if (list) {
-        Log(LOG_INFO, "INFO: connection lost to '%s-%s'; closing connection.\n", list->name, list->type.string);
+        Log(LOG_WARNING, "WARN ( %s/%s ): connection lost to '%s-%s'; closing connection.\n",
+		config.name, config.type, list->name, list->type.string);
         close(list->pipe[1]);
         delete_pipe_channel(list->pipe[1]);
         ret = delete_plugin_by_id(list->id);
         if (!ret) {
-          Log(LOG_INFO, "INFO: no more plugins active. Shutting down.\n");
+          Log(LOG_WARNING, "WARN ( %s/%s ): no more plugins active. Shutting down.\n", config.name, config.type);
 	  if (config.pidfile) remove_pid_file(config.pidfile);
           exit(1);
         }
@@ -76,12 +80,13 @@ void handle_falling_child()
   j = waitpid(-1, 0, WNOHANG);
   list = search_plugin_by_pid(j);
   if (list) {
-    Log(LOG_INFO, "INFO: connection lost to '%s-%s'; closing connection.\n", list->name, list->type.string);
+    Log(LOG_WARNING, "WARN ( %s/%s ): connection lost to '%s-%s'; closing connection.\n",
+	config.name, config.type, list->name, list->type.string);
     close(list->pipe[1]);
     delete_pipe_channel(list->pipe[1]);
     ret = delete_plugin_by_id(list->id);
     if (!ret) {
-      Log(LOG_INFO, "INFO: no more plugins active. Shutting down.\n");
+      Log(LOG_WARNING, "WARN ( %s/%s ): no more plugins active. Shutting down.\n", config.name, config.type);
       if (config.pidfile) remove_pid_file(config.pidfile);
       exit(1);
     }
@@ -92,13 +97,30 @@ void handle_falling_child()
 
 void ignore_falling_child()
 {
-  while (waitpid(-1, 0, WNOHANG) > 0) sql_writers.retired++;
+  pid_t cpid;
+  int status;
+
+  while ((cpid = waitpid(-1, &status, WNOHANG)) > 0) {
+    if (!WIFEXITED(status)) Log(LOG_WARNING, "WARN ( %s/%s ): Abnormal exit status detected for child PID %u\n", config.name, config.type, cpid);
+    // sql_writers.retired++;
+  }
+
   signal(SIGCHLD, ignore_falling_child);
 }
 
 void my_sigint_handler(int signum)
 {
   struct plugins_list_entry *list = plugins_list;
+  char shutdown_msg[] = "pmacct received SIGINT - shutting down";
+
+  if (config.acct_type == ACCT_PMBGP || config.nfacctd_bgp == BGP_DAEMON_ONLINE) {
+    int idx;
+
+    for (idx = 0; idx < config.nfacctd_bgp_max_peers; idx++) {
+      if (peers[idx].fd)
+	bgp_peer_close(&peers[idx], FUNC_TYPE_BGP, TRUE, TRUE, BGP_NOTIFY_CEASE, BGP_NOTIFY_CEASE_ADMIN_SHUTDOWN, shutdown_msg);
+    }
+  }
 
   if (config.syslog) closelog();
 
@@ -127,12 +149,13 @@ void my_sigint_handler(int signum)
 
   wait(NULL);
 
-  Log(LOG_INFO, "OK: Exiting ...\n");
+  Log(LOG_INFO, "INFO ( %s/%s ): OK, Exiting ...\n", config.name, config.type);
 
   if (config.acct_type == ACCT_PM && !config.uacctd_group /* XXX */) {
     if (config.dev) {
       if (pcap_stats(glob_pcapt, &ps) < 0) printf("\npcap_stats: %s\n", pcap_geterr(glob_pcapt));
-      printf("\n%u packets received by filter\n", ps.ps_recv);
+      printf("\n");
+      printf("%u packets received by filter\n", ps.ps_recv);
       printf("%u packets dropped by kernel\n", ps.ps_drop);
     }
   }
@@ -150,15 +173,21 @@ void reload()
     logf = parse_log_facility(config.syslog);
     if (logf == ERR) {
       config.syslog = NULL;
-      Log(LOG_WARNING, "WARN: specified syslog facility is not supported; logging to console.\n");
+      Log(LOG_WARNING, "WARN ( %s/%s ): specified syslog facility is not supported; logging to console.\n", config.name, config.type);
     }
     openlog(NULL, LOG_PID, logf);
-    Log(LOG_INFO, "INFO: Start logging ...\n");
+    Log(LOG_INFO, "INFO ( %s/%s ): Start logging ...\n", config.name, config.type);
   }
-  else if (config.logfile) {
+
+  if (config.logfile) {
     fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile);
+    config.logfile_fd = open_output_file(config.logfile, "a", FALSE);
   }
+
+  if (config.nfacctd_bgp_msglog_file) reload_log_bgp_thread = TRUE;
+  if (config.nfacctd_bmp_msglog_file) reload_log_bmp_thread = TRUE;
+  if (config.sfacctd_counter_file) reload_log_sf_cnt = TRUE;
+  if (config.telemetry_msglog_file) reload_log_telemetry_thread = TRUE;
 
   signal(SIGHUP, reload);
 }
@@ -169,9 +198,12 @@ void push_stats()
 
   if (config.acct_type == ACCT_PM) {
     if (config.dev) {
-      if (pcap_stats(glob_pcapt, &ps) < 0) Log(LOG_INFO, "\npcap_stats: %s\n", pcap_geterr(glob_pcapt));
-      Log(LOG_NOTICE, "\n%s: (%u) %u packets received by filter\n", config.dev, now, ps.ps_recv);
-      Log(LOG_NOTICE, "%s: (%u) %u packets dropped by kernel\n", config.dev, now, ps.ps_drop);
+      if (pcap_stats(glob_pcapt, &ps) < 0) Log(LOG_INFO, "INFO ( %s/%s ): pcap_stats: %s\n",
+						config.name, config.type, pcap_geterr(glob_pcapt));
+      Log(LOG_NOTICE, "NOTICE ( %s/%s ): %s: (%u) %u packets received by filter\n",
+		config.name, config.type, config.dev, now, ps.ps_recv);
+      Log(LOG_NOTICE, "NOTICE ( %s/%s ): %s: (%u) %u packets dropped by kernel\n",
+		config.name, config.type, config.dev, now, ps.ps_drop);
     }
   }
   else if (config.acct_type == ACCT_NF || config.acct_type == ACCT_SF)
@@ -184,10 +216,14 @@ void reload_maps()
 {
   reload_map = FALSE;
   reload_map_bgp_thread = FALSE;
+  reload_map_exec_plugins = FALSE;
+  reload_geoipv2_file = FALSE;
 
-  if (config.refresh_maps) {
+  if (config.maps_refresh) {
     reload_map = TRUE; 
     reload_map_bgp_thread = TRUE;
+    reload_map_exec_plugins = TRUE;
+    reload_geoipv2_file = TRUE;
   }
   
   signal(SIGUSR2, reload_maps);

@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -41,6 +41,14 @@
 #include <getopt.h> 
 #endif
 
+#if defined HAVE_MALLOPT
+#include <malloc.h>
+#endif
+
+#if defined (HAVE_ZLIB)
+#include <zlib.h>
+#endif
+
 #include <ctype.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -48,6 +56,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
+#include <net/if.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -55,6 +64,10 @@
 #include <sys/select.h>
 #include <signal.h>
 #include <syslog.h>
+#include <sys/resource.h>
+#include <search.h>
+#include <dirent.h>
+#include <limits.h>
 
 #include <sys/mman.h>
 #if !defined (MAP_ANONYMOUS)
@@ -66,6 +79,21 @@
 #endif
 #endif
 
+#if defined (WITH_GEOIP)
+#include <GeoIP.h>
+#if defined (WITH_GEOIPV2)
+#error "--enable-geoip and --enable-geoipv2 are mutually exclusive"
+#endif
+#endif
+#if defined (WITH_GEOIPV2)
+#include <maxminddb.h>
+#endif
+
+#include "pmacct-build.h"
+
+#if !defined ETHER_ADDRSTRLEN
+#define ETHER_ADDRSTRLEN 18
+#endif
 #if !defined INET_ADDRSTRLEN 
 #define INET_ADDRSTRLEN 16
 #endif
@@ -152,9 +180,44 @@
 }
 #endif
 
-struct plugin_requests {
-  u_int8_t bpf_filter; /* On-request packet copy for BPF purposes */
+/* structure to pass requests: probably plugin_requests
+   name outdated at this point .. */
+
+struct ptm_complex {
+  int load_ptm_plugin;		/* load_pre_tag_map(): input plugin type ID */
+  int load_ptm_res;		/* load_pre_tag_map(): result */
+  int exec_ptm_dissect;		/* exec_plugins(): TRUE if at least one plugin returned load_ptm_res == TRUE */
+  int exec_ptm_res;		/* exec_plugins(): input to be matched against list->cfg.ptm_complex */ 
 };
+
+struct plugin_requests {
+  u_int8_t bpf_filter;		/* On-request packet copy for BPF purposes */
+
+  /* load_id_file() stuff */
+  void *key_value_table;	/* table to be filled in from key-value files */
+  int line_num;			/* line number being processed */
+  int map_entries;		/* number of map entries: wins over global setting */
+  int map_row_len;		/* map row length: wins over global setting */
+  struct ptm_complex ptm_c;	/* flags a map that requires parsing of the records (ie. tee plugin) */
+};
+
+typedef struct {
+  char *val;
+  u_int16_t len;
+} pm_hash_key_t;
+
+typedef struct {
+  pm_hash_key_t key;
+  u_int16_t off;
+} pm_hash_serial_t;
+
+#if (defined WITH_JANSSON)
+#include <jansson.h>
+#endif
+
+#if (defined WITH_AVRO)
+#include <avro.h>
+#endif
 
 #include "pmacct-defines.h"
 #include "network.h"
@@ -193,15 +256,14 @@ struct pcap_device {
 
 struct pcap_callback_data {
   u_char * f_agent; 
-  u_char * idt; 
   u_char * bta_table;
   u_char * bpas_table; 
   u_char * blp_table; 
   u_char * bmed_table; 
   u_char * biss_table; 
   struct pcap_device *device;
-  u_int16_t ifindex_in;
-  u_int16_t ifindex_out;
+  u_int32_t ifindex_in;
+  u_int32_t ifindex_out;
 };
 
 struct _protocols_struct {
@@ -212,6 +274,18 @@ struct _protocols_struct {
 struct _devices_struct {
   void (*handler)(const struct pcap_pkthdr *, register struct packet_ptrs *);
   int link_type;
+};
+
+struct _primitives_matrix_struct {
+  char name[PRIMITIVE_LEN];
+  u_int8_t pmacctd;
+  u_int8_t uacctd;
+  u_int8_t nfacctd;
+  u_int8_t sfacctd;
+  u_int8_t pmtelemetryd;
+  u_int8_t pmbgpd;
+  u_int8_t pmbmpd;
+  char desc[PRIMITIVE_DESC_LEN];
 };
 
 struct smallbuf {
@@ -226,9 +300,10 @@ struct largebuf {
   u_char *ptr;
 };
 
-struct child_ctl {
+struct child_ctl2 {
+  pid_t *list;
   u_int16_t active;
-  u_int16_t retired;
+  u_int16_t max;
   u_int32_t flags;
 };
 
@@ -279,32 +354,49 @@ EXT void tunnel_registry_init();
 EXT void pcap_cb(u_char *, const struct pcap_pkthdr *, const u_char *);
 EXT int PM_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 EXT void compute_once();
+EXT void set_index_pkt_ptrs(struct packet_ptrs *);
 #undef EXT
 
-#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C)
+#ifndef HAVE_STRLCPY
+size_t strlcpy(char *, const char *, size_t);
+#endif
+
+#if (defined WITH_JANSSON)
+#if (!defined HAVE_JSON_OBJECT_UPDATE_MISSING)
+int json_object_update_missing(json_t *, json_t *);
+#endif
+#endif
+
+void
+#ifdef __STDC__
+pm_setproctitle(const char *fmt, ...);
+#else /* __STDC__ */
+#error
+pm_setproctitle(fmt, va_alist);
+#endif /* __STDC__ */
+
+void
+initsetproctitle(int, char**, char**);
+
+/* global variables */
+#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C) && (!defined __PMTELEMETRYD_C) && (!defined __PMBGPD_C) && (!defined __PMBMPD_C)
 #define EXT extern
 #else
 #define EXT
 #endif
 EXT struct host_addr mcast_groups[MAX_MCAST_GROUPS];
-EXT int reload_map, reload_map_bgp_thread, data_plugins, tee_plugins;
+EXT int reload_map, reload_map_exec_plugins, reload_geoipv2_file;
+EXT int reload_map_bgp_thread, reload_log_bgp_thread, reload_log_bmp_thread;
+EXT int reload_log_sf_cnt, reload_log_telemetry_thread;
+EXT int data_plugins, tee_plugins;
 EXT struct timeval reload_map_tstamp;
-EXT struct child_ctl sql_writers;
+EXT struct child_ctl2 dump_writers;
+EXT int debug;
+EXT struct configuration config; /* global configuration structure */
+EXT struct plugins_list_entry *plugins_list; /* linked list of each plugin configuration */
+EXT pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
+EXT u_char dummy_tlhdr[16];
+EXT pcap_t *glob_pcapt;
+EXT struct pcap_stat ps;
 #undef EXT
-
-size_t strlcpy(char *, const char *, size_t);
-
-/* global variables */
-pcap_t *glob_pcapt;
-struct pcap_stat ps;
-
-#if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C)
-extern int debug;
-extern int have_num_memory_pools; /* global getopt() stuff */
-extern struct configuration config; /* global configuration structure */ 
-extern struct plugins_list_entry *plugins_list; /* linked list of each plugin configuration */
-extern pid_t failed_plugins[MAX_N_PLUGINS]; /* plugins failed during startup phase */
-extern u_char dummy_tlhdr[16];
-#endif
-
 #endif /* _PMACCT_H_ */

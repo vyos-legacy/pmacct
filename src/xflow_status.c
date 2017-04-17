@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2011 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -23,6 +23,7 @@
 
 /* includes */
 #include "pmacct.h"
+#include "addr.h"
 
 /* functions */
 u_int32_t hash_status_table(u_int32_t data, struct sockaddr *sa, u_int32_t size)
@@ -44,7 +45,7 @@ u_int32_t hash_status_table(u_int32_t data, struct sockaddr *sa, u_int32_t size)
   return hash;
 }
 
-struct xflow_status_entry *search_status_table(struct sockaddr *sa, u_int32_t aux1, int hash, int num_entries)
+struct xflow_status_entry *search_status_table(struct sockaddr *sa, u_int32_t aux1, u_int32_t aux2, int hash, int num_entries)
 {
   struct xflow_status_entry *entry = xflow_status_table[hash], *saved = NULL;
   u_int16_t port;
@@ -52,7 +53,7 @@ struct xflow_status_entry *search_status_table(struct sockaddr *sa, u_int32_t au
   cycle_again:
   if (entry) {
     saved = entry;
-    if (!sa_addr_cmp(sa, &entry->agent_addr) && aux1 == entry->aux1); /* FOUND IT: we are finished */
+    if (!sa_addr_cmp(sa, &entry->agent_addr) && aux1 == entry->aux1 && aux2 == entry->aux2); /* FOUND IT: we are done */
     else {
       entry = entry->next;
       goto cycle_again;
@@ -64,8 +65,9 @@ struct xflow_status_entry *search_status_table(struct sockaddr *sa, u_int32_t au
       if (!entry) goto error;
       else {
 	memset(entry, 0, sizeof(struct xflow_status_entry));
-	sa_to_addr(sa, &entry->agent_addr, &port);
+	sa_to_addr((struct sockaddr *)sa, &entry->agent_addr, &port);
 	entry->aux1 = aux1;
+	entry->aux2 = aux2;
 	entry->seqno = 0;
 	entry->next = FALSE;
         if (!saved) xflow_status_table[hash] = entry;
@@ -77,7 +79,7 @@ struct xflow_status_entry *search_status_table(struct sockaddr *sa, u_int32_t au
     else {
       error:
       if (xflow_status_table_error) {
-	Log(LOG_ERR, "ERROR: unable to allocate more entries into the xFlow status table.\n");
+	Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate more entries into the xFlow status table.\n", config.name, config.type);
 	xflow_status_table_error = FALSE;
 	return NULL;
       }
@@ -111,8 +113,9 @@ void update_status_table(struct xflow_status_entry *entry, u_int32_t seqno)
       else
 	strcpy(collector_ip_address, null_ip_address);
 
-      Log(LOG_WARNING, "WARN: expecting flow '%u' but received '%u' collector=%s:%u agent=%s:%u\n",
-		      entry->seqno+entry->inc, seqno, collector_ip_address, config.nfacctd_port, agent_ip_address, entry->aux1);
+      Log(LOG_INFO, "INFO ( %s/%s ): expecting flow '%u' but received '%u' collector=%s:%u agent=%s:%u\n",
+		config.name, config.type, entry->seqno+entry->inc, seqno, collector_ip_address,
+		config.nfacctd_port, agent_ip_address, entry->aux1);
       if (seqno > entry->seqno+entry->inc) {
         // entry->counters.missed += (seqno-entry->seqno);
         entry->counters.jumps_f++;
@@ -156,13 +159,14 @@ void print_status_table(time_t now, int buckets)
       else
         strcpy(collector_ip_address, null_ip_address);
 
-      Log(LOG_NOTICE, "\n+++\n");
-      Log(LOG_NOTICE, "%s statistics collector=%s:%u agent=%s:%u (%u):\n",
-		      ftype, collector_ip_address, config.nfacctd_port, agent_ip_address, entry->aux1, now);
-      Log(LOG_NOTICE, "Good datagrams:	%u\n", entry->counters.good);
-      Log(LOG_NOTICE, "Forward jumps:	%u\n", entry->counters.jumps_f);
-      Log(LOG_NOTICE, "Backward jumps:	%u\n", entry->counters.jumps_b);
-      Log(LOG_NOTICE, "---\n");
+      Log(LOG_NOTICE, "NOTICE ( %s/%s ): +++\n", config.name, config.type);
+      Log(LOG_NOTICE, "NOTICE ( %s/%s ): %s statistics collector=%s:%u agent=%s:%u (%u):\n",
+		config.name, config.type, ftype, collector_ip_address, config.nfacctd_port,
+		agent_ip_address, entry->aux1, now);
+      Log(LOG_NOTICE, "NOTICE ( %s/%s ): Good datagrams:  %u\n", config.name, config.type, entry->counters.good);
+      Log(LOG_NOTICE, "NOTICE ( %s/%s ): Forward jumps:   %u\n", config.name, config.type, entry->counters.jumps_f);
+      Log(LOG_NOTICE, "NOTICE ( %s/%s ): Backward jumps:  %u\n", config.name, config.type, entry->counters.jumps_b);
+      Log(LOG_NOTICE, "NOTICE ( %s/%s ): ---\n", config.name, config.type);
 
       if (entry->next) {
 	entry = entry->next;
@@ -171,9 +175,9 @@ void print_status_table(time_t now, int buckets)
     } 
   }
 
-  Log(LOG_NOTICE, "+++\n");
-  Log(LOG_NOTICE, "Total bad %s datagrams: %u (%u)\n", ftype, xflow_tot_bad_datagrams, now);
-  Log(LOG_NOTICE, "---\n\n");
+  Log(LOG_NOTICE, "NOTICE ( %s/%s ): +++\n", config.name, config.type);
+  Log(LOG_NOTICE, "NOTICE ( %s/%s ): Total bad %s datagrams: %u (%u)\n", config.name, config.type, ftype, xflow_tot_bad_datagrams, now);
+  Log(LOG_NOTICE, "NOTICE ( %s/%s ): ---\n", config.name, config.type);
 }
 
 struct xflow_status_entry_sampling *
@@ -188,7 +192,7 @@ search_smp_if_status_table(struct xflow_status_entry_sampling *sentry, u_int32_t
 }
 
 struct xflow_status_entry_sampling *
-search_smp_id_status_table(struct xflow_status_entry_sampling *sentry, u_int16_t sampler_id, u_int8_t return_unequal)
+search_smp_id_status_table(struct xflow_status_entry_sampling *sentry, u_int32_t sampler_id, u_int8_t return_unequal)
 {
   /* Match a samplerID or, if samplerID within a data record is zero and no match was
      possible, then return the last samplerID defined -- last part is C7600 workaround */
@@ -213,7 +217,7 @@ create_smp_entry_status_table(struct xflow_status_entry *entry)
     new = malloc(sizeof(struct xflow_status_entry_sampling));
     if (!new) {
       if (smp_entry_status_table_memerr) {
-	Log(LOG_ERR, "ERROR: unable to allocate more entries into the xflow renormalization table.\n");
+	Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate more entries into the xflow renormalization table.\n", config.name, config.type);
 	smp_entry_status_table_memerr = FALSE;
       }
     }
@@ -232,7 +236,13 @@ create_smp_entry_status_table(struct xflow_status_entry *entry)
 struct xflow_status_entry_class *
 search_class_id_status_table(struct xflow_status_entry_class *centry, pm_class_t class_id)
 {
+  pm_class_t needle, haystack;
+
+  needle = ntohl(class_id);
+
   while (centry) {
+    haystack = ntohl(centry->class_id);
+
     if (centry->class_id == class_id) return centry;
     centry = centry->next;
   }
@@ -253,7 +263,7 @@ create_class_entry_status_table(struct xflow_status_entry *entry)
     new = malloc(sizeof(struct xflow_status_entry_class));
     if (!new) {
       if (class_entry_status_table_memerr) {
-        Log(LOG_ERR, "ERROR: unable to allocate more entries into the xflow classification table.\n");
+        Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate more entries into the xflow classification table.\n", config.name, config.type);
         class_entry_status_table_memerr = FALSE;
       }
     }
@@ -269,18 +279,6 @@ create_class_entry_status_table(struct xflow_status_entry *entry)
   return new;
 }
 
-pm_class_t NF_evaluate_classifiers(struct xflow_status_entry_class *entry, pm_class_t *class_id)
-{
-  struct xflow_status_entry_class *centry;
-
-  centry = search_class_id_status_table(entry, *class_id);
-  if (centry) {
-    return centry->class_int_id;
-  }
-
-  return 0;
-}
-
 void set_vector_f_status(struct packet_ptrs_vector *pptrsv)
 {
   pptrsv->vlan4.f_status = pptrsv->v4.f_status;
@@ -291,5 +289,18 @@ void set_vector_f_status(struct packet_ptrs_vector *pptrsv)
   pptrsv->vlan6.f_status = pptrsv->v4.f_status;
   pptrsv->vlanmpls6.f_status = pptrsv->v4.f_status;
   pptrsv->mpls6.f_status = pptrsv->v4.f_status;
+#endif
+}
+
+void set_vector_f_status_g(struct packet_ptrs_vector *pptrsv)
+{
+  pptrsv->vlan4.f_status_g = pptrsv->v4.f_status_g;
+  pptrsv->mpls4.f_status_g = pptrsv->v4.f_status_g;
+  pptrsv->vlanmpls4.f_status_g = pptrsv->v4.f_status_g;
+#if defined ENABLE_IPV6
+  pptrsv->v6.f_status_g = pptrsv->v4.f_status_g;
+  pptrsv->vlan6.f_status_g = pptrsv->v4.f_status_g;
+  pptrsv->vlanmpls6.f_status_g = pptrsv->v4.f_status_g;
+  pptrsv->mpls6.f_status_g = pptrsv->v4.f_status_g;
 #endif
 }

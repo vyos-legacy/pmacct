@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -51,6 +51,7 @@
  */
 
 #include "common.h"
+#include "addr.h"
 #include "sys-tree.h"
 #include "convtime.h"
 #include "../nfacctd.h"
@@ -203,14 +204,12 @@ format_flow(struct FLOW *flow)
 	inet_ntop(flow->af, &flow->addr[0], addr1, sizeof(addr1));
 	inet_ntop(flow->af, &flow->addr[1], addr2, sizeof(addr2));
 
-	snprintf(stime, sizeof(ftime), "%s", 
-	    format_time(flow->flow_start.tv_sec));
-	snprintf(ftime, sizeof(ftime), "%s", 
-	    format_time(flow->flow_last.tv_sec));
+	snprintf(stime, sizeof(ftime), "%s", format_time(flow->flow_start.tv_sec));
+	snprintf(ftime, sizeof(ftime), "%s", format_time(flow->flow_last.tv_sec));
 
-	snprintf(buf, sizeof(buf),  "seq:%llu [%s]:%hu <> [%s]:%hu proto:%u "
-	    "octets>:%u packets>:%u octets<:%u packets<:%u "
-	    "start:%s.%03ld finish:%s.%03ld tcp>:%02x tcp<:%02x "
+	snprintf(buf, sizeof(buf),  "seq:%llu [%s]:%u <> [%s]:%u proto:%u "
+	    "octets>:%llu packets>:%llu octets<:%llu packets<:%llu "
+	    "start:%s.%03u finish:%s.%03u tcp>:%02x tcp<:%02x "
 	    "flowlabel>:%08x flowlabel<:%08x ",
 	    flow->flow_seq,
 	    addr1, ntohs(flow->port[0]), addr2, ntohs(flow->port[1]),
@@ -218,7 +217,7 @@ format_flow(struct FLOW *flow)
 	    flow->octets[0], flow->packets[0], 
 	    flow->octets[1], flow->packets[1], 
 	    stime, (flow->flow_start.tv_usec + 500) / 1000, 
-	    ftime, (flow->flow_start.tv_usec + 500) / 1000,
+	    ftime, (flow->flow_last.tv_usec + 500) / 1000,
 	    flow->tcp_flags[0], flow->tcp_flags[1],
 	    flow->ip6_flowlabel[0], flow->ip6_flowlabel[1]);
 
@@ -300,12 +299,12 @@ l2_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *extra
       direction = config.nfprobe_direction;
       break;
     case DIRECTION_TAG:
-      if (p->id == 1) direction = DIRECTION_IN;
-      else if (p->id == 2) direction = DIRECTION_OUT;
+      if (p->tag == 1) direction = DIRECTION_IN;
+      else if (p->tag == 2) direction = DIRECTION_OUT;
       break;
     case DIRECTION_TAG2:
-      if (p->id2 == 1) direction = DIRECTION_IN;
-      else if (p->id2 == 2) direction = DIRECTION_OUT;
+      if (p->tag2 == 1) direction = DIRECTION_IN;
+      else if (p->tag2 == 2) direction = DIRECTION_OUT;
       break;
     }
 
@@ -334,12 +333,12 @@ l2_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *extra
         flow->ifindex[ndx ^ 1] = (direction == DIRECTION_OUT) ? config.nfprobe_ifindex : 0;
         break;
       case IFINDEX_TAG:
-        flow->ifindex[ndx] = (direction == DIRECTION_IN) ? p->id : 0;
-	flow->ifindex[ndx ^ 1] = (direction == DIRECTION_OUT) ? p->id : 0;
+        flow->ifindex[ndx] = (direction == DIRECTION_IN) ? p->tag : 0;
+	flow->ifindex[ndx ^ 1] = (direction == DIRECTION_OUT) ? p->tag : 0;
 	break;
       case IFINDEX_TAG2:
-        flow->ifindex[ndx] = (direction == DIRECTION_IN) ? p->id2 : 0;
-	flow->ifindex[ndx ^ 1] = (direction == DIRECTION_OUT) ? p->id2 : 0;
+        flow->ifindex[ndx] = (direction == DIRECTION_IN) ? p->tag2 : 0;
+	flow->ifindex[ndx ^ 1] = (direction == DIRECTION_OUT) ? p->tag2 : 0;
         break;
       default:
         flow->ifindex[ndx] = 0;
@@ -364,12 +363,12 @@ l2_to_flowrec_update(struct FLOW *flow, struct pkt_data *data, struct pkt_extras
   if (config.nfprobe_direction) {
     switch (config.nfprobe_direction) {
     case DIRECTION_TAG:
-      if (p->id == 1) direction = DIRECTION_IN;
-      else if (p->id == 2) direction = DIRECTION_OUT;
+      if (p->tag == 1) direction = DIRECTION_IN;
+      else if (p->tag == 2) direction = DIRECTION_OUT;
       break;
     case DIRECTION_TAG2:
-      if (p->id2 == 1) direction = DIRECTION_IN;
-      else if (p->id2 == 2) direction = DIRECTION_OUT;
+      if (p->tag2 == 1) direction = DIRECTION_IN;
+      else if (p->tag2 == 2) direction = DIRECTION_OUT;
       break;
     }
 
@@ -380,6 +379,8 @@ l2_to_flowrec_update(struct FLOW *flow, struct pkt_data *data, struct pkt_extras
       if (!flow->direction[ndx]) flow->direction[ndx] = DIRECTION_OUT;
     }
   }
+
+  return (0);
 }
 
 static int
@@ -393,10 +394,49 @@ ASN_to_flowrec(struct FLOW *flow, struct pkt_data *data, int ndx)
   return (0);
 }
 
+static int
+cust_to_flowrec(struct FLOW *flow, char *pcust, int ndx)
+{
+  if (pcust) {
+    if (!flow->pcust[ndx]) flow->pcust[ndx] = malloc(config.cpptrs.len);
+    if (flow->pcust[ndx]) memcpy(flow->pcust[ndx], pcust, config.cpptrs.len);
+    else {
+      Log(LOG_WARNING, "WARN ( %s/%s ): Finished memory for flow entries.\n", config.name, config.type);
+      return PP_MALLOC_FAIL;
+    }
+  }
+  else {
+    if (flow->pcust[ndx]) free(flow->pcust[ndx]);
+    flow->pcust[ndx] = NULL;
+  }
+
+  return (0);
+}
+
+static int
+vlen_to_flowrec(struct FLOW *flow, struct pkt_vlen_hdr_primitives *pvlen, int ndx)
+{
+  if (pvlen) {
+    /* XXX: naive and un-efficient approach copied from cache-based plugins */
+    if (flow->pvlen[ndx]) {
+      vlen_prims_free(flow->pvlen[ndx]);
+      flow->pvlen[ndx] = NULL;
+    }
+
+    flow->pvlen[ndx] = (struct pkt_vlen_hdr_primitives *) vlen_prims_copy(pvlen);
+  }
+
+  return (0);
+}
+
 /* Convert a IPv4 packet to a partial flow record (used for comparison) */
 static int
-ipv4_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *extras, int *isfrag, int af)
+ipv4_to_flowrec(struct FLOW *flow, struct primitives_ptrs *prim_ptrs, int *isfrag, int af)
 {
+  struct pkt_data *data = prim_ptrs->data;
+  struct pkt_extras *extras = prim_ptrs->pextras;
+  char *pcust = prim_ptrs->pcust;
+  struct pkt_vlen_hdr_primitives *pvlen = prim_ptrs->pvlen;
   struct pkt_primitives *p = &data->primitives;
   int ndx;
 
@@ -415,22 +455,26 @@ ipv4_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *ext
   flow->packets[ndx] = data->pkt_num;
   flow->flows[ndx] = data->flo_num;
   flow->class = p->class;
-  flow->tag[ndx] = p->id;
-  flow->tag2[ndx] = p->id2;
+  flow->tag[ndx] = p->tag;
+  flow->tag2[ndx] = p->tag2;
 
   *isfrag = 0;
 
   l2_to_flowrec(flow, data, extras, ndx);
   ASN_to_flowrec(flow, data, ndx);
+  cust_to_flowrec(flow, pcust, ndx);
+  vlen_to_flowrec(flow, pvlen, ndx);
 
   return (transport_to_flowrec(flow, data, extras, p->proto, ndx));
-
-  // return (0);
 }
 
 static int
-ipv4_to_flowrec_update(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *extras, int *isfrag, int af)
+ipv4_to_flowrec_update(struct FLOW *flow, struct primitives_ptrs *prim_ptrs, int *isfrag, int af)
 {
+  struct pkt_data *data = prim_ptrs->data;
+  struct pkt_extras *extras = prim_ptrs->pextras;
+  char *pcust = prim_ptrs->pcust;
+  struct pkt_vlen_hdr_primitives *pvlen = prim_ptrs->pvlen;
   struct pkt_primitives *p = &data->primitives;
   int ndx;
 
@@ -440,13 +484,21 @@ ipv4_to_flowrec_update(struct FLOW *flow, struct pkt_data *data, struct pkt_extr
   if (!flow->bgp_next_hop[ndx].v4.s_addr) flow->bgp_next_hop[ndx].v4 = extras->bgp_next_hop.address.ipv4;
 
   l2_to_flowrec_update(flow, data, extras, ndx);
+  cust_to_flowrec(flow, pcust, ndx);
+  vlen_to_flowrec(flow, pvlen, ndx);
+
+  return (0);
 }
 
 #if defined ENABLE_IPV6
 /* Convert a IPv6 packet to a partial flow record (used for comparison) */
 static int
-ipv6_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *extras, int *isfrag, int af)
+ipv6_to_flowrec(struct FLOW *flow, struct primitives_ptrs *prim_ptrs, int *isfrag, int af)
 {
+  struct pkt_data *data = prim_ptrs->data;
+  struct pkt_extras *extras = prim_ptrs->pextras;
+  char *pcust = prim_ptrs->pcust;
+  struct pkt_vlen_hdr_primitives *pvlen = prim_ptrs->pvlen;
   struct pkt_primitives *p = &data->primitives;
   int ndx, nxt;
 
@@ -461,26 +513,31 @@ ipv6_to_flowrec(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *ext
   flow->bgp_next_hop[ndx].v6 = extras->bgp_next_hop.address.ipv6;
   flow->mask[ndx] = p->src_nmask;
   flow->mask[ndx ^ 1] = p->dst_nmask;
+  flow->protocol = p->proto;
   flow->octets[ndx] = data->pkt_len;
   flow->packets[ndx] = data->pkt_num; 
   flow->flows[ndx] = data->flo_num;
   flow->class = p->class;
-  flow->tag[ndx] = p->id;
-  flow->tag2[ndx] = p->id2;
+  flow->tag[ndx] = p->tag;
+  flow->tag2[ndx] = p->tag2;
 
   *isfrag = 0;
 
   l2_to_flowrec(flow, data, extras, ndx);
   ASN_to_flowrec(flow, data, ndx);
+  cust_to_flowrec(flow, pcust, ndx);
+  vlen_to_flowrec(flow, pvlen, ndx);
 
   return (transport_to_flowrec(flow, data, extras, p->proto, ndx));
-
-  // return (0);
 }
 
 static int
-ipv6_to_flowrec_update(struct FLOW *flow, struct pkt_data *data, struct pkt_extras *extras, int *isfrag, int af)
+ipv6_to_flowrec_update(struct FLOW *flow, struct primitives_ptrs *prim_ptrs, int *isfrag, int af)
 {
+  struct pkt_data *data = prim_ptrs->data;
+  struct pkt_extras *extras = prim_ptrs->pextras;
+  char *pcust = prim_ptrs->pcust;
+  struct pkt_vlen_hdr_primitives *pvlen = prim_ptrs->pvlen;
   struct pkt_primitives *p = &data->primitives;
   struct in6_addr dummy_ipv6; 
   int ndx;
@@ -493,6 +550,10 @@ ipv6_to_flowrec_update(struct FLOW *flow, struct pkt_data *data, struct pkt_extr
     flow->bgp_next_hop[ndx].v6 = extras->bgp_next_hop.address.ipv6;
 
   l2_to_flowrec_update(flow, data, extras, ndx);
+  cust_to_flowrec(flow, pcust, ndx);
+  vlen_to_flowrec(flow, pvlen, ndx);
+
+  return (0);
 }
 #endif 
 
@@ -501,12 +562,29 @@ flow_update_expiry(struct FLOWTRACK *ft, struct FLOW *flow)
 {
 	EXPIRY_REMOVE(EXPIRIES, &ft->expiries, flow->expiry);
 
+#if defined HAVE_64BIT_COUNTERS
+        if (config.nfprobe_version == 9 || config.nfprobe_version == 10) {
+	  if (flow->octets[0] > (1ULL << 63) || flow->octets[1] > (1ULL << 63)) { 
+                flow->expiry->expires_at = 0;
+                flow->expiry->reason = R_OVERBYTES;
+                goto out;
+	  }
+        }
+	else {
+          if (flow->octets[0] > (1U << 31) || flow->octets[1] > (1U << 31)) {
+                flow->expiry->expires_at = 0;
+                flow->expiry->reason = R_OVERBYTES;
+                goto out;
+          }
+	}
+#else
 	/* Flows over 2Gb traffic */
 	if (flow->octets[0] > (1U << 31) || flow->octets[1] > (1U << 31)) {
 		flow->expiry->expires_at = 0;
 		flow->expiry->reason = R_OVERBYTES;
 		goto out;
 	}
+#endif
 	
 	/* Flows over maximum life seconds */
 	if (ft->maximum_lifetime != 0 && 
@@ -576,11 +654,13 @@ flow_update_expiry(struct FLOWTRACK *ft, struct FLOW *flow)
 	EXPIRY_INSERT(EXPIRIES, &ft->expiries, flow->expiry);
 }
 
-
-/* Return values from process_packet */
-#define PP_OK		0
-#define PP_BAD_PACKET	-2
-#define PP_MALLOC_FAIL	-3
+void free_flow_allocs(struct FLOW *flow)
+{
+  if (flow->pcust[0]) free(flow->pcust[0]);
+  if (flow->pcust[1]) free(flow->pcust[1]);
+  if (flow->pvlen[0]) free(flow->pvlen[0]);
+  if (flow->pvlen[1]) free(flow->pvlen[1]);
+}
 
 /*
  * Main per-packet processing function. Take a packet (provided by 
@@ -591,8 +671,10 @@ flow_update_expiry(struct FLOWTRACK *ft, struct FLOW *flow)
  * (the actual expiry is performed elsewhere)
  */
 static int
-process_packet(struct FLOWTRACK *ft, struct pkt_data *data, struct pkt_extras *extras, const struct timeval *received_time)
+process_packet(struct FLOWTRACK *ft, struct primitives_ptrs *prim_ptrs, const struct timeval *received_time)
 {
+  struct pkt_data *data = prim_ptrs->data;
+
   struct FLOW tmp, *flow;
   int frag, af, dont_summarize = (config.acct_type == ACCT_NF ? 1 : 0);
 
@@ -604,18 +686,20 @@ process_packet(struct FLOWTRACK *ft, struct pkt_data *data, struct pkt_extras *e
 
   switch (af) {
   case AF_INET:
-    if (ipv4_to_flowrec(&tmp, data, extras, &frag, af) == -1)
+    if (ipv4_to_flowrec(&tmp, prim_ptrs, &frag, af) == -1)
       goto bad;
     break;
 #if defined ENABLE_IPV6
   case AF_INET6:
-    if (ipv6_to_flowrec(&tmp, data, extras, &frag, af) == -1)
+    if (ipv6_to_flowrec(&tmp, prim_ptrs, &frag, af) == -1)
       goto bad;
     break;
 #endif
   default:
   bad: 
     ft->bad_packets += data->pkt_num;
+    free_flow_allocs(&tmp);
+
     return (PP_BAD_PACKET);
   }
 
@@ -663,11 +747,11 @@ process_packet(struct FLOWTRACK *ft, struct pkt_data *data, struct pkt_extras *e
     /* Address family dependent items to update */
     switch (flow->af) {
     case AF_INET:
-      ipv4_to_flowrec_update(flow, data, extras, &frag, af);
+      ipv4_to_flowrec_update(flow, prim_ptrs, &frag, af);
     break;
 #if defined ENABLE_IPV6
     case AF_INET6:
-      ipv6_to_flowrec_update(flow, data, extras, &frag, af);
+      ipv6_to_flowrec_update(flow, prim_ptrs, &frag, af);
     break;
 #endif
     }
@@ -676,6 +760,8 @@ process_packet(struct FLOWTRACK *ft, struct pkt_data *data, struct pkt_extras *e
     if (!flow->tag[1]) flow->tag[1] = tmp.tag[1];
     if (!flow->tag2[0]) flow->tag2[0] = tmp.tag2[0];
     if (!flow->tag2[1]) flow->tag2[1] = tmp.tag2[1];
+
+    free_flow_allocs(&tmp);
   }
 	
   memcpy(&flow->flow_last, received_time, sizeof(flow->flow_last));
@@ -887,17 +973,28 @@ check_expired(struct FLOWTRACK *ft, struct NETFLOW_TARGET *target, int ex, u_int
 	
 	/* Processing for expired flows */
 	if (num_expired > 0) {
-		if (target != NULL && target->fd != -1) {
-			r = target->dialect->func(expired_flows, num_expired, 
+		if (target != NULL) {
+			if (target->fd == -1) {
+			  Log(LOG_WARNING, "WARN ( %s/%s ): No connection to collector, discarding flows\n", config.name, config.type);
+			  for (i = 0; i < num_expired; i++) {
+				  free_flow_allocs(expired_flows[i]);
+				  free(expired_flows[i]);
+			  }
+			  free(expired_flows);
+			  return -1;
+                        }
+			else {
+			  r = target->dialect->func(expired_flows, num_expired, 
 			    target->fd, &ft->flows_exported, // &ft->next_datagram_seq,
 			    &ft->system_boot_time, verbose_flag, engine_type, engine_id);
-			if (verbose_flag)
+			  if (verbose_flag)
 				Log(LOG_DEBUG, "DEBUG ( %s/%s ): Sent %d netflow packets\n", config.name, config.type, r);
-			if (r > 0) {
+			  if (r > 0) {
 				ft->packets_sent += r;
 				/* XXX what if r < num_expired * 2 ? */
-			} else {
+			  } else {
 				ft->flows_dropped += num_expired * 2;
+			  }
 			}
 		}
 		for (i = 0; i < num_expired; i++) {
@@ -908,6 +1005,7 @@ check_expired(struct FLOWTRACK *ft, struct NETFLOW_TARGET *target, int ex, u_int
 			}
 			update_statistics(ft, expired_flows[i]);
 
+			free_flow_allocs(expired_flows[i]);
 			free(expired_flows[i]);
 		}
 	
@@ -994,6 +1092,8 @@ delete_all_flows(struct FLOWTRACK *ft)
 		free(flow->expiry);
 
 		ft->num_flows--;
+
+		free_flow_allocs(flow);
 		free(flow);
 		i++;
 	}
@@ -1006,14 +1106,18 @@ delete_all_flows(struct FLOWTRACK *ft)
  * sans datalink headers to process_packet.
  */
 
-static void flow_cb(u_char *user_data, struct pkt_data *data, struct pkt_extras *extras)
+static void flow_cb(u_char *user_data, struct primitives_ptrs *prim_ptrs)
 {
+  struct pkt_data *data = prim_ptrs->data;
   struct CB_CTXT *cb_ctxt = (struct CB_CTXT *)user_data;
   struct timeval tv;
 
-  tv.tv_sec = data->time_start.tv_sec;
-  tv.tv_usec = data->time_start.tv_usec; 
-  if (process_packet(cb_ctxt->ft, data, extras, &tv) == PP_MALLOC_FAIL) cb_ctxt->fatal = 1;
+  if (data) {
+    tv.tv_sec = data->time_start.tv_sec;
+    tv.tv_usec = data->time_start.tv_usec; 
+
+    if (process_packet(cb_ctxt->ft, prim_ptrs, &tv) == PP_MALLOC_FAIL) cb_ctxt->fatal = 1;
+  }
 }
 
 static void
@@ -1060,9 +1164,10 @@ connsock(struct sockaddr_storage *addr, socklen_t len, int hoplimit)
   }
 
   if (config.pipe_size) {
-    int rc;
+    int rc, value;
 
-    rc = Setsocksize(s, SOL_SOCKET, SO_SNDBUF, &config.pipe_size, sizeof(config.pipe_size));
+    value = MIN(config.pipe_size, INT_MAX); 
+    rc = Setsocksize(s, SOL_SOCKET, SO_SNDBUF, &value, sizeof(value));
     if (rc < 0) Log(LOG_WARNING, "WARN ( %s/%s ): setsockopt() failed for SOL_SNDBUF: %s\n", config.name, config.type, strerror(errno));
   }
 
@@ -1073,7 +1178,11 @@ connsock(struct sockaddr_storage *addr, socklen_t len, int hoplimit)
 
   if (connect(s, (struct sockaddr*)addr, len) == -1) {
     Log(LOG_ERR, "ERROR ( %s/%s ): connect() failed: %s\n", config.name, config.type, strerror(errno));
-    exit_plugin(1);
+    if (errno == ENETUNREACH) {
+      close(s);
+      return -1;
+    }
+    else exit_plugin(1);
   }
 
   switch (addr->ss_family) {
@@ -1264,18 +1373,22 @@ parse_engine(char *s, u_int8_t *engine_type, u_int8_t *engine_id)
 void nfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 {
   struct pkt_data *data, dummy;
-  struct pkt_extras *extras;
+  struct pkt_bgp_primitives dummy_pbgp;
   struct ports_table pt;
   struct pollfd pfd;
   struct timezone tz;
   unsigned char *pipebuf;
   time_t now, refresh_deadline;
-  int ret, num;
+  int refresh_timeout, amqp_timeout, kafka_timeout, ret, num;
   char default_receiver[] = "127.0.0.1:2100";
   char default_engine[] = "0:0";
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
+  struct plugins_list_entry *plugin_data = ((struct channels_list_entry *)ptr)->plugin;
+  int datasize = ((struct channels_list_entry *)ptr)->datasize;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
+  pid_t core_pid = ((struct channels_list_entry *)ptr)->core_pid;
+  struct networks_file_data nfd;
 
   unsigned char *rgptr, *dataptr;
   int pollagain = TRUE;
@@ -1291,14 +1404,34 @@ void nfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct CB_CTXT cb_ctxt;
   u_int8_t engine_type, engine_id;
 
-  /* XXX: glue */
+  struct extra_primitives extras;
+  struct primitives_ptrs prim_ptrs;
+  void *kafka_msg;
+
+#ifdef WITH_RABBITMQ
+  struct p_amqp_host *amqp_host = &((struct channels_list_entry *)ptr)->amqp_host;
+#endif
+
+#ifdef WITH_KAFKA
+  struct p_kafka_host *kafka_host = &((struct channels_list_entry *)ptr)->kafka_host;
+#endif
+
   memcpy(&config, cfgptr, sizeof(struct configuration));
+  memcpy(&extras, &((struct channels_list_entry *)ptr)->extras, sizeof(struct extra_primitives));
   recollect_pipe_memory(ptr);
   pm_setproctitle("%s [%s]", "Netflow Probe Plugin", config.name);
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
   if (config.logfile) {
     fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile);
+    config.logfile_fd = open_output_file(config.logfile, "a", FALSE);
+  }
+
+  if (config.proc_priority) {
+    int ret;
+
+    ret = setpriority(PRIO_PROCESS, 0, config.proc_priority);
+    if (ret) Log(LOG_WARNING, "WARN ( %s/%s ): proc_priority failed (errno: %d)\n", config.name, config.type, errno);
+    else Log(LOG_INFO, "INFO ( %s/%s ): proc_priority set to %d\n", config.name, config.type, getpriority(PRIO_PROCESS, 0));
   }
 
   Log(LOG_INFO, "INFO ( %s/%s ): NetFlow probe plugin is originally based on softflowd 0.9.7 software, Copyright 2002 Damien Miller <djm@mindrot.org> All rights reserved.\n",
@@ -1311,11 +1444,7 @@ void nfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   signal(SIGUSR1, SIG_IGN);
   signal(SIGUSR2, reload_maps);
   signal(SIGPIPE, SIG_IGN);
-#if !defined FBSD4
   signal(SIGCHLD, SIG_IGN);
-#else
-  signal(SIGCHLD, ignore_falling_child);
-#endif
 	    
   memset(&cb_ctxt, '\0', sizeof(cb_ctxt));
 
@@ -1329,7 +1458,7 @@ void nfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   glob_flowtrack = &flowtrack;
 
   if (config.nfprobe_timeouts) handle_timeouts(&flowtrack, config.nfprobe_timeouts);
-  timeout = flowtrack.expiry_interval * 1000;
+  refresh_timeout = flowtrack.expiry_interval * 1000;
   print_timeouts(&flowtrack);
 
   if (!config.nfprobe_hoplimit) hoplimit = -1;
@@ -1367,11 +1496,11 @@ sort_version:
       exit_plugin(1);
     }
     target.fd = connsock(&dest, dest_len, hoplimit);
-  }
 	
-  if (dest.ss_family != 0)
-    Log(LOG_INFO, "INFO ( %s/%s ): Exporting flows to [%s]:%s\n",
+    if (target.fd != -1)
+      Log(LOG_INFO, "INFO ( %s/%s ): Exporting flows to [%s]:%s\n",
 		    config.name, config.type, dest_addr, dest_serv);
+  }
 
   /* Main processing loop */
   gettimeofday(&flowtrack.system_boot_time, NULL);
@@ -1384,24 +1513,75 @@ sort_version:
   memset(&nc, 0, sizeof(nc));
   memset(&pt, 0, sizeof(pt));
   memset(&dummy, 0, sizeof(dummy));
+  memset(&dummy_pbgp, 0, sizeof(dummy_pbgp));
 
   load_networks(config.networks_file, &nt, &nc);
   set_net_funcs(&nt);
 
   if (config.ports_file) load_ports(config.ports_file, &pt);
 
-  pipebuf = (unsigned char *) Malloc(config.buffer_size);
+  pipebuf = (unsigned char *) pm_malloc(config.buffer_size);
   memset(pipebuf, 0, config.buffer_size);
 
-  pfd.fd = pipe_fd;
-  pfd.events = POLLIN;
-  setnonblocking(pipe_fd);
+  if (config.pipe_amqp) {
+    plugin_pipe_amqp_compile_check();
+#ifdef WITH_RABBITMQ
+    pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
+    amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
+#endif
+  }
+  else if (config.pipe_kafka) {
+    plugin_pipe_kafka_compile_check();
+#ifdef WITH_KAFKA
+    pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
+    kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+#endif
+  }
+  else setnonblocking(pipe_fd);
+
+  memset(&prim_ptrs, 0, sizeof(prim_ptrs));
+  set_primptrs_funcs(&extras);
+
+  /* In case of custom primitives, let's do a round of validation */
+  {
+    struct custom_primitive_ptrs *cp_entry;
+    int cp_idx;
+
+    for (cp_idx = 0; cp_idx < config.cpptrs.num; cp_idx++) {
+      cp_entry = &config.cpptrs.primitive[cp_idx];
+
+      if (!cp_entry->ptr->field_type) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): custom primitive '%s' has null field_type\n", config.name, config.type, cp_entry->ptr->name);
+        exit_plugin(1);
+      }
+    }
+  }
 
   for(;;) {
-poll_again:
     status->wakeup = TRUE;
-    ret = poll(&pfd, 1, timeout);
-    if (ret < 0) goto poll_again;
+
+    pfd.fd = pipe_fd;
+    pfd.events = POLLIN;
+
+    if (config.pipe_homegrown || config.pipe_amqp) {
+      timeout = MIN(refresh_timeout, (amqp_timeout ? amqp_timeout : INT_MAX));
+      ret = poll(&pfd, (pfd.fd == ERR ? 0 : 1), timeout);
+    }
+#ifdef WITH_KAFKA
+    else if (config.pipe_kafka) {
+      timeout = MIN(refresh_timeout, (kafka_timeout ? kafka_timeout : INT_MAX));
+      ret = p_kafka_consume_poller(kafka_host, &kafka_msg, timeout);
+    }
+#endif
+
+    /* Flags set by signal handlers or control socket */
+    if (graceful_shutdown_request) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): Shutting down on user request.\n", config.name, config.type);
+      check_expired(&flowtrack, &target, CE_EXPIRE_ALL, engine_type, engine_id);
+      goto exit_lane;
+    }
+
+    if (ret < 0) continue;
 
     /* Fatal error from per-packet functions */
     if (cb_ctxt.fatal) {
@@ -1415,80 +1595,126 @@ poll_again:
       reload_map = FALSE;
     }
 
+    now = time(NULL);
+
+#ifdef WITH_RABBITMQ
+    if (config.pipe_amqp && pipe_fd == ERR) {
+      if (timeout == amqp_timeout) {
+        pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
+      }
+      else amqp_timeout = plugin_pipe_calc_retry_timeout_diff(&amqp_host->btimers, now);
+    }
+#endif
+
+#ifdef WITH_KAFKA
+    if (config.pipe_kafka && pipe_fd == ERR) {
+      if (timeout == kafka_timeout) {
+        pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
+        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+      }
+      else kafka_timeout = plugin_pipe_calc_retry_timeout_diff(&kafka_host->btimers, now);
+    }
+#endif
+
     if (ret > 0) { /* we received data */
 read_data:
-      if (!pollagain) {
-        seq++;
-        seq %= MAX_SEQNUM;
-        if (seq == 0) rg_err_count = FALSE;
-      }
-      else {
-        if ((ret = read(pipe_fd, &rgptr, sizeof(rgptr))) == 0)
-          exit_plugin(1); /* we exit silently; something happened at the write end */
-      }
+      if (config.pipe_homegrown) {
+        if (!pollagain) {
+          seq++;
+          seq %= MAX_SEQNUM;
+          if (seq == 0) rg_err_count = FALSE;
+        }
+        else {
+          if ((ret = read(pipe_fd, &rgptr, sizeof(rgptr))) == 0)
+            exit_plugin(1); /* we exit silently; something happened at the write end */
+        }
+  
+        if ((rg->ptr + bufsz) > rg->end) rg->ptr = rg->base;
+  
+        if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
+  	  if (!pollagain) {
+  	    pollagain = TRUE;
+  	    goto handle_flow_expiration;
+  	  }
+  	  else {
+  	    rg_err_count++;
+  	    if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
+              Log(LOG_WARNING, "WARN ( %s/%s ): Missing data detected (plugin_buffer_size=%llu plugin_pipe_size=%llu).\n",
+                        config.name, config.type, config.buffer_size, config.pipe_size);
+              Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
+                        config.name, config.type);
+  	    }
 
-      if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
-	if (!pollagain) {
-	  pollagain = TRUE;
-	  goto handle_flow_expiration;
-	}
-	else {
-	  rg_err_count++;
-	  if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-	    Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
-	    Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
-	    Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
-	    Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
-	    Log(LOG_ERR, "- increase system maximum socket size.\n\n");
-	  }
-	  seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
-	}
+	    rg->ptr = (rg->base + status->last_buf_off);
+  	    seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
+  	  }
+        }
+  
+        pollagain = FALSE;
+        memcpy(pipebuf, rg->ptr, bufsz);
+        rg->ptr += bufsz;
       }
+#ifdef WITH_RABBITMQ
+      else if (config.pipe_amqp) {
+        ret = p_amqp_consume_binary(amqp_host, pipebuf, config.buffer_size);
+        if (ret) pipe_fd = ERR;
 
-      pollagain = FALSE;
-      memcpy(pipebuf, rg->ptr, bufsz);
-      if ((rg->ptr+bufsz) >= rg->end) rg->ptr = rg->base;
-      else rg->ptr += bufsz;
+        seq = ((struct ch_buf_hdr *)pipebuf)->seq;
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
+      }
+#endif
+#ifdef WITH_KAFKA
+      else if (config.pipe_kafka) {
+        ret = p_kafka_consume_data(kafka_host, kafka_msg, pipebuf, config.buffer_size);
+        if (ret) pipe_fd = ERR;
+
+        seq = ((struct ch_buf_hdr *)pipebuf)->seq;
+        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+      }
+#endif
 
       data = (struct pkt_data *) (pipebuf+sizeof(struct ch_buf_hdr));
 
-      while (((struct ch_buf_hdr *)pipebuf)->num) {
+      if (config.debug_internal_msg) 
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u len=%llu seq=%u num_entries=%u\n",
+                config.name, config.type, core_pid, ((struct ch_buf_hdr *)pipebuf)->len,
+                seq, ((struct ch_buf_hdr *)pipebuf)->num);
 
-	if (config.networks_file) {
-	  memcpy(&dummy.primitives.src_ip, &data->primitives.src_ip, HostAddrSz);
-	  memcpy(&dummy.primitives.dst_ip, &data->primitives.dst_ip, HostAddrSz);
+      if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
+      while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
+        for (num = 0; primptrs_funcs[num]; num++)
+          (*primptrs_funcs[num])((u_char *)data, &extras, &prim_ptrs);
 
-          for (num = 0; net_funcs[num]; num++) (*net_funcs[num])(&nt, &nc, &dummy.primitives);
+        for (num = 0; net_funcs[num]; num++)
+	  (*net_funcs[num])(&nt, &nc, &data->primitives, &dummy_pbgp, &nfd);
 
-	  if (config.nfacctd_as == NF_AS_NEW) {
-	    data->primitives.src_as = dummy.primitives.src_as;
-	    data->primitives.dst_as = dummy.primitives.dst_as;
-	  }
-
-	  if (config.nfacctd_net == NF_NET_NEW) {
-	    data->primitives.src_nmask = dummy.primitives.src_nmask;
-            data->primitives.dst_nmask = dummy.primitives.dst_nmask;
-	  }
-	}
+	/* hacky: bgp next-hop */
+        if (config.nfacctd_net & NF_NET_NEW && dummy_pbgp.peer_dst_ip.family) {
+          memcpy(&prim_ptrs.pextras->bgp_next_hop, &dummy_pbgp.peer_dst_ip, sizeof(struct host_addr));
+          memset(&dummy_pbgp, 0, sizeof(dummy_pbgp));
+        }
 
 	if (config.ports_file) {
 	  if (!pt.table[data->primitives.src_port]) data->primitives.src_port = 0;
 	  if (!pt.table[data->primitives.dst_port]) data->primitives.dst_port = 0;
 	}
 
-        extras = (struct pkt_extras *) ((u_char *)data+PdataSz);
-
+	prim_ptrs.data = data;
 	handle_hostbyteorder_packet(data);
-	flow_cb((void *)&cb_ctxt, data, extras);
+	flow_cb((void *)&cb_ctxt, &prim_ptrs);
 
 	((struct ch_buf_hdr *)pipebuf)->num--;
 	if (((struct ch_buf_hdr *)pipebuf)->num) {
 	  dataptr = (unsigned char *) data;
-	  dataptr += PdataSz + PextrasSz;
+          if (!prim_ptrs.vlen_next_off) dataptr += datasize;
+          else dataptr += prim_ptrs.vlen_next_off;
 	  data = (struct pkt_data *) dataptr;
 	}
       }
-      goto read_data;
+      }
+
+      if (config.pipe_homegrown) goto read_data;
     }
 
 handle_flow_expiration:
@@ -1509,10 +1735,12 @@ expiry_check:
 
 	/* Let's try to sleep a bit and re-open the NetFlow send socket */
 	if (dest.ss_family != 0) {
+	  if (target.fd != -1) close(target.fd);
 	  sleep(5);
 	  target.fd = connsock(&dest, dest_len, hoplimit);
 
-	  Log(LOG_INFO, "INFO ( %s/%s ): Exporting flows to [%s]:%s\n",
+	  if (target.fd != -1)
+	    Log(LOG_INFO, "INFO ( %s/%s ): Exporting flows to [%s]:%s\n",
 			config.name, config.type, dest_addr, dest_serv);
 	}
       }
@@ -1525,13 +1753,6 @@ expiry_check:
 	force_expire(&flowtrack, flowtrack.num_flows - max_flows);
 	goto expiry_check;
       }
-    }
-    
-    /* Flags set by signal handlers or control socket */
-    if (graceful_shutdown_request) {
-      Log(LOG_WARNING, "WARN ( %s/%s ): Shutting down on user request.\n", config.name, config.type);
-      check_expired(&flowtrack, &target, CE_EXPIRE_ALL, engine_type, engine_id);
-      goto exit_lane;
     }
   }
 		

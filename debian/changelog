@@ -1,3 +1,9 @@
+pmacct (1.6.1+vyos2+lithium3) unstable; urgency=low
+
+  * Update to latest upstream master
+
+ -- Marlin Cremers <m.cremers@cvo-technologies.com>  Mon, 17 Apr 2017 20:25:02 +0200
+
 pmacct (0.14.0+vyos2+lithium3) unstable; urgency=low
 
   * pmacct: update dh_gencontrol with new development build flag

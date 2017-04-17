@@ -1,12 +1,314 @@
 UPGRAGE guidelines.
-pmacct is developed keeping an eye to backward compatibility: the upgrade to some
-newer version should be as smooth as possible from an user standpoint. This is
-because, for example, features like SQL table versioning have been introduced
-over the time. 
+pmacct is developed keeping an eye to backward compatibility: the upgrade to
+some newer version should be as smooth as possible from an user standpoint.
+However, sometimes the upgrade may require some operations aimed to support
+the changes done or break old assumptions no longer valid; while the effort
+is to keep these cases at a low, please read this file in preparation to
+upgrading your installation.
+
+
+TO:	>= 1.6.2
+FROM:	<= 1.6.1
+TOPIC:	default plugin names
+DESC:	Plugin names had to be unique per plugin type, meaning two plugins
+	could be named "foobar" if they were of different type. Such behaviour
+	has proven to lead to ambiguous scenarios and hence now plugin names
+	must be globally unique. If not naming a plugin, its default name
+	will now be "default_<plugin type>" instead of "default". Any piece
+	of configuration that attaches directives to the "default" name, ie.
+	relying on the assumption the plugin name defaults to "default", must
+	be reviewed. 
+
+TO:     >= 1.6.2
+FROM:   <= 1.6.1
+TOPIC:	print_time_roundoff configuration directive suppressed
+DESC:	The directive was renamed print_history_roundoff for consistency with
+	other plugins. print_time_roundoff was already removed from documents
+	for the past 3+ years. 
+
+TO:	>= 1.6.2
+FROM:	<= 1.6.1
+TOPIC:	sFlow probe (sfprobe plugin) and tags and class primitives
+DESC:	Historically enterprise #8800 was squatted for the purpose of encoding
+	pmacct-specific fields in sFlow, ie. tags and class. This never got
+	changed when pmacct was assigned its own enterprise number (#43874) by
+	IANA. In 1.6.2, these primitives are moved from #8800 to #43874 making
+	older exports not compatible anymore. 
+        
+TO:	>= 1.6.1
+FROM:	<= 1.6.0
+TOPIC:	BGP communities and AS-PATH
+DESC:	In pmacct 1.6.1 BGP communities and AS-PATH primitives (ie. std_comm,
+	ext_comm, as_path, etc.) were moved from being fixed length to the
+	variable-length framework, allowing for very long lists of communities
+	or paths to be integrally represented. The IMT plugin is excluded from
+	this work and these primitives will still be fixed length. Also, these
+	primitives are not going to be supported anymore in the formatted output
+	(but they will be no problem in the CSV, JSON and Avro output formats)
+	of the print plugin. Btw, the formatted output support for the print
+	plugin will be eventually discontinued in future so it is good to move
+	away from it.
+
+TO:	>= 1.6.1
+FROM:	<= 1.6.0
+TOPIC:	BGP extended communities (ext_comm, src_ext_comm primitives)
+DESC:	Some legacy decision (..) made BGP standard and extended communities be
+	written to the same field, mutual excluding each other. This behaviour
+	has now been changed with each community type being written to the own
+	field. For backward compatibility purposes a temporary config directive
+	has been introduced, tmp_comms_same_field, that - if set to true - does
+	enable the old behaviour. The config directive will be removed at the
+	next major release.
+
+TO:	>= 1.6.1
+FROM:	<= 1.6.0
+TOPIC:	print_markers
+DESC:	In the print plugin, start marker is now printed also in the case where
+	print_output_file_append is set to true; also, markers are printed as a
+	JSON object, if output is set to JSON. 
+
+TO:	>= 1.6.0
+FROM:	<= 1.5.3
+TOPIC:	uacctd switched from ULOG to NFLOG
+DESC:	NFLOG supports both IPv4 and IPv6. While ULOG is still supported in
+        recent kernels, NFLOG is supported since 2.6.14 and there is little
+        point to support both - so a switch was made. The new daemon depends
+        on the package libnetfilter-log-dev (in Debian/Ubuntu or equivalent
+        in the prefered Linux distribution). For a quick test one can setup
+	iptables to produce data in one of the following ways:
+
+	* iptables -t mangle -I POSTROUTING -j NFLOG --nflog-group 4
+	* iptables -t raw -I PREROUTING -j NFLOG --nflog-group 4
+
+	And use the following command to collect data back:
+
+	uacctd -c in_iface,out_iface,src_mac,dst_mac,src_host,dst_host,proto,src_port,dst_port -P print -g 4
+
+TO:	>= 1.6.0
+FROM:	<= 1.5.3
+TOPIC:	build system refreshed
+DESC:	autoconf and automake from early 2000 were being used to compile the
+	build system until 1.5.3. This was for the sake of simplicity and
+	robustness and, of course, came with drawbacks: somebody wanting to
+	touch the build system should know which version of the tools to use,
+	no leverage of the latest and greatest advancements made in the last
+	one and half decades. The switch for should be almost transparent,
+	the only impact being how to supply information in case the build
+	system is unable to determine location of libraries (ie. via pkg-config
+	and checking "typical" locations like /usr/local/lib): taking as an
+	example PostgreSQL, before --with-pgsql-libs and --with-pgsql-includes
+	were to be used to supply path to library and headers respectively;
+	now environment variables PGSQL_LIBS and PGSQL_CFLAGS should be used
+	instead for the same purpose, ie.:
+
+	PGSQL_LIBS="-L/usr/local/postgresql/lib -lpq"
+	PGSQL_CFLAGS="-I/usr/local/postgresql/include"
+	./configure --enable-pgsql
+
+TO:	>= 1.6.0
+FROM:	<= 1.5.3
+TOPIC:	nfacctd_disable_checks and sfacctd_disable_checks
+DESC:	Default for this feature changed from false to true, ie. log warning
+	messages for failing basic checks against incoming NetFlow/sFlow
+	datagrams is disabled. For sequencing checks, the 'export_proto_seqno'
+	primitive is recommended instead.
+
+TO:	>= 1.6.0
+FROM:	<= 1.5.3
+TOPIC:	sql_recovery_logfile
+DESC:	Feature removed from pmacct along with pmmyplay and pmpgplay logfile
+	replay tools. 
+
+TO:	>= 1.6.0
+FROM:	<= 1.5.3
+TOPIC:	MongoDB C legagy driver releases <= 0.8
+DESC:	Support for MongoDB C legacy driver prior to 0.8 is dropped; in 0.8
+	release, the most current version of the legacy driver, there was an
+	impacting change of API; unfortunately in mongo.h the version was not
+	updated and it looks the legacy driver is not maintained anymore (so
+	no chance to have the nit fixed). The only way out seemed to default
+	to the 0.8 behaviour, as that is the one currently being downloaded
+	from GitHub by users. 
+
+TO:     >= 1.6.0
+FROM:   <= 1.5.3
+TOPIC:  src_net and dst_net primitives
+DESC:   Until 1.5.3 src_net and dst_net primitives value was written in the
+        same field as src_host and dst_host - hence making the two sets mutual
+        exclusive. This was found limiting by several users and, as a result of
+        that, a separate field was added for storing networks (see "Increased
+        memory usage by plugin caches" entry in this document). The use of such
+        separate field had to be explicitely enabled by setting tmp_net_own_field
+        configuration directive to true (by default set to false for backward
+	compatibility); in version 1.6.0, tmp_net_own_field default value has
+	now changed to true. tmp_net_own_field will be removed at the next
+	major release.
+
+TO:	>= 1.5.2
+FROM:	<= 1.5.1
+TOPIC:	--enable-ipv6 , IPv4-mapped IPv6 addresses & bindv6only
+DESC:	Explicit support for IPv4-mapped IPv6 addresses was removed and now the
+	bindv6only kind of behaviour is expected to be false (ie. both v4, via
+	v4-mapped v6 addresses, and v6 addresses can connect to the v6 socket).
+	On BSDs this is enforced in the code via a setsockopt() call; on Linux
+	/proc/sys/net/ipv6/bindv6only is meant to enable/disable the feature.
+	If binding to a "::" address (ie. no [sn]facctd_ip specified when pmacct
+	is compiled with --enable-ipv6) no packets from IPv4 senders are not
+	being received, then please check your bindv6only kernel setting. 
+
+TO:	>= 1.5.2
+FROM:	<= 1.5.1
+TOPIC:	sql_history_since_epoch
+DESC:	The effect of configuration directive sql_history_since_epoch has been
+	ported to encompass any timestamp in pmacct, ie. timestamp_start and
+	timestamp_end primitives, nfacctd_stitching, sfacctd counters filename,
+	etc. The directive has hence been renamed timestamps_since_epoch. The
+	old name, sql_history_since_epoch, has been removed from documentation
+	but it is still going to be accepted in the configuration until the next
+	major release for the sake of backwards compatibility.
+
+TO:	>= 1.5.1
+FROM:	<= 1.5.0
+TOPIC:	Increased memory usage by plugin caches
+DESC:	Source and destination IP prefixes aggregaton primitives, src_net and
+	dst_net, now feature a separate field so to not be mutually exclusive
+	with aggregation over IP addresses, ie. src_host and dst_host. In 1.5
+	this can be optionally enabled by setting tmp_net_own_field to true;
+	in later releases this behaviour will become default. The extra fields
+	for IP prefixes do take additional memory in plugins cache - meaning 
+	values for pre-allocated cache enries, ie. print_cache_entries, if
+	configured to tight to available resources might generate SEGV and
+	have to be reviewed downward.
+
+TO:     >= 1.5.0
+FROM:   <= 1.5.0rc3
+TOPIC:  nfprobe plugin, NetFlow v9 export and flow timestamps
+DESC:	timestamps for nfprobe plugin NetFlow v9 export are now absolute and
+	in msecs, using field types #152 and #153. timestamps_secs can be set
+	to true in order to revert to timestamps relative and in secs, using
+	fields types #21 and #22.
+
+TO:     >= 1.5.0
+FROM:   <= 1.5.0rc3
+TOPIC:  nfprobe plugin, NetFlow/IPFIX exports and tag, tag2 primitives
+DESC:	tag and tag2 primitives can now be exported by nfprobe plugin only
+	using IPFIX transport (nfprobe_version: 10). This is because, being
+	custom pmacct field types, they have moved inside pmacct PEN for a
+	cleaner solution (PENs not being supported by NetFlow v9). 
+
+TO:	>= 1.5.0
+FROM:	<= 1.5.0rc3
+TOPIC:	NetFlow/IPFIX, print/AMQP/MongoDB plugins & time syncronization
+DESC:	In 1.5.0 print/AMQP/MongoDB plugins are brought on par to SQL plugins
+	by which flows/data with a future timestamp than the one currently
+	being flushed is retained in the cache - to give further chances to
+	in-memory data aggregation. This is intuitive, consistent behaviour
+	but could happen time syncronization between collector and NetFlow/ 
+	IPFIX agents was not an issue and suddenly it appears pmacct is not
+	writing to the backend anymore. Solution is simply to sync all via
+	NTP and use same timezone (recommended UTC for all).
+
+TO:     >= 1.5.0rc3
+FROM:   <= 1.5.0rc2
+TOPIC:  nfacctd, sfacctd & plugin_pipe_size
+DESC:	nfacctd_pipe_size and sfacctd_pipe_size configuration directives
+	are being introduced in order to set the socket size between the
+	daemons and the kernel. Until 1.5.0rc2 the same was accomplished,
+	the dirty way, via existing plugin_pipe_size config directive when
+	assigned to the core process. If relying on this trick on 1.5.0rc2
+	and upgrading this can silently create packet loss on 1.5.0r3 and
+	later (packet loss can be checked by veryfing that the counter
+	showed by "netstat -s | grep Rcv" is not increasing).
+
+TO:	>= 1.5.0rc3
+FROM:	<= 1.5.0rc2
+TOPIC:	MySQL plugin, additional libraries required when compiling
+DESC:	MySQL 5.6 and later require linking against libstdc++ and librt. For
+	this reason, when compiling MySQL plugin, it's now required that the
+	development packages for these two libraries must be installed on the
+	host system. Checks for this are introduced at configure script time.  
+	It is not checked which MySQL version is installed so the requirement
+	for these libraries is made retroactive.
+
+TO:     >= 1.5.0rc3
+FROM:   <= 1.5.0rc2
+TOPIC:  SQL plugins, agent_id2 field
+DESC:	Over the years, agent_id, agent_id2 fields were found confusing to
+	store tag, tag2 primitives respectively. agent_id is now renamed 'tag'
+	and backwards compatibility is preserved by issuing schema version #9.
+	agent_id2 is not defined in any sql_table_schema instead and hence its
+	renaming will be disruptive for existing deployments.
+
+TO:     >= 1.5.0rc2
+FROM:   <= 1.5.0rc1
+TOPIC:  print plugin, dynamic file names and pointer to latest file
+DESC:	Until 1.5.0rc1 pointer to latest file available was built as "<plugin
+	name>-latest". Possibility to build variable spool directory structure
+	and introduction of primitives-related variables, ie. $peer_src_ip, do
+	phase-out the simple way of producing pointers, jeopardizing backward
+	compatibility aswell. From 1.5.0rc2 a print_latest_file configuration
+	directive allows to explicitely define pointer(s) to latest file(s):
+	please refer to CONFIG-KEYS for more details about the feature. When
+	upgrading, it is recommended to delete existing symlinks. 
+
+TO:     >= 1.5.0rc2
+FROM:   <= 1.5.0rc1
+TOPIC:  print plugin, dynamic file names and time-related variables
+DESC:	Time-related variables substitution is now based solely on the value of
+	print_history. Previously, if print_history was not specified, this was
+	based on the value of print_refresh_time. While this breaks backward-
+	compatibility, it makes print plugin acting consistently to the rest of
+	pmacct plugins. 
+
+TO:     >= 1.5.0rc1
+FROM:   <= 0.14.3
+TOPIC:  print plugin, no entries to print_output_file
+DESC:	In line with SQL plugins, in case there are no entries to account for the
+	last print_refresh_time period, the purge function will not be invoked.
+	As a result of that, if print_output_file contains time-based variables
+	and if required to, output files will not be created anymore in case of
+	no traffic to account for. Until 0.14.3, under same conditions, an empty
+	output file (title only in case of formatted, CSV output) would have been
+	printed out. 
+
+TO:	>= 1.5.0rc1
+FROM:	<= 0.14.3
+TOPIC:	IPv6, peer_src_ip primitive, NetFlow exporter IP address
+DESC:	Upon enabling IPv6 at compile time, via --enable-ipv6 switch, an IPv4
+	NetFlow exporter IP address, ie. 10.0.0.1, was being written as IPv4-
+        mapped IPv6 address, ie. ::ffff:10.0.0.1. This was causing confusion
+	when composing maps, ie. the 'ip' field would change depending on whether
+	IPv6 was enabled or not. To make maps consistent and simplify transitions
+	to IPv6 compiled pmacct executables, IPv4-mapped IPv6 addresses are now
+	internally translated to plain IPv4 ones.
  
-However, sometimes the upgrade may require some easy operations aimed to support
-the changes done or break old assumptions no longer valid. Such happenings have
-been (and will be) very limited through the development process.
+TO:	>= 0.14.3
+FROM:	<= 0.14.2
+TOPIC:	networks_file & host aggregation primitives 
+DESC:	In previous releases defining a networks_file in conjunction with host
+	aggregation primitives would automatically work as a filter (ie. zero out
+	hosts not included in the networks_file); whereas defining a networks_file
+	in conjunction with net primitives would only work as a resolver. Now this
+	behaviour has been streamlined by introducing a networks_file_filter true-
+	false configuration directive to explicitely enable/disable the filtering
+	feature (for both host and net primitives) on top of the resolver one. To
+	summarize: if using a networks_file in conjunction with host aggregation
+	primitives, and in order to keep the same behaviour while upgrading, a
+	line should be added to the configuration: "networks_file_filter: true".
+
+TO:     >= 0.14.3
+FROM:   <= 0.14.2
+TOPIC:	xlate_src and xlate_dst
+DESC:	Feature has been obsoleted and replaced by proper aggregation primitives
+	(nat_event, post_nat_*) to support NEL (NetFlow Event Logging) as currently
+	implemented on Cisco ASR devices and to support CGNAT kind of scenarios.
+
+TO:     >= 0.14.3
+FROM:   <= 0.14.2
+TOPIC:	nfacctd_sql_log
+DESC:	Feature has been obsoleted and replaced by proper aggregation primitives
+	(timestamp_start, timestamp_end) that effectively convert pmacct into a
+	logger if enabled.
 
 TO:     >= 0.14.0
 FROM:   <= 0.14.0rc3
@@ -77,6 +379,8 @@ DESC:   With release 0.12, the agent_id field becomes 4-bytes large (from 2-byte
         is to run an "ALTER TABLE" statement to increase the field size during a
         maintenance window.
 
+TO:     >= 0.12.0rc1
+FROM:   <= 0.11
 TOPIC:  nfprobe plugin: NetFlow v9 and 32-bit ASNs
 DESC:   Release 0.12 introduces support for 32-bit ASNs in pmacct; things do not
         change in NetFlow v5 as if a 32-bit ASN is encountered, it is written as

@@ -4,7 +4,7 @@
 --
 
 -- Tables 
-DROP TABLE acct_uni_v2;
+DROP TABLE IF EXISTS acct_uni_v2;
 CREATE TABLE acct_uni_v2 (
         agent_id BIGINT NOT NULL DEFAULT 0,
         mac_src CHAR(17) NOT NULL DEFAULT '0:0:0:0:0:0',
@@ -17,12 +17,12 @@ CREATE TABLE acct_uni_v2 (
         ip_proto SMALLINT NOT NULL DEFAULT 0,
         packets INT NOT NULL,
         bytes BIGINT NOT NULL,
-        stamp_inserted timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', 
+        stamp_inserted timestamp without time zone NOT NULL DEFAULT '0001-01-01 00:00:00', 
         stamp_updated timestamp without time zone,
         CONSTRAINT acct_uni_v2_pk PRIMARY KEY (agent_id, mac_src, mac_dst, vlan, ip_src, ip_dst, port_src, port_dst, ip_proto, stamp_inserted)
 );
 
-DROP TABLE acct_v2;
+DROP TABLE IF EXISTS acct_v2;
 CREATE TABLE acct_v2 (
 	agent_id BIGINT NOT NULL DEFAULT 0,
         mac_src macaddr NOT NULL DEFAULT '0:0:0:0:0:0',
@@ -35,12 +35,12 @@ CREATE TABLE acct_v2 (
         ip_proto SMALLINT NOT NULL DEFAULT 0,
         packets INT NOT NULL,
         bytes BIGINT NOT NULL,
-        stamp_inserted timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', 
+        stamp_inserted timestamp without time zone NOT NULL DEFAULT '0001-01-01 00:00:00', 
         stamp_updated timestamp without time zone,
         CONSTRAINT acct_v2_pk PRIMARY KEY (agent_id, mac_src, mac_dst, vlan, ip_src, ip_dst, port_src, port_dst, ip_proto, stamp_inserted)
 );
 
-DROP TABLE acct_as_v2;
+DROP TABLE IF EXISTS acct_as_v2;
 CREATE TABLE acct_as_v2 (
         agent_id BIGINT NOT NULL DEFAULT 0,
         mac_src macaddr NOT NULL DEFAULT '0:0:0:0:0:0',
@@ -53,12 +53,12 @@ CREATE TABLE acct_as_v2 (
         ip_proto SMALLINT NOT NULL DEFAULT 0,
         packets INT NOT NULL,
         bytes BIGINT NOT NULL,
-        stamp_inserted timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', 
+        stamp_inserted timestamp without time zone NOT NULL DEFAULT '0001-01-01 00:00:00', 
         stamp_updated timestamp without time zone,
         CONSTRAINT acct_as_v2_pk PRIMARY KEY (agent_id, mac_src, mac_dst, vlan, ip_src, ip_dst, port_src, port_dst, ip_proto, stamp_inserted)
 );
 
-DROP TABLE proto;
+DROP TABLE IF EXISTS proto;
 CREATE TABLE proto (
 	num SMALLINT NOT NULL,
 	description CHAR(20),

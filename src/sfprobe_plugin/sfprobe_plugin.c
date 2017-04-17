@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /* 
@@ -452,7 +452,7 @@ static void readPacket(SflSp *sp, struct pkt_payload *hdr, const unsigned char *
 	SFLADD_ELEMENT(&fs, &classHdrElem);
     }
 
-    if (config.what_to_count & (COUNT_ID|COUNT_ID2)) {
+    if (config.what_to_count & (COUNT_TAG|COUNT_TAG2)) {
       memset(&tagHdrElem, 0, sizeof(tagHdrElem));
       tagHdrElem.tag = SFLFLOW_EX_TAG;
       tagHdrElem.flowType.tag.tag = hdr->tag;
@@ -567,31 +567,51 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 {
   struct pkt_payload *hdr;
   struct pkt_data dummy;
+  struct pkt_bgp_primitives dummy_pbgp;
   struct pollfd pfd;
   struct timezone tz;
   unsigned char *pipebuf, *pipebuf_ptr;
   time_t now;
-  int timeout;
-  int ret, num;
+  int timeout, refresh_timeout, amqp_timeout, kafka_timeout, ret, num;
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
+  struct plugins_list_entry *plugin_data = ((struct channels_list_entry *)ptr)->plugin;
   u_int32_t bufsz = ((struct channels_list_entry *)ptr)->bufsize;
+  pid_t core_pid = ((struct channels_list_entry *)ptr)->core_pid;
   unsigned char *rgptr;
   int pollagain = TRUE;
   u_int32_t seq = 1, rg_err_count = 0;
+  struct networks_file_data nfd;
 
   time_t clk, test_clk;
   SflSp sp;
+  void *kafka_msg;
+
+#ifdef WITH_RABBITMQ
+  struct p_amqp_host *amqp_host = &((struct channels_list_entry *)ptr)->amqp_host;
+#endif
+
+#ifdef WITH_KAFKA
+  struct p_kafka_host *kafka_host = &((struct channels_list_entry *)ptr)->kafka_host;
+#endif
+
   memset(&sp, 0, sizeof(sp));
 
-  /* XXX: glue */
   memcpy(&config, cfgptr, sizeof(struct configuration));
   recollect_pipe_memory(ptr);
   pm_setproctitle("%s [%s]", "sFlow Probe Plugin", config.name);
   if (config.pidfile) write_pid_file_plugin(config.pidfile, config.type, config.name);
   if (config.logfile) {
     fclose(config.logfile_fd);
-    config.logfile_fd = open_logfile(config.logfile);
+    config.logfile_fd = open_output_file(config.logfile, "a", FALSE);
+  }
+
+  if (config.proc_priority) {
+    int ret;
+
+    ret = setpriority(PRIO_PROCESS, 0, config.proc_priority);
+    if (ret) Log(LOG_WARNING, "WARN ( %s/%s ): proc_priority failed (errno: %d)\n", config.name, config.type, errno);
+    else Log(LOG_INFO, "INFO ( %s/%s ): proc_priority set to %d\n", config.name, config.type, getpriority(PRIO_PROCESS, 0));
   }
 
   reload_map = FALSE;
@@ -601,11 +621,7 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   signal(SIGUSR1, SIG_IGN);
   signal(SIGUSR2, reload_maps);
   signal(SIGPIPE, SIG_IGN);
-#if !defined FBSD4
   signal(SIGCHLD, SIG_IGN);
-#else
-  signal(SIGCHLD, ignore_falling_child);
-#endif
 
   /* ****** sFlow part starts here ****** */
 
@@ -633,18 +649,45 @@ void sfprobe_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     set_net_funcs(&nt);
   }
 
-  pipebuf = (unsigned char *) Malloc(config.buffer_size);
+  pipebuf = (unsigned char *) pm_malloc(config.buffer_size);
   memset(pipebuf, 0, config.buffer_size);
 
-  pfd.fd = pipe_fd;
-  pfd.events = POLLIN;
-  setnonblocking(pipe_fd);
-  timeout = 60 * 1000; /* 1 min */
+  if (config.pipe_amqp) {
+    plugin_pipe_amqp_compile_check();
+#ifdef WITH_RABBITMQ
+    pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
+    amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
+#endif
+  }
+  else if (config.pipe_kafka) {
+    plugin_pipe_kafka_compile_check();
+#ifdef WITH_KAFKA
+    pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
+    kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+#endif
+  }
+  else setnonblocking(pipe_fd);
+
+  refresh_timeout = 60 * 1000; /* 1 min */
 
   for (;;) {
 poll_again:
     status->wakeup = TRUE;
-    ret = poll(&pfd, 1, timeout);
+
+    pfd.fd = pipe_fd;
+    pfd.events = POLLIN;
+
+    if (config.pipe_homegrown || config.pipe_amqp) {
+      timeout = MIN(refresh_timeout, (amqp_timeout ? amqp_timeout : INT_MAX));
+      ret = poll(&pfd, (pfd.fd == ERR ? 0 : 1), timeout);
+    }
+#ifdef WITH_KAFKA
+    else if (config.pipe_kafka) {
+      timeout = MIN(refresh_timeout, (kafka_timeout ? kafka_timeout : INT_MAX));
+      ret = p_kafka_consume_poller(kafka_host, &kafka_msg, timeout);
+    }
+#endif
+
     if (ret < 0) goto poll_again;
 
     if (reload_map) {
@@ -652,61 +695,119 @@ poll_again:
       reload_map = FALSE;
     }
 
+#ifdef WITH_RABBITMQ
+    if (config.pipe_amqp && pipe_fd == ERR) {
+      if (timeout == amqp_timeout) {
+        pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
+      }
+      else amqp_timeout = plugin_pipe_calc_retry_timeout_diff(&amqp_host->btimers, clk);
+    }
+#endif
+
+#ifdef WITH_KAFKA
+    if (config.pipe_kafka && pipe_fd == ERR) {
+      if (timeout == kafka_timeout) {
+        pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
+        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+      }
+      else kafka_timeout = plugin_pipe_calc_retry_timeout_diff(&kafka_host->btimers, clk);
+    }
+#endif
+
     if (ret > 0) { /* we received data */
 read_data:
-      if (!pollagain) {
-        seq++;
-        seq %= MAX_SEQNUM;
-        if (seq == 0) rg_err_count = FALSE;
-      }
-      else {
-        if ((ret = read(pipe_fd, &rgptr, sizeof(rgptr))) == 0)
-          exit_plugin(1); /* we exit silently; something happened at the write end */
-      }
-
-      if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
+      if (config.pipe_homegrown) {
         if (!pollagain) {
-          pollagain = TRUE;
-          // goto poll_again;
-          goto handle_tick;
+          seq++;
+          seq %= MAX_SEQNUM;
+          if (seq == 0) rg_err_count = FALSE;
         }
         else {
-	  rg_err_count++;
-	  if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
-	    Log(LOG_ERR, "ERROR ( %s/%s ): We are missing data.\n", config.name, config.type);
-	    Log(LOG_ERR, "If you see this message once in a while, discard it. Otherwise some solutions follow:\n");
-	    Log(LOG_ERR, "- increase shared memory size, 'plugin_pipe_size'; now: '%u'.\n", config.pipe_size);
-	    Log(LOG_ERR, "- increase buffer size, 'plugin_buffer_size'; now: '%u'.\n", config.buffer_size);
-	    Log(LOG_ERR, "- increase system maximum socket size.\n\n");
-	  }
-	  seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
-	}
-      }
+          if ((ret = read(pipe_fd, &rgptr, sizeof(rgptr))) == 0)
+            exit_plugin(1); /* we exit silently; something happened at the write end */
+        }
+  
+        if ((rg->ptr + bufsz) > rg->end) rg->ptr = rg->base;
+  
+        if (((struct ch_buf_hdr *)rg->ptr)->seq != seq) {
+          if (!pollagain) {
+            pollagain = TRUE;
+            goto handle_tick;
+          }
+          else {
+  	    rg_err_count++;
+  	    if (config.debug || (rg_err_count > MAX_RG_COUNT_ERR)) {
+              Log(LOG_WARNING, "WARN ( %s/%s ): Missing data detected (plugin_buffer_size=%llu plugin_pipe_size=%llu).\n",
+                        config.name, config.type, config.buffer_size, config.pipe_size);
+              Log(LOG_WARNING, "WARN ( %s/%s ): Increase values or look for plugin_buffer_size, plugin_pipe_size in CONFIG-KEYS document.\n\n",
+                        config.name, config.type);
+  	    }
 
-      pollagain = FALSE;
-      memcpy(pipebuf, rg->ptr, bufsz);
-      if ((rg->ptr+bufsz) >= rg->end) rg->ptr = rg->base;
-      else rg->ptr += bufsz;
+	    rg->ptr = (rg->base + status->last_buf_off);
+  	    seq = ((struct ch_buf_hdr *)rg->ptr)->seq;
+  	  }
+        }
+  
+        pollagain = FALSE;
+        memcpy(pipebuf, rg->ptr, bufsz);
+        rg->ptr += bufsz;
+      }
+#ifdef WITH_RABBITMQ
+      else if (config.pipe_amqp) {
+        ret = p_amqp_consume_binary(amqp_host, pipebuf, config.buffer_size);
+        if (ret) pipe_fd = ERR;
+
+        seq = ((struct ch_buf_hdr *)pipebuf)->seq;
+        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
+      }
+#endif
+#ifdef WITH_KAFKA
+      else if (config.pipe_kafka) {
+        ret = p_kafka_consume_data(kafka_host, kafka_msg, pipebuf, config.buffer_size);
+        if (ret) pipe_fd = ERR;
+
+        seq = ((struct ch_buf_hdr *)pipebuf)->seq;
+        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+      }
+#endif
 
       hdr = (struct pkt_payload *) (pipebuf+ChBufHdrSz);
       pipebuf_ptr = (unsigned char *) pipebuf+ChBufHdrSz+PpayloadSz;
 
-      while (((struct ch_buf_hdr *)pipebuf)->num) {
+      if (config.debug_internal_msg) 
+	Log(LOG_DEBUG, "DEBUG ( %s/%s ): buffer received cpid=%u len=%llu seq=%u num_entries=%u\n",
+		config.name, config.type, core_pid, ((struct ch_buf_hdr *)pipebuf)->len,
+		seq, ((struct ch_buf_hdr *)pipebuf)->num);
+
+      if (!config.pipe_check_core_pid || ((struct ch_buf_hdr *)pipebuf)->core_pid == core_pid) {
+      while (((struct ch_buf_hdr *)pipebuf)->num > 0) {
 	if (config.networks_file) {
+	  memset(&dummy.primitives, 0, sizeof(dummy.primitives));
+	  memset(&dummy_pbgp, 0, sizeof(dummy_pbgp));
+
 	  memcpy(&dummy.primitives.src_ip, &hdr->src_ip, HostAddrSz);
 	  memcpy(&dummy.primitives.dst_ip, &hdr->dst_ip, HostAddrSz);
+	  dummy.primitives.src_nmask = hdr->src_nmask;
+	  dummy.primitives.dst_nmask = hdr->dst_nmask;
 
-	  for (num = 0; net_funcs[num]; num++) (*net_funcs[num])(&nt, &nc, &dummy.primitives);
+	  for (num = 0; net_funcs[num]; num++) (*net_funcs[num])(&nt, &nc, &dummy.primitives, &dummy_pbgp, &nfd);
 
-          if (config.nfacctd_as == NF_AS_NEW) {
+	  /* hacky */
+	  if (config.nfacctd_as & NF_AS_NEW && dummy.primitives.src_as)
 	    hdr->src_as = dummy.primitives.src_as;
-	    hdr->dst_as = dummy.primitives.dst_as;
-          }
 
-          if (config.nfacctd_net == NF_NET_NEW) {
-            hdr->src_nmask = dummy.primitives.src_nmask;
-            hdr->dst_nmask = dummy.primitives.dst_nmask;
-          }
+	  if (config.nfacctd_as & NF_AS_NEW && dummy.primitives.dst_as)
+	    hdr->dst_as = dummy.primitives.dst_as;
+
+          if (config.nfacctd_net & NF_NET_NEW && dummy.primitives.src_nmask)
+	    hdr->src_nmask = dummy.primitives.src_nmask;
+
+          if (config.nfacctd_net & NF_NET_NEW && dummy.primitives.dst_nmask)
+	    hdr->dst_nmask = dummy.primitives.dst_nmask;
+
+          if (config.nfacctd_net & NF_NET_NEW && dummy_pbgp.peer_dst_ip.family)
+            memcpy(&hdr->bgp_next_hop, &dummy_pbgp.peer_dst_ip, sizeof(struct host_addr));
 	}
 	
 	readPacket(&sp, hdr, pipebuf_ptr);
@@ -721,7 +822,8 @@ read_data:
 	  pipebuf_ptr += PpayloadSz;
 	}
       }
-      goto read_data;
+      }
+      if (config.pipe_homegrown) goto read_data;
     }
 handle_tick:
     test_clk = time(NULL);

@@ -4,7 +4,7 @@
 --
 
 -- Tables 
-DROP TABLE acct_v7;
+DROP TABLE IF EXISTS acct_v7;
 CREATE TABLE acct_v7 (
 	agent_id BIGINT NOT NULL DEFAULT 0,
 	class_id CHAR(16) NOT NULL DEFAULT ' ',
@@ -23,12 +23,12 @@ CREATE TABLE acct_v7 (
         packets INT NOT NULL,
         bytes BIGINT NOT NULL,
 	flows INT NOT NULL DEFAULT 0,
-        stamp_inserted timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', 
+        stamp_inserted timestamp without time zone NOT NULL DEFAULT '0001-01-01 00:00:00', 
         stamp_updated timestamp without time zone,
         CONSTRAINT acct_v7_pk PRIMARY KEY (agent_id, class_id, mac_src, mac_dst, vlan, as_src, as_dst, ip_src, ip_dst, port_src, port_dst, ip_proto, tos, stamp_inserted)
 );
 
-DROP TABLE proto;
+DROP TABLE IF EXISTS proto;
 CREATE TABLE proto (
 	num SMALLINT NOT NULL,
 	description CHAR(20),
