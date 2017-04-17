@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -23,14 +23,22 @@
 
 #include "pmacct.h"
 #include "pmacct-data.h"
+#define __PLUGIN_COMMON_EXPORT
+#include "plugin_common.h"
+#undef __PLUGIN_COMMON_EXPORT
+#define __SQL_COMMON_EXPORT
 #include "sql_common.h"
+#undef __SQL_COMMON_EXPORT
+#include "preprocess.h"
+#include "preprocess-data.h"
 
-void set_preprocess_funcs(char *string, struct preprocess *prep)
+void set_preprocess_funcs(char *string, struct preprocess *prep, int dictionary)
 {
   char *token, *sep, *key, *value;
-  int j = 0;
+  int dindex, err, sql_idx = 0, p_idx = 0;
 
-  memset(preprocess_funcs, 0, sizeof(preprocess_funcs));
+  memset(sql_preprocess_funcs, 0, sizeof(sql_preprocess_funcs));
+  memset(P_preprocess_funcs, 0, sizeof(P_preprocess_funcs));
   memset(prep, 0, sizeof(struct preprocess));
 
   if (!string) return;
@@ -40,68 +48,94 @@ void set_preprocess_funcs(char *string, struct preprocess *prep)
   while (token = extract_token(&string, ',')) {
     sep = strchr(token, '=');
     if (!sep) {
-      Log(LOG_WARNING, "WARN ( %s/%s ): Malformed preprocess string. Discarded.\n", config.name, config.type);
+      Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: malformed input string. Ignored.\n", config.name, config.type);
       return; 
     }
     else {
       key = token;
       *sep = '\0';
       value = sep+1;
-    } 
+      lower_string(key);
+    }
+
+    /* validation against dictionaries */
+    if (dictionary == PREP_DICT_SQL) {
+      for (dindex = 0; strcmp(sql_prep_dict[dindex].key, ""); dindex++) {
+        if (!strcmp(sql_prep_dict[dindex].key, key)) {
+          err = FALSE;
+          break;
+        }
+        else err = E_NOTFOUND; /* key not found */
+      }
+    }
+    else if (dictionary == PREP_DICT_PRINT) {
+      for (dindex = 0; strcmp(print_prep_dict[dindex].key, ""); dindex++) {
+        if (!strcmp(print_prep_dict[dindex].key, key)) {
+          err = FALSE;
+          break;      
+        }           
+        else err = E_NOTFOUND; /* key not found */
+      }
+    }
+
+    if (err == E_NOTFOUND) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: unknown keyword %s. Ignored.\n", config.name, config.type, key);
+      continue;
+    }
 
     if (!strcmp(key, "qnum")) {
       prep->qnum = atoi(value);
-      if (!prep->qnum) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'qnum' value.\n", config.name, config.type);
+      if (!prep->qnum) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'qnum' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "minp")) {
       prep->minp = atoi(value);
-      if (!prep->minp) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'minp' value.\n", config.name, config.type);
+      if (!prep->minp) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'minp' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "minf")) {
       prep->minf = atoi(value);
-      if (!prep->minf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'minf' value.\n", config.name, config.type);
+      if (!prep->minf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'minf' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "minb")) {
       prep->minb = atoi(value);
-      if (!prep->minb) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'minb' value.\n", config.name, config.type);
+      if (!prep->minb) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'minb' value.\n", config.name, config.type);
     }
 
     else if (!strcmp(key, "maxp")) {
       prep->maxp = atoi(value);
-      if (!prep->maxp) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'maxp' value.\n", config.name, config.type);
+      if (!prep->maxp) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'maxp' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "maxf")) {
       prep->maxf = atoi(value);
-      if (!prep->maxf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'maxf' value.\n", config.name, config.type);
+      if (!prep->maxf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'maxf' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "maxb")) {
       prep->maxb = atoi(value);
-      if (!prep->maxb) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'maxb' value.\n", config.name, config.type);
+      if (!prep->maxb) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'maxb' value.\n", config.name, config.type);
     }
 
     else if (!strcmp(key, "maxbpp")) {
       prep->maxbpp = atoi(value);
-      if (!prep->maxbpp) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'maxbpp' value.\n", config.name, config.type);
+      if (!prep->maxbpp) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'maxbpp' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "maxppf")) {
       prep->maxppf = atoi(value);
-      if (!prep->maxppf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'maxppf' value.\n", config.name, config.type);
+      if (!prep->maxppf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'maxppf' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "minbpp")) {
       prep->minbpp = atoi(value);
-      if (!prep->minbpp) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'minbpp' value.\n", config.name, config.type);
+      if (!prep->minbpp) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'minbpp' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "minppf")) {
       prep->minppf = atoi(value);
-      if (!prep->minppf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'minppf' value.\n", config.name, config.type);
+      if (!prep->minppf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'minppf' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "fss")) {
       prep->fss = atoi(value);
-      if (!prep->fss) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'fss' value.\n", config.name, config.type);
+      if (!prep->fss) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'fss' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "fsrc")) {
       prep->fsrc = atoi(value);
-      if (!prep->fsrc) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'fsrc' value.\n", config.name, config.type);
+      if (!prep->fsrc) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'fsrc' value.\n", config.name, config.type);
       else {
 	fsrc_queue.num = 0;
 	memset(&fsrc_queue.head, 0, sizeof(struct fsrc_queue_elem)); 
@@ -109,17 +143,17 @@ void set_preprocess_funcs(char *string, struct preprocess *prep)
     }
     else if (!strcmp(key, "usrf")) {
       prep->usrf = atoi(value);
-      if (!prep->usrf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'usrf' value.\n", config.name, config.type);
+      if (!prep->usrf) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'usrf' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "adjb")) {
       prep->adjb = atoi(value);
-      if (!prep->adjb) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'adjb' value.\n", config.name, config.type);
+      if (!prep->adjb) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'adjb' value.\n", config.name, config.type);
     }
     else if (!strcmp(key, "recover")) {
       prep->recover = atoi(value);
-      if (!prep->recover) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: Invalid 'recover' value.\n", config.name, config.type);
+      if (!prep->recover) Log(LOG_WARNING, "WARN ( %s/%s ): preprocess: invalid 'recover' value.\n", config.name, config.type);
     }
-    else Log(LOG_ERR, "ERROR ( %s/%s ): Invalid preprocess key: '%s'. Ignored.\n", config.name, config.type, key);
+    else Log(LOG_ERR, "ERROR ( %s/%s ): preprocess: invalid key: '%s'. Ignored.\n", config.name, config.type, key);
   }
 
   /* Post checks: almost one check should have been specified */
@@ -128,119 +162,185 @@ void set_preprocess_funcs(char *string, struct preprocess *prep)
       (!prep->maxbpp) && (!prep->maxppf) && (!prep->minbpp) &&
       (!prep->minppf) && (!prep->fss) && (!prep->fsrc) &&
       (!prep->usrf) && (!prep->adjb)) {
-    Log(LOG_ERR, "ERROR ( %s/%s ): 'sql_preprocess' does not contain any check. Ignored.\n", config.name, config.type); 
+    Log(LOG_ERR, "ERROR ( %s/%s ): preprocess: does not contain any checks. Ignored.\n", config.name, config.type); 
     return;
   } 
 
   /* 1st step: insert conditionals */
   if (prep->qnum) {
-    preprocess_funcs[j] = cond_qnum;
-    j++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = cond_qnum;
+      sql_idx++;
+    }
   }
 
   /* 2nd step: invalidation of committed cache entries - if at
      least one check was specified; each check will selectively
      re-validate entries that pass tests successfully */
-  preprocess_funcs[j] = mandatory_invalidate;
-  j++;
+  if (dictionary == PREP_DICT_SQL) {
+    sql_preprocess_funcs[sql_idx] = mandatory_invalidate;
+    sql_idx++;
+  }
+  else if (dictionary == PREP_DICT_PRINT) {
+    P_preprocess_funcs[p_idx] = P_mandatory_invalidate;
+    p_idx++;
+  }
 
   /* 3rd step: insert checks */
   if (prep->minp) {
-    preprocess_funcs[j] = check_minp;
-    prep->num++;
-    j++;
-    prep->checkno++;
-  } 
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_minp;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
+    else if (dictionary == PREP_DICT_PRINT) {
+      P_preprocess_funcs[p_idx] = P_check_minp;
+      prep->num++;
+      p_idx++;
+      prep->checkno++;
+    }
+  }
 
   if (prep->minf) {
-    preprocess_funcs[j] = check_minf;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_minf;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
+    else if (dictionary == PREP_DICT_PRINT) {
+      P_preprocess_funcs[p_idx] = P_check_minf;
+      prep->num++;
+      p_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->minb) {
-    preprocess_funcs[j] = check_minb;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_minb;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
+    else if (dictionary == PREP_DICT_PRINT) {
+      P_preprocess_funcs[p_idx] = P_check_minb;
+      prep->num++;
+      p_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->maxp) {
-    preprocess_funcs[j] = check_maxp;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_maxp;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->maxf) {
-    preprocess_funcs[j] = check_maxf;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_maxf;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->maxb) {
-    preprocess_funcs[j] = check_maxb;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_maxb;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->maxbpp) {
-    preprocess_funcs[j] = check_maxbpp;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_maxbpp;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->maxppf) {
-    preprocess_funcs[j] = check_maxppf;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_maxppf;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->minbpp) {
-    preprocess_funcs[j] = check_minbpp;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_minbpp;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
+    else if (dictionary == PREP_DICT_PRINT) {
+      P_preprocess_funcs[p_idx] = P_check_minbpp;
+      prep->num++;
+      p_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->minppf) {
-    preprocess_funcs[j] = check_minppf;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_minppf;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
+    else if (dictionary == PREP_DICT_PRINT) {
+      P_preprocess_funcs[p_idx] = P_check_minppf;
+      prep->num++;
+      p_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->fss) {
-    preprocess_funcs[j] = check_fss;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_fss;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->fsrc) {
-    preprocess_funcs[j] = check_fsrc;
-    prep->num++;
-    j++;
-    prep->checkno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = check_fsrc;
+      prep->num++;
+      sql_idx++;
+      prep->checkno++;
+    }
   }
 
   if (prep->usrf) {
-    preprocess_funcs[j] = action_usrf;
-    prep->num++;
-    j++;
-    prep->actionno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = action_usrf;
+      prep->num++;
+      sql_idx++;
+      prep->actionno++;
+    }
   }
 
   if (prep->adjb) {
-    preprocess_funcs[j] = action_adjb;
-    prep->num++;
-    j++;
-    prep->actionno++;
+    if (dictionary == PREP_DICT_SQL) {
+      sql_preprocess_funcs[sql_idx] = action_adjb;
+      prep->num++;
+      sql_idx++;
+      prep->actionno++;
+    }
   }
 
   /* 
@@ -248,14 +348,16 @@ void set_preprocess_funcs(char *string, struct preprocess *prep)
      - if in 'any' mode, any entry with 'points >= 1' is valid
      - if in 'all' mode, any entry with 'points == number of conditions' is valid 
   */
-  preprocess_funcs[j] = mandatory_validate;
-  j++;
+  if (dictionary == PREP_DICT_SQL) {
+    sql_preprocess_funcs[sql_idx] = mandatory_validate;
+    sql_idx++;
+  }
 }
 
 void check_validity(struct db_cache *entry, int seq)
 {
   if (config.sql_preprocess_type == 0) {
-    if (entry->prep_valid > 0 && entry->valid == SQL_CACHE_FREE)
+    if (entry->prep_valid > 0 && entry->valid == SQL_CACHE_INVALID)
       entry->valid = SQL_CACHE_COMMITTED;
   }
   else {
@@ -275,7 +377,7 @@ int check_minp(struct db_cache *queue[], int *num, int seq)
   int x;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       if (queue[x]->packet_counter >= prep.minp) queue[x]->prep_valid++;
 
       check_validity(queue[x], seq);
@@ -290,7 +392,7 @@ int check_minb(struct db_cache *queue[], int *num, int seq)
   int x;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       if (queue[x]->bytes_counter >= prep.minb) queue[x]->prep_valid++; 
 
       check_validity(queue[x], seq);
@@ -305,7 +407,7 @@ int check_minf(struct db_cache *queue[], int *num, int seq)
   int x;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       if (queue[x]->flows_counter >= prep.minf) queue[x]->prep_valid++;
 
       check_validity(queue[x], seq);
@@ -320,7 +422,7 @@ int check_maxp(struct db_cache *queue[], int *num, int seq)
   int x;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       if (queue[x]->packet_counter < prep.maxp) queue[x]->prep_valid++;
 
       check_validity(queue[x], seq);
@@ -335,7 +437,7 @@ int check_maxb(struct db_cache *queue[], int *num, int seq)
   int x;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       if (queue[x]->bytes_counter < prep.maxb) queue[x]->prep_valid++;
 
       check_validity(queue[x], seq);
@@ -350,7 +452,7 @@ int check_maxf(struct db_cache *queue[], int *num, int seq)
   int x;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       if (queue[x]->flows_counter < prep.maxf) queue[x]->prep_valid++;
 
       check_validity(queue[x], seq);
@@ -365,7 +467,7 @@ int check_maxbpp(struct db_cache *queue[], int *num, int seq)
   int x;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       if (queue[x]->bytes_counter/queue[x]->packet_counter < prep.maxbpp) queue[x]->prep_valid++;
 
       check_validity(queue[x], seq);
@@ -382,7 +484,7 @@ int check_maxppf(struct db_cache *queue[], int *num, int seq)
   if (!queue[0]->flows_counter) return FALSE;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       if (queue[x]->packet_counter/queue[x]->flows_counter < prep.maxppf) queue[x]->prep_valid++;
 
       check_validity(queue[x], seq);
@@ -397,7 +499,7 @@ int check_minbpp(struct db_cache *queue[], int *num, int seq)
   int x;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       if (queue[x]->bytes_counter/queue[x]->packet_counter >= prep.minbpp) queue[x]->prep_valid++; 
 
       check_validity(queue[x], seq);
@@ -414,7 +516,7 @@ int check_minppf(struct db_cache *queue[], int *num, int seq)
   if (!queue[0]->flows_counter) return FALSE;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       if (queue[x]->packet_counter/queue[x]->flows_counter >= prep.minppf) queue[x]->prep_valid++; 
 
       check_validity(queue[x], seq);
@@ -432,7 +534,7 @@ int check_fss(struct db_cache *queue[], int *num, int seq)
   int x;
 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       res = (float) queue[x]->bytes_counter/t;
       if (res < 1) p += res;
       if (p >= 1 || res >= 1) {
@@ -471,7 +573,7 @@ int check_fsrc(struct db_cache *queue[], int *num, int seq)
   /* no need to sample */ 
   if (*num <= prep.fsrc) {
     for (x = 0; x < *num; x++) {
-      if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+      if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
         queue[x]->prep_valid++;
         check_validity(queue[x], seq);
       }
@@ -481,7 +583,7 @@ int check_fsrc(struct db_cache *queue[], int *num, int seq)
 
   /* 1st stage: computing the m+1==max flows with highest z */ 
   for (x = 0; x < *num; x++) {
-    if (queue[x]->valid == SQL_CACHE_FREE || queue[x]->valid == SQL_CACHE_COMMITTED) {
+    if (queue[x]->valid == SQL_CACHE_INVALID || queue[x]->valid == SQL_CACHE_COMMITTED) {
       gettimeofday(&tv, NULL);
       srandom((unsigned int)tv.tv_usec);
       w = (float) (random()/(RAND_MAX+1.0));
@@ -497,6 +599,10 @@ int check_fsrc(struct db_cache *queue[], int *num, int seq)
 
       if (fsrc_queue.num < max) {
         new = malloc(queueElemSz);
+        if (!new) {
+	  Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (check_fsrc). Exiting ..\n", config.name, config.type);
+	  exit_plugin(1);
+	}
         fsrc_queue.num++;
         new->next = last_seen->next;
         last_seen->next = new;
@@ -535,7 +641,8 @@ int check_fsrc(struct db_cache *queue[], int *num, int seq)
     check_validity(ptr->cache_ptr, seq);
   }
 
-  if (config.debug) Log(LOG_DEBUG, "DEBUG: TOT/%u/%u SUBTOT/%u/%u\n", *num, total, fsrc_queue.num-1, subtotal);
+  if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): TOT/%u/%u SUBTOT/%u/%u\n",
+			config.name, config.type, *num, total, fsrc_queue.num-1, subtotal);
 
   end:
   return FALSE;
@@ -588,7 +695,7 @@ int mandatory_invalidate(struct db_cache *queue[], int *num, int seq)
     else queue[x]->prep_valid = seq;
 
     if (prep.checkno && queue[x]->valid == SQL_CACHE_COMMITTED)
-      queue[x]->valid = SQL_CACHE_FREE; 
+      queue[x]->valid = SQL_CACHE_INVALID; 
   }
 
   return FALSE;
@@ -604,11 +711,119 @@ int mandatory_validate(struct db_cache *queue[], int *num, int seq)
   int x;
 
   for (x = 0; x < *num; x++) {
-    // if (!prep.checkno) queue[x]->valid = SQL_CACHE_INUSE; 
-    // if (config.sql_preprocess_type == 1 && (queue[x]->valid-1) < (prep.num-prep.actionno))
-    //   queue[x]->valid = SQL_CACHE_FREE; 
-    if (queue[x]->valid == SQL_CACHE_FREE && prep.recover) queue[x]->valid = SQL_CACHE_ERROR;
+    if (queue[x]->valid == SQL_CACHE_INVALID && prep.recover) queue[x]->valid = SQL_CACHE_ERROR;
   }
 
   return FALSE;
+}
+
+int P_mandatory_invalidate(struct chained_cache *queue[], int *num, int seq)
+{
+  int x;
+
+  /* Two validation mechanisms are used: if ALL checks have to be
+     successful, prep_valid is a) initializated to a base value,
+     b) incremented at every test concluding positively and c)
+     checked for prep_valid == seq; if instead ANY check has to
+     be successful, a) prep_valid is initializeted to zero, b) is
+     brought to a positive value by the first positive test and c)
+     finally checked for a non-zero value */
+  for (x = 0; x < *num; x++) {
+    if (config.sql_preprocess_type == 0) queue[x]->prep_valid = 0;
+    else queue[x]->prep_valid = seq;
+
+    if (prep.checkno && queue[x]->valid == PRINT_CACHE_COMMITTED)
+      queue[x]->valid = PRINT_CACHE_INVALID;
+  }
+
+  return FALSE;
+}
+
+int P_check_minp(struct chained_cache *queue[], int *num, int seq)
+{
+  int x;
+
+  for (x = 0; x < *num; x++) {
+    if (queue[x]->valid == PRINT_CACHE_INVALID || queue[x]->valid == PRINT_CACHE_COMMITTED) {
+      if (queue[x]->packet_counter >= prep.minp) queue[x]->prep_valid++;
+
+      P_check_validity(queue[x], seq);
+    }
+  }
+
+  return FALSE;
+}
+
+int P_check_minb(struct chained_cache *queue[], int *num, int seq)
+{
+  int x;
+
+  for (x = 0; x < *num; x++) {
+    if (queue[x]->valid == PRINT_CACHE_INVALID || queue[x]->valid == PRINT_CACHE_COMMITTED) {
+      if (queue[x]->bytes_counter >= prep.minb) queue[x]->prep_valid++;
+
+      P_check_validity(queue[x], seq);
+    }
+  }
+
+  return FALSE;
+}
+
+int P_check_minf(struct chained_cache *queue[], int *num, int seq)
+{
+  int x;
+
+  for (x = 0; x < *num; x++) {
+    if (queue[x]->valid == PRINT_CACHE_INVALID || queue[x]->valid == PRINT_CACHE_COMMITTED) {
+      if (queue[x]->flow_counter >= prep.minf) queue[x]->prep_valid++;
+
+      P_check_validity(queue[x], seq);
+    }
+  }
+
+  return FALSE;
+}
+
+int P_check_minbpp(struct chained_cache *queue[], int *num, int seq)
+{
+  int x;
+
+  for (x = 0; x < *num; x++) {
+    if (queue[x]->valid == PRINT_CACHE_INVALID || queue[x]->valid == PRINT_CACHE_COMMITTED) {
+      if (queue[x]->bytes_counter/queue[x]->packet_counter >= prep.minbpp) queue[x]->prep_valid++;
+
+      P_check_validity(queue[x], seq);
+    }
+  }
+
+  return FALSE;
+}
+
+int P_check_minppf(struct chained_cache *queue[], int *num, int seq)
+{
+  int x;
+
+  if (!queue[0]->flow_counter) return FALSE;
+
+  for (x = 0; x < *num; x++) {
+    if (queue[x]->valid == PRINT_CACHE_INVALID || queue[x]->valid == PRINT_CACHE_COMMITTED) {
+      if (queue[x]->packet_counter/queue[x]->flow_counter >= prep.minppf) queue[x]->prep_valid++;
+
+      P_check_validity(queue[x], seq);
+    }
+  }
+
+  return FALSE;
+}
+
+void P_check_validity(struct chained_cache *entry, int seq)
+{
+  if (config.sql_preprocess_type == 0) {
+    if (entry->prep_valid > 0 && entry->valid == PRINT_CACHE_INVALID)
+      entry->valid = PRINT_CACHE_COMMITTED;
+  }
+  else {
+    if (entry->prep_valid == seq) entry->valid = PRINT_CACHE_COMMITTED;
+    else entry->valid = PRINT_CACHE_FREE;
+  }
 }

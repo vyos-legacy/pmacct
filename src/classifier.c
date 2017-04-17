@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2010 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -463,52 +463,6 @@ int parse_shared_object(char *fname, struct pkt_classifier *css)
 #endif
 }
 
-int pm_scandir(const char *dir, struct dirent ***namelist,
-            int (*select)(const struct dirent *),
-            int (*compar)(const struct dirent **, const struct dirent **))
-{
-  DIR *d;
-  struct dirent *entry;
-  register int i = 0;
-  size_t entrysize;
-
-  if ((d=opendir(dir)) == NULL) return(-1);
-
-  *namelist = NULL;
-  while ((entry=readdir(d)) != NULL)
-  {
-    if (select == NULL || (select != NULL && (*select)(entry)))
-    {
-      *namelist=(struct dirent **)realloc((void *)(*namelist), (size_t)((i+1)*sizeof(struct dirent *)));
-      if (*namelist == NULL)
-      {
-         closedir(d);
-         return(-1);
-      }
-      entrysize=sizeof(struct dirent)-sizeof(entry->d_name)+strlen(entry->d_name)+1;
-      (*namelist)[i]=(struct dirent *)malloc(entrysize);
-      if ((*namelist)[i] == NULL)
-      {
-        closedir(d);
-        return(-1);
-      }
-      memcpy((*namelist)[i], entry, entrysize);
-      i++;
-    }
-  }
-  if (closedir(d)) return(-1);
-  if (i == 0) return(-1);
-  if (compar != NULL)
-    qsort((void *)(*namelist), (size_t)i, sizeof(struct dirent *), compar);
-    
-  return(i);
-}
-
-int pm_alphasort(const struct dirent **a, const struct dirent **b)
-{
-  return(strcmp((*a)->d_name, (*b)->d_name));
-}
-
 void link_conntrack_helper(struct pkt_classifier *css)
 {
   int index = 0;
@@ -642,6 +596,13 @@ pm_class_t pmct_find_first_free()
     if (ret > 0) return idx+1;
     else if (ret < 0) return 0;
     idx++;
+  }
+
+  if (num && idx == num) {
+    if (!log_notification_isset(&log_notifications.max_classifiers, FALSE)) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): Finished elements in class table (%u). Raise via classifier_table_num.\n", config.name, config.type, num);
+      log_notification_set(&log_notifications.max_classifiers, FALSE, FALSE);
+    }
   }
 
   return 0;

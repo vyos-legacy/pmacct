@@ -1,3 +1,6 @@
+See how to configure and compile pmacct for MySQL use in the "Configuring
+pmacct for compilation and installing" chapter of QUICKSTART.
+
 To create the database and grant default permission to pmacctd you have to execute
 the two scripts below, in the same order (assuming mysql command is in the path):
 
@@ -57,23 +60,31 @@ Similarly, BGP tables:
 - Aggregation primitives to SQL schema mapping:
   Aggregation primitive => SQL table field
   * tag => agent_id (INT(4) UNSIGNED NOT NULL)
-  * tag2 => agent_id2 (INT(4) UNSIGNED NOT NULL, see README.agent_id2)
+    - or tag => tag (INT(4) UNSIGNED NOT NULL, if sql_table_version >= 9)
+  * tag2 => tag2 (INT(4) UNSIGNED NOT NULL, see README.tag2)
+  * label => label (VARCHAR(255) NOT NULL, see README.label)
   * src_as => as_src (INT(4) UNSIGNED NOT NULL)
+    - or src_as => ip_src (INT(4) UNSIGNED NOT NULL), if sql_table_version < 6)
   * dst_as => as_dst (INT(4) UNSIGNED NOT NULL)
+    - or dst_as => ip_dst (INT(4) UNSIGNED NOT NULL), if sql_table_version < 6)
   * peer_src_as => peer_as_src (INT(4) UNSIGNED NOT NULL)
   * peer_dst_as => peer_as_dst (INT(4) UNSIGNED NOT NULL)
   * peer_src_ip => peer_ip_src (CHAR(15) NOT NULL, see README.IPv6)
-    - peer_src_ip => peer_ip_src (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true)
+    - or (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true and --disable-ipv6)
+    - or (INT(16) UNSIGNED NOT NULL, if sql_num_hosts: true)
   * peer_dst_ip => peer_ip_dst (CHAR(15) NOT NULL, see README.IPv6)
-    - peer_dst_ip => peer_ip_dst (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true)
+    - or (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true and --disable-ipv6)
+    - or (INT(16) UNSIGNED NOT NULL, if sql_num_hosts: true)
   * mpls_vpn_rd => mpls_vpn_rd (CHAR(18) NOT NULL)
   * std_comm => comms (CHAR(24) NOT NULL)
-  * ext_comm => comms (CHAR(24) NOT NULL)
+  * ext_comm => ecomms (CHAR(24) NOT NULL)
+  * lrg_comm => lcomms (CHAR(24) NOT NULL)
   * as_path => as_path (CHAR(21) NOT NULL)
   * local_pref => local_pref (INT(4) UNSIGNED NOT NULL)
   * med => med (INT(4) UNSIGNED NOT NULL)
   * src_std_comm => comms_src (CHAR(24) NOT NULL)
-  * src_ext_comm => comms_src (CHAR(24) NOT NULL)
+  * src_ext_comm => ecomms_src (CHAR(24) NOT NULL)
+  * src_lrg_comm => lcomms_src (CHAR(24) NOT NULL)
   * src_as_path => as_path_src (CHAR(21) NOT NULL)
   * src_local_pref => local_pref_src (INT(4) UNSIGNED NOT NULL)
   * src_med => med_src (INT(4) UNSIGNED NOT NULL)
@@ -82,7 +93,13 @@ Similarly, BGP tables:
   * src_mask => mask_src (INT(1) UNSIGNED NOT NULL, see README.mask)
   * dst_mask => mask_dst (INT(1) UNSIGNED NOT NULL, see README.mask)
   * cos => cos (INT(1) UNSIGNED NOT NULL, see README.cos)
-  * etype => etype (INT(2) UNSIGNED NOT NULL, see README.etype)
+  * etype => etype (CHAR(5) NOT NULL, see README.etype)
+  * src_host_country => country_ip_src (CHAR(2) NOT NULL, see README.GeoIP)
+  * dst_host_country => country_ip_dst (CHAR(2) NOT NULL, see README.GeoIP)
+  * src_host_pocode => pocode_ip_src (CHAR(12) NOT NULL, see README.GeoIP)
+  * dst_host_pocode => pocode_ip_dst (CHAR(12) NOT NULL, see README.GeoIP)
+  * sampling_rate => sampling_rate (INT(4) UNSIGNED NOT NULL, see README.sampling_rate)
+  * pkt_len_distrib => pkt_len_distrib (CHAR(10) NOT NULL, see README.pkt_len_distrib)
   * class => class_id (CHAR(16) NOT NULL)
   * src_mac => mac_src (CHAR(17) NOT NULL)
   * dst_mac => mac_dst (CHAR(17) NOT NULL)
@@ -90,27 +107,66 @@ Similarly, BGP tables:
   * src_as => as_src (INT(4) UNSIGNED NOT NULL)
   * dst_as => as_dst (INT(4) UNSIGNED NOT NULL)
   * src_host => ip_src (CHAR(15) NOT NULL, see README.IPv6)
-    - src_host => ip_src (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true)
+    - or (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true  and --disable-ipv6)
+    - or (INT(16) UNSIGNED NOT NULL, if sql_num_hosts: true)
   * dst_host => ip_dst (CHAR(15) NOT NULL, see README.IPv6)
-    - dst_host => ip_dst (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true)
+    - or (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true and --disable-ipv6)
+    - or (INT(16) UNSIGNED NOT NULL, if sql_num_hosts: true)
   * src_net => ip_src (CHAR(15) NOT NULL, see README.IPv6)
-    - src_net => ip_src (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true)
+    - or (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true and --disable-ipv6)
+    - or (INT(16) UNSIGNED NOT NULL, if sql_num_hosts: true) 
+    - or src_net => net_src (same definitions, if tmp_net_own_field: true)
   * dst_net => ip_dst (CHAR(15) NOT NULL, see README.IPv6)
-    - dst_net => ip_dst (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true)
+    - or (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true and --disable-ipv6)
+    - or (INT(16) UNSIGNED NOT NULL, if sql_num_hosts: true) 
+    - or dst_net => net_dst (same definitions, if tmp_net_own_field: true)
   * src_port => src_port (INT(2) UNSIGNED NOT NULL)
-    - src_port => port_src (INT(2) UNSIGNED NOT NULL, if sql_table_version: 8)
+    - or src_port => port_src (INT(2) UNSIGNED NOT NULL, if sql_table_version >= 8)
   * dst_port => dst_port (INT(2) UNSIGNED NOT NULL)
-    - dst_port => port_dst (INT(2) UNSIGNED NOT NULL, if sql_table_version: 8)
+    - or dst_port => port_dst (INT(2) UNSIGNED NOT NULL, if sql_table_version >= 8)
   * tcpflags => tcp_flags (INT(4) UNSIGNED NOT NULL)
   * proto => ip_proto (CHAR(6) NOT NULL)
-    - proto => ip_proto (INT(1) UNSIGNED NOT NULL, if sql_num_protos: true)
+    - or (INT(1) UNSIGNED NOT NULL, if sql_num_protos: true)
   * tos => tos (INT(4) UNSIGNED NOT NULL)
+  * post_nat_src_host => post_nat_ip_src (CHAR(15) NOT NULL, see README.IPv6)
+    - or (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true  and --disable-ipv6)
+    - or (INT(16) UNSIGNED NOT NULL, if sql_num_hosts: true) 
+  * post_nat_dst_host => post_nat_ip_dst (CHAR(15) NOT NULL, see README.IPv6)
+    - or (INT(4) UNSIGNED NOT NULL, if sql_num_hosts: true and --disable-ipv6)
+    - or (INT(16) UNSIGNED NOT NULL, if sql_num_hosts: true) 
+  * post_nat_src_port => post_nat_port_src (INT(2) UNSIGNED NOT NULL)
+  * post_nat_dst_port => post_nat_port_dst (INT(2) UNSIGNED NOT NULL)
+  * nat_event => nat_event (INT(1) UNSIGNED NOT NULL)
+  * mpls_label_top => mpls_label_top (INT(4) UNSIGNED NOT NULL)
+  * mpls_label_bottom => mpls_label_bottom (INT(4) UNSIGNED NOT NULL)
+  * mpls_stack_depth => mpls_stack_depth (INT(1) UNSIGNED NOT NULL)
+  * timestamp_start => timestamp_start, timestamp_start_residual:
+    - timestamp_start DATETIME NOT NULL, see README.timestamp)
+    - timestamp_start_residual INT NOT NULL, see README.timestamp)
+  * timestamp_end => timestamp_end, timestamp_end_residual:
+    - timestamp_end DATETIME NOT NULL, see README.timestamp)
+    - timestamp_end_residual INT NOT NULL, see README.timestamp)
+  * timestamp_arrival => timestamp_arrival, timestamp_arrival_residual:
+    - timestamp_arrival DATETIME NOT NULL, see README.timestamp)
+    - timestamp_arrival_residual INT NOT NULL, see README.timestamp)
+  * timestamp_min => timestamp_min, timestamp_min_residual:
+    - timestamp_min DATETIME NOT NULL, see README.timestamp)
+    - timestamp_min_residual INT NOT NULL, see README.timestamp)
+  * timestamp_max => timestamp_max, timestamp_max_residual:
+    - timestamp_max DATETIME NOT NULL, see README.timestamp)
+    - timestamp_max_residual INT NOT NULL, see README.timestamp)
 
-- Counters and time reference need always to be defined as part of the SQL schema:
+- 'packets' and 'bytes' counters need to be defined as part of the SQL schema
+  whenever traffic flows are being accounted for; they are not required, and
+  are zeroed, if accounting for events, ie. using Cisco NEL; 'stamp_inserted'
+  and 'stamp_updated' time references are mandatory only if temporal aggregation
+  (sql_history) is enabled:
   * packets (INT UNSIGNED NOT NULL)
   * bytes (BIGINT UNSIGNED NOT NULL)
-  * stamp_inserted (DATETIME NOT NULL, enabled by sql_history)
-  * stamp_updated (DATETIME, enabled by sql_history)
+  * stamp_inserted (DATETIME NOT NULL)
+  * stamp_updated (DATETIME)
+
+- For custom-defined primitives refer to the README.custom_primitives doc.
 
 NOTE: mind to specify EVERYTIME which SQL table version you
 intend to adhere to by using either of the following rules:

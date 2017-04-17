@@ -64,7 +64,7 @@ isis_new_adj (u_char * id, u_char * snpa, int level,
 
   if (adj == NULL)
     {
-      Log(LOG_ERR, "ERROR ( default/core/ISIS ): isis_new_adj() out of memory!\n");
+      Log(LOG_ERR, "ERROR ( %s/core/ISIS ): isis_new_adj() out of memory!\n", config.name);
       return NULL;
     }
 
@@ -115,15 +115,15 @@ isis_delete_adj (struct isis_adjacency *adj, struct list *adjdb)
     return;
   /* When we recieve a NULL list, we will know its p2p. */
   if (adjdb)
-    listnode_delete (adjdb, adj);
+    isis_listnode_delete (adjdb, adj);
 
   memset(&adj->expire, 0, sizeof(struct timeval));
 
   if (adj->ipv4_addrs)
-    list_delete (adj->ipv4_addrs);
+    isis_list_delete (adj->ipv4_addrs);
 #ifdef ENABLE_IPV6
   if (adj->ipv6_addrs)
-    list_delete (adj->ipv6_addrs);
+    isis_list_delete (adj->ipv6_addrs);
 #endif
   
   free(adj);
@@ -143,8 +143,8 @@ isis_adj_state_change (struct isis_adjacency *adj, enum isis_adj_state state,
 
   circuit = adj->circuit;
 
-  Log(LOG_DEBUG, "DEBUG ( default/core/ISIS ): ISIS-Adj (%s): Adjacency state change %d->%d: %s\n",
-		 circuit->area->area_tag, old_state, state, reason ? reason : "unspecified"); 
+  Log(LOG_DEBUG, "DEBUG ( %s/core/ISIS ): ISIS-Adj (%s): Adjacency state change %d->%d: %s\n",
+		 config.name, circuit->area->area_tag, old_state, state, reason ? reason : "unspecified"); 
 
   if (state == ISIS_ADJ_UP)
     {
@@ -220,7 +220,7 @@ isis_adj_build_neigh_list (struct list *adjdb, struct list *list)
 
   if (!list)
     {
-      Log(LOG_WARNING, "WARN (default/core/ISIS ): isis_adj_build_neigh_list(): NULL list\n");
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): isis_adj_build_neigh_list(): NULL list\n", config.name);
       return;
     }
 
@@ -228,13 +228,13 @@ isis_adj_build_neigh_list (struct list *adjdb, struct list *list)
     {
       if (!adj)
 	{
-	  Log(LOG_WARNING, "WARN (default/core/ISIS ): isis_adj_build_neigh_list(): NULL adj\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): isis_adj_build_neigh_list(): NULL adj\n", config.name);
 	  return;
 	}
 
       if ((adj->adj_state == ISIS_ADJ_UP ||
 	   adj->adj_state == ISIS_ADJ_INITIALIZING))
-	listnode_add (list, adj->snpa);
+	isis_listnode_add (list, adj->snpa);
     }
   return;
 }
@@ -247,7 +247,7 @@ isis_adj_build_up_list (struct list *adjdb, struct list *list)
 
   if (!list)
     {
-      Log(LOG_WARNING, "WARN (default/core/ISIS ): isis_adj_build_up_list(): NULL list\n");
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): isis_adj_build_up_list(): NULL list\n", config.name);
       return;
     }
 
@@ -255,12 +255,12 @@ isis_adj_build_up_list (struct list *adjdb, struct list *list)
     {
       if (!adj)
 	{
-	  Log(LOG_WARNING, "WARN (default/core/ISIS ): isis_adj_build_up_list(): NULL adj\n");
+	  Log(LOG_WARNING, "WARN ( %s/core/ISIS ): isis_adj_build_up_list(): NULL adj\n", config.name);
 	  return;
 	}
 
       if (adj->adj_state == ISIS_ADJ_UP)
-	listnode_add (list, adj);
+	isis_listnode_add (list, adj);
     }
 
   return;

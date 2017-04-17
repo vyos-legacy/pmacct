@@ -25,7 +25,7 @@
 #include "common.h"
 #include "convtime.h"
 
-RCSID("$Id: convtime.c,v 1.1 2006/11/19 15:16:07 paolo Exp $");
+RCSID("$Id$");
 
 #define SECONDS		1
 #define MINUTES		(SECONDS * 60)

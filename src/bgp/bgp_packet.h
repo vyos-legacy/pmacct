@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /* 
@@ -33,7 +33,7 @@
 #define _BGP_PACKET_H_
 
 /* some handy things to know */
-#define BGP_MAX_PACKET_SIZE		4096
+#define BGP_BUFFER_SIZE			100000
 #define BGP_MARKER_SIZE			16	/* size of BGP marker */
 #define BGP_HEADER_SIZE			19	/* size of BGP header, including marker */
 #define BGP_MIN_OPEN_MSG_SIZE		29
@@ -42,7 +42,8 @@
 #define BGP_MIN_KEEPALVE_MSG_SIZE	BGP_HEADER_SIZE
 #define BGP_TCP_PORT			179
 #define BGP_VERSION4			4
-#define CAPABILITY_CODE_AS4_LEN 4
+#define BGP_MAX_MSGLEN			4096
+#define CAPABILITY_CODE_AS4_LEN		4
 
 /* BGP message types */
 #define BGP_OPEN		1
@@ -86,6 +87,29 @@ struct bgp_open {
 };
 
 /* BGP NOTIFICATION message */
+/* BGP notify message codes.  */
+#define BGP_NOTIFY_HEADER_ERR			1
+#define BGP_NOTIFY_OPEN_ERR			2
+#define BGP_NOTIFY_UPDATE_ERR			3
+#define BGP_NOTIFY_HOLD_ERR			4
+#define BGP_NOTIFY_FSM_ERR			5
+#define BGP_NOTIFY_CEASE			6
+#define BGP_NOTIFY_CAPABILITY_ERR		7
+#define BGP_NOTIFY_MAX				8
+
+#define BGP_NOTIFY_SUBCODE_UNSPECIFIC		0
+
+/* BGP_NOTIFY_CEASE sub codes (RFC 4486).  */
+#define BGP_NOTIFY_CEASE_MAX_PREFIX		1
+#define BGP_NOTIFY_CEASE_ADMIN_SHUTDOWN		2
+#define BGP_NOTIFY_CEASE_PEER_UNCONFIG		3
+#define BGP_NOTIFY_CEASE_ADMIN_RESET		4
+#define BGP_NOTIFY_CEASE_CONNECT_REJECT		5
+#define BGP_NOTIFY_CEASE_CONFIG_CHANGE		6
+#define BGP_NOTIFY_CEASE_COLLISION_RESOLUTION	7
+#define BGP_NOTIFY_CEASE_OUT_OF_RESOURCE	8
+#define BGP_NOTIFY_CEASE_MAX			9 
+
 struct bgp_notification {
     u_int8_t bgpn_marker[BGP_MARKER_SIZE];
     u_int16_t bgpn_len;
@@ -93,6 +117,14 @@ struct bgp_notification {
     u_int8_t bgpn_major;
     u_int8_t bgpn_minor;
     /* data should follow */
+};
+
+/* based on: draft-ietf-idr-shutdown-01 */
+#define BGP_NOTIFY_CEASE_SM_LEN			128
+
+struct bgp_notification_shutdown_msg {
+    u_int8_t bgpnsm_len;
+    u_int8_t bgpnsm_data[BGP_NOTIFY_CEASE_SM_LEN];
 };
 
 /* BGP ROUTE-REFRESH message */
@@ -115,6 +147,13 @@ struct capability_mp_data
 struct capability_as4
 {
   uint32_t as4;
+};
+
+struct capability_add_paths
+{
+  u_int16_t afi;
+  u_char safi;
+  u_char sndrcv;
 };
 
 /* attribute flags, from RFC1771 */
@@ -151,6 +190,7 @@ struct capability_as4
 #define BGP_CAPABILITY_GRACEFUL_RESTART         0x40   /* draft-ietf-idr-restart-05  */
 #define BGP_CAPABILITY_4_OCTET_AS_NUMBER	0x41   /* draft-ietf-idr-as4bytes-06 */
 #define BGP_CAPABILITY_DYNAMIC_CAPABILITY	0x42   /* draft-ietf-idr-dynamic-cap-03 */
+#define BGP_CAPABILITY_ADD_PATHS		0x45   /* draft-ietf-idr-add-paths-09 */ 
 #define BGP_CAPABILITY_ORF_CISCO	        0x82   /* Cisco */
 #define BGP_CAPABILITY_ROUTE_REFRESH_CISCO      0x80   /* Cisco */
 

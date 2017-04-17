@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
 */
 
 /*
@@ -67,6 +67,11 @@
  * 8192 corresponds to just under 1Mb of flow data
  */
 #define DEFAULT_MAX_FLOWS	8192
+
+/* Return values from process_packet */
+#define PP_OK           0
+#define PP_BAD_PACKET   -2
+#define PP_MALLOC_FAIL  -3
 
 /* Store a couple of statistics, maybe more in the future */
 struct STATISTIC {
@@ -184,9 +189,18 @@ struct FLOW {
 	struct timeval flow_last;		/* Time of last traffic */
 
 	/* Per-endpoint statistics (all in _host_ byte order) */
+#if defined HAVE_64BIT_COUNTERS
+	u_int64_t octets[2];			/* Octets so far */
+	u_int64_t packets[2];			/* Packets so far */
+	u_int64_t flows[2];			/* Flows so far */
+#else
 	u_int32_t octets[2];			/* Octets so far */
 	u_int32_t packets[2];			/* Packets so far */
 	u_int32_t flows[2];			/* Flows so far */
+#endif
+
+	char *pcust[2];				/* space for custom-defined primitives */
+	struct pkt_vlen_hdr_primitives *pvlen[2]; 	/* space for vlen primitives */
 };
 
 /*

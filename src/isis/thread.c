@@ -216,7 +216,8 @@ recent_relative_time (void)
 static unsigned int
 cpu_record_hash_key (struct cpu_thread_history *a)
 {
-  return (uintptr_t) a->func;
+  /* XXX: uintptr_t not portable: changed to "unsigned int *" */
+  return (unsigned int) a->func;
 }
 
 static int 
@@ -256,7 +257,7 @@ cpu_record_hash_clear (struct hash_backet *bucket,
   if ( !(a->types & *filter) )
        return;
   
-  hash_release (cpu_record, bucket->data);
+  isis_hash_release (cpu_record, bucket->data);
 }
 
 /* Allocate new thread master.  */
@@ -265,7 +266,7 @@ thread_master_create ()
 {
   if (cpu_record == NULL) 
     cpu_record 
-      = hash_create_size (1011, (unsigned int (*) (void *))cpu_record_hash_key, 
+      = isis_hash_create_size (1011, (unsigned int (*) (void *))cpu_record_hash_key, 
                           (int (*) (const void *, const void *))cpu_record_hash_cmp);
     
   return (struct thread_master *) calloc(1, sizeof (struct thread_master));
@@ -364,8 +365,8 @@ thread_master_free (struct thread_master *m)
 
   if (cpu_record)
     {
-      hash_clean (cpu_record, cpu_record_hash_free);
-      hash_free (cpu_record);
+      isis_hash_clean (cpu_record, cpu_record_hash_free);
+      isis_hash_free (cpu_record);
       cpu_record = NULL;
     }
 }
@@ -465,7 +466,7 @@ funcname_thread_add_read (struct thread_master *m,
 
   if (FD_ISSET (fd, &m->readfd))
     {
-      Log(LOG_WARNING, "WARN (default/core/ISIS ): There is already read fd [%d]\n", fd);
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): There is already read fd [%d]\n", config.name, fd);
       return NULL;
     }
 
@@ -488,7 +489,7 @@ funcname_thread_add_write (struct thread_master *m,
 
   if (FD_ISSET (fd, &m->writefd))
     {
-      Log(LOG_WARNING, "WARN (default/core/ISIS ): There is already write fd [%d]\n", fd);
+      Log(LOG_WARNING, "WARN ( %s/core/ISIS ): There is already write fd [%d]\n", config.name, fd);
       return NULL;
     }
 
@@ -825,7 +826,7 @@ thread_fetch (struct thread_master *m, struct thread *fetch)
         {
           if (errno == EINTR)
             continue; /* signal received - process it */
-          Log(LOG_WARNING, "WARN (default/core/ISIS ): select() error: %s\n", strerror (errno));
+          Log(LOG_WARNING, "WARN ( %s/core/ISIS ): select() error: %s\n", config.name, strerror (errno));
             return NULL;
         }
 
@@ -922,7 +923,7 @@ thread_call (struct thread *thread)
       tmp.func = thread->func;
       tmp.funcname = thread->funcname;
       
-      thread->hist = hash_get (cpu_record, &tmp, 
+      thread->hist = isis_hash_get (cpu_record, &tmp, 
                     (void * (*) (void *))cpu_record_hash_alloc);
     }
 

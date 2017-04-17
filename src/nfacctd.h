@@ -1,3 +1,24 @@
+/*  
+    pmacct (Promiscuous mode IP Accounting package)
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
+*/
+
+/*
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program; if not, write to the Free Software
+    Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA.
+*/
+
 /* Netflow stuff */
 
 /*  NetFlow Export Version 1 Header Format  */
@@ -379,7 +400,7 @@ struct data_hdr_v9 {
 
 /* defines */
 #define DEFAULT_NFACCTD_PORT 2100
-#define NETFLOW_MSG_SIZE 1550
+#define NETFLOW_MSG_SIZE PKT_MSG_SIZE
 #define V1_MAXFLOWS 24  /* max records in V1 packet */
 #define V5_MAXFLOWS 30  /* max records in V5 packet */
 #define V7_MAXFLOWS 27  /* max records in V7 packet */
@@ -405,6 +426,7 @@ struct data_hdr_v9 {
 
 #define IPFIX_TPL_EBIT                  0x8000 /* IPFIX telmplate enterprise bit */
 #define IPFIX_VARIABLE_LENGTH           65535
+#define PMACCT_PEN                      43874
 
 /* NetFlow V9 stuff */
 #define NF9_TEMPLATE_FLOWSET_ID         0
@@ -454,6 +476,11 @@ struct data_hdr_v9 {
 #define NF9_ENGINE_TYPE                 38
 #define NF9_ENGINE_ID                   39
 /* ... */
+#define NF9_IPV4_SRC_PREFIX		44
+#define NF9_IPV4_DST_PREFIX		45
+/* ... */
+#define NF9_MPLS_TOP_LABEL_ADDR		47
+/* ... */
 #define NF9_IN_SRC_MAC                  56
 #define NF9_OUT_DST_MAC                 57
 #define NF9_IN_VLAN                     58
@@ -479,48 +506,65 @@ struct data_hdr_v9 {
 #define NF9_FLOW_BYTES			85 
 #define NF9_FLOW_PACKETS		86 
 /* ... */
-#define NF9_PEER_SRC_AS			128
-#define NF9_PEER_DST_AS			129
+#define NF9_PEER_DST_AS			128
+#define NF9_PEER_SRC_AS			129
 #define NF9_EXPORTER_IPV4_ADDRESS	130
 #define NF9_EXPORTER_IPV6_ADDRESS	131
+/* ... */
+#define NF9_MPLS_TOP_LABEL_IPV6_ADDR	140
 /* ... */
 #define NF9_FIRST_SWITCHED_SEC		150
 #define NF9_LAST_SWITCHED_SEC		151
 #define NF9_FIRST_SWITCHED_MSEC		152
 #define NF9_LAST_SWITCHED_MSEC		153
 /* ... */
+#define NF9_FIRST_SWITCHED_DELTA_MICRO	158
+#define NF9_LAST_SWITCHED_DELTA_MICRO	159
+#define NF9_SYS_UPTIME_MSEC		160
+/* ... */
+#define NF9_IPV6_DST_PREFIX		169
+#define NF9_IPV6_SRC_PREFIX		170
+/* ... */
 #define NF9_UDP_SRC_PORT                180
 #define NF9_UDP_DST_PORT                181
 #define NF9_TCP_SRC_PORT                182
 #define NF9_TCP_DST_PORT                183
 /* ... */
-#define NF9_CUST_TAG			201
-#define NF9_CUST_TAG2			202
+#define NF9_POST_NAT_IPV4_SRC_ADDR	225
+#define NF9_POST_NAT_IPV4_DST_ADDR	226
+#define NF9_POST_NAT_IPV4_SRC_PORT	227
+#define NF9_POST_NAT_IPV4_DST_PORT	228
 /* ... */
+#define NF9_NAT_EVENT			230
+/* ... */
+#define NF9_INITIATOR_OCTETS		231
+#define NF9_RESPONDER_OCTETS		232
+/* ... */
+#define NF9_INGRESS_VRFID		234
+#define NF9_EGRESS_VRFID		235
+/* ... */
+#define NF9_DOT1QVLANID			243
+#define NF9_DOT1QPRIORITY		244
+#define NF9_DOT1QCVLANID		245
+/* ... */
+#define NF9_PSEUDOWIREID		249
+/* ... */
+#define NF9_INPUT_PHYSINT		252
+#define NF9_OUTPUT_PHYSINT		253
+#define NF9_POST_DOT1QVLANID		254
+#define NF9_POST_DOT1QCVLANID		255
 #define NF9_ETHERTYPE			256
-/* ... */
-#define NF9_XLATE_IPV6_SRC_ADDR         281
-#define NF9_XLATE_IPV6_DST_ADDR         282
 /* ... */
 #define NF9_OBSERVATION_TIME_SEC	322
 #define NF9_OBSERVATION_TIME_MSEC	323
+/* ... */
+#define NF9_LAYER2OCTETDELTACOUNT	352
 /* ... */
 #define NF9_ASA_XLATE_IPV4_SRC_ADDR	40001
 #define NF9_ASA_XLATE_IPV4_DST_ADDR	40002
 #define NF9_ASA_XLATE_L4_SRC_PORT	40003
 #define NF9_ASA_XLATE_L4_DST_PORT	40004
-
-#define NF9_FTYPE_IPV4			0
-#define NF9_FTYPE_IPV6			1
-#define NF9_FTYPE_VLAN			5
-#define NF9_FTYPE_VLAN_IPV4		5
-#define NF9_FTYPE_VLAN_IPV6		6
-#define NF9_FTYPE_MPLS			10
-#define NF9_FTYPE_MPLS_IPV4		10
-#define NF9_FTYPE_MPLS_IPV6		11
-#define NF9_FTYPE_VLAN_MPLS		15	
-#define NF9_FTYPE_VLAN_MPLS_IPV4	15
-#define NF9_FTYPE_VLAN_MPLS_IPV6	16
+#define NF9_ASA_XLATE_EVENT		40005
 
 /* Sampling */
 #define NF9_SAMPLING_INTERVAL		34
@@ -528,6 +572,10 @@ struct data_hdr_v9 {
 #define NF9_FLOW_SAMPLER_ID		48
 #define NF9_FLOW_SAMPLER_MODE		49
 #define NF9_FLOW_SAMPLER_INTERVAL	50
+#define NF9_SELECTOR_ID			302
+#define NF9_SELECTOR_ALGORITHM		304
+#define NF9_SAMPLING_PKT_INTERVAL	305
+#define NF9_SAMPLING_PKT_SPACE		306
 
 /* Classification */
 #define NF9_APPLICATION_DESC		94
@@ -539,6 +587,12 @@ struct data_hdr_v9 {
 #define NF9_OPT_SCOPE_LC		3
 #define NF9_OPT_SCOPE_CACHE		4
 #define NF9_OPT_SCOPE_TPL		5
+
+/* CUSTOM TYPES START HERE: supported in IPFIX only with pmacct PEN */
+#define NF9_CUST_TAG                    1
+#define NF9_CUST_TAG2                   2
+#define NF9_CUST_LABEL			3
+/* CUSTOM TYPES END HERE */
 
 #define MAX_TPL_DESC_LIST 81
 static char *tpl_desc_list[] = {
@@ -662,6 +716,7 @@ struct utpl_field {
   u_int16_t off;
   u_int16_t len;
   u_int16_t tpl_len;
+  u_int8_t repeat_id;
 };
 
 /* Template field database */
@@ -713,20 +768,25 @@ EXT void process_v7_packet(unsigned char *, u_int16_t, struct packet_ptrs *, str
 EXT void process_v8_packet(unsigned char *, u_int16_t, struct packet_ptrs *, struct plugin_requests *);
 EXT void process_v9_packet(unsigned char *, u_int16_t, struct packet_ptrs_vector *, struct plugin_requests *, u_int16_t);
 EXT void process_raw_packet(unsigned char *, u_int16_t, struct packet_ptrs_vector *, struct plugin_requests *);
-EXT u_int16_t NF_evaluate_flow_type(struct template_cache_entry *, struct packet_ptrs *);
+EXT u_int8_t NF_evaluate_flow_type(struct template_cache_entry *, struct packet_ptrs *);
 EXT u_int16_t NF_evaluate_direction(struct template_cache_entry *, struct packet_ptrs *);
+EXT pm_class_t NF_evaluate_classifiers(struct xflow_status_entry_class *, pm_class_t *, struct xflow_status_entry *);
 EXT void reset_mac(struct packet_ptrs *);
 EXT void reset_mac_vlan(struct packet_ptrs *);
 EXT void reset_ip4(struct packet_ptrs *);
 EXT void reset_ip6(struct packet_ptrs *);
-EXT void notify_malf_packet(short int, char *, struct sockaddr *);
+EXT void notify_malf_packet(short int, char *, struct sockaddr *, u_int32_t);
 EXT int NF_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 
 EXT char *nfv578_check_status(struct packet_ptrs *);
-EXT char *nfv9_check_status(struct packet_ptrs *, u_int32_t, u_int32_t);
+EXT char *nfv9_check_status(struct packet_ptrs *, u_int32_t, u_int32_t, u_int32_t, u_int8_t);
 
 EXT struct template_cache tpl_cache;
 EXT struct v8_handler_entry v8_handlers[15];
+
+EXT struct host_addr debug_a;
+EXT u_char debug_agent_addr[50];
+EXT u_int16_t debug_agent_port;
 #undef EXT
 
 #if (!defined __NFV9_TEMPLATE_C)
@@ -734,17 +794,31 @@ EXT struct v8_handler_entry v8_handlers[15];
 #else
 #define EXT
 #endif
-EXT void handle_template(struct template_hdr_v9 *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *);
-EXT struct template_cache_entry *find_template(u_int16_t, struct packet_ptrs *, u_int16_t, u_int32_t);
-EXT struct template_cache_entry *insert_template(struct template_hdr_v9 *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *, u_int8_t);
-EXT void refresh_template(struct template_hdr_v9 *, struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *, u_int8_t);
+EXT struct template_cache_entry *handle_template(struct template_hdr_v9 *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *, u_int16_t, u_int32_t);
+EXT struct template_cache_entry *find_template(u_int16_t, struct host_addr *, u_int16_t, u_int32_t);
+EXT struct template_cache_entry *insert_template(struct template_hdr_v9 *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *, u_int8_t, u_int16_t, u_int32_t);
+EXT struct template_cache_entry *refresh_template(struct template_hdr_v9 *, struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *, u_int8_t, u_int16_t, u_int32_t);
 EXT void log_template_header(struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t);
 EXT void log_opt_template_field(u_int16_t, u_int16_t, u_int16_t, u_int8_t);
 EXT void log_template_field(u_int8_t, u_int32_t *, u_int16_t, u_int16_t, u_int16_t, u_int8_t);
-EXT void log_template_footer(u_int16_t, u_int8_t);
-EXT struct template_cache_entry *insert_opt_template(void *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t);
-EXT void refresh_opt_template(void *, struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t);
+EXT void log_template_footer(struct template_cache_entry *, u_int16_t, u_int8_t);
+EXT struct template_cache_entry *insert_opt_template(void *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t, u_int16_t, u_int32_t);
+EXT struct template_cache_entry *refresh_opt_template(void *, struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t, u_int16_t, u_int32_t);
+EXT struct utpl_field *ext_db_get_ie(struct template_cache_entry *, u_int32_t, u_int16_t, u_int8_t);
+EXT struct utpl_field *ext_db_get_next_ie(struct template_cache_entry *, u_int16_t, u_int8_t *);
 
-EXT void resolve_vlen_template(char *, struct template_cache_entry *);
+EXT void resolve_vlen_template(char *, u_int16_t, struct template_cache_entry *);
 EXT u_int8_t get_ipfix_vlen(char *, u_int16_t *);
+
+EXT struct template_cache_entry *nfacctd_offline_read_json_template(char *, char *, int);
+EXT void load_templates_from_file(char *);
+EXT void save_template(struct template_cache_entry *, char *);
+#undef EXT
+
+#if (!defined __PKT_HANDLERS_C)
+#define EXT extern
+#else
+#define EXT
+#endif
+EXT struct utpl_field *(*get_ext_db_ie_by_type)(struct template_cache_entry *, u_int32_t, u_int16_t, u_int8_t);
 #undef EXT

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /* 
@@ -27,8 +27,7 @@
 #define __BGP_HASH_C
 
 #include "pmacct.h"
-#include "bgp_packet.h"
-#include "bgp_hash.h"
+#include "bgp.h"
 
 /* Allocate a new hash.  */
 struct hash *
@@ -38,8 +37,16 @@ hash_create_size (unsigned int size, unsigned int (*hash_key) (void *),
   struct hash *hash;
 
   hash = malloc(sizeof (struct hash));
+  if (!hash) {
+    Log(LOG_ERR, "ERROR ( %s/core/BGP ): malloc() failed (hash_create_size). Exiting ..\n", config.name); // XXX
+    exit_all(1);
+  }
   memset (hash, 0, sizeof (struct hash));
   hash->index = malloc(sizeof (struct hash_backet *) * size);
+  if (!hash->index) {
+    Log(LOG_ERR, "ERROR ( %s/core/BGP ): malloc() failed (hash_create_size). Exiting ..\n", config.name); // XXX
+    exit_all(1);
+  }
   memset (hash->index, 0, sizeof (struct hash_backet *) * size);
   hash->size = size;
   hash->hash_key = hash_key;
@@ -51,10 +58,10 @@ hash_create_size (unsigned int size, unsigned int (*hash_key) (void *),
 
 /* Allocate a new hash with default hash size.  */
 struct hash *
-hash_create (unsigned int (*hash_key) (void *), 
+hash_create (int buckets, unsigned int (*hash_key) (void *), 
              int (*hash_cmp) (const void *, const void *))
 {
-  return hash_create_size (HASHTABSIZE, hash_key, hash_cmp);
+  return hash_create_size (buckets, hash_key, hash_cmp);
 }
 
 /* Utility function for hash_get().  When this function is specified
@@ -70,12 +77,19 @@ hash_alloc_intern (void *arg)
    corresponding hash backet and alloc_func is specified, create new
    hash backet.  */
 void *
-hash_get (struct hash *hash, void *data, void * (*alloc_func) (void *))
+hash_get (struct bgp_peer *peer, struct hash *hash, void *data, void * (*alloc_func) (void *))
 {
+  struct bgp_misc_structs *bms;
   unsigned int key;
   unsigned int index;
   void *newdata;
   struct hash_backet *backet;
+
+  if (!peer) return NULL;
+
+  bms = bgp_select_misc_db(peer->type);
+
+  if (!bms) return NULL;
 
   key = (*hash->hash_key) (data);
   index = key % hash->size;
@@ -87,10 +101,16 @@ hash_get (struct hash *hash, void *data, void * (*alloc_func) (void *))
   if (alloc_func)
     {
       newdata = (*alloc_func) (data);
-      if (newdata == NULL)
-	return NULL;
+      if (!newdata) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): alloc_func failed (hash_get). Exiting ..\n", config.name, bms->log_str);
+        exit_all(1);
+      }
 
       backet = malloc(sizeof (struct hash_backet));
+      if (!backet) {
+        Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (hash_get). Exiting ..\n", config.name, bms->log_str);
+        exit_all(1);
+      }
       memset(backet, 0, sizeof (struct hash_backet));
       backet->data = newdata;
       backet->key = key;
@@ -99,14 +119,8 @@ hash_get (struct hash *hash, void *data, void * (*alloc_func) (void *))
       hash->count++;
       return backet->data;
     }
-  return NULL;
-}
 
-/* Hash lookup.  */
-void *
-hash_lookup (struct hash *hash, void *data)
-{
-  return hash_get (hash, data, NULL);
+  return NULL;
 }
 
 /* This function release registered value from specified hash.  When

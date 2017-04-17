@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2012 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -28,7 +28,7 @@ Boston, MA 02111-1307, USA.
 #define _BGP_HASH_H_
 
 /* Default hash table size.  */ 
-#define HASHTABSIZE     1024
+#define HASHTABSIZE     65535
 
 struct hash_backet
 {
@@ -65,11 +65,10 @@ struct hash
 #else
 #define EXT
 #endif
-EXT struct hash *hash_create (unsigned int (*) (void *), int (*) (const void *, const void *));
+EXT struct hash *hash_create (int, unsigned int (*) (void *), int (*) (const void *, const void *));
 EXT struct hash *hash_create_size (unsigned int, unsigned int (*) (void *), int (*) (const void *, const void *));
-EXT void *hash_get (struct hash *, void *, void * (*) (void *));
+EXT void *hash_get (struct bgp_peer *, struct hash *, void *, void * (*) (void *));
 EXT void *hash_alloc_intern (void *);
-EXT void *hash_lookup (struct hash *, void *);
 EXT void *hash_release (struct hash *, void *);
 EXT void hash_iterate (struct hash *, void (*) (struct hash_backet *, void *), void *);
 EXT void hash_clean (struct hash *, void (*) (void *));
