@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -36,9 +36,6 @@
 #include "isis/isis.h"
 #include "bgp/bgp.h"
 #include "bmp/bmp.h"
-#if defined (WITH_NDPI)
-#include "ndpi/ndpi.h"
-#endif
 
 void pcap_cb(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *buf)
 {
@@ -66,13 +63,6 @@ void pcap_cb(u_char *user, const struct pcap_pkthdr *pkthdr, const u_char *buf)
     (*device->data->handler)(pkthdr, &pptrs);
     if (pptrs.iph_ptr) {
       if ((*pptrs.l3_handler)(&pptrs)) {
-
-#if defined (WITH_NDPI)
-        if (config.classifier_ndpi && pm_ndpi_wfl) {
-          pptrs.ndpi_class = pm_ndpi_workflow_process_packet(pm_ndpi_wfl, &pptrs);
-	}
-#endif
-
         if (config.nfacctd_isis) {
           isis_srcdst_lookup(&pptrs);
         }
@@ -123,14 +113,14 @@ int ip_handler(register struct packet_ptrs *pptrs)
   int ret = TRUE, num, is_fragment = 0;
 
   /* len: number of 32bit words forming the header */
-  len = IP_HL(((struct pm_iphdr *) pptrs->iph_ptr));
+  len = IP_HL(((struct my_iphdr *) pptrs->iph_ptr));
   len <<= 2;
   ptr = pptrs->iph_ptr+len;
   off += len;
 
   /* check len */
   if (off > caplen) return FALSE; /* IP packet truncated */
-  pptrs->l4_proto = ((struct pm_iphdr *)pptrs->iph_ptr)->ip_p;
+  pptrs->l4_proto = ((struct my_iphdr *)pptrs->iph_ptr)->ip_p;
   pptrs->payload_ptr = NULL;
   off_l4 = off;
 
@@ -144,7 +134,7 @@ int ip_handler(register struct packet_ptrs *pptrs)
       }
       pptrs->tlh_ptr = ptr;
 
-      if (((struct pm_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_MF|IP_OFFMASK)) {
+      if (((struct my_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_MF|IP_OFFMASK)) {
 	is_fragment = TRUE;
         ret = ip_fragment_handler(pptrs);
         if (!ret) {
@@ -162,14 +152,14 @@ int ip_handler(register struct packet_ptrs *pptrs)
       /* Let's handle both fragments and packets. If we are facing any subsequent frag
          our pointer is in place; we handle unknown L4 protocols likewise. In case of
          "entire" TCP/UDP packets we have to jump the L4 header instead */
-      if (((struct pm_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_OFFMASK));
+      if (((struct my_iphdr *)pptrs->iph_ptr)->ip_off & htons(IP_OFFMASK));
       else if (pptrs->l4_proto == IPPROTO_UDP) {
         ptr += UDPHdrSz;
         off += UDPHdrSz;
       }
       else if (pptrs->l4_proto == IPPROTO_TCP) {
-        ptr += ((struct pm_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
-        off += ((struct pm_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
+        ptr += ((struct my_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
+        off += ((struct my_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
       }
       if (off < caplen) pptrs->payload_ptr = ptr;
     }
@@ -187,10 +177,10 @@ int ip_handler(register struct packet_ptrs *pptrs)
 			config.name, caplen, off_l4+TCPFlagOff+1);
           return FALSE;
         }
-        if (((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_SYN) pptrs->tcp_flags |= TH_SYN;
-        if (((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_FIN) pptrs->tcp_flags |= TH_FIN;
-        if (((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_RST) pptrs->tcp_flags |= TH_RST;
-        if (((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_ACK && pptrs->tcp_flags) pptrs->tcp_flags |= TH_ACK;
+        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_SYN) pptrs->tcp_flags |= TH_SYN;
+        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_FIN) pptrs->tcp_flags |= TH_FIN;
+        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_RST) pptrs->tcp_flags |= TH_RST;
+        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_ACK && pptrs->tcp_flags) pptrs->tcp_flags |= TH_ACK;
       }
 
       ip_flow_handler(pptrs);
@@ -199,22 +189,22 @@ int ip_handler(register struct packet_ptrs *pptrs)
     /* XXX: optimize/short circuit here! */
     pptrs->tcp_flags = FALSE;
     if (pptrs->l4_proto == IPPROTO_TCP && off_l4+TCPFlagOff+1 <= caplen)
-      pptrs->tcp_flags = ((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags;
+      pptrs->tcp_flags = ((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags;
 
-    /* tunnel handlers here */
+    /* tunnel handlers here */ 
     if (config.tunnel0 && !pptrs->tun_stack) {
       for (num = 0; pptrs->payload_ptr && !is_fragment && tunnel_registry[0][num].tf; num++) {
         if (tunnel_registry[0][num].proto == pptrs->l4_proto) {
-	  if (!tunnel_registry[0][num].port || (pptrs->tlh_ptr && tunnel_registry[0][num].port == ntohs(((struct pm_tlhdr *)pptrs->tlh_ptr)->dst_port))) {
+	  if (!tunnel_registry[0][num].port || (pptrs->tlh_ptr && tunnel_registry[0][num].port == ntohs(((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port))) {
 	    pptrs->tun_stack = num;
 	    ret = (*tunnel_registry[0][num].tf)(pptrs);
 	  }
         }
       }
     }
-    else if (pptrs->tun_stack) {
+    else if (pptrs->tun_stack) { 
       if (tunnel_registry[pptrs->tun_stack][pptrs->tun_layer].proto == pptrs->l4_proto) {
-        if (!tunnel_registry[pptrs->tun_stack][pptrs->tun_layer].port || (pptrs->tlh_ptr && tunnel_registry[pptrs->tun_stack][pptrs->tun_layer].port == ntohs(((struct pm_tlhdr *)pptrs->tlh_ptr)->dst_port))) {
+        if (!tunnel_registry[pptrs->tun_stack][pptrs->tun_layer].port || (pptrs->tlh_ptr && tunnel_registry[pptrs->tun_stack][pptrs->tun_layer].port == ntohs(((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port))) {
           ret = (*tunnel_registry[pptrs->tun_stack][pptrs->tun_layer].tf)(pptrs);
         }
       }
@@ -313,8 +303,8 @@ int ip6_handler(register struct packet_ptrs *pptrs)
         off += UDPHdrSz;
       }
       else if (pptrs->l4_proto == IPPROTO_TCP) {
-        ptr += ((struct pm_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
-        off += ((struct pm_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
+        ptr += ((struct my_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
+        off += ((struct my_tcphdr *)pptrs->tlh_ptr)->th_off << 2;
       }
       if (off < caplen) pptrs->payload_ptr = ptr;
     }
@@ -332,10 +322,10 @@ int ip6_handler(register struct packet_ptrs *pptrs)
 			config.name, caplen, off_l4+TCPFlagOff+1);
           return FALSE;
         }
-        if (((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_SYN) pptrs->tcp_flags |= TH_SYN;
-        if (((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_FIN) pptrs->tcp_flags |= TH_FIN;
-        if (((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_RST) pptrs->tcp_flags |= TH_RST;
-        if (((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_ACK && pptrs->tcp_flags) pptrs->tcp_flags |= TH_ACK;
+        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_SYN) pptrs->tcp_flags |= TH_SYN;
+        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_FIN) pptrs->tcp_flags |= TH_FIN;
+        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_RST) pptrs->tcp_flags |= TH_RST;
+        if (((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags & TH_ACK && pptrs->tcp_flags) pptrs->tcp_flags |= TH_ACK;
       }
 
       ip_flow6_handler(pptrs);
@@ -344,7 +334,7 @@ int ip6_handler(register struct packet_ptrs *pptrs)
     /* XXX: optimize/short circuit here! */
     pptrs->tcp_flags = FALSE;
     if (pptrs->l4_proto == IPPROTO_TCP && off_l4+TCPFlagOff+1 <= caplen)
-      pptrs->tcp_flags = ((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags;
+      pptrs->tcp_flags = ((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags;
   }
 
   quit:
@@ -410,14 +400,13 @@ void compute_once()
   PlbgpSz = sizeof(struct pkt_legacy_bgp_primitives);
   PnatSz = sizeof(struct pkt_nat_primitives);
   PmplsSz = sizeof(struct pkt_mpls_primitives);
-  PtunSz = sizeof(struct pkt_tunnel_primitives);
   PvhdrSz = sizeof(struct pkt_vlen_hdr_primitives);
   PmLabelTSz = sizeof(pm_label_t);
   PtLabelTSz = sizeof(pt_label_t);
   ChBufHdrSz = sizeof(struct ch_buf_hdr);
   CharPtrSz = sizeof(char *);
-  IP4HdrSz = sizeof(struct pm_iphdr);
-  MyTLHdrSz = sizeof(struct pm_tlhdr);
+  IP4HdrSz = sizeof(struct my_iphdr);
+  MyTLHdrSz = sizeof(struct my_tlhdr);
   TCPFlagOff = 13;
   MyTCPHdrSz = TCPFlagOff+1;
   PptrsSz = sizeof(struct packet_ptrs);
@@ -473,9 +462,9 @@ int gtp_tunnel_configurator(struct tunnel_handler *th, char *opts)
 int gtp_tunnel_func(register struct packet_ptrs *pptrs)
 {
   register u_int16_t caplen = ((struct pcap_pkthdr *)pptrs->pkthdr)->caplen;
-  struct pm_gtphdr_v0 *gtp_hdr_v0 = (struct pm_gtphdr_v0 *) pptrs->payload_ptr;
-  struct pm_gtphdr_v1 *gtp_hdr_v1 = (struct pm_gtphdr_v1 *) pptrs->payload_ptr;
-  struct pm_udphdr *udp_hdr = (struct pm_udphdr *) pptrs->tlh_ptr;
+  struct my_gtphdr_v0 *gtp_hdr_v0 = (struct my_gtphdr_v0 *) pptrs->payload_ptr;
+  struct my_gtphdr_v1 *gtp_hdr_v1 = (struct my_gtphdr_v1 *) pptrs->payload_ptr;
+  struct my_udphdr *udp_hdr = (struct my_udphdr *) pptrs->tlh_ptr;
   u_int16_t off = pptrs->payload_ptr-pptrs->packet_ptr;
   u_int16_t gtp_hdr_len, gtp_opt_len, gtp_version;
   char *ptr = pptrs->payload_ptr;

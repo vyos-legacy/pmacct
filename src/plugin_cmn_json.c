@@ -29,9 +29,6 @@
 #include "plugin_cmn_json.h"
 #include "ip_flow.h"
 #include "classifier.h"
-#if defined (WITH_NDPI)
-#include "ndpi/ndpi.h"
-#endif
 
 /* Functions */
 #ifdef WITH_JANSSON
@@ -65,13 +62,6 @@ void compose_json(u_int64_t wtc, u_int64_t wtc_2)
     cjhandler[idx] = compose_json_class;
     idx++;
   }
-
-#if defined (WITH_NDPI)
-  if (wtc_2 & COUNT_NDPI_CLASS) {
-    cjhandler[idx] = compose_json_ndpi_class;
-    idx++;
-  }
-#endif
 
 #if defined (HAVE_L2)
   if (wtc & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
@@ -343,26 +333,6 @@ void compose_json(u_int64_t wtc, u_int64_t wtc_2)
     idx++;
   }
 
-  if (wtc_2 & COUNT_TUNNEL_SRC_HOST) {
-    cjhandler[idx] = compose_json_tunnel_src_host;
-    idx++;
-  }
-
-  if (wtc_2 & COUNT_TUNNEL_DST_HOST) {
-    cjhandler[idx] = compose_json_tunnel_dst_host;
-    idx++;
-  }
-
-  if (wtc_2 & COUNT_TUNNEL_IP_PROTO) {
-    cjhandler[idx] = compose_json_tunnel_proto;
-    idx++;
-  } 
-    
-  if (wtc_2 & COUNT_TUNNEL_IP_TOS) {
-    cjhandler[idx] = compose_json_tunnel_tos;
-    idx++;
-  }
-
   if (wtc_2 & COUNT_TIMESTAMP_START) {
     cjhandler[idx] = compose_json_timestamp_start;
     idx++;
@@ -446,20 +416,6 @@ void compose_json_class(json_t *obj, struct chained_cache *cc)
   json_object_set_new_nocheck(obj, "class", json_string((pbase->class && class[(pbase->class)-1].id) ? class[(pbase->class)-1].protocol : "unknown"));
 }
 
-#if defined (WITH_NDPI)
-void compose_json_ndpi_class(json_t *obj, struct chained_cache *cc)
-{
-  char ndpi_class[SUPERSHORTBUFLEN];
-  struct pkt_primitives *pbase = &cc->primitives;
-
-  snprintf(ndpi_class, SUPERSHORTBUFLEN, "%s/%s",
-	ndpi_get_proto_name(pm_ndpi_wfl->ndpi_struct, pbase->ndpi_class.master_protocol),
-	ndpi_get_proto_name(pm_ndpi_wfl->ndpi_struct, pbase->ndpi_class.app_protocol));
-
-  json_object_set_new_nocheck(obj, "class", json_string(ndpi_class));
-}
-#endif
-
 void compose_json_src_mac(json_t *obj, struct chained_cache *cc)
 {
   char mac[18];
@@ -535,7 +491,8 @@ void compose_json_ext_comm(json_t *obj, struct chained_cache *cc)
   }
   else str_ptr = empty_string;
 
-  json_object_set_new_nocheck(obj, "ecomms", json_string(str_ptr));
+  if (!config.tmp_comms_same_field) json_object_set_new_nocheck(obj, "ecomms", json_string(str_ptr));
+  else json_object_set_new_nocheck(obj, "comms", json_string(str_ptr));
 }
 
 void compose_json_lrg_comm(json_t *obj, struct chained_cache *cc)
@@ -639,7 +596,8 @@ void compose_json_src_ext_comm(json_t *obj, struct chained_cache *cc)
   }
   else str_ptr = empty_string;
 
-  json_object_set_new_nocheck(obj, "src_ecomms", json_string(str_ptr));
+  if (!config.tmp_comms_same_field) json_object_set_new_nocheck(obj, "src_ecomms", json_string(str_ptr));
+  else json_object_set_new_nocheck(obj, "src_comms", json_string(str_ptr));
 }
 
 void compose_json_src_lrg_comm(json_t *obj, struct chained_cache *cc)
@@ -717,7 +675,8 @@ void compose_json_src_net(json_t *obj, struct chained_cache *cc)
   char ip_address[INET6_ADDRSTRLEN];
 
   addr_to_str(ip_address, &cc->primitives.src_net);
-  json_object_set_new_nocheck(obj, "net_src", json_string(ip_address));
+  if (!config.tmp_net_own_field) json_object_set_new_nocheck(obj, "ip_src", json_string(ip_address));
+  else json_object_set_new_nocheck(obj, "net_src", json_string(ip_address));
 }
 
 void compose_json_dst_host(json_t *obj, struct chained_cache *cc)
@@ -733,7 +692,8 @@ void compose_json_dst_net(json_t *obj, struct chained_cache *cc)
   char ip_address[INET6_ADDRSTRLEN];
 
   addr_to_str(ip_address, &cc->primitives.dst_net);
-  json_object_set_new_nocheck(obj, "net_dst", json_string(ip_address));
+  if (!config.tmp_net_own_field) json_object_set_new_nocheck(obj, "ip_dst", json_string(ip_address));
+  else json_object_set_new_nocheck(obj, "net_dst", json_string(ip_address));
 }
 
 void compose_json_src_mask(json_t *obj, struct chained_cache *cc)
@@ -896,37 +856,6 @@ void compose_json_mpls_label_bottom(json_t *obj, struct chained_cache *cc)
 void compose_json_mpls_stack_depth(json_t *obj, struct chained_cache *cc)
 {
   json_object_set_new_nocheck(obj, "mpls_stack_depth", json_integer((json_int_t)cc->pmpls->mpls_stack_depth));
-}
-
-void compose_json_tunnel_src_host(json_t *obj, struct chained_cache *cc)
-{
-  char ip_address[INET6_ADDRSTRLEN];
-
-  addr_to_str(ip_address, &cc->ptun->tunnel_src_ip);
-  json_object_set_new_nocheck(obj, "tunnel_ip_src", json_string(ip_address));
-}
-
-void compose_json_tunnel_dst_host(json_t *obj, struct chained_cache *cc)
-{
-  char ip_address[INET6_ADDRSTRLEN];
-
-  addr_to_str(ip_address, &cc->ptun->tunnel_dst_ip);
-  json_object_set_new_nocheck(obj, "tunnel_ip_dst", json_string(ip_address));
-}
-
-void compose_json_tunnel_proto(json_t *obj, struct chained_cache *cc)
-{
-  char misc_str[VERYSHORTBUFLEN];
-
-  if (!config.num_protos && (cc->ptun->tunnel_proto < protocols_number))
-    json_object_set_new_nocheck(obj, "tunnel_ip_proto", json_string(_protocols[cc->ptun->tunnel_proto].name));
-  else
-    json_object_set_new_nocheck(obj, "tunnel_ip_proto", json_integer((json_int_t)cc->ptun->tunnel_proto));
-}
-
-void compose_json_tunnel_tos(json_t *obj, struct chained_cache *cc)
-{
-  json_object_set_new_nocheck(obj, "tunnel_tos", json_integer((json_int_t)cc->ptun->tunnel_tos));
 }
 
 void compose_json_timestamp_start(json_t *obj, struct chained_cache *cc)

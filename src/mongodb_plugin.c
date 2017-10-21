@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
 */
 
 /*
@@ -30,25 +30,8 @@
 #include "ip_flow.h"
 #include "classifier.h"
 #include "crc32.h"
-#if defined (WITH_NDPI)
-#include "ndpi/ndpi.h"
-#endif
 
 /* Functions */
-void mongodb_legacy_warning(int pipe_fd, struct configuration *cfgptr, void *ptr) 
-{
-  Log(LOG_WARNING, "WARN ( %s/%s ): =======\n", config.name, config.type);
-  Log(LOG_WARNING, "WARN ( %s/%s ): MongoDB plugin is in the process of being discontinued.\n", config.name, config.type);
-  Log(LOG_WARNING, "WARN ( %s/%s ): MongoDB plugin can still be used via the 'mongodb_legacy' keyword, ie.:\n", config.name, config.type);
-  Log(LOG_WARNING, "WARN ( %s/%s ): \n", config.name, config.type);
-  Log(LOG_WARNING, "WARN ( %s/%s ): plugins: mongodb_legacy[abc]\n", config.name, config.type);
-  Log(LOG_WARNING, "WARN ( %s/%s ): \n", config.name, config.type);
-  Log(LOG_WARNING, "WARN ( %s/%s ): %s: %s\n", config.name, config.type, GET_IN_TOUCH_MSG, MANTAINER);
-  Log(LOG_WARNING, "WARN ( %s/%s ): =======\n", config.name, config.type);
-
-  exit(0);
-}
-
 void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr) 
 {
   struct pkt_data *data;
@@ -293,23 +276,21 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   }
 }
 
-void MongoDB_cache_purge(struct chained_cache *queue[], int index, int safe_action)
+void MongoDB_cache_purge(struct chained_cache *queue[], int index)
 {
   struct pkt_primitives *data = NULL;
   struct pkt_bgp_primitives *pbgp = NULL;
   struct pkt_nat_primitives *pnat = NULL;
   struct pkt_mpls_primitives *pmpls = NULL;
-  struct pkt_tunnel_primitives *ptun = NULL;
   char *pcust = NULL;
   struct pkt_vlen_hdr_primitives *pvlen = NULL;
   struct pkt_bgp_primitives empty_pbgp;
   struct pkt_nat_primitives empty_pnat;
   struct pkt_mpls_primitives empty_pmpls;
-  struct pkt_tunnel_primitives empty_ptun;
   char *empty_pcust = NULL;
   char src_mac[18], dst_mac[18], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN], ip_address[INET6_ADDRSTRLEN];
   char rd_str[SRVBUFLEN], misc_str[SRVBUFLEN], tmpbuf[LONGLONGSRVBUFLEN], mongo_database[SRVBUFLEN];
-  char *str_ptr, *as_path, *bgp_comm, default_table[] = "test.acct", ndpi_class[SUPERSHORTBUFLEN];
+  char *str_ptr, *as_path, *bgp_comm, default_table[] = "test.acct";
   char default_user[] = "pmacct", default_passwd[] = "arealsmartpwd";
   int qn = 0, i, j, stop, db_status, batch_idx, go_to_pending, saved_index = index;
   time_t stamp, start, duration;
@@ -360,7 +341,6 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index, int safe_acti
   memset(&empty_pbgp, 0, sizeof(struct pkt_bgp_primitives));
   memset(&empty_pnat, 0, sizeof(struct pkt_nat_primitives));
   memset(&empty_pmpls, 0, sizeof(struct pkt_mpls_primitives));
-  memset(&empty_ptun, 0, sizeof(struct pkt_tunnel_primitives));
   memset(empty_pcust, 0, config.cpptrs.len);
   memset(mongo_database, 0, sizeof(mongo_database));
   memset(&prim_ptrs, 0, sizeof(prim_ptrs));
@@ -462,9 +442,6 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index, int safe_acti
   
       if (queue[j]->pmpls) pmpls = queue[j]->pmpls;
       else pmpls = &empty_pmpls;
-
-      if (queue[j]->ptun) ptun = queue[j]->ptun;
-      else ptun = &empty_ptun;
   
       if (queue[j]->pcust) pcust = queue[j]->pcust;
       else pcust = empty_pcust;
@@ -479,17 +456,6 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index, int safe_acti
       if (config.what_to_count_2 & COUNT_LABEL) MongoDB_append_string(bson_elem, "label", pvlen, COUNT_INT_LABEL); 
 
       if (config.what_to_count & COUNT_CLASS) bson_append_string(bson_elem, "class", ((data->class && class[(data->class)-1].id) ? class[(data->class)-1].protocol : "unknown" ));
-
-  #if defined (WITH_NDPI)
-      if (config.what_to_count_2 & COUNT_NDPI_CLASS) {
-	snprintf(ndpi_class, SUPERSHORTBUFLEN, "%s/%s",
-		ndpi_get_proto_name(pm_ndpi_wfl->ndpi_struct, data->ndpi_class.master_protocol),
-		ndpi_get_proto_name(pm_ndpi_wfl->ndpi_struct, data->ndpi_class.app_protocol));
-
-	bson_append_string(bson_elem, "class", ndpi_class);
-      }
-  #endif
-
   #if defined (HAVE_L2)
       if (config.what_to_count & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
         etheraddr_string(data->eth_shost, src_mac);
@@ -533,7 +499,10 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index, int safe_acti
           }
         }
 
-	MongoDB_append_string(bson_elem, "ecomms", pvlen, COUNT_INT_EXT_COMM);
+        if (!config.tmp_comms_same_field)
+	  MongoDB_append_string(bson_elem, "ecomms", pvlen, COUNT_INT_EXT_COMM);
+        else
+	  MongoDB_append_string(bson_elem, "comms", pvlen, COUNT_INT_EXT_COMM);
       }
 
       if (config.what_to_count_2 & COUNT_LRG_COMM) {
@@ -599,7 +568,10 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index, int safe_acti
           }
         }
 
-        MongoDB_append_string(bson_elem, "src_ecomms", pvlen, COUNT_INT_SRC_EXT_COMM);
+        if (!config.tmp_comms_same_field)
+          MongoDB_append_string(bson_elem, "src_ecomms", pvlen, COUNT_INT_SRC_EXT_COMM);
+        else
+          MongoDB_append_string(bson_elem, "src_comms", pvlen, COUNT_INT_SRC_EXT_COMM);
       }
 
       if (config.what_to_count_2 & COUNT_SRC_LRG_COMM) {
@@ -639,24 +611,50 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index, int safe_acti
         bson_append_string(bson_elem, "mpls_vpn_rd", rd_str);
       }
   
-      if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST)) {
-        addr_to_str(src_host, &data->src_ip);
-        bson_append_string(bson_elem, "ip_src", src_host);
+      if (!config.tmp_net_own_field) {
+        if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST)) {
+          addr_to_str(src_host, &data->src_ip);
+          bson_append_string(bson_elem, "ip_src", src_host);
+        }
+
+        if (config.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) {
+          addr_to_str(src_host, &data->src_net);
+          bson_append_string(bson_elem, "ip_src", src_host);
+        }
+      }
+      else {
+        if (config.what_to_count & (COUNT_SRC_HOST|COUNT_SUM_HOST)) {
+          addr_to_str(src_host, &data->src_ip);
+          bson_append_string(bson_elem, "ip_src", src_host);
+        }
+
+        if (config.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) {
+          addr_to_str(src_host, &data->src_net);
+          bson_append_string(bson_elem, "net_src", src_host);
+        }
       }
 
-      if (config.what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) {
-        addr_to_str(src_host, &data->src_net);
-        bson_append_string(bson_elem, "net_src", src_host);
-      }
+      if (!config.tmp_net_own_field) {
+        if (config.what_to_count & COUNT_DST_HOST) {
+          addr_to_str(dst_host, &data->dst_ip);
+          bson_append_string(bson_elem, "ip_dst", dst_host);
+        }
 
-      if (config.what_to_count & COUNT_DST_HOST) {
-        addr_to_str(dst_host, &data->dst_ip);
-        bson_append_string(bson_elem, "ip_dst", dst_host);
+        if (config.what_to_count & COUNT_DST_NET) {
+          addr_to_str(dst_host, &data->dst_net);
+          bson_append_string(bson_elem, "ip_dst", dst_host);
+        }
       }
+      else {
+        if (config.what_to_count & COUNT_DST_HOST) {
+          addr_to_str(dst_host, &data->dst_ip);
+          bson_append_string(bson_elem, "ip_dst", dst_host);
+        }
 
-      if (config.what_to_count & COUNT_DST_NET) {
-        addr_to_str(dst_host, &data->dst_net);
-        bson_append_string(bson_elem, "net_dst", dst_host);
+        if (config.what_to_count & COUNT_DST_NET) {
+          addr_to_str(dst_host, &data->dst_net);
+          bson_append_string(bson_elem, "net_dst", dst_host);
+        }
       }
   
       if (config.what_to_count & COUNT_SRC_NMASK) bson_append_int(bson_elem, "mask_src", data->src_nmask);
@@ -739,24 +737,6 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index, int safe_acti
       if (config.what_to_count_2 & COUNT_MPLS_LABEL_TOP) bson_append_int(bson_elem, "mpls_label_top", pmpls->mpls_label_top);
       if (config.what_to_count_2 & COUNT_MPLS_LABEL_BOTTOM) bson_append_int(bson_elem, "mpls_label_bottom", pmpls->mpls_label_bottom);
       if (config.what_to_count_2 & COUNT_MPLS_STACK_DEPTH) bson_append_int(bson_elem, "mpls_stack_depth", pmpls->mpls_stack_depth);
-
-      if (config.what_to_count_2 & COUNT_TUNNEL_SRC_HOST) {
-        addr_to_str(src_host, &ptun->tunnel_src_ip);
-        bson_append_string(bson_elem, "tunnel_ip_src", src_host);
-      }
-      if (config.what_to_count_2 & COUNT_TUNNEL_DST_HOST) {
-        addr_to_str(dst_host, &ptun->tunnel_dst_ip);
-        bson_append_string(bson_elem, "tunnel_ip_dst", dst_host);
-      }
-      if (config.what_to_count_2 & COUNT_TUNNEL_IP_PROTO) {
-        if (!config.num_protos && (ptun->tunnel_proto < protocols_number))
-	  bson_append_string(bson_elem, "tunnel_ip_proto", _protocols[ptun->tunnel_proto].name);
-        else {
-          sprintf(misc_str, "%u", ptun->tunnel_proto);
-          bson_append_string(bson_elem, "tunnel_ip_proto", misc_str);
-        }
-      }
-      if (config.what_to_count_2 & COUNT_TUNNEL_IP_TOS) bson_append_int(bson_elem, "tunnel_tos", ptun->tunnel_tos);
   
       if (config.what_to_count_2 & COUNT_TIMESTAMP_START) {
 	if (config.timestamps_since_epoch) {

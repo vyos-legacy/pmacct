@@ -40,9 +40,6 @@
 #include "crc32.h"
 #include "isis/isis.h"
 #include "bmp/bmp.h"
-#if defined (WITH_NDPI)
-#include "ndpi/ndpi.h"
-#endif
 
 /* variables to be exported away */
 struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
@@ -65,7 +62,7 @@ void usage_daemon(char *prog_name)
   printf("  -D  \tDaemonize\n"); 
   printf("  -n  \tPath to a file containing networks and/or ASNs definitions\n");
   printf("  -t  \tPath to a file containing ports definitions\n");
-  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | amqp | kafka | tee ] \n\tActivate plugin\n"); 
+  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | mongodb | amqp | kafka | tee ] \n\tActivate plugin\n"); 
   printf("  -d  \tEnable debug\n");
   printf("  -S  \t[ auth | mail | daemon | kern | user | local[0-7] ] \n\tLog to the specified syslog facility\n");
   printf("  -F  \tWrite Core Process PID into the specified file\n");
@@ -83,9 +80,7 @@ void usage_daemon(char *prog_name)
   printf("  -A  \tAppend output (applies to -o)\n");
   printf("  -E  \tCSV format serparator (applies to -O csv, DEFAULT: ',')\n");
   printf("\n");
-  printf("For examples, see:\n");
-  printf("  https://github.com/pmacct/pmacct/blob/master/QUICKSTART or\n");
-  printf("  https://github.com/pmacct/pmacct/wiki\n");
+  printf("  See QUICKSTART or visit http://wiki.pmacct.net/ for examples.\n");
   printf("\n");
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
@@ -443,18 +438,21 @@ int main(int argc,char **argv, char **envp)
                         COUNT_MPLS_STACK_DEPTH))
           list->cfg.data_type |= PIPE_TYPE_MPLS;
 
-	if (list->cfg.what_to_count_2 & (COUNT_TUNNEL_SRC_HOST|COUNT_TUNNEL_DST_HOST|
-			COUNT_TUNNEL_IP_PROTO|COUNT_TUNNEL_IP_TOS))
-	  list->cfg.data_type |= PIPE_TYPE_TUN;
-
         if (list->cfg.what_to_count_2 & (COUNT_LABEL))
           list->cfg.data_type |= PIPE_TYPE_VLEN;
 
-	evaluate_sums(&list->cfg.what_to_count, &list->cfg.what_to_count_2, list->name, list->type.string);
+	evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
 	if (!list->cfg.what_to_count && !list->cfg.what_to_count_2 && !list->cfg.cpptrs.num) {
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	  list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
+        if (((list->cfg.what_to_count & COUNT_SRC_HOST) && (list->cfg.what_to_count & COUNT_SRC_NET)) ||
+            ((list->cfg.what_to_count & COUNT_DST_HOST) && (list->cfg.what_to_count & COUNT_DST_NET))) {
+          if (!list->cfg.tmp_net_own_field) {
+            Log(LOG_ERR, "ERROR ( %s/%s ): src_host, src_net and dst_host, dst_net are mutually exclusive: set tmp_net_own_field to true. Exiting...\n\n", list->name, list->type.string);
+            exit(1);
+          }
+        }
 	if (list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) {
 	  if (!list->cfg.networks_file && list->cfg.nfacctd_as & NF_AS_NEW) {
 	    Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation was selected but NO 'networks_file' specified. Exiting...\n\n", list->name, list->type.string);
@@ -485,19 +483,8 @@ int main(int argc,char **argv, char **envp)
               list->cfg.nfacctd_net |= NF_NET_NEW;
           }
         }
-
 	if (list->cfg.what_to_count & COUNT_CLASS && !list->cfg.classifiers_path) {
 	  Log(LOG_ERR, "ERROR ( %s/%s ): 'class' aggregation selected but NO 'classifiers' key specified. Exiting...\n\n", list->name, list->type.string);
-	  exit(1);
-	}
-
-	if (list->cfg.what_to_count_2 & COUNT_NDPI_CLASS) {
-          config.handle_fragments = TRUE;
-          config.classifier_ndpi = TRUE;
-	}
-
-	if ((list->cfg.what_to_count & COUNT_CLASS) && (list->cfg.what_to_count_2 & COUNT_NDPI_CLASS)) {
-	  Log(LOG_ERR, "ERROR ( %s/%s ): 'class_legacy' and 'class' primitives are mutual exclusive. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
 	}
 
@@ -759,15 +746,6 @@ int main(int argc,char **argv, char **envp)
 
   if (config.classifiers_path) init_classifiers(config.classifiers_path);
 
-#if defined (WITH_NDPI)
-  if (config.classifier_ndpi) {
-    config.handle_fragments = TRUE;
-    pm_ndpi_wfl = pm_ndpi_workflow_init();
-    pm_ndpi_export_proto_to_class(pm_ndpi_wfl);
-  }
-  else pm_ndpi_wfl = NULL;
-#endif
-
   /* plugins glue: creation */
   load_plugins(&req);
   load_plugin_filters(1);
@@ -794,9 +772,9 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.v4.packet_ptr)->ether_type, htons(ETHERTYPE_IP)); /* 0x800 */
   pptrs.v4.mac_ptr = (u_char *)((struct eth_header *)pptrs.v4.packet_ptr)->ether_dhost; 
   pptrs.v4.iph_ptr = pptrs.v4.packet_ptr + ETHER_HDRLEN; 
-  pptrs.v4.tlh_ptr = pptrs.v4.packet_ptr + ETHER_HDRLEN + sizeof(struct pm_iphdr); 
-  Assign8(((struct pm_iphdr *)pptrs.v4.iph_ptr)->ip_vhl, 5);
-  // pptrs.v4.pkthdr->caplen = 38; /* eth_header + pm_iphdr + pm_tlhdr */
+  pptrs.v4.tlh_ptr = pptrs.v4.packet_ptr + ETHER_HDRLEN + sizeof(struct my_iphdr); 
+  Assign8(((struct my_iphdr *)pptrs.v4.iph_ptr)->ip_vhl, 5);
+  // pptrs.v4.pkthdr->caplen = 38; /* eth_header + my_iphdr + my_tlhdr */
   pptrs.v4.pkthdr->caplen = 55;
   pptrs.v4.pkthdr->len = 100; /* fake len */ 
   pptrs.v4.l3_proto = ETHERTYPE_IP;
@@ -811,9 +789,9 @@ int main(int argc,char **argv, char **envp)
   pptrs.vlan4.vlan_ptr = pptrs.vlan4.packet_ptr + ETHER_HDRLEN;
   Assign16(*(pptrs.vlan4.vlan_ptr+2), htons(ETHERTYPE_IP));
   pptrs.vlan4.iph_ptr = pptrs.vlan4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
-  pptrs.vlan4.tlh_ptr = pptrs.vlan4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN + sizeof(struct pm_iphdr);
-  Assign8(((struct pm_iphdr *)pptrs.vlan4.iph_ptr)->ip_vhl, 5);
-  // pptrs.vlan4.pkthdr->caplen = 42; /* eth_header + vlan + pm_iphdr + pm_tlhdr */
+  pptrs.vlan4.tlh_ptr = pptrs.vlan4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN + sizeof(struct my_iphdr);
+  Assign8(((struct my_iphdr *)pptrs.vlan4.iph_ptr)->ip_vhl, 5);
+  // pptrs.vlan4.pkthdr->caplen = 42; /* eth_header + vlan + my_iphdr + my_tlhdr */
   pptrs.vlan4.pkthdr->caplen = 59;
   pptrs.vlan4.pkthdr->len = 100; /* fake len */
   pptrs.vlan4.l3_proto = ETHERTYPE_IP;
@@ -826,7 +804,7 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.mpls4.packet_ptr)->ether_type, htons(ETHERTYPE_MPLS));
   pptrs.mpls4.mac_ptr = (u_char *)((struct eth_header *)pptrs.mpls4.packet_ptr)->ether_dhost;
   pptrs.mpls4.mpls_ptr = pptrs.mpls4.packet_ptr + ETHER_HDRLEN;
-  // pptrs.mpls4.pkthdr->caplen = 78; /* eth_header + upto 10 MPLS labels + pm_iphdr + pm_tlhdr */
+  // pptrs.mpls4.pkthdr->caplen = 78; /* eth_header + upto 10 MPLS labels + my_iphdr + my_tlhdr */
   pptrs.mpls4.pkthdr->caplen = 95;
   pptrs.mpls4.pkthdr->len = 100; /* fake len */
   pptrs.mpls4.l3_proto = ETHERTYPE_IP;
@@ -841,7 +819,7 @@ int main(int argc,char **argv, char **envp)
   pptrs.vlanmpls4.vlan_ptr = pptrs.vlanmpls4.packet_ptr + ETHER_HDRLEN;
   Assign16(*(pptrs.vlanmpls4.vlan_ptr+2), htons(ETHERTYPE_MPLS));
   pptrs.vlanmpls4.mpls_ptr = pptrs.vlanmpls4.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
-  // pptrs.vlanmpls4.pkthdr->caplen = 82; /* eth_header + vlan + upto 10 MPLS labels + pm_iphdr + pm_tlhdr */
+  // pptrs.vlanmpls4.pkthdr->caplen = 82; /* eth_header + vlan + upto 10 MPLS labels + my_iphdr + my_tlhdr */
   pptrs.vlanmpls4.pkthdr->caplen = 99;
   pptrs.vlanmpls4.pkthdr->len = 100; /* fake len */
   pptrs.vlanmpls4.l3_proto = ETHERTYPE_IP;
@@ -858,7 +836,7 @@ int main(int argc,char **argv, char **envp)
   pptrs.v6.tlh_ptr = pptrs.v6.packet_ptr + ETHER_HDRLEN + sizeof(struct ip6_hdr);
   Assign16(((struct ip6_hdr *)pptrs.v6.iph_ptr)->ip6_plen, htons(100));
   Assign16(((struct ip6_hdr *)pptrs.v6.iph_ptr)->ip6_hlim, htons(64));
-  // pptrs.v6.pkthdr->caplen = 60; /* eth_header + ip6_hdr + pm_tlhdr */
+  // pptrs.v6.pkthdr->caplen = 60; /* eth_header + ip6_hdr + my_tlhdr */
   pptrs.v6.pkthdr->caplen = 77;
   pptrs.v6.pkthdr->len = 100; /* fake len */
   pptrs.v6.l3_proto = ETHERTYPE_IPV6;
@@ -877,7 +855,7 @@ int main(int argc,char **argv, char **envp)
   pptrs.vlan6.tlh_ptr = pptrs.vlan6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN + sizeof(struct ip6_hdr);
   Assign16(((struct ip6_hdr *)pptrs.vlan6.iph_ptr)->ip6_plen, htons(100));
   Assign16(((struct ip6_hdr *)pptrs.vlan6.iph_ptr)->ip6_hlim, htons(64));
-  // pptrs.vlan6.pkthdr->caplen = 64; /* eth_header + vlan + ip6_hdr + pm_tlhdr */
+  // pptrs.vlan6.pkthdr->caplen = 64; /* eth_header + vlan + ip6_hdr + my_tlhdr */
   pptrs.vlan6.pkthdr->caplen = 81;
   pptrs.vlan6.pkthdr->len = 100; /* fake len */
   pptrs.vlan6.l3_proto = ETHERTYPE_IPV6;
@@ -890,7 +868,7 @@ int main(int argc,char **argv, char **envp)
   Assign16(((struct eth_header *)pptrs.mpls6.packet_ptr)->ether_type, htons(ETHERTYPE_MPLS));
   pptrs.mpls6.mac_ptr = (u_char *)((struct eth_header *)pptrs.mpls6.packet_ptr)->ether_dhost;
   pptrs.mpls6.mpls_ptr = pptrs.mpls6.packet_ptr + ETHER_HDRLEN;
-  // pptrs.mpls6.pkthdr->caplen = 100; /* eth_header + upto 10 MPLS labels + ip6_hdr + pm_tlhdr */
+  // pptrs.mpls6.pkthdr->caplen = 100; /* eth_header + upto 10 MPLS labels + ip6_hdr + my_tlhdr */
   pptrs.mpls6.pkthdr->caplen = 117;
   pptrs.mpls6.pkthdr->len = 128; /* fake len */
   pptrs.mpls6.l3_proto = ETHERTYPE_IPV6;
@@ -906,7 +884,7 @@ int main(int argc,char **argv, char **envp)
   Assign8(*(pptrs.vlanmpls6.vlan_ptr+2), 0x88);
   Assign8(*(pptrs.vlanmpls6.vlan_ptr+3), 0x47);
   pptrs.vlanmpls6.mpls_ptr = pptrs.vlanmpls6.packet_ptr + ETHER_HDRLEN + IEEE8021Q_TAGLEN;
-  // pptrs.vlanmpls6.pkthdr->caplen = 104; /* eth_header + vlan + upto 10 MPLS labels + ip6_hdr + pm_tlhdr */
+  // pptrs.vlanmpls6.pkthdr->caplen = 104; /* eth_header + vlan + upto 10 MPLS labels + ip6_hdr + my_tlhdr */
   pptrs.vlanmpls6.pkthdr->caplen = 121;
   pptrs.vlanmpls6.pkthdr->len = 128; /* fake len */
   pptrs.vlanmpls6.l3_proto = ETHERTYPE_IP;
@@ -1374,26 +1352,25 @@ void compute_once()
   PlbgpSz = sizeof(struct pkt_legacy_bgp_primitives);
   PnatSz = sizeof(struct pkt_nat_primitives);
   PmplsSz = sizeof(struct pkt_mpls_primitives);
-  PtunSz = sizeof(struct pkt_tunnel_primitives);
   PvhdrSz = sizeof(struct pkt_vlen_hdr_primitives);
   PmLabelTSz = sizeof(pm_label_t);
   PtLabelTSz = sizeof(pt_label_t);
   ChBufHdrSz = sizeof(struct ch_buf_hdr);
   CharPtrSz = sizeof(char *);
-  IP4HdrSz = sizeof(struct pm_iphdr);
-  IP4TlSz = sizeof(struct pm_iphdr)+sizeof(struct pm_tlhdr);
+  IP4HdrSz = sizeof(struct my_iphdr);
+  IP4TlSz = sizeof(struct my_iphdr)+sizeof(struct my_tlhdr);
   SFSampleSz = sizeof(SFSample);
   SFLAddressSz = sizeof(SFLAddress);
   SFrenormEntrySz = sizeof(struct xflow_status_entry_sampling);
   PptrsSz = sizeof(struct packet_ptrs);
   CSSz = sizeof(struct class_st);
   HostAddrSz = sizeof(struct host_addr);
-  UDPHdrSz = sizeof(struct pm_udphdr);
+  UDPHdrSz = sizeof(struct my_udphdr);
 
 #if defined ENABLE_IPV6
   IP6HdrSz = sizeof(struct ip6_hdr);
   IP6AddrSz = sizeof(struct in6_addr);
-  IP6TlSz = sizeof(struct ip6_hdr)+sizeof(struct pm_tlhdr);
+  IP6TlSz = sizeof(struct ip6_hdr)+sizeof(struct my_tlhdr);
 #endif
 }
 
@@ -1441,14 +1418,14 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
 
         memcpy(pptrs->mac_ptr+ETH_ADDR_LEN, &sample->eth_src, ETH_ADDR_LEN); 
         memcpy(pptrs->mac_ptr, &sample->eth_dst, ETH_ADDR_LEN);
-	((struct pm_iphdr *)pptrs->iph_ptr)->ip_vhl = 0x45;
-        memcpy(&((struct pm_iphdr *)pptrs->iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
-        memcpy(&((struct pm_iphdr *)pptrs->iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
-        memcpy(&((struct pm_iphdr *)pptrs->iph_ptr)->ip_p, &dcd_ipProtocol, 1);
-        memcpy(&((struct pm_iphdr *)pptrs->iph_ptr)->ip_tos, &dcd_ipTos, 1);
-        memcpy(&((struct pm_tlhdr *)pptrs->tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct pm_tlhdr *)pptrs->tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct pm_tcphdr *)pptrs->tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+	((struct my_iphdr *)pptrs->iph_ptr)->ip_vhl = 0x45;
+        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
+        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
+        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_p, &dcd_ipProtocol, 1);
+        memcpy(&((struct my_iphdr *)pptrs->iph_ptr)->ip_tos, &dcd_ipTos, 1);
+        memcpy(&((struct my_tlhdr *)pptrs->tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct my_tlhdr *)pptrs->tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct my_tcphdr *)pptrs->tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrs->lm_mask_src = sample->srcMask;
@@ -1483,9 +1460,9 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(&((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz);
         memcpy(&((struct ip6_hdr *)pptrsv->v6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1);
         /* XXX: class ID ? */
-        memcpy(&((struct pm_tlhdr *)pptrsv->v6.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct pm_tlhdr *)pptrsv->v6.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct pm_tcphdr *)pptrsv->v6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+        memcpy(&((struct my_tlhdr *)pptrsv->v6.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct my_tlhdr *)pptrsv->v6.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct my_tcphdr *)pptrsv->v6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->v6.lm_mask_src = sample->srcMask;
@@ -1516,14 +1493,14 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(pptrsv->vlan4.mac_ptr+ETH_ADDR_LEN, &sample->eth_src, ETH_ADDR_LEN); 
         memcpy(pptrsv->vlan4.mac_ptr, &sample->eth_dst, ETH_ADDR_LEN); 
         memcpy(pptrsv->vlan4.vlan_ptr, &vlan, 2); 
-	((struct pm_iphdr *)pptrsv->vlan4.iph_ptr)->ip_vhl = 0x45;
-        memcpy(&((struct pm_iphdr *)pptrsv->vlan4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
-        memcpy(&((struct pm_iphdr *)pptrsv->vlan4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
-        memcpy(&((struct pm_iphdr *)pptrsv->vlan4.iph_ptr)->ip_p, &dcd_ipProtocol, 1);
-        memcpy(&((struct pm_iphdr *)pptrsv->vlan4.iph_ptr)->ip_tos, &dcd_ipTos, 1); 
-        memcpy(&((struct pm_tlhdr *)pptrsv->vlan4.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct pm_tlhdr *)pptrsv->vlan4.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct pm_tcphdr *)pptrsv->vlan4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+	((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_vhl = 0x45;
+        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
+        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
+        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_p, &dcd_ipProtocol, 1);
+        memcpy(&((struct my_iphdr *)pptrsv->vlan4.iph_ptr)->ip_tos, &dcd_ipTos, 1); 
+        memcpy(&((struct my_tlhdr *)pptrsv->vlan4.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct my_tlhdr *)pptrsv->vlan4.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct my_tcphdr *)pptrsv->vlan4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->vlan4.lm_mask_src = sample->srcMask;
@@ -1559,9 +1536,9 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(&((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz);
         memcpy(&((struct ip6_hdr *)pptrsv->vlan6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1); 
         /* XXX: class ID ? */
-        memcpy(&((struct pm_tlhdr *)pptrsv->vlan6.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct pm_tlhdr *)pptrsv->vlan6.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct pm_tcphdr *)pptrsv->vlan6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+        memcpy(&((struct my_tlhdr *)pptrsv->vlan6.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct my_tlhdr *)pptrsv->vlan6.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct my_tcphdr *)pptrsv->vlan6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->vlan6.lm_mask_src = sample->srcMask;
@@ -1605,14 +1582,14 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         pptrsv->mpls4.tlh_ptr = ptr + IP4HdrSz;
         reset_ip4(&pptrsv->mpls4);
 	
-	((struct pm_iphdr *)pptrsv->mpls4.iph_ptr)->ip_vhl = 0x45;
-        memcpy(&((struct pm_iphdr *)pptrsv->mpls4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
-        memcpy(&((struct pm_iphdr *)pptrsv->mpls4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4); 
-        memcpy(&((struct pm_iphdr *)pptrsv->mpls4.iph_ptr)->ip_p, &dcd_ipProtocol, 1); 
-        memcpy(&((struct pm_iphdr *)pptrsv->mpls4.iph_ptr)->ip_tos, &dcd_ipTos, 1); 
-        memcpy(&((struct pm_tlhdr *)pptrsv->mpls4.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct pm_tlhdr *)pptrsv->mpls4.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct pm_tcphdr *)pptrsv->mpls4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+	((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_vhl = 0x45;
+        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4);
+        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4); 
+        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_p, &dcd_ipProtocol, 1); 
+        memcpy(&((struct my_iphdr *)pptrsv->mpls4.iph_ptr)->ip_tos, &dcd_ipTos, 1); 
+        memcpy(&((struct my_tlhdr *)pptrsv->mpls4.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct my_tlhdr *)pptrsv->mpls4.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct my_tcphdr *)pptrsv->mpls4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->mpls4.lm_mask_src = sample->srcMask;
@@ -1660,9 +1637,9 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(&((struct ip6_hdr *)pptrsv->mpls6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz); 
         memcpy(&((struct ip6_hdr *)pptrsv->mpls6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1); 
         /* XXX: class ID ? */
-        memcpy(&((struct pm_tlhdr *)pptrsv->mpls6.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct pm_tlhdr *)pptrsv->mpls6.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct pm_tcphdr *)pptrsv->mpls6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+        memcpy(&((struct my_tlhdr *)pptrsv->mpls6.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct my_tlhdr *)pptrsv->mpls6.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct my_tcphdr *)pptrsv->mpls6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->mpls6.lm_mask_src = sample->srcMask;
@@ -1706,14 +1683,14 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         pptrsv->vlanmpls4.tlh_ptr = ptr + IP4HdrSz;
         reset_ip4(&pptrsv->vlanmpls4);
 
-	((struct pm_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_vhl = 0x45;
-        memcpy(&((struct pm_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4); 
-        memcpy(&((struct pm_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
-        memcpy(&((struct pm_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_p, &dcd_ipProtocol, 1);
-        memcpy(&((struct pm_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_tos, &dcd_ipTos, 1);
-        memcpy(&((struct pm_tlhdr *)pptrsv->vlanmpls4.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct pm_tlhdr *)pptrsv->vlanmpls4.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct pm_tcphdr *)pptrsv->vlanmpls4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+	((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_vhl = 0x45;
+        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_src, &sample->dcd_srcIP, 4); 
+        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_dst, &sample->dcd_dstIP, 4);
+        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_p, &dcd_ipProtocol, 1);
+        memcpy(&((struct my_iphdr *)pptrsv->vlanmpls4.iph_ptr)->ip_tos, &dcd_ipTos, 1);
+        memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls4.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls4.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct my_tcphdr *)pptrsv->vlanmpls4.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->vlanmpls4.lm_mask_src = sample->srcMask;
@@ -1762,9 +1739,9 @@ void finalizeSample(SFSample *sample, struct packet_ptrs_vector *pptrsv, struct 
         memcpy(&((struct ip6_hdr *)pptrsv->vlanmpls6.iph_ptr)->ip6_dst, &sample->ipdst.address.ip_v6, IP6AddrSz); 
         memcpy(&((struct ip6_hdr *)pptrsv->vlanmpls6.iph_ptr)->ip6_nxt, &dcd_ipProtocol, 1); 
         /* XXX: class ID ? */
-        memcpy(&((struct pm_tlhdr *)pptrsv->vlanmpls6.tlh_ptr)->src_port, &dcd_sport, 2);
-        memcpy(&((struct pm_tlhdr *)pptrsv->vlanmpls6.tlh_ptr)->dst_port, &dcd_dport, 2);
-        memcpy(&((struct pm_tcphdr *)pptrsv->vlanmpls6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
+        memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls6.tlh_ptr)->src_port, &dcd_sport, 2);
+        memcpy(&((struct my_tlhdr *)pptrsv->vlanmpls6.tlh_ptr)->dst_port, &dcd_dport, 2);
+        memcpy(&((struct my_tcphdr *)pptrsv->vlanmpls6.tlh_ptr)->th_flags, &dcd_tcpFlags, 1);
       }
 
       pptrsv->vlanmpls6.lm_mask_src = sample->srcMask;
@@ -1906,7 +1883,7 @@ void reset_mac_vlan(struct packet_ptrs *pptrs)
 void reset_ip4(struct packet_ptrs *pptrs)
 {
   memset(pptrs->iph_ptr, 0, IP4TlSz);
-  Assign8(((struct pm_iphdr *)pptrs->iph_ptr)->ip_vhl, 5);
+  Assign8(((struct my_iphdr *)pptrs->iph_ptr)->ip_vhl, 5);
 }
 
 #if defined ENABLE_IPV6
