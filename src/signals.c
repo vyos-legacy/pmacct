@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -26,6 +26,7 @@
 #include "pmacct.h"
 #include "pmacct-data.h"
 #include "plugin_hooks.h"
+#include "bgp/bgp.h"
 
 /* extern */
 extern struct plugins_list_entry *plugin_list;
@@ -101,7 +102,7 @@ void ignore_falling_child()
 
   while ((cpid = waitpid(-1, &status, WNOHANG)) > 0) {
     if (!WIFEXITED(status)) Log(LOG_WARNING, "WARN ( %s/%s ): Abnormal exit status detected for child PID %u\n", config.name, config.type, cpid);
-    sql_writers.retired++;
+    // sql_writers.retired++;
   }
 
   signal(SIGCHLD, ignore_falling_child);
@@ -110,6 +111,16 @@ void ignore_falling_child()
 void my_sigint_handler(int signum)
 {
   struct plugins_list_entry *list = plugins_list;
+  char shutdown_msg[] = "pmacct received SIGINT - shutting down";
+
+  if (config.acct_type == ACCT_PMBGP || config.nfacctd_bgp == BGP_DAEMON_ONLINE) {
+    int idx;
+
+    for (idx = 0; idx < config.nfacctd_bgp_max_peers; idx++) {
+      if (peers[idx].fd)
+	bgp_peer_close(&peers[idx], FUNC_TYPE_BGP, TRUE, TRUE, BGP_NOTIFY_CEASE, BGP_NOTIFY_CEASE_ADMIN_SHUTDOWN, shutdown_msg);
+    }
+  }
 
   if (config.syslog) closelog();
 

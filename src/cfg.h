@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -111,6 +111,7 @@ struct configuration {
   int pipe_kafka_partition_keylen;
   int pipe_kafka_broker_port;
   int pipe_kafka_retry;
+  char *pipe_kafka_fallback;
   int files_umask;
   int files_uid;
   int files_gid;
@@ -145,7 +146,6 @@ struct configuration {
   int sql_cache_entries;
   int sql_dont_try_update;
   char *sql_history_roundoff;
-  int sql_max_writers;
   int sql_trigger_time;
   int sql_trigger_time_howmany; /* internal */
   char *sql_trigger_exec;
@@ -169,10 +169,15 @@ struct configuration {
   u_int32_t amqp_heartbeat_interval;
   char *amqp_vhost;
   int amqp_routing_key_rr;
+  char *amqp_avro_schema_routing_key;
+  int amqp_avro_schema_refresh_time;
   int kafka_broker_port;
   int kafka_partition;
   char *kafka_partition_key;
   int kafka_partition_keylen;
+  char *kafka_avro_schema_topic;
+  int kafka_avro_schema_refresh_time;
+  char *kafka_config_file;
   int print_cache_entries;
   int print_markers;
   int print_output;
@@ -213,6 +218,7 @@ struct configuration {
   int sfacctd_counter_kafka_partition_keylen;
   int sfacctd_counter_kafka_broker_port;
   int sfacctd_counter_kafka_retry;
+  char *sfacctd_counter_kafka_config_file;
   int nfacctd_disable_checks;
   int telemetry_daemon;
   int telemetry_sock;
@@ -262,6 +268,7 @@ struct configuration {
   char *telemetry_msglog_kafka_partition_key;
   int telemetry_msglog_kafka_partition_keylen;
   int telemetry_msglog_kafka_retry;
+  char *telemetry_msglog_kafka_config_file;
   char *telemetry_dump_kafka_broker_host;
   int telemetry_dump_kafka_broker_port;
   char *telemetry_dump_kafka_topic;
@@ -269,6 +276,7 @@ struct configuration {
   int telemetry_dump_kafka_partition;
   char *telemetry_dump_kafka_partition_key;
   int telemetry_dump_kafka_partition_keylen;
+  char *telemetry_dump_kafka_config_file;
   int nfacctd_bgp;
   int nfacctd_bgp_msglog_output;
   char *nfacctd_bgp_msglog_file;
@@ -292,8 +300,10 @@ struct configuration {
   int nfacctd_bgp_msglog_kafka_partition_keylen;
   int nfacctd_bgp_msglog_kafka_broker_port;
   int nfacctd_bgp_msglog_kafka_retry;
-  char *nfacctd_bgp_ip;
+  char *nfacctd_bgp_msglog_kafka_config_file;
   char *nfacctd_bgp_id;
+  char *nfacctd_bgp_ip;
+  as_t nfacctd_bgp_as;
   int nfacctd_bgp_port;
   int nfacctd_bgp_pipe_size;
   int nfacctd_bgp_ipprec;
@@ -302,10 +312,12 @@ struct configuration {
   int nfacctd_bgp_aspath_radius;
   char *nfacctd_bgp_stdcomm_pattern;
   char *nfacctd_bgp_extcomm_pattern;
+  char *nfacctd_bgp_lrgcomm_pattern;
   char *nfacctd_bgp_stdcomm_pattern_to_asn;
   int nfacctd_bgp_peer_as_src_type;
   int nfacctd_bgp_src_std_comm_type;
   int nfacctd_bgp_src_ext_comm_type;
+  int nfacctd_bgp_src_lrg_comm_type;
   int nfacctd_bgp_src_as_path_type;
   int nfacctd_bgp_src_local_pref_type;
   int nfacctd_bgp_src_med_type;
@@ -322,6 +334,9 @@ struct configuration {
   int nfacctd_bgp_follow_nexthop_external;
   char *nfacctd_bgp_neighbors_file;
   char *nfacctd_bgp_md5_file;
+  int nfacctd_bgp_offline_input;
+  char *nfacctd_bgp_offline_file_spool;
+  int nfacctd_bgp_offline_file_refresh_time;
   int bgp_table_peer_buckets;
   int bgp_table_per_peer_buckets;
   int bgp_table_attr_hash_buckets;
@@ -348,6 +363,7 @@ struct configuration {
   char *bgp_table_dump_kafka_partition_key;
   int bgp_table_dump_kafka_partition_keylen;
   int bgp_table_dump_kafka_broker_port;
+  char *bgp_table_dump_kafka_config_file;
   int bmp_sock;
   int nfacctd_bmp;
   char *nfacctd_bmp_ip;
@@ -380,6 +396,7 @@ struct configuration {
   int nfacctd_bmp_msglog_kafka_partition_keylen;
   int nfacctd_bmp_msglog_kafka_broker_port;
   int nfacctd_bmp_msglog_kafka_retry;
+  char *nfacctd_bmp_msglog_kafka_config_file;
   int bmp_table_peer_buckets;
   int bmp_table_per_peer_buckets;
   int bmp_table_attr_hash_buckets;
@@ -406,6 +423,7 @@ struct configuration {
   char *bmp_dump_kafka_partition_key;
   int bmp_dump_kafka_partition_keylen;
   int bmp_dump_kafka_broker_port;
+  char *bmp_dump_kafka_config_file;
   int nfacctd_isis;
   char *nfacctd_isis_ip;
   char *nfacctd_isis_net;
@@ -496,6 +514,7 @@ struct configuration {
   int tee_max_receiver_pools;
   char *tee_receivers;
   int tee_pipe_size;
+  int tee_dissect_send_full_pkt;
   int uacctd_group;
   int uacctd_nl_size;
   int uacctd_threshold;
@@ -504,6 +523,7 @@ struct configuration {
   char *pkt_len_distrib_bins[MAX_PKT_LEN_DISTRIB_BINS];
   u_int16_t pkt_len_distrib_bins_lookup[ETHER_JUMBO_MTU+1];
   int use_ip_next_hop;
+  int dump_max_writers;
   int tmp_net_own_field;
   int tmp_asa_bi_flow;
   int tmp_comms_same_field;
@@ -520,6 +540,7 @@ EXT void evaluate_configuration(char *, int);
 EXT int parse_configuration_file(char *);
 EXT int parse_plugin_names(char *, int, int);
 EXT void parse_core_process_name(char *, int, int);
+EXT void compose_default_plugin_name(char *, int, char *);
 EXT int create_plugin(char *, char *, char *);
 EXT int delete_plugin_by_id(int);
 EXT struct plugins_list_entry *search_plugin_by_pipe(int);

@@ -121,7 +121,7 @@ void mongodb_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   /* print_refresh time init: deadline */
   refresh_deadline = idata.now; 
-  P_init_refresh_deadline(&refresh_deadline);
+  P_init_refresh_deadline(&refresh_deadline, config.sql_refresh_time, config.sql_startup_delay, config.sql_history_roundoff);
 
   if (config.sql_history) {
     basetime_init = P_init_historical_acct;
@@ -504,6 +504,19 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
         else
 	  MongoDB_append_string(bson_elem, "comms", pvlen, COUNT_INT_EXT_COMM);
       }
+
+      if (config.what_to_count_2 & COUNT_LRG_COMM) {
+        vlen_prims_get(pvlen, COUNT_INT_LRG_COMM, &str_ptr);
+        if (str_ptr) {
+          bgp_comm = str_ptr;
+          while (bgp_comm) {
+            bgp_comm = strchr(str_ptr, ' ');
+            if (bgp_comm) *bgp_comm = '_';
+          }
+        }
+
+        MongoDB_append_string(bson_elem, "lcomms", pvlen, COUNT_INT_LRG_COMM);
+      }
   
       if (config.what_to_count & COUNT_AS_PATH) {
 	vlen_prims_get(pvlen, COUNT_INT_AS_PATH, &str_ptr);
@@ -559,6 +572,19 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
           MongoDB_append_string(bson_elem, "src_ecomms", pvlen, COUNT_INT_SRC_EXT_COMM);
         else
           MongoDB_append_string(bson_elem, "src_comms", pvlen, COUNT_INT_SRC_EXT_COMM);
+      }
+
+      if (config.what_to_count_2 & COUNT_SRC_LRG_COMM) {
+        vlen_prims_get(pvlen, COUNT_INT_SRC_LRG_COMM, &str_ptr);
+        if (str_ptr) {
+          bgp_comm = str_ptr;
+          while (bgp_comm) {
+            bgp_comm = strchr(str_ptr, ' ');
+            if (bgp_comm) *bgp_comm = '_';
+          }
+        }
+
+        MongoDB_append_string(bson_elem, "src_lcomms", pvlen, COUNT_INT_SRC_LRG_COMM);
       }
 
       if (config.what_to_count & COUNT_SRC_AS_PATH) {
@@ -639,29 +665,42 @@ void MongoDB_cache_purge(struct chained_cache *queue[], int index)
   #if defined (WITH_GEOIP)
       if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) {
         if (data->src_ip_country.id > 0)
-  	bson_append_string(bson_elem, "country_ip_src", GeoIP_code_by_id(data->src_ip_country.id));
+  	  bson_append_string(bson_elem, "country_ip_src", GeoIP_code_by_id(data->src_ip_country.id));
         else
-  	bson_append_null(bson_elem, "country_ip_src");
+  	  bson_append_null(bson_elem, "country_ip_src");
       }
       if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) {
         if (data->dst_ip_country.id > 0)
-  	bson_append_string(bson_elem, "country_ip_dst", GeoIP_code_by_id(data->dst_ip_country.id));
+  	  bson_append_string(bson_elem, "country_ip_dst", GeoIP_code_by_id(data->dst_ip_country.id));
         else
-  	bson_append_null(bson_elem, "country_ip_dst");
+  	  bson_append_null(bson_elem, "country_ip_dst");
       }
   #endif
   #if defined (WITH_GEOIPV2)
       if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) {
         if (strlen(data->src_ip_country.str))
-        bson_append_string(bson_elem, "country_ip_src", data->src_ip_country.str);
+          bson_append_string(bson_elem, "country_ip_src", data->src_ip_country.str);
         else
-        bson_append_null(bson_elem, "country_ip_src");
+          bson_append_null(bson_elem, "country_ip_src");
       }
       if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) {
         if (strlen(data->dst_ip_country.str))
-        bson_append_string(bson_elem, "country_ip_dst", data->dst_ip_country.str);
+          bson_append_string(bson_elem, "country_ip_dst", data->dst_ip_country.str);
         else
-        bson_append_null(bson_elem, "country_ip_dst");
+          bson_append_null(bson_elem, "country_ip_dst");
+      }
+
+      if (config.what_to_count_2 & COUNT_SRC_HOST_POCODE) {
+        if (strlen(data->src_ip_pocode.str))
+          bson_append_string(bson_elem, "pocode_ip_src", data->src_ip_pocode.str);
+        else
+          bson_append_null(bson_elem, "pocode_ip_src");
+      }
+      if (config.what_to_count_2 & COUNT_DST_HOST_POCODE) {
+        if (strlen(data->dst_ip_pocode.str))
+          bson_append_string(bson_elem, "pocode_ip_dst", data->dst_ip_pocode.str);
+        else
+          bson_append_null(bson_elem, "pocode_ip_dst");
       }
   #endif
 

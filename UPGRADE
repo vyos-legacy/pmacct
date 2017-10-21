@@ -1,12 +1,39 @@
 UPGRAGE guidelines.
-pmacct is developed keeping an eye to backward compatibility: the upgrade to some
-newer version should be as smooth as possible from an user standpoint. This is
-because, for example, features like SQL table versioning have been introduced
-over the time. 
- 
-However, sometimes the upgrade may require some easy operations aimed to support
-the changes done or break old assumptions no longer valid. Such happenings have
-been (and will be) very limited through the development process.
+pmacct is developed keeping an eye to backward compatibility: the upgrade to
+some newer version should be as smooth as possible from an user standpoint.
+However, sometimes the upgrade may require some operations aimed to support
+the changes done or break old assumptions no longer valid; while the effort
+is to keep these cases at a low, please read this file in preparation to
+upgrading your installation.
+
+
+TO:	>= 1.6.2
+FROM:	<= 1.6.1
+TOPIC:	default plugin names
+DESC:	Plugin names had to be unique per plugin type, meaning two plugins
+	could be named "foobar" if they were of different type. Such behaviour
+	has proven to lead to ambiguous scenarios and hence now plugin names
+	must be globally unique. If not naming a plugin, its default name
+	will now be "default_<plugin type>" instead of "default". Any piece
+	of configuration that attaches directives to the "default" name, ie.
+	relying on the assumption the plugin name defaults to "default", must
+	be reviewed. 
+
+TO:     >= 1.6.2
+FROM:   <= 1.6.1
+TOPIC:	print_time_roundoff configuration directive suppressed
+DESC:	The directive was renamed print_history_roundoff for consistency with
+	other plugins. print_time_roundoff was already removed from documents
+	for the past 3+ years. 
+
+TO:	>= 1.6.2
+FROM:	<= 1.6.1
+TOPIC:	sFlow probe (sfprobe plugin) and tags and class primitives
+DESC:	Historically enterprise #8800 was squatted for the purpose of encoding
+	pmacct-specific fields in sFlow, ie. tags and class. This never got
+	changed when pmacct was assigned its own enterprise number (#43874) by
+	IANA. In 1.6.2, these primitives are moved from #8800 to #43874 making
+	older exports not compatible anymore. 
         
 TO:	>= 1.6.1
 FROM:	<= 1.6.0

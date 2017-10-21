@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -24,6 +24,8 @@
 
 /* includes */
 #include "pmacct.h"
+#include "../bgp/bgp.h"
+#include "../bmp/bmp.h"
 #include "telemetry.h"
 #if defined WITH_RABBITMQ
 #include "amqp_common.h"
@@ -38,6 +40,7 @@ int telemetry_log_msg(telemetry_peer *peer, struct telemetry_data *t_data, void 
 {
   telemetry_misc_structs *tms;
   int ret = 0, amqp_ret = 0, kafka_ret = 0, etype = TELEMETRY_LOGDUMP_ET_NONE;
+  pid_t writer_pid = getpid();
 
   char *base64_tdata = NULL;
   size_t base64_tdata_len = 0;
@@ -65,65 +68,39 @@ int telemetry_log_msg(telemetry_peer *peer, struct telemetry_data *t_data, void 
 
   if (output == PRINT_OUTPUT_JSON) {
 #ifdef WITH_JANSSON
-    json_t *obj = json_object(), *kv;
+    json_t *obj = json_object();
     char tstamp_str[SRVBUFLEN];
 
-    kv = json_pack("{ss}", "event_type", event_type);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
+    json_object_set_new_nocheck(obj, "event_type", json_string(event_type));
 
-    kv = json_pack("{sI}", "seq", (json_int_t)log_seq);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
+    json_object_set_new_nocheck(obj, "seq", json_integer((json_int_t)log_seq));
 
-    if (etype == BGP_LOGDUMP_ET_LOG) {
-      kv = json_pack("{ss}", "timestamp", tms->log_tstamp_str);
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
-    }
-    else if (etype == BGP_LOGDUMP_ET_DUMP) {
-      kv = json_pack("{ss}", "timestamp", tms->dump.tstamp_str);
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
-    }
+    if (etype == BGP_LOGDUMP_ET_LOG)
+      json_object_set_new_nocheck(obj, "timestamp", json_string(tms->log_tstamp_str));
+    else if (etype == BGP_LOGDUMP_ET_DUMP)
+      json_object_set_new_nocheck(obj, "timestamp", json_string(tms->dump.tstamp_str));
 
-    kv = json_pack("{ss}", "telemetry_node", peer->addr_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
+    json_object_set_new_nocheck(obj, "telemetry_node", json_string(peer->addr_str));
 
-    kv = json_pack("{sI}", "telemetry_port", (json_int_t)peer->tcp_port);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
+    json_object_set_new_nocheck(obj, "telemetry_port", json_integer((json_int_t)peer->tcp_port));
 
     if (data_decoder == TELEMETRY_DATA_DECODER_JSON) {
-      kv = json_pack("{ss}", "telemetry_data", log_data);
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
+      json_object_set_new_nocheck(obj, "telemetry_data", json_string(log_data));
 
-      kv = json_pack("{ss}", "serialization", "json");
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
+      json_object_set_new_nocheck(obj, "serialization", json_string("json"));
     }
     else if (data_decoder == TELEMETRY_DATA_DECODER_GPB) {
       base64_tdata = base64_encode(log_data, log_data_len, &base64_tdata_len);
 
       if (base64_tdata) {
-        kv = json_pack("{ss}", "telemetry_data", base64_tdata);
-        json_object_update_missing(obj, kv);
-        json_decref(kv);
-
+        json_object_set_new_nocheck(obj, "telemetry_data", json_string(base64_tdata));
 	base64_freebuf(base64_tdata);
         base64_tdata_len = 0;
       }
-      else {
-        kv = json_pack("{sn}", "telemetry_data");
-        json_object_update_missing(obj, kv);
-        json_decref(kv);
-      }
+      else json_object_set_new_nocheck(obj, "telemetry_data", json_null());
+           // XXX: kv = json_pack("{sn}", "telemetry_data");
 
-      kv = json_pack("{ss}", "serialization", "gpb");
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
+      json_object_set_new_nocheck(obj, "serialization", json_string("gpb"));
     }
 
     if ((config.telemetry_msglog_file && etype == TELEMETRY_LOGDUMP_ET_LOG) ||
@@ -133,6 +110,7 @@ int telemetry_log_msg(telemetry_peer *peer, struct telemetry_data *t_data, void 
 #ifdef WITH_RABBITMQ
     if ((config.telemetry_msglog_amqp_routing_key && etype == TELEMETRY_LOGDUMP_ET_LOG) ||
         (config.telemetry_dump_amqp_routing_key && etype == TELEMETRY_LOGDUMP_ET_DUMP)) {
+      add_writer_name_and_pid_json(obj, config.proc_name, writer_pid);
       amqp_ret = write_and_free_json_amqp(peer->log->amqp_host, obj);
       p_amqp_unset_routing_key(peer->log->amqp_host);
     }
@@ -141,6 +119,7 @@ int telemetry_log_msg(telemetry_peer *peer, struct telemetry_data *t_data, void 
 #ifdef WITH_KAFKA
     if ((config.telemetry_msglog_kafka_topic && etype == TELEMETRY_LOGDUMP_ET_LOG) ||
         (config.telemetry_dump_kafka_topic && etype == TELEMETRY_LOGDUMP_ET_DUMP)) {
+      add_writer_name_and_pid_json(obj, config.proc_name, writer_pid);
       kafka_ret = write_and_free_json_kafka(peer->log->kafka_host, obj);
       p_kafka_unset_topic(peer->log->kafka_host);
     }
@@ -485,7 +464,7 @@ int telemetry_daemon_msglog_init_kafka_host()
 {
   int ret;
 
-  p_kafka_init_host(&telemetry_daemon_msglog_kafka_host);
+  p_kafka_init_host(&telemetry_daemon_msglog_kafka_host, config.telemetry_msglog_kafka_config_file);
   ret = p_kafka_connect_to_produce(&telemetry_daemon_msglog_kafka_host);
 
   if (!config.telemetry_msglog_kafka_broker_host) config.telemetry_msglog_kafka_broker_host = default_kafka_broker_host;
@@ -513,7 +492,7 @@ int telemetry_dump_init_kafka_host()
 {
   int ret;
 
-  p_kafka_init_host(&telemetry_dump_kafka_host);
+  p_kafka_init_host(&telemetry_dump_kafka_host, config.telemetry_dump_kafka_config_file);
   ret = p_kafka_connect_to_produce(&telemetry_dump_kafka_host);
 
   if (!config.telemetry_dump_kafka_broker_host) config.telemetry_dump_kafka_broker_host = default_kafka_broker_host;

@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -150,7 +150,7 @@ int parse_configuration_file(char *filename)
 
   if (!num && config.acct_type < ACCT_FWPLANE_MAX) {
     Log(LOG_WARNING, "WARN: [%s] No plugin has been activated; defaulting to in-memory table.\n", filename); 
-    num = create_plugin(filename, "default", "memory");
+    num = create_plugin(filename, "default_memory", "memory");
   }
 
   if (debug) {
@@ -173,7 +173,7 @@ int parse_configuration_file(char *filename)
 
 void sanitize_cfg(int rows, char *filename)
 {
-  int rindex = 0, len, got_first;
+  int rindex = 0, len, got_first, got_first_colon;
   char localbuf[10240];
 
   while (rindex < rows) {
@@ -193,12 +193,13 @@ void sanitize_cfg(int rows, char *filename)
     */
     len = strlen(cfg[rindex]);
     if (len) {
-      int symbol = FALSE, cindex = 0, got_first = 0;
+      int symbol = FALSE, cindex = 0, got_first = 0, got_first_colon = 0;
 
       if (!strchr(cfg[rindex], ':')) {
 	Log(LOG_ERR, "ERROR: [%s:%u] Syntax error: missing ':'. Exiting.\n", filename, rindex+1); 
 	exit(1);
       }
+
       while(cindex <= len) {
         if (cfg[rindex][cindex] == '[') symbol++;
         else if (cfg[rindex][cindex] == ']') {
@@ -206,15 +207,24 @@ void sanitize_cfg(int rows, char *filename)
 	  got_first++;
 	}
 	
-	if ((cfg[rindex][cindex] == ':') || (cfg[rindex][cindex] == '\0')) {
+	if (cfg[rindex][cindex] == ':' && !got_first_colon) {
+	  got_first_colon = TRUE;
+
+	  if (symbol) {
+	    Log(LOG_ERR, "ERROR: [%s:%u] Syntax error: illegal brackets. Exiting.\n", filename, rindex+1);
+	    exit(1);
+	  }
+	}
+
+	if (cfg[rindex][cindex] == '\0') {
 	  if (symbol && !got_first) {
-            Log(LOG_ERR, "ERROR: [%s:%u] Syntax error: not weighted brackets. Exiting.\n", filename, rindex+1);
+            Log(LOG_ERR, "ERROR: [%s:%u] Syntax error: not weighted brackets (1). Exiting.\n", filename, rindex+1);
 	    exit(1);
 	  }
 	}
 
 	if (symbol < 0 && !got_first) {
-	  Log(LOG_ERR, "ERROR: [%s:%u] Syntax error: not weighted brackets. Exiting.\n", filename, rindex+1);
+	  Log(LOG_ERR, "ERROR: [%s:%u] Syntax error: not weighted brackets (2). Exiting.\n", filename, rindex+1);
 	  exit(1);
 	}
 
@@ -352,7 +362,7 @@ void parse_core_process_name(char *filename, int rows, int ignore_names)
    if it exists and creates the plugins linked list */ 
 int parse_plugin_names(char *filename, int rows, int ignore_names)
 {
-  int index = 0, num = 0, found = 0;
+  int index = 0, num = 0, found = 0, default_name = FALSE;
   char *start, *end, *start_name, *end_name;
   char key[SRVBUFLEN], value[10240], token[SRVBUFLEN], name[SRVBUFLEN];
 
@@ -391,7 +401,7 @@ int parse_plugin_names(char *filename, int rows, int ignore_names)
 	  *start_name = '\0';
 	}
       }
-      else strcpy(name, "default");
+      else default_name = TRUE;
 	
       /* Having already plugins name and type, we'll filter out reserved symbols */
       trim_spaces(token);
@@ -400,11 +410,14 @@ int parse_plugin_names(char *filename, int rows, int ignore_names)
         Log(LOG_ERR, "ERROR: [%s] plugins of type 'core' are not allowed. Exiting.\n", filename);
         exit(1);
       }
+
       if (!ignore_names) {
+        if (default_name) compose_default_plugin_name(name, SRVBUFLEN, token);
         if (create_plugin(filename, name, token)) num++;
       }
       else {
-        if (create_plugin(filename, "default", token)) num++;
+        compose_default_plugin_name(name, SRVBUFLEN, token);
+        if (create_plugin(filename, name, token)) num++;
       }
     }
     start = end+1;
@@ -430,12 +443,19 @@ void set_default_values()
   }
 }
 
+void compose_default_plugin_name(char *out, int outlen, char *type)
+{
+  strcpy(out, "default");
+  strcat(out, "_");
+  strncat(out, type, (outlen - 10));
+}
+
 int create_plugin(char *filename, char *name, char *type)
 {
   struct plugins_list_entry *plugin, *ptr;
   struct plugin_type_entry *ptype = NULL;
   int index = 0, id = 0;
- 
+
   /* searching for a valid known plugin type */
   while(strcmp(plugin_types_list[index].string, "")) {
     if (!strcmp(type, plugin_types_list[index].string)) ptype = &plugin_types_list[index];
@@ -451,16 +471,15 @@ int create_plugin(char *filename, char *name, char *type)
   if (plugins_list) {
     id = 0;
     ptr = plugins_list;
-    while(ptr) {
+
+    while (ptr) {
       /* plugin id */
       if (ptr->id > id) id = ptr->id;
 
       /* dupes */
       if (!strcmp(name, ptr->name)) {
-        if (!strcmp(type, ptr->type.string)) {
-          Log(LOG_WARNING, "WARN: [%s] another plugin with the same name '%s' already exists. Preserving first.\n", filename, name);
-          return FALSE;
-        }
+        Log(LOG_WARNING, "WARN: [%s] another plugin with the same name '%s' already exists. Preserving first.\n", filename, name);
+        return FALSE;
       }
       ptr = ptr->next;
     }

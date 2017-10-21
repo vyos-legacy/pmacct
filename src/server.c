@@ -528,6 +528,8 @@ void mask_elem(struct pkt_primitives *d1, struct pkt_bgp_primitives *d2, struct 
 #if defined (WITH_GEOIP) || defined (WITH_GEOIPV2)
   if (w2 & COUNT_SRC_HOST_COUNTRY) memcpy(&d1->src_ip_country, &s1->src_ip_country, sizeof(d1->src_ip_country)); 
   if (w2 & COUNT_DST_HOST_COUNTRY) memcpy(&d1->dst_ip_country, &s1->dst_ip_country, sizeof(d1->dst_ip_country)); 
+  if (w2 & COUNT_SRC_HOST_POCODE) memcpy(&d1->src_ip_pocode, &s1->src_ip_pocode, sizeof(d1->src_ip_pocode)); 
+  if (w2 & COUNT_DST_HOST_POCODE) memcpy(&d1->dst_ip_pocode, &s1->dst_ip_pocode, sizeof(d1->dst_ip_pocode)); 
 #endif
   if (w2 & COUNT_SAMPLING_RATE) d1->sampling_rate = s1->sampling_rate; 
   if (w2 & COUNT_PKT_LEN_DISTRIB) d1->pkt_len_distrib = s1->pkt_len_distrib; 
@@ -547,9 +549,11 @@ void mask_elem(struct pkt_primitives *d1, struct pkt_bgp_primitives *d2, struct 
   if (extras->off_pkt_lbgp_primitives && s5) {
     if (w & COUNT_STD_COMM) strlcpy(d5->std_comms, s5->std_comms, MAX_BGP_STD_COMMS); 
     if (w & COUNT_EXT_COMM) strlcpy(d5->ext_comms, s5->ext_comms, MAX_BGP_EXT_COMMS); 
+    if (w2 & COUNT_LRG_COMM) strlcpy(d5->lrg_comms, s5->lrg_comms, MAX_BGP_LRG_COMMS); 
     if (w & COUNT_AS_PATH) strlcpy(d5->as_path, s5->as_path, MAX_BGP_ASPATH);
     if (w & COUNT_SRC_STD_COMM) strlcpy(d5->src_std_comms, s5->src_std_comms, MAX_BGP_STD_COMMS); 
     if (w & COUNT_SRC_EXT_COMM) strlcpy(d5->src_ext_comms, s5->src_ext_comms, MAX_BGP_EXT_COMMS); 
+    if (w2 & COUNT_SRC_LRG_COMM) strlcpy(d5->src_lrg_comms, s5->src_lrg_comms, MAX_BGP_LRG_COMMS); 
     if (w & COUNT_SRC_AS_PATH) strlcpy(d5->src_as_path, s5->src_as_path, MAX_BGP_ASPATH);
   }
 

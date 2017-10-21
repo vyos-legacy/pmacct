@@ -1,3 +1,6 @@
+See how to configure and compile pmacct for PostgreSQL use in the "Configuring
+pmacct for compilation and installing" chapter of QUICKSTART. 
+
 To create the database and grant default permission to the daemon you have to execute
 the two scripts below, in the same order; which user has to execute them and how to
 autenticate with the PostgreSQL server depends upon your current configuration.
@@ -74,7 +77,9 @@ CHAR fields because making use of IP prefix labels, transparently to pmacct.
   * tag2 => tag2 (BIGINT NOT NULL DEFAULT 0, see README.tag2)
   * label => label (VARCHAR(255) NOT NULL DEFAULT ' ', see README.label)
   * src_as => as_src (BIGINT NOT NULL DEFAULT 0)
+    - or src_as => ip_src (BIGINT NOT NULL DEFAULT 0, if sql_table_version < 6)
   * dst_as => as_dst (BIGINT NOT NULL DEFAULT 0)
+    - or dst_as => ip_dst (BIGINT NOT NULL DEFAULT 0, if sql_table_version < 6)
   * peer_src_as => peer_as_src (BIGINT NOT NULL DEFAULT 0)
   * peer_dst_as => peer_as_dst (BIGINT NOT NULL DEFAULT 0)
   * peer_src_ip => peer_ip_src (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
@@ -82,11 +87,13 @@ CHAR fields because making use of IP prefix labels, transparently to pmacct.
   * mpls_vpn_rd => mpls_vpn_rd (CHAR(18) NOT NULL DEFAULT ' ')
   * std_comm => comms (CHAR(24) NOT NULL DEFAULT ' ')
   * ext_comm => ecomms (CHAR(24) NOT NULL DEFAULT ' ')
+  * lrg_comm => lcomms (CHAR(24) NOT NULL DEFAULT ' ')
   * as_path => as_path (CHAR(21) NOT NULL DEFAULT ' ')
   * local_pref => local_pref (BIGINT NOT NULL DEFAULT 0)
   * med => med (BIGINT NOT NULL DEFAULT 0)
   * src_std_comm => comms_src (CHAR(24) NOT NULL DEFAULT ' ')
   * src_ext_comm => ecomms_src (CHAR(24) NOT NULL DEFAULT ' ')
+  * src_lrg_comm => lcomms_src (CHAR(24) NOT NULL DEFAULT ' ')
   * src_as_path => as_path_src (CHAR(21) NOT NULL DEFAULT ' ')
   * src_local_pref => local_pref_src (BIGINT NOT NULL DEFAULT 0)
   * src_med => med_src (BIGINT NOT NULL DEFAULT 0)
@@ -96,8 +103,10 @@ CHAR fields because making use of IP prefix labels, transparently to pmacct.
   * dst_mask => mask_dst (SMALLINT NOT NULL DEFAULT 0, see README.mask)
   * cos => cos (SMALLINT NOT NULL DEFAULT 0, see README.cos)
   * etype => etype (CHAR(5) NOT NULL DEFAULT ' ', see README.etype)
-  * src_host_country => country_ip_src (CHAR (2) NOT NULL DEFAULT '--', see README.country)
-  * dst_host_country => country_ip_dst (CHAR (2) NOT NULL DEFAULT '--', see README.country)
+  * src_host_country => country_ip_src (CHAR (2) NOT NULL DEFAULT '--', see README.GeoIP)
+  * dst_host_country => country_ip_dst (CHAR (2) NOT NULL DEFAULT '--', see README.GeoIP)
+  * src_host_pocode => pocode_ip_src (CHAR (12) NOT NULL DEFAULT ' ', see README.GeoIP)
+  * dst_host_pocode => pocode_ip_dst (CHAR (12) NOT NULL DEFAULT ' ', see README.GeoIP)
   * sampling_rate => sampling_rate (BIGINT NOT NULL DEFAULT 0, see README.sampling_rate)
   * pkt_len_distrib => pkt_len_distrib (CHAR(10) NOT NULL DEFAULT ' ', see README.pkt_len_distrib)
   * class => class_id (CHAR(16) NOT NOT NULL DEFAULT ' ')

@@ -1,0 +1,34 @@
+language: C
+compiler: gcc
+sudo: required
+
+install:
+  - sudo apt-get install libtool autoconf cmake
+  - git clone https://github.com/edenhill/librdkafka
+  - cd librdkafka && ./configure && make && sudo make install && cd ..
+  - git clone https://github.com/alanxz/rabbitmq-c
+  - cd rabbitmq-c && mkdir build && cd build && cmake .. && sudo cmake --build . --target install && cd .. && cd ..
+  - wget https://github.com/maxmind/libmaxminddb/releases/download/1.1.2/libmaxminddb-1.1.2.tar.gz
+  - tar fxz libmaxminddb-1.1.2.tar.gz
+  - cd libmaxminddb-1.1.2 && ./configure && make && sudo make install && cd ..
+
+script:
+  - ./autogen.sh
+  - ./configure --enable-mysql --enable-pgsql --enable-sqlite3 --enable-kafka --enable-geoipv2 --enable-jansson --enable-rabbitmq --enable-nflog
+  - make
+  - sudo make install
+  - make distcheck
+
+addons:
+  apt:
+    packages:
+      - libpcap-dev
+      - libpq-dev
+      - libsqlite3-dev
+      - libmysqlclient-dev
+      - libjansson-dev
+      - libnetfilter-log-dev
+      - mysql-client
+      - libtool
+      - autoconf
+      - automake

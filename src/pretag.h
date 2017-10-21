@@ -62,6 +62,7 @@
 #define PRETAG_IP			0x040000000
 #define PRETAG_SET_LABEL		0x080000000
 #define PRETAG_CVLAN_ID			0x100000000
+#define PRETAG_MPLS_VPN_ID		0x200000000
 
 #define PRETAG_MAP_RCODE_ID		0x00000100
 #define PRETAG_MAP_RCODE_ID2		0x00000200
@@ -105,7 +106,7 @@ typedef struct host_mask pt_hostmask_t;
 
 typedef struct {
   u_int8_t neg;
-  u_char a[ETH_ADDR_LEN]; 
+  char a[ETH_ADDR_LEN]; 
 } pt_etheraddr_t;
 
 typedef struct {
@@ -164,6 +165,7 @@ struct id_entry_key {
   s_uint16_t lookup_bgp_port;
   char *src_comms[16]; /* XXX: MAX_BGP_COMM_PATTERNS = 16 */
   char *comms[16]; /* XXX: MAX_BGP_COMM_PATTERNS = 16 */
+  pt_uint32_t mpls_vpn_id;
   pt_rd_t mpls_vpn_rd;
   struct bpf_program filter;
   pt_uint8_t v8agg;

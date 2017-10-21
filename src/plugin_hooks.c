@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -26,6 +26,7 @@
 #include "pmacct-data.h"
 #include "thread_pool.h"
 #include "plugin_hooks.h"
+#include "plugin_common.h"
 #include "pkt_handlers.h"
 
 /* functions */
@@ -426,7 +427,8 @@ void exec_plugins(struct packet_ptrs *pptrs, struct plugin_requests *req)
 
     if (p->cfg.pre_tag_map && find_id_func) {
       if (p->cfg.type_id == PLUGIN_ID_TEE) {
-	if ((req->ptm_c.exec_ptm_res && !p->cfg.ptm_complex) || (!req->ptm_c.exec_ptm_res && p->cfg.ptm_complex)) 
+	if ((req->ptm_c.exec_ptm_res && !p->cfg.ptm_complex) ||
+	    ((!req->ptm_c.exec_ptm_res && p->cfg.ptm_complex) && !p->cfg.tee_dissect_send_full_pkt)) 
 	  continue;
       }
 
@@ -1164,7 +1166,7 @@ int plugin_pipe_kafka_init_host(struct p_kafka_host *kafka_host, struct plugins_
   if (kafka_host && list && !validate_truefalse(is_prod)) {
     char *topic = plugin_pipe_compose_default_string(list, "pmacct.$core_proc_name-$plugin_name-$plugin_type");
 
-    p_kafka_init_host(kafka_host);
+    p_kafka_init_host(kafka_host, NULL);
 
     if (is_prod) ret = p_kafka_connect_to_produce(kafka_host);
     else ret = p_kafka_connect_to_consume(kafka_host);
@@ -1178,6 +1180,7 @@ int plugin_pipe_kafka_init_host(struct p_kafka_host *kafka_host, struct plugins_
     p_kafka_set_topic(kafka_host, list->cfg.pipe_kafka_topic);
     p_kafka_set_partition(kafka_host, list->cfg.pipe_kafka_partition);
     p_kafka_set_key(kafka_host, list->cfg.pipe_kafka_partition_key, list->cfg.pipe_kafka_partition_keylen);
+    p_kafka_set_fallback(kafka_host, list->cfg.pipe_kafka_fallback);
     p_kafka_set_content_type(kafka_host, PM_KAFKA_CNT_TYPE_BIN);
     P_broker_timers_set_retry_interval(&kafka_host->btimers, list->cfg.pipe_kafka_retry);
   }

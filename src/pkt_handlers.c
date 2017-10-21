@@ -379,10 +379,11 @@ void evaluate_packet_handlers()
       }
     }
 
-    if (channels_list[index].aggregation & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|
+    if ((channels_list[index].aggregation & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|
                                             COUNT_AS_PATH|COUNT_PEER_DST_AS|COUNT_SRC_AS_PATH|COUNT_SRC_STD_COMM|
                                             COUNT_SRC_EXT_COMM|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|COUNT_SRC_AS|
-                                            COUNT_DST_AS|COUNT_PEER_SRC_AS) &&
+					    COUNT_DST_AS|COUNT_PEER_SRC_AS) ||
+	channels_list[index].aggregation_2 & (COUNT_LRG_COMM|COUNT_SRC_LRG_COMM)) &&
         channels_list[index].plugin->cfg.nfacctd_as & NF_AS_BGP) {
       if (config.acct_type == ACCT_PM && config.nfacctd_bgp) {
         if (channels_list[index].plugin->type.id == PLUGIN_ID_SFPROBE) {
@@ -411,8 +412,9 @@ void evaluate_packet_handlers()
         channels_list[index].phandler[primitives] = mpls_vpn_rd_frommap_handler;
         primitives++;
       } 
+
       if (config.acct_type == ACCT_NF) {
-        channels_list[index].phandler[primitives] = NF_mpls_vpn_rd_handler;
+        channels_list[index].phandler[primitives] = NF_mpls_vpn_id_handler;
         primitives++;
       }
     }
@@ -565,7 +567,7 @@ void evaluate_packet_handlers()
 #if defined (WITH_GEOIPV2)
     pm_geoipv2_init();
 
-    if (channels_list[index].aggregation_2 & COUNT_SRC_HOST_COUNTRY /* other GeoIP primitives here */) {
+    if (channels_list[index].aggregation_2 & (COUNT_SRC_HOST_COUNTRY|COUNT_SRC_HOST_POCODE) /* other GeoIP primitives here */) {
       channels_list[index].phandler[primitives] = src_host_geoipv2_lookup_handler;
       primitives++;
 
@@ -573,14 +575,24 @@ void evaluate_packet_handlers()
         channels_list[index].phandler[primitives] = src_host_country_geoipv2_handler;
         primitives++;
       }
+
+      if (channels_list[index].aggregation_2 & COUNT_SRC_HOST_POCODE) {
+        channels_list[index].phandler[primitives] = src_host_pocode_geoipv2_handler;
+        primitives++;
+      }
     }
 
-    if (channels_list[index].aggregation_2 & COUNT_DST_HOST_COUNTRY /* other GeoIP primitives here */) {
+    if (channels_list[index].aggregation_2 & (COUNT_DST_HOST_COUNTRY|COUNT_DST_HOST_POCODE) /* other GeoIP primitives here */) {
       channels_list[index].phandler[primitives] = dst_host_geoipv2_lookup_handler;
       primitives++;
 
       if (channels_list[index].aggregation_2 & COUNT_DST_HOST_COUNTRY) {
         channels_list[index].phandler[primitives] = dst_host_country_geoipv2_handler;
+        primitives++;
+      }
+
+      if (channels_list[index].aggregation_2 & COUNT_DST_HOST_POCODE) {
+        channels_list[index].phandler[primitives] = dst_host_pocode_geoipv2_handler;
         primitives++;
       }
     }
@@ -814,8 +826,8 @@ void evaluate_packet_handlers()
     /* tee plugin: struct pkt_msg handling */
     if (channels_list[index].aggregation & COUNT_NONE) {
       if (channels_list[index].plugin->type.id == PLUGIN_ID_TEE) {
-        if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = tee_payload_handler;
-        if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = tee_payload_handler;
+        if (config.acct_type == ACCT_SF) channels_list[index].phandler[primitives] = SF_tee_payload_handler;
+        if (config.acct_type == ACCT_NF) channels_list[index].phandler[primitives] = NF_tee_payload_handler;
         else primitives--; /* This case is filtered out at startup: getting out silently */
       }
       primitives++;
@@ -1229,7 +1241,7 @@ void sfprobe_payload_handler(struct channels_list_entry *chptr, struct packet_pt
   }
 }
 
-void tee_payload_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+void NF_tee_payload_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
   struct pkt_msg *pmsg = (struct pkt_msg *) *data;
   char *ppayload = ((*data) + PmsgSz);
@@ -1242,6 +1254,38 @@ void tee_payload_handler(struct channels_list_entry *chptr, struct packet_ptrs *
   pmsg->tag2 = pptrs->tag2;
   if (!check_pipe_buffer_space(chptr, NULL, pptrs->f_len)) {
     memcpy(ppayload, pptrs->f_header, pptrs->f_len);
+  }
+}
+
+void SF_tee_payload_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_msg *pmsg = (struct pkt_msg *) *data;
+  char *ppayload = ((*data) + PmsgSz);
+
+  if (!pptrs->tee_dissect) {
+    pmsg->seqno = pptrs->seqno;
+    pmsg->len = pptrs->f_len;
+    pmsg->payload = NULL;
+    memcpy(&pmsg->agent, pptrs->f_agent, sizeof(pmsg->agent));
+    pmsg->tag = pptrs->tag;
+    pmsg->tag2 = pptrs->tag2;
+    if (!check_pipe_buffer_space(chptr, NULL, pptrs->f_len)) {
+      memcpy(ppayload, pptrs->f_header, pptrs->f_len);
+    }
+  }
+  else {
+    struct SF_dissect *dissect = (struct SF_dissect *) pptrs->tee_dissect;
+
+    pmsg->seqno = pptrs->seqno;
+    pmsg->len = (dissect->hdrLen + dissect->flowLen); 
+    pmsg->payload = NULL;
+    memcpy(&pmsg->agent, pptrs->f_agent, sizeof(pmsg->agent));
+    pmsg->tag = pptrs->tag;
+    pmsg->tag2 = pptrs->tag2;
+    if (!check_pipe_buffer_space(chptr, NULL, pmsg->len)) {
+      memcpy(ppayload, dissect->hdrBasePtr, dissect->hdrLen);
+      memcpy((ppayload + dissect->hdrLen), dissect->flowBasePtr, dissect->flowLen);
+    }
   }
 }
 
@@ -3598,7 +3642,7 @@ void NF_mpls_stack_depth_handler(struct channels_list_entry *chptr, struct packe
   }
 }
 
-void NF_mpls_vpn_rd_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+void NF_mpls_vpn_id_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
 {
   struct pkt_data *pdata = (struct pkt_data *) *data;
   struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
@@ -3872,7 +3916,7 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
   struct bgp_info *info = NULL;
 
   /* variables for vlen primitives */
-  char *ptr, empty_str = '\0'; 
+  char empty_str = '\0', *ptr = &empty_str; 
   int len;
 
   if (src_ret && evaluate_lm_method(pptrs, FALSE, chptr->plugin->cfg.nfacctd_as, NF_AS_BGP)) {
@@ -3919,11 +3963,11 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
           }
           else vlen_prims_insert(pvlen, COUNT_INT_SRC_AS_PATH, len, ptr, PM_MSG_STR_COPY);
 
-          if (config.nfacctd_bgp_aspath_radius && ptr) free(ptr);
+          if (config.nfacctd_bgp_aspath_radius && ptr && len) free(ptr);
         }
         /* fallback to legacy fixed length behaviour */
         else {
-	  if (config.nfacctd_bgp_src_as_path_type & BGP_SRC_PRIMITIVES_BGP) {
+	  if (config.nfacctd_bgp_src_as_path_type & BGP_SRC_PRIMITIVES_BGP) { 
             strlcpy(plbgp->src_as_path, info->attr->aspath->str, MAX_BGP_ASPATH);
             if (strlen(info->attr->aspath->str) >= MAX_BGP_ASPATH) {
               plbgp->src_as_path[MAX_BGP_ASPATH-2] = '+';
@@ -4027,6 +4071,51 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
 	  else plbgp->src_ext_comms[0] = '\0';
         }
       }
+      if (chptr->aggregation_2 & COUNT_SRC_LRG_COMM && info->attr->lcommunity && info->attr->lcommunity->str) {
+        if (chptr->plugin->type.id != PLUGIN_ID_MEMORY) {
+          len = strlen(info->attr->lcommunity->str);
+
+          if (len && (config.nfacctd_bgp_src_lrg_comm_type & BGP_SRC_PRIMITIVES_BGP)) {
+            len++;
+
+            if (config.nfacctd_bgp_lrgcomm_pattern) {
+              ptr = malloc(len);
+
+              if (ptr) {
+                evaluate_comm_patterns(ptr, info->attr->lcommunity->str, lrg_comm_patterns, len);
+                len = strlen(ptr);
+                len++;
+              }
+              else len = 0;
+            }
+            else ptr = info->attr->lcommunity->str;
+          }
+          else ptr = &empty_str;
+
+          if (check_pipe_buffer_space(chptr, pvlen, PmLabelTSz + len)) {
+            vlen_prims_init(pvlen, 0);
+            return;
+          }
+          else {
+            vlen_prims_insert(pvlen, COUNT_INT_SRC_LRG_COMM, len, ptr, PM_MSG_STR_COPY);
+            if (config.nfacctd_bgp_lrgcomm_pattern && ptr && len) free(ptr);
+          }
+        }
+        else {
+	  if (config.nfacctd_bgp_src_lrg_comm_type & BGP_SRC_PRIMITIVES_BGP) {
+            if (config.nfacctd_bgp_lrgcomm_pattern)
+              evaluate_comm_patterns(plbgp->src_lrg_comms, info->attr->lcommunity->str, lrg_comm_patterns, MAX_BGP_LRG_COMMS);
+            else {
+              strlcpy(plbgp->src_lrg_comms, info->attr->lcommunity->str, MAX_BGP_LRG_COMMS);
+              if (strlen(info->attr->lcommunity->str) >= MAX_BGP_LRG_COMMS) {
+                plbgp->src_lrg_comms[MAX_BGP_LRG_COMMS-2] = '+';
+                plbgp->src_lrg_comms[MAX_BGP_LRG_COMMS-1] = '\0';
+	      }
+            }
+          }
+	  else plbgp->src_lrg_comms[0] = '\0';
+        }
+      }
       if (chptr->aggregation & COUNT_SRC_LOCAL_PREF && config.nfacctd_bgp_src_local_pref_type & BGP_SRC_PRIMITIVES_BGP)
 	pbgp->src_local_pref = info->attr->local_pref;
 
@@ -4081,6 +4170,17 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
           return;
         }
         else vlen_prims_insert(pvlen, COUNT_INT_SRC_EXT_COMM, len, ptr, PM_MSG_STR_COPY);
+      }
+
+      if (chptr->aggregation_2 & COUNT_SRC_LRG_COMM) {
+        ptr = &empty_str;
+        len = strlen(ptr);
+
+        if (check_pipe_buffer_space(chptr, pvlen, PmLabelTSz + len)) {
+          vlen_prims_init(pvlen, 0);
+          return;
+        }
+        else vlen_prims_insert(pvlen, COUNT_INT_SRC_LRG_COMM, len, ptr, PM_MSG_STR_COPY);
       }
     }
   }
@@ -4174,6 +4274,49 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
 	  }
         }
       }
+      if (chptr->aggregation_2 & COUNT_LRG_COMM && info->attr->lcommunity && info->attr->lcommunity->str) {
+        if (chptr->plugin->type.id != PLUGIN_ID_MEMORY) {
+          len = strlen(info->attr->lcommunity->str);
+
+          if (len) {
+            len++;
+
+            if (config.nfacctd_bgp_lrgcomm_pattern) {
+              ptr = malloc(len);
+
+              if (ptr) {
+                evaluate_comm_patterns(ptr, info->attr->lcommunity->str, lrg_comm_patterns, len);
+                len = strlen(ptr);
+                len++;
+              }
+              else len = 0;
+            }
+            else ptr = info->attr->lcommunity->str;
+          }
+          else ptr = &empty_str;
+
+          if (check_pipe_buffer_space(chptr, pvlen, PmLabelTSz + len)) {
+            vlen_prims_init(pvlen, 0);
+            return;
+          }
+          else {
+            vlen_prims_insert(pvlen, COUNT_INT_LRG_COMM, len, ptr, PM_MSG_STR_COPY);
+            if (config.nfacctd_bgp_lrgcomm_pattern && ptr && len) free(ptr);
+          }
+        }
+        /* fallback to legacy fixed length behaviour */
+        else {
+          if (config.nfacctd_bgp_lrgcomm_pattern)
+            evaluate_comm_patterns(plbgp->lrg_comms, info->attr->lcommunity->str, lrg_comm_patterns, MAX_BGP_LRG_COMMS);
+          else {
+            strlcpy(plbgp->lrg_comms, info->attr->lcommunity->str, MAX_BGP_LRG_COMMS);
+            if (strlen(info->attr->lcommunity->str) >= MAX_BGP_LRG_COMMS) {
+              plbgp->lrg_comms[MAX_BGP_LRG_COMMS-2] = '+';
+              plbgp->lrg_comms[MAX_BGP_LRG_COMMS-1] = '\0';
+            }
+          }
+        }
+      }
       if (chptr->aggregation & COUNT_AS_PATH && info->attr->aspath && info->attr->aspath->str) {
 	if (chptr->plugin->type.id != PLUGIN_ID_MEMORY) {
           len = strlen(info->attr->aspath->str);
@@ -4201,7 +4344,7 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
           }
           else vlen_prims_insert(pvlen, COUNT_INT_AS_PATH, len, ptr, PM_MSG_STR_COPY);
 
-          if (config.nfacctd_bgp_aspath_radius && ptr) free(ptr);
+          if (config.nfacctd_bgp_aspath_radius && ptr && len) free(ptr);
 	}
 	/* fallback to legacy fixed length behaviour */
 	else {
@@ -4281,6 +4424,17 @@ void bgp_ext_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptr
           return;
         }
         else vlen_prims_insert(pvlen, COUNT_INT_EXT_COMM, len, ptr, PM_MSG_STR_COPY);
+      }
+
+      if (chptr->aggregation_2 & COUNT_LRG_COMM) {
+        ptr = &empty_str;
+        len = strlen(ptr);
+
+        if (check_pipe_buffer_space(chptr, pvlen, PmLabelTSz + len)) {
+          vlen_prims_init(pvlen, 0);
+          return;
+        }
+        else vlen_prims_insert(pvlen, COUNT_INT_LRG_COMM, len, ptr, PM_MSG_STR_COPY);
       }
     }
   }
@@ -4685,6 +4839,7 @@ void SF_as_path_handler(struct channels_list_entry *chptr, struct packet_ptrs *p
   struct pkt_legacy_bgp_primitives *plbgp = (struct pkt_legacy_bgp_primitives *) ((*data) + chptr->extras.off_pkt_lbgp_primitives);
   struct pkt_vlen_hdr_primitives *pvlen = (struct pkt_vlen_hdr_primitives *) ((*data) + chptr->extras.off_pkt_vlen_hdr_primitives);
 
+  /* variables for vlen primitives */
   char empty_str = '\0', *ptr = &empty_str;
   int len;
 
@@ -5237,6 +5392,76 @@ void dst_host_country_geoipv2_handler(struct channels_list_entry *chptr, struct 
 
           memcpy(pdata->primitives.dst_ip_country.str, entry_data_list->entry_data.utf8_string, size);
           pdata->primitives.dst_ip_country.str[size] = '\0';
+        }
+      }
+
+      MMDB_free_entry_data_list(entry_data_list);
+    }
+  }
+}
+
+void src_host_pocode_geoipv2_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  MMDB_entry_data_list_s *entry_data_list = NULL;
+  int status;
+
+  if (pptrs->geoipv2_src.found_entry) {
+    MMDB_entry_data_s entry_data;
+
+    status = MMDB_get_value(&pptrs->geoipv2_src.entry, &entry_data, "postal", "code", NULL);
+
+    if (entry_data.offset) {
+      MMDB_entry_s entry = { .mmdb = &config.geoipv2_db, .offset = entry_data.offset };
+      status = MMDB_get_entry_data_list(&entry, &entry_data_list);
+    }
+
+    if (status != MMDB_SUCCESS && status != MMDB_LOOKUP_PATH_DOES_NOT_MATCH_DATA_ERROR) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): src_host_pocode_geoipv2_handler(): %s\n", config.name, config.type, MMDB_strerror(status));
+    }
+
+    if (entry_data_list != NULL) {
+      if (entry_data_list->entry_data.has_data) {
+        if (entry_data_list->entry_data.type == MMDB_DATA_TYPE_UTF8_STRING) {
+          int size = (entry_data_list->entry_data.data_size < (PM_POCODE_T_STRLEN-1)) ? entry_data_list->entry_data.data_size : (PM_POCODE_T_STRLEN-1);
+
+          memcpy(pdata->primitives.src_ip_pocode.str, entry_data_list->entry_data.utf8_string, size);
+          pdata->primitives.src_ip_pocode.str[size] = '\0';
+        }
+      }
+
+      MMDB_free_entry_data_list(entry_data_list);
+    }
+  }
+}
+
+void dst_host_pocode_geoipv2_handler(struct channels_list_entry *chptr, struct packet_ptrs *pptrs, char **data)
+{
+  struct pkt_data *pdata = (struct pkt_data *) *data;
+  MMDB_entry_data_list_s *entry_data_list = NULL;
+  int status;
+
+  if (pptrs->geoipv2_dst.found_entry) {
+    MMDB_entry_data_s entry_data;
+
+    status = MMDB_get_value(&pptrs->geoipv2_dst.entry, &entry_data, "postal", "code", NULL);
+
+    if (entry_data.offset) {
+      MMDB_entry_s entry = { .mmdb = &config.geoipv2_db, .offset = entry_data.offset };
+      status = MMDB_get_entry_data_list(&entry, &entry_data_list);
+    }
+
+    if (status != MMDB_SUCCESS && status != MMDB_LOOKUP_PATH_DOES_NOT_MATCH_DATA_ERROR) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): dst_host_pocode_geoipv2_handler(): %s\n", config.name, config.type, MMDB_strerror(status));
+    }
+
+    if (entry_data_list != NULL) {
+      if (entry_data_list->entry_data.has_data) {
+        if (entry_data_list->entry_data.type == MMDB_DATA_TYPE_UTF8_STRING) {
+          int size = (entry_data_list->entry_data.data_size < (PM_POCODE_T_STRLEN-1)) ? entry_data_list->entry_data.data_size : (PM_POCODE_T_STRLEN-1);
+
+          memcpy(pdata->primitives.dst_ip_pocode.str, entry_data_list->entry_data.utf8_string, size);
+          pdata->primitives.dst_ip_pocode.str[size] = '\0';
         }
       }
 

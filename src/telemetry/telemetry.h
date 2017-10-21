@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -20,11 +20,7 @@
 */
 
 /* includes */
-#include "../bgp/bgp.h"
-#include "../bmp/bmp.h"
-#if defined (HAVE_ZLIB)
-#include <zlib.h>
-#endif
+#include "base64.h"
 
 /* defines */
 #define TELEMETRY_TCP_PORT		1620

@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -25,6 +25,7 @@
 /* includes */
 #include "pmacct.h"
 #include "pmacct-data.h"
+#include "addr.h"
 #include "bgp.h"
 #if defined WITH_RABBITMQ
 #include "amqp_common.h"
@@ -158,6 +159,22 @@ int bgp_str2rd(rd_t *output, char *value)
   return TRUE;
 }
 
+int bgp_label2str(char *str, u_char *label)
+{
+  unsigned long int tmp;
+  char *endp;
+
+  snprintf(str, 8, "0x%x%x%x",
+	(unsigned)(unsigned char)label[0],
+	(unsigned)(unsigned char)label[1],
+	(unsigned)(unsigned char)(label[2] >> 4));
+  
+  tmp = strtoul(str, &endp, 16);
+  snprintf(str, 8, "%u", tmp);
+
+  return TRUE;
+}
+
 /* Allocate bgp_info_extra */
 struct bgp_info_extra *bgp_info_extra_new(struct bgp_info *ri)
 {
@@ -180,9 +197,17 @@ struct bgp_info_extra *bgp_info_extra_new(struct bgp_info *ri)
   return new;
 }
 
-void bgp_info_extra_free(struct bgp_info_extra **extra)
+void bgp_info_extra_free(struct bgp_peer *peer, struct bgp_info_extra **extra)
 {
+  struct bgp_misc_structs *bms;
+
+  bms = bgp_select_misc_db(peer->type);
+
+  if (!bms) return;
+
   if (extra && *extra) {
+    if ((*extra)->bmed.id && bms->bgp_extra_data_free) (*bms->bgp_extra_data_free)(&(*extra)->bmed);
+
     free(*extra);
     *extra = NULL;
   }
@@ -195,6 +220,30 @@ struct bgp_info_extra *bgp_info_extra_get(struct bgp_info *ri)
     ri->extra = bgp_info_extra_new(ri);
 
   return ri->extra;
+}
+
+struct bgp_info_extra *bgp_info_extra_process(struct bgp_peer *peer, struct bgp_info *ri, safi_t safi,
+		  			      path_id_t *path_id, rd_t *rd, char *label)
+{
+  struct bgp_info_extra *rie = NULL;
+
+  /* Install/update MPLS stuff if required */
+  if (safi == SAFI_MPLS_LABEL || safi == SAFI_MPLS_VPN) {
+    if (!rie) rie = bgp_info_extra_get(ri);
+
+    if (rie) {
+      if (safi == SAFI_MPLS_VPN) memcpy(&rie->rd, rd, sizeof(rd_t));
+      memcpy(&rie->label, label, 3);
+    }
+  }
+
+  /* Install/update BGP ADD-PATHs stuff if required */
+  if (peer->cap_add_paths && path_id && *path_id) {
+    if (!rie) rie = bgp_info_extra_get(ri);
+    if (rie) memcpy(&rie->path_id, path_id, sizeof(path_id_t));
+  }
+
+  return rie;
 }
 
 /* Allocate new bgp info structure. */
@@ -255,7 +304,7 @@ void bgp_info_free(struct bgp_peer *peer, struct bgp_info *ri)
   if (ri->attr)
     bgp_attr_unintern(peer, ri->attr);
 
-  bgp_info_extra_free(&ri->extra);
+  bgp_info_extra_free(peer, &ri->extra);
 
   ri->peer->lock--;
   free(ri);
@@ -268,6 +317,7 @@ void bgp_attr_init(int buckets, struct bgp_rt_structs *inter_domain_routing_db)
   attrhash_init(buckets, &inter_domain_routing_db->attrhash);
   community_init(buckets, &inter_domain_routing_db->comhash);
   ecommunity_init(buckets, &inter_domain_routing_db->ecomhash);
+  lcommunity_init(buckets, &inter_domain_routing_db->lcomhash);
 }
 
 unsigned int attrhash_key_make(void *p)
@@ -290,6 +340,8 @@ unsigned int attrhash_key_make(void *p)
     key += community_hash_make(attr->community);
   if (attr->ecommunity)
     key += ecommunity_hash_make(attr->ecommunity);
+  if (attr->lcommunity)
+    key += lcommunity_hash_make(attr->lcommunity);
 
   /* XXX: add mp_nexthop to key */
 
@@ -307,24 +359,15 @@ int attrhash_cmp(const void *p1, const void *p2)
       && attr1->aspath == attr2->aspath
       && attr1->community == attr2->community
       && attr1->ecommunity == attr2->ecommunity
+      && attr1->lcommunity == attr2->lcommunity
       && attr1->med == attr2->med
       && attr1->local_pref == attr2->local_pref
       && attr1->pathlimit.ttl == attr2->pathlimit.ttl
-      && attr1->pathlimit.as == attr2->pathlimit.as) {
-    if (attr1->mp_nexthop.family == attr2->mp_nexthop.family) {
-      if (attr1->mp_nexthop.family == AF_INET
-	  && attr1->mp_nexthop.address.ipv4.s_addr == attr2->mp_nexthop.address.ipv4.s_addr) 
-        return 1;
-#if defined ENABLE_IPV6
-      else if (attr1->mp_nexthop.family == AF_INET6
-	  && !memcmp(&attr1->mp_nexthop.address.ipv6, &attr2->mp_nexthop.address.ipv6, 16))
-        return 1;
-#endif
-      else return 1;
-    }
-  }
+      && attr1->pathlimit.as == attr2->pathlimit.as
+      && !memcmp(&attr1->mp_nexthop, &attr2->mp_nexthop, sizeof(struct host_addr)))
+    return TRUE;
 
-  return SUCCESS;
+  return FALSE;
 }
 
 void attrhash_init(int buckets, struct hash **loc_attrhash)
@@ -363,6 +406,12 @@ struct bgp_attr *bgp_attr_intern(struct bgp_peer *peer, struct bgp_attr *attr)
   else
     attr->ecommunity->refcnt++;
   }
+  if (attr->lcommunity) {
+    if (!attr->lcommunity->refcnt)
+      attr->lcommunity = lcommunity_intern(peer, attr->lcommunity);
+  else
+    attr->lcommunity->refcnt++;
+  }
  
   find = (struct bgp_attr *) hash_get(peer, inter_domain_routing_db->attrhash, attr, bgp_attr_hash_alloc);
   find->refcnt++;
@@ -379,6 +428,7 @@ void bgp_attr_unintern(struct bgp_peer *peer, struct bgp_attr *attr)
   struct aspath *aspath;
   struct community *community;
   struct ecommunity *ecommunity = NULL;
+  struct lcommunity *lcommunity = NULL;
 
   if (!peer) return;
 
@@ -392,6 +442,7 @@ void bgp_attr_unintern(struct bgp_peer *peer, struct bgp_attr *attr)
   aspath = attr->aspath;
   community = attr->community;
   ecommunity = attr->ecommunity;
+  lcommunity = attr->lcommunity;
 
   /* If reference becomes zero then free attribute object. */
   if (attr->refcnt == 0) {
@@ -408,6 +459,8 @@ void bgp_attr_unintern(struct bgp_peer *peer, struct bgp_attr *attr)
     community_unintern(peer, community);
   if (ecommunity)
     ecommunity_unintern(peer, ecommunity);
+  if (lcommunity)
+    lcommunity_unintern(peer, lcommunity);
 }
 
 void *bgp_attr_hash_alloc(void *p)
@@ -457,7 +510,7 @@ int bgp_peer_init(struct bgp_peer *peer, int type)
   return ret;
 }
 
-void bgp_peer_close(struct bgp_peer *peer, int type /* XXX */)
+void bgp_peer_close(struct bgp_peer *peer, int type, int no_quiet, int send_notification, u_int8_t n_major, u_int8_t n_minor, char *shutdown_msg)
 {
   struct bgp_misc_structs *bms;
   afi_t afi;
@@ -469,7 +522,16 @@ void bgp_peer_close(struct bgp_peer *peer, int type /* XXX */)
 
   if (!bms) return;
 
-  bgp_peer_info_delete(peer);
+  if (send_notification) {
+    int ret, notification_msglen = (BGP_MIN_NOTIFICATION_MSG_SIZE + BGP_NOTIFY_CEASE_SM_LEN + 1);
+    char notification_msg[notification_msglen];
+
+    ret = bgp_write_notification_msg(notification_msg, notification_msglen, n_major, n_minor, shutdown_msg);
+    if (ret) send(peer->fd, notification_msg, ret, 0);
+  }
+
+  /* be quiet if we are in a signal handler and already set to exit() */
+  if (!no_quiet) bgp_peer_info_delete(peer);
 
   if (bms->msglog_file || bms->msglog_amqp_routing_key || bms->msglog_kafka_topic)
     bgp_peer_log_close(peer, bms->msglog_output, peer->type);
@@ -519,7 +581,7 @@ void bgp_peer_info_delete(struct bgp_peer *peer)
       node = bgp_table_top(peer, table);
 
       while (node) {
-        u_int32_t modulo = bms->route_info_modulo(peer, NULL);
+        u_int32_t modulo = bms->route_info_modulo(peer, NULL, bms->table_per_peer_buckets);
         u_int32_t peer_buckets;
         struct bgp_info *ri;
         struct bgp_info *ri_next;
@@ -530,7 +592,7 @@ void bgp_peer_info_delete(struct bgp_peer *peer)
 	      if (bms->msglog_backend_methods) {
 		char event_type[] = "log";
 
-		bgp_peer_log_msg(node, ri, safi, event_type, bms->msglog_output, BGP_LOG_TYPE_DELETE);
+		bgp_peer_log_msg(node, ri, afi, safi, event_type, bms->msglog_output, BGP_LOG_TYPE_DELETE);
 	      }
 
 	      ri_next = ri->next; /* let's save pointer to next before free up */
@@ -563,13 +625,14 @@ int bgp_attr_munge_as4path(struct bgp_peer *peer, struct bgp_attr *attr, struct 
   return SUCCESS;
 }
 
-void load_comm_patterns(char **stdcomm, char **extcomm, char **stdcomm_to_asn)
+void load_comm_patterns(char **stdcomm, char **extcomm, char **lrgcomm, char **stdcomm_to_asn)
 {
   int idx;
   char *token;
 
   memset(std_comm_patterns, 0, sizeof(std_comm_patterns));
   memset(ext_comm_patterns, 0, sizeof(ext_comm_patterns));
+  memset(lrg_comm_patterns, 0, sizeof(lrg_comm_patterns));
   memset(std_comm_patterns_to_asn, 0, sizeof(std_comm_patterns_to_asn));
 
   if (*stdcomm) {
@@ -586,6 +649,15 @@ void load_comm_patterns(char **stdcomm, char **extcomm, char **stdcomm_to_asn)
     while ( (token = extract_token(extcomm, ',')) && idx < MAX_BGP_COMM_PATTERNS ) {
       ext_comm_patterns[idx] = token;
       trim_spaces(ext_comm_patterns[idx]);
+      idx++;
+    }
+  }
+
+  if (*lrgcomm) {
+    idx = 0;
+    while ( (token = extract_token(lrgcomm, ',')) && idx < MAX_BGP_COMM_PATTERNS ) {
+      lrg_comm_patterns[idx] = token;
+      trim_spaces(lrg_comm_patterns[idx]);
       idx++;
     }
   }
@@ -837,8 +909,9 @@ void bgp_config_checks(struct configuration *c)
     c->data_type |= PIPE_TYPE_BGP;
   }
 
-  if (c->what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_AS_PATH|COUNT_SRC_STD_COMM|
-			  COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH)) {
+  if ((c->what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_AS_PATH|COUNT_SRC_STD_COMM|
+			  COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH)) ||
+      (c->what_to_count_2 & (COUNT_LRG_COMM|COUNT_SRC_LRG_COMM))) {
     /* Sanitizing the aggregation method */
     if (config.tmp_comms_same_field) {
       if (((c->what_to_count & COUNT_STD_COMM) && (c->what_to_count & COUNT_EXT_COMM)) ||
@@ -850,11 +923,13 @@ void bgp_config_checks(struct configuration *c)
 
     if ( (c->what_to_count & COUNT_SRC_AS_PATH && !c->nfacctd_bgp_src_as_path_type) ||
          (c->what_to_count & COUNT_SRC_STD_COMM && !c->nfacctd_bgp_src_std_comm_type) ||
-	 (c->what_to_count & COUNT_SRC_EXT_COMM && !c->nfacctd_bgp_src_ext_comm_type) ) {
+	 (c->what_to_count & COUNT_SRC_EXT_COMM && !c->nfacctd_bgp_src_ext_comm_type) ||
+	 (c->what_to_count_2 & COUNT_SRC_LRG_COMM && !c->nfacctd_bgp_src_lrg_comm_type) ) {
       printf("ERROR: At least one of the following primitives is in use but its source type is not specified:\n");
       printf("       src_as_path     =>  bgp_src_as_path_type\n");
       printf("       src_std_comm    =>  bgp_src_std_comm_type\n");
       printf("       src_ext_comm    =>  bgp_src_ext_comm_type\n");
+      printf("       src_lrg_comm    =>  bgp_src_lrg_comm_type\n");
       exit(1);
     }
 
@@ -1003,7 +1078,10 @@ void bgp_link_misc_structs(struct bgp_misc_structs *bms)
   bms->msglog_kafka_topic_rr = config.nfacctd_bgp_msglog_kafka_topic_rr;
   bms->peer_str = malloc(strlen("peer_ip_src") + 1);
   strcpy(bms->peer_str, "peer_ip_src");
+  bms->peer_port_str = malloc(strlen("peer_ip_src_port") + 1);
+  strcpy(bms->peer_port_str, "peer_ip_src_port");
   bms->bgp_peer_log_msg_extras = NULL;
+  bms->bgp_peer_logdump_initclose_extras = NULL;
 
   bms->table_peer_buckets = config.bgp_table_peer_buckets;
   bms->table_per_peer_buckets = config.bgp_table_per_peer_buckets;
@@ -1012,4 +1090,60 @@ void bgp_link_misc_structs(struct bgp_misc_structs *bms)
   bms->route_info_modulo = bgp_route_info_modulo;
   bms->bgp_lookup_find_peer = bgp_lookup_find_bgp_peer;
   bms->bgp_lookup_node_match_cmp = bgp_lookup_node_match_cmp_bgp;
+
+  if (!bms->is_thread && !bms->dump_backend_methods) bms->skip_rib = TRUE;
+}
+
+int bgp_peer_cmp(const void *a, const void *b)
+{
+  return memcmp(&((struct bgp_peer *)a)->addr, &((struct bgp_peer *)b)->addr, sizeof(struct host_addr));
+}
+
+int bgp_peer_host_addr_cmp(const void *a, const void *b)
+{
+  return memcmp(a, &((struct bgp_peer *)b)->addr, sizeof(struct host_addr));
+}
+
+void bgp_peer_free(void *a)
+{
+}
+
+void bgp_peers_bintree_walk_print(const void *nodep, const VISIT which, const int depth)
+{
+  struct bgp_misc_structs *bms;
+  struct bgp_peer *peer;
+  char peer_str[INET6_ADDRSTRLEN];
+
+  peer = (*(struct bgp_peer **) nodep);
+  bms = bgp_select_misc_db(peer->type);
+
+  if (!bms) return;
+
+  if (!peer) Log(LOG_INFO, "INFO ( %s/%s ): bgp_peers_bintree_walk_print(): null\n", config.name, bms->log_str);
+  else {
+    addr_to_str(peer_str, &peer->addr);
+    Log(LOG_INFO, "INFO ( %s/%s ): bgp_peers_bintree_walk_print(): %s\n", config.name, bms->log_str, peer_str);
+  }
+}
+
+void bgp_peers_bintree_walk_delete(const void *nodep, const VISIT which, const int depth)
+{
+  struct bgp_misc_structs *bms;
+  char peer_str[] = "peer_ip", *saved_peer_str;
+  struct bgp_peer *peer;
+
+  peer = (*(struct bgp_peer **) nodep);
+
+  if (!peer) return;
+
+  bms = bgp_select_misc_db(peer->type);
+
+  if (!bms) return;
+
+  saved_peer_str = bms->peer_str;
+  bms->peer_str = peer_str;
+  bgp_peer_info_delete(peer);
+  bms->peer_str = saved_peer_str;
+
+  // XXX: count tree elements to index and free() later
 }

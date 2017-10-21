@@ -21,7 +21,8 @@
 
 #define __TEE_PLUGIN_C
 
-#include "../pmacct.h"
+#include "pmacct.h"
+#include "addr.h"
 #include "tee_plugin.h"
 #include "pmacct-data.h"
 #include "plugin_hooks.h"
@@ -111,7 +112,7 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   /* Setting up receivers per pool */
   if (!config.tee_max_receivers) config.tee_max_receivers = MAX_TEE_RECEIVERS;
 
-  for (pool_idx = 0; pool_idx < MAX_TEE_POOLS; pool_idx++) { 
+  for (pool_idx = 0; pool_idx < config.tee_max_receiver_pools; pool_idx++) { 
     receivers.pools[pool_idx].receivers = malloc(config.tee_max_receivers*sizeof(struct tee_receivers));
     if (!receivers.pools[pool_idx].receivers) {
       Log(LOG_ERR, "ERROR ( %s/%s ): unable to allocate receivers for pool #%u. Exiting ...\n", config.name, config.type, pool_idx);
@@ -340,6 +341,7 @@ void Tee_send(struct pkt_msg *msg, struct sockaddr *target, int fd)
   u_int16_t recv_port;
 
   if (config.debug) {
+    char *flow = NULL, netflow[] = "NetFlow/IPFIX", sflow[] = "sFlow";
     struct host_addr a;
     u_char agent_addr[50];
     u_int16_t agent_port;
@@ -350,9 +352,12 @@ void Tee_send(struct pkt_msg *msg, struct sockaddr *target, int fd)
     sa_to_addr((struct sockaddr *)target, &r, &recv_port);
     addr_to_str(recv_addr, &r);
 
-    Log(LOG_DEBUG, "DEBUG ( %s/%s ): Sending NetFlow packet from [%s:%u] seqno [%u] to [%s:%u]\n",
-                        config.name, config.type, agent_addr, agent_port, msg->seqno, recv_addr,
-			recv_port);
+    if (config.acct_type == ACCT_NF) flow = netflow;
+    else if (config.acct_type == ACCT_SF) flow = sflow;
+
+    Log(LOG_DEBUG, "DEBUG ( %s/%s ): Sending %s packet from [%s:%u] seqno [%u] to [%s:%u]\n",
+                        config.name, config.type, flow, agent_addr, agent_port, msg->seqno,
+			recv_addr, recv_port);
   }
 
   if (!config.tee_transparent) {
@@ -519,7 +524,7 @@ void Tee_init_socks()
         u_char recv_addr_str[INET6_ADDRSTRLEN];
 	u_int16_t recv_port;
 
-	sa_to_addr(&target->dest, &recv_addr, &recv_port); 
+	sa_to_addr((struct sockaddr *)&target->dest, &recv_addr, &recv_port); 
         addr_to_str(recv_addr_str, &recv_addr);
         Log(LOG_DEBUG, "DEBUG ( %s/%s ): pool ID: %u :: receiver: %s :: fd: %d.\n",
                 config.name, config.type, receivers.pools[pool_idx].id, recv_addr_str, target->fd);

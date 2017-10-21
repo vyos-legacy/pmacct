@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -23,11 +23,13 @@
 
 /* includes */
 #include "pmacct.h"
+#include "addr.h"
 #include "pmacct-data.h"
 #include "ip_flow.h"
 #include "classifier.h"
 #include "plugin_hooks.h"
 #include <search.h>
+#include <sys/file.h>
 
 /* functions */
 void setnonblocking(int sock)
@@ -293,6 +295,15 @@ int iscomment(char *line)
   }
 
   return FALSE;
+}
+
+void string_add_newline(char *buf)
+{
+  int len = strlen(buf);
+
+  buf[len] = '\n';
+  len++;
+  buf[len] = '\0';
 }
 
 time_t roundoff_time(time_t t, char *value)
@@ -1144,6 +1155,7 @@ void set_default_preferences(struct configuration *cfg)
   if (!cfg->nfacctd_bgp_peer_as_src_type) cfg->nfacctd_bgp_peer_as_src_type = BGP_SRC_PRIMITIVES_KEEP;
   if (!cfg->nfacctd_bgp_src_std_comm_type) cfg->nfacctd_bgp_src_std_comm_type = BGP_SRC_PRIMITIVES_KEEP;
   if (!cfg->nfacctd_bgp_src_ext_comm_type) cfg->nfacctd_bgp_src_ext_comm_type = BGP_SRC_PRIMITIVES_KEEP;
+  if (!cfg->nfacctd_bgp_src_lrg_comm_type) cfg->nfacctd_bgp_src_lrg_comm_type = BGP_SRC_PRIMITIVES_KEEP;
   if (!cfg->nfacctd_bgp_src_as_path_type) cfg->nfacctd_bgp_src_as_path_type = BGP_SRC_PRIMITIVES_KEEP;
   if (!cfg->nfacctd_bgp_src_local_pref_type) cfg->nfacctd_bgp_src_local_pref_type = BGP_SRC_PRIMITIVES_KEEP;
   if (!cfg->nfacctd_bgp_src_med_type) cfg->nfacctd_bgp_src_med_type = BGP_SRC_PRIMITIVES_KEEP;
@@ -1210,11 +1222,7 @@ void *pm_tfind(const void *key, void *const *rootp, int (*compar) (const void *k
 
 void *pm_tdelete(const void *key, void **rootp, int (*compar)(const void *key1, const void *key2))
 {
-  void *ptr = tdelete(key, rootp, compar);
-
-  if (ptr) free((*(void **) ptr));
-
-  return NULL;
+  return tdelete(key, rootp, compar);
 }
 
 void pm_twalk(const void *root, void (*action)(const void *nodep, const VISIT which, const int depth))
@@ -1386,13 +1394,15 @@ int BTA_find_id(struct id_table *t, struct packet_ptrs *pptrs, pm_id_t *tag, pm_
 
 void calc_refresh_timeout(time_t deadline, time_t now, int *timeout)
 {
-  *timeout = ((deadline-now)+1)*1000;
+  if (deadline >= now) *timeout = ((deadline-now)+1)*1000;
+  else *timeout = 0;
 }
 
 /* secs version of calc_refresh_timeout() */
 void calc_refresh_timeout_sec(time_t deadline, time_t now, int *timeout)
 {
-  *timeout = ((deadline-now)+1);
+  if (deadline >= now) *timeout = ((deadline-now)+1);
+  else *timeout = 0;
 }
 
 int load_tags(char *filename, struct pretag_filter *filter, char *value_ptr)
@@ -1571,550 +1581,6 @@ void version_daemon(char *header)
 } 
 
 #ifdef WITH_JANSSON 
-void *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
-		  struct pkt_bgp_primitives *pbgp, struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
-		  char *pcust, struct pkt_vlen_hdr_primitives *pvlen, pm_counter_t bytes_counter,
-		  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime,
-		  struct pkt_stitching *stitch)
-{
-  char src_mac[18], dst_mac[18], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN], ip_address[INET6_ADDRSTRLEN];
-  char rd_str[SRVBUFLEN], misc_str[SRVBUFLEN], *as_path, *bgp_comm, empty_string[] = "", *str_ptr;
-  char tstamp_str[SRVBUFLEN];
-  json_t *obj = json_object(), *kv;
-
-  if (wtc & COUNT_TAG) {
-    kv = json_pack("{sI}", "tag", (json_int_t)pbase->tag);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_TAG2) {
-    kv = json_pack("{sI}", "tag2", (json_int_t)pbase->tag2);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_LABEL) {
-    vlen_prims_get(pvlen, COUNT_INT_LABEL, &str_ptr);
-    if (!str_ptr) str_ptr = empty_string;
-
-    kv = json_pack("{ss}", "label", str_ptr);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_CLASS) {
-    kv = json_pack("{ss}", "class", ((pbase->class && class[(pbase->class)-1].id) ? class[(pbase->class)-1].protocol : "unknown" ));
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-#if defined (HAVE_L2)
-  if (wtc & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
-    etheraddr_string(pbase->eth_shost, src_mac);
-    kv = json_pack("{ss}", "mac_src", src_mac);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_DST_MAC) {
-    etheraddr_string(pbase->eth_dhost, dst_mac);
-    kv = json_pack("{ss}", "mac_dst", dst_mac);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_VLAN) {
-    kv = json_pack("{sI}", "vlan", (json_int_t)pbase->vlan_id);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_COS) {
-    kv = json_pack("{sI}", "cos", (json_int_t)pbase->cos);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_ETHERTYPE) {
-    sprintf(misc_str, "%x", pbase->etype);
-    kv = json_pack("{ss}", "etype", misc_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-#endif
-
-  if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS)) {
-    kv = json_pack("{sI}", "as_src", (json_int_t)pbase->src_as);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_DST_AS) {
-    kv = json_pack("{sI}", "as_dst", (json_int_t)pbase->dst_as);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_STD_COMM) {
-    vlen_prims_get(pvlen, COUNT_INT_STD_COMM, &str_ptr);
-    if (str_ptr) {
-      bgp_comm = str_ptr;
-      while (bgp_comm) {
-        bgp_comm = strchr(str_ptr, ' ');
-        if (bgp_comm) *bgp_comm = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    kv = json_pack("{ss}", "comms", str_ptr);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_EXT_COMM) {
-    vlen_prims_get(pvlen, COUNT_INT_EXT_COMM, &str_ptr);
-    if (str_ptr) {
-      bgp_comm = str_ptr;
-      while (bgp_comm) {
-        bgp_comm = strchr(str_ptr, ' ');
-        if (bgp_comm) *bgp_comm = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    if (!config.tmp_comms_same_field)
-      kv = json_pack("{ss}", "ecomms", str_ptr);
-    else
-      kv = json_pack("{ss}", "comms", str_ptr);
-
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_AS_PATH) {
-    vlen_prims_get(pvlen, COUNT_INT_AS_PATH, &str_ptr);
-    if (str_ptr) {
-      as_path = str_ptr;
-      while (as_path) {
-	as_path = strchr(str_ptr, ' ');
-	if (as_path) *as_path = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    kv = json_pack("{ss}", "as_path", str_ptr);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_LOCAL_PREF) {
-    kv = json_pack("{sI}", "local_pref", (json_int_t)pbgp->local_pref);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_MED) {
-    kv = json_pack("{sI}", "med", (json_int_t)pbgp->med);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_PEER_SRC_AS) {
-    kv = json_pack("{sI}", "peer_as_src", (json_int_t)pbgp->peer_src_as);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_PEER_DST_AS) {
-    kv = json_pack("{sI}", "peer_as_dst", (json_int_t)pbgp->peer_dst_as);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_PEER_SRC_IP) {
-    addr_to_str(ip_address, &pbgp->peer_src_ip);
-    kv = json_pack("{ss}", "peer_ip_src", ip_address);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_PEER_DST_IP) {
-    addr_to_str(ip_address, &pbgp->peer_dst_ip);
-    kv = json_pack("{ss}", "peer_ip_dst", ip_address);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_SRC_STD_COMM) {
-    vlen_prims_get(pvlen, COUNT_INT_SRC_STD_COMM, &str_ptr);
-    if (str_ptr) {
-      bgp_comm = str_ptr;
-      while (bgp_comm) {
-        bgp_comm = strchr(str_ptr, ' ');
-        if (bgp_comm) *bgp_comm = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    kv = json_pack("{ss}", "src_comms", str_ptr);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_SRC_EXT_COMM) {
-    vlen_prims_get(pvlen, COUNT_INT_SRC_EXT_COMM, &str_ptr);
-    if (str_ptr) {
-      bgp_comm = str_ptr;
-      while (bgp_comm) {
-        bgp_comm = strchr(str_ptr, ' ');
-        if (bgp_comm) *bgp_comm = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    if (!config.tmp_comms_same_field)
-      kv = json_pack("{ss}", "src_ecomms", str_ptr);
-    else
-      kv = json_pack("{ss}", "src_comms", str_ptr);
-
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_SRC_AS_PATH) {
-    vlen_prims_get(pvlen, COUNT_INT_SRC_AS_PATH, &str_ptr);
-    if (str_ptr) {
-      as_path = str_ptr;
-      while (as_path) {
-        as_path = strchr(str_ptr, ' ');
-        if (as_path) *as_path = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    kv = json_pack("{ss}", "src_as_path", str_ptr);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_SRC_LOCAL_PREF) {
-    kv = json_pack("{sI}", "src_local_pref", (json_int_t)pbgp->src_local_pref);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_SRC_MED) {
-    kv = json_pack("{sI}", "src_med", (json_int_t)pbgp->src_med);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_IN_IFACE) {
-    kv = json_pack("{sI}", "iface_in", (json_int_t)pbase->ifindex_in);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_OUT_IFACE) {
-    kv = json_pack("{sI}", "iface_out", (json_int_t)pbase->ifindex_out);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_MPLS_VPN_RD) {
-    bgp_rd2str(rd_str, &pbgp->mpls_vpn_rd);
-    kv = json_pack("{ss}", "mpls_vpn_rd", rd_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & (COUNT_SRC_HOST|COUNT_SUM_HOST)) {
-    addr_to_str(src_host, &pbase->src_ip);
-    kv = json_pack("{ss}", "ip_src", src_host);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & (COUNT_SRC_NET|COUNT_SUM_NET)) {
-    addr_to_str(src_host, &pbase->src_net);
-    if (!config.tmp_net_own_field) kv = json_pack("{ss}", "ip_src", src_host);
-    else kv = json_pack("{ss}", "net_src", src_host);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_DST_HOST) {
-    addr_to_str(dst_host, &pbase->dst_ip);
-    kv = json_pack("{ss}", "ip_dst", dst_host);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_DST_NET) {
-    addr_to_str(dst_host, &pbase->dst_net);
-    if (!config.tmp_net_own_field) kv = json_pack("{ss}", "ip_dst", dst_host);
-    else kv = json_pack("{ss}", "net_dst", dst_host);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_SRC_NMASK) {
-    kv = json_pack("{sI}", "mask_src", (json_int_t)pbase->src_nmask);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_DST_NMASK) {
-    kv = json_pack("{sI}", "mask_dst", (json_int_t)pbase->dst_nmask);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & (COUNT_SRC_PORT|COUNT_SUM_PORT)) {
-    kv = json_pack("{sI}", "port_src", (json_int_t)pbase->src_port);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_DST_PORT) {
-    kv = json_pack("{sI}", "port_dst", (json_int_t)pbase->dst_port);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-#if defined (WITH_GEOIP)
-  if (wtc_2 & COUNT_SRC_HOST_COUNTRY) {
-    if (pbase->src_ip_country.id > 0)
-      kv = json_pack("{ss}", "country_ip_src", GeoIP_code_by_id(pbase->src_ip_country.id));
-    else
-      kv = json_pack("{ss}", "country_ip_src", empty_string);
-
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_DST_HOST_COUNTRY) {
-    if (pbase->dst_ip_country.id > 0)
-      kv = json_pack("{ss}", "country_ip_dst", GeoIP_code_by_id(pbase->dst_ip_country.id));
-    else
-      kv = json_pack("{ss}", "country_ip_dst", empty_string);
-
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-#endif
-#if defined (WITH_GEOIPV2)
-  if (wtc_2 & COUNT_SRC_HOST_COUNTRY) {
-    if (strlen(pbase->src_ip_country.str))
-      kv = json_pack("{ss}", "country_ip_src", pbase->src_ip_country.str);
-    else
-      kv = json_pack("{ss}", "country_ip_src", empty_string);
-
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_DST_HOST_COUNTRY) {
-    if (strlen(pbase->dst_ip_country.str))
-      kv = json_pack("{ss}", "country_ip_dst", pbase->dst_ip_country.str);
-    else
-      kv = json_pack("{ss}", "country_ip_dst", empty_string);
-
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-#endif
-
-  if (wtc & COUNT_TCPFLAGS) {
-    sprintf(misc_str, "%u", tcp_flags);
-    kv = json_pack("{ss}", "tcp_flags", misc_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_IP_PROTO) {
-    if (!config.num_protos && (pbase->proto < protocols_number))
-      kv = json_pack("{ss}", "ip_proto", _protocols[pbase->proto].name);
-    else
-      kv = json_pack("{sI}", "ip_proto", (json_int_t)pbase->proto);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc & COUNT_IP_TOS) {
-    kv = json_pack("{sI}", "tos", (json_int_t)pbase->tos);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_SAMPLING_RATE) {
-    kv = json_pack("{sI}", "sampling_rate", (json_int_t)pbase->sampling_rate);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_PKT_LEN_DISTRIB) {
-    kv = json_pack("{ss}", "pkt_len_distrib", config.pkt_len_distrib_bins[pbase->pkt_len_distrib]);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_POST_NAT_SRC_HOST) {
-    addr_to_str(src_host, &pnat->post_nat_src_ip);
-    kv = json_pack("{ss}", "post_nat_ip_src", src_host);
-    json_object_update_missing(obj, kv);
-  }
-
-  if (wtc_2 & COUNT_POST_NAT_DST_HOST) {
-    addr_to_str(dst_host, &pnat->post_nat_dst_ip);
-    kv = json_pack("{ss}", "post_nat_ip_dst", dst_host);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_POST_NAT_SRC_PORT) {
-    kv = json_pack("{sI}", "post_nat_port_src", (json_int_t)pnat->post_nat_src_port);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_POST_NAT_DST_PORT) {
-    kv = json_pack("{sI}", "post_nat_port_dst", (json_int_t)pnat->post_nat_dst_port);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_NAT_EVENT) {
-    kv = json_pack("{sI}", "nat_event", (json_int_t)pnat->nat_event);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_MPLS_LABEL_TOP) {
-    kv = json_pack("{sI}", "mpls_label_top", (json_int_t)pmpls->mpls_label_top);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_MPLS_LABEL_BOTTOM) {
-    kv = json_pack("{sI}", "mpls_label_bottom", (json_int_t)pmpls->mpls_label_bottom);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_MPLS_STACK_DEPTH) {
-    kv = json_pack("{sI}", "mpls_stack_depth", (json_int_t)pmpls->mpls_stack_depth);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_TIMESTAMP_START) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_start, TRUE, config.timestamps_since_epoch);
-    kv = json_pack("{ss}", "timestamp_start", tstamp_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_TIMESTAMP_END) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_end, TRUE, config.timestamps_since_epoch);
-    kv = json_pack("{ss}", "timestamp_end", tstamp_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_TIMESTAMP_ARRIVAL) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_arrival, TRUE, config.timestamps_since_epoch);
-    kv = json_pack("{ss}", "timestamp_arrival", tstamp_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (config.nfacctd_stitching && stitch) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_min, TRUE, config.timestamps_since_epoch);
-    kv = json_pack("{ss}", "timestamp_min", tstamp_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-
-    compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_max, TRUE, config.timestamps_since_epoch);
-    kv = json_pack("{ss}", "timestamp_max", tstamp_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_EXPORT_PROTO_SEQNO) {
-    kv = json_pack("{sI}", "export_proto_seqno", (json_int_t)pbase->export_proto_seqno);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (wtc_2 & COUNT_EXPORT_PROTO_VERSION) {
-    kv = json_pack("{sI}", "export_proto_version", (json_int_t)pbase->export_proto_version);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  /* all custom primitives printed here */
-  {
-    int cp_idx;
-
-    for (cp_idx = 0; cp_idx < config.cpptrs.num; cp_idx++) {
-      if (config.cpptrs.primitive[cp_idx].ptr->len != PM_VARIABLE_LENGTH) {
-        char cp_str[SRVBUFLEN];
-
-        custom_primitive_value_print(cp_str, SRVBUFLEN, pcust, &config.cpptrs.primitive[cp_idx], FALSE);
-        kv = json_pack("{ss}", config.cpptrs.primitive[cp_idx].name, cp_str);
-      }
-      else {
-        char *label_ptr = NULL;
-
-        vlen_prims_get(pvlen, config.cpptrs.primitive[cp_idx].ptr->type, &label_ptr);
-        if (!label_ptr) label_ptr = empty_string;
-        kv = json_pack("{ss}", config.cpptrs.primitive[cp_idx].name, label_ptr);
-      }
-
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
-    }
-  }
-
-  if (basetime && config.sql_history) {
-    struct timeval tv;
-
-    tv.tv_sec = basetime->tv_sec;
-    tv.tv_usec = 0;
-    compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE, config.timestamps_since_epoch);
-    kv = json_pack("{ss}", "stamp_inserted", tstamp_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-
-    tv.tv_sec = time(NULL);
-    tv.tv_usec = 0;
-    compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE, config.timestamps_since_epoch);
-    kv = json_pack("{ss}", "stamp_updated", tstamp_str);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  if (flow_type != NF9_FTYPE_EVENT && flow_type != NF9_FTYPE_OPTION) {
-    kv = json_pack("{sI}", "packets", (json_int_t)packet_counter);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-
-    if (wtc & COUNT_FLOWS) {
-      kv = json_pack("{sI}", "flows", (json_int_t)flow_counter);
-      json_object_update_missing(obj, kv);
-      json_decref(kv);
-    }
-
-    kv = json_pack("{sI}", "bytes", (json_int_t)bytes_counter);
-    json_object_update_missing(obj, kv);
-    json_decref(kv);
-  }
-
-  return obj;
-}
-
 char *compose_json_str(void *obj)
 {
   char *tmpbuf = NULL;
@@ -2143,50 +1609,6 @@ void write_and_free_json(FILE *f, void *obj)
     fprintf(f, "%s\n", tmpbuf);
     free(tmpbuf);
   }
-}
-
-void *compose_purge_init_json(pid_t writer_pid)
-{
-  char event_type[] = "purge_init";
-  json_t *obj = json_object(), *kv;
-
-  kv = json_pack("{ss}", "event_type", event_type);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
-
-  kv = json_pack("{sI}", "writer_pid", (json_int_t)writer_pid);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
-
-  return obj;
-}
-
-void *compose_purge_close_json(pid_t writer_pid, int purged_entries, int total_entries, int duration)
-{
-  char event_type[] = "purge_close";
-  json_t *obj = json_object(), *kv;
-
-  kv = json_pack("{ss}", "event_type", event_type);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
-
-  kv = json_pack("{sI}", "writer_pid", (json_int_t)writer_pid);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
-
-  kv = json_pack("{sI}", "purged_entries", (json_int_t)purged_entries);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
-
-  kv = json_pack("{sI}", "total_entries", (json_int_t)total_entries);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
-
-  kv = json_pack("{sI}", "duration", (json_int_t)duration);
-  json_object_update_missing(obj, kv);
-  json_decref(kv);
-
-  return obj;
 }
 
 #ifdef WITH_RABBITMQ
@@ -2220,7 +1642,6 @@ int write_and_free_json_amqp(void *amqp_log, void *obj)
 #endif
 
 #ifdef WITH_KAFKA
-/* XXX: impact of frequent p_kafka_set_topic() to be verified */ 
 int write_and_free_json_kafka(void *kafka_log, void *obj)
 {
   char *orig_kafka_topic = NULL, dyn_kafka_topic[SRVBUFLEN];
@@ -2249,18 +1670,16 @@ int write_and_free_json_kafka(void *kafka_log, void *obj)
   return ret;
 }
 #endif
-#else
-void *compose_json(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
-                  struct pkt_bgp_primitives *pbgp, struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
-		  char *pcust, struct pkt_vlen_hdr_primitives *pvlen, pm_counter_t bytes_counter,
-		  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime,
-		  struct pkt_stitching *stitch)
+
+void add_writer_name_and_pid_json(void *obj, char *name, pid_t writer_pid)
 {
-  if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): compose_json(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
+  char wid[SHORTSHORTBUFLEN]; 
+  json_t *json_obj = (json_t *) obj;
 
-  return NULL;
+  snprintf(wid, SHORTSHORTBUFLEN, "%s/%u", name, writer_pid);
+  json_object_set_new_nocheck(json_obj, "writer_id", json_string(wid));
 }
-
+#else
 char *compose_json_str(void *obj)
 {
   if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): compose_json_str(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
@@ -2271,16 +1690,6 @@ char *compose_json_str(void *obj)
 void write_and_free_json(FILE *f, void *obj)
 {
   if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): write_and_free_json(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
-}
-
-void *compose_purge_init_json(pid_t writer_pid)
-{
-  if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): compose_purge_init_json(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
-}
-
-void *compose_purge_close_json(pid_t writer_pid, int purged_entries, int total_entries, int duration)
-{
-  if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): compose_purge_close_json(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
 }
 
 int write_and_free_json_amqp(void *amqp_log, void *obj)
@@ -2296,760 +1705,67 @@ int write_and_free_json_kafka(void *kafka_log, void *obj)
 
   return 0;
 }
+
+void add_writer_name_and_pid_json(void *obj, char *name, pid_t writer_pid)
+{
+  if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): add_writer_name_and_pid_json(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
+}
 #endif
 
 #ifdef WITH_AVRO
-
-#define check_i(call) \
-  do { \
-    if ((call) != 0) { \
-      Log(LOG_ERR, "Error: %s\n", avro_strerror()); \
-      exit_plugin(EXIT_FAILURE); \
-    } \
-} while (0)
-
-avro_schema_t build_avro_schema(u_int64_t wtc, u_int64_t wtc_2)
+void write_avro_schema_to_file(char *filename, avro_schema_t schema)
 {
-  avro_schema_t schema = avro_schema_record("acct", NULL);
+  FILE *avro_fp = open_output_file(filename, "w", TRUE);
+  avro_writer_t avro_schema_writer = avro_writer_file(avro_fp);
 
-  avro_schema_t optlong_s = avro_schema_union();
-  avro_schema_union_append(optlong_s, avro_schema_null());
-  avro_schema_union_append(optlong_s, avro_schema_long());
-
-  avro_schema_t optstr_s = avro_schema_union();
-  avro_schema_union_append(optstr_s, avro_schema_null());
-  avro_schema_union_append(optstr_s, avro_schema_string());
-
-  if (wtc & COUNT_TAG)
-    avro_schema_record_field_append(schema, "tag", avro_schema_long());
-
-  if (wtc & COUNT_TAG2)
-    avro_schema_record_field_append(schema, "tag2", avro_schema_long());
-
-  if (wtc_2 & COUNT_LABEL)
-    avro_schema_record_field_append(schema, "label", avro_schema_string());
-
-  if (wtc & COUNT_CLASS)
-    avro_schema_record_field_append(schema, "class", avro_schema_string());
-
-#if defined (HAVE_L2)
-  if (wtc & (COUNT_SRC_MAC|COUNT_SUM_MAC))
-    avro_schema_record_field_append(schema, "mac_src", avro_schema_string());
-
-  if (wtc & COUNT_DST_MAC)
-    avro_schema_record_field_append(schema, "mac_dst", avro_schema_string());
-
-  if (wtc & COUNT_VLAN)
-    avro_schema_record_field_append(schema, "vlan", avro_schema_long());
-
-  if (wtc & COUNT_COS)
-    avro_schema_record_field_append(schema, "cos", avro_schema_long());
-
-  if (wtc & COUNT_ETHERTYPE)
-    avro_schema_record_field_append(schema, "etype", avro_schema_string());
-#endif
-
-  if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS))
-    avro_schema_record_field_append(schema, "as_src", avro_schema_long());
-
-  if (wtc & COUNT_DST_AS)
-    avro_schema_record_field_append(schema, "as_dst", avro_schema_long());
-
-  if (wtc & COUNT_STD_COMM)
-    avro_schema_record_field_append(schema, "comms", avro_schema_string());
-
-  if (wtc & COUNT_EXT_COMM) {
-    if (!config.tmp_comms_same_field)
-      avro_schema_record_field_append(schema, "ecomms", avro_schema_string());
-    else
-      avro_schema_record_field_append(schema, "comms", avro_schema_string());
+  if (avro_schema_to_json(schema, avro_schema_writer)) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: unable to dump schema: %s\n", config.name, config.type, avro_strerror());
+    exit(1);
   }
 
-  if (wtc & COUNT_AS_PATH)
-    avro_schema_record_field_append(schema, "as_path", avro_schema_string());
-
-  if (wtc & COUNT_LOCAL_PREF)
-    avro_schema_record_field_append(schema, "local_pref", avro_schema_long());
-
-  if (wtc & COUNT_MED)
-    avro_schema_record_field_append(schema, "med", avro_schema_long());
-
-  if (wtc & COUNT_PEER_SRC_AS)
-    avro_schema_record_field_append(schema, "peer_as_src", avro_schema_long());
-
-  if (wtc & COUNT_PEER_DST_AS)
-    avro_schema_record_field_append(schema, "peer_as_dst", avro_schema_long());
-
-  if (wtc & COUNT_PEER_SRC_IP)
-    avro_schema_record_field_append(schema, "peer_ip_src", avro_schema_string());
-
-  if (wtc & COUNT_PEER_DST_IP)
-    avro_schema_record_field_append(schema, "peer_ip_dst", avro_schema_string());
-
-  if (wtc & COUNT_SRC_STD_COMM)
-    avro_schema_record_field_append(schema, "src_comms", avro_schema_string());
-
-  if (wtc & COUNT_SRC_EXT_COMM) {
-    if (!config.tmp_comms_same_field)
-      avro_schema_record_field_append(schema, "src_ecomms", avro_schema_string());
-    else
-      avro_schema_record_field_append(schema, "src_comms", avro_schema_string());
-  }
-
-  if (wtc & COUNT_SRC_AS_PATH)
-     avro_schema_record_field_append(schema, "src_as_path", avro_schema_string());
-
-  if (wtc & COUNT_SRC_LOCAL_PREF)
-    avro_schema_record_field_append(schema, "src_local_pref", avro_schema_long());
-
-  if (wtc & COUNT_SRC_MED)
-    avro_schema_record_field_append(schema, "src_med", avro_schema_long());
-
-  if (wtc & COUNT_IN_IFACE)
-    avro_schema_record_field_append(schema, "iface_in", avro_schema_long());
-
-  if (wtc & COUNT_OUT_IFACE)
-    avro_schema_record_field_append(schema, "iface_out", avro_schema_long());
-
-  if (wtc & COUNT_MPLS_VPN_RD)
-    avro_schema_record_field_append(schema, "mpls_vpn_rd", avro_schema_string());
-
-  if ((wtc & (COUNT_SRC_HOST|COUNT_SUM_HOST)) ||
-      ((wtc & (COUNT_SRC_NET|COUNT_SUM_NET)) && !config.tmp_net_own_field))
-    avro_schema_record_field_append(schema, "ip_src", avro_schema_string());
-
-  if ((wtc & (COUNT_SRC_NET|COUNT_SUM_NET)) && config.tmp_net_own_field)
-    avro_schema_record_field_append(schema, "net_src", avro_schema_string());
-
-  if ((wtc & COUNT_DST_HOST) ||
-      ((wtc & COUNT_DST_NET) && !config.tmp_net_own_field))
-    avro_schema_record_field_append(schema, "ip_dst", avro_schema_string());
-
-  if ((wtc & COUNT_DST_NET) && config.tmp_net_own_field)
-    avro_schema_record_field_append(schema, "net_dst", avro_schema_string());
-
-  if (wtc & COUNT_SRC_NMASK)
-    avro_schema_record_field_append(schema, "mask_src", avro_schema_long());
-
-  if (wtc & COUNT_DST_NMASK)
-    avro_schema_record_field_append(schema, "mask_dst", avro_schema_long());
-
-  if (wtc & (COUNT_SRC_PORT|COUNT_SUM_PORT))
-    avro_schema_record_field_append(schema, "port_src", avro_schema_long());
-
-  if (wtc & COUNT_DST_PORT)
-    avro_schema_record_field_append(schema, "port_dst", avro_schema_long());
-
-#if defined (WITH_GEOIP) || (WITH_GEOIPV2)
-  if (wtc_2 & COUNT_SRC_HOST_COUNTRY)
-    avro_schema_record_field_append(schema, "country_ip_src", avro_schema_string());
-
-  if (wtc_2 & COUNT_DST_HOST_COUNTRY)
-    avro_schema_record_field_append(schema, "country_ip_dst", avro_schema_string());
-#endif
-
-  if (wtc & COUNT_TCPFLAGS)
-    avro_schema_record_field_append(schema, "tcp_flags", avro_schema_string());
-
-  if (wtc & COUNT_IP_PROTO)
-    avro_schema_record_field_append(schema, "ip_proto", avro_schema_string());
-
-  if (wtc & COUNT_IP_TOS)
-    avro_schema_record_field_append(schema, "tos", avro_schema_long());
-
-  if (wtc_2 & COUNT_SAMPLING_RATE)
-    avro_schema_record_field_append(schema, "sampling_rate", avro_schema_long());
-
-  if (wtc_2 & COUNT_PKT_LEN_DISTRIB)
-    avro_schema_record_field_append(schema, "pkt_len_distrib", avro_schema_string());
-
-  if (wtc_2 & COUNT_POST_NAT_SRC_HOST)
-    avro_schema_record_field_append(schema, "post_nat_ip_src", avro_schema_string());
-
-  if (wtc_2 & COUNT_POST_NAT_DST_HOST)
-    avro_schema_record_field_append(schema, "post_nat_ip_dst", avro_schema_string());
-
-  if (wtc_2 & COUNT_POST_NAT_SRC_PORT)
-    avro_schema_record_field_append(schema, "post_nat_port_src", avro_schema_long());
-
-  if (wtc_2 & COUNT_POST_NAT_DST_PORT)
-    avro_schema_record_field_append(schema, "post_nat_port_dst", avro_schema_long());
-
-  if (wtc_2 & COUNT_NAT_EVENT)
-    avro_schema_record_field_append(schema, "nat_event", avro_schema_long());
-
-  if (wtc_2 & COUNT_MPLS_LABEL_TOP)
-    avro_schema_record_field_append(schema, "mpls_label_top", avro_schema_long());
-
-  if (wtc_2 & COUNT_MPLS_LABEL_BOTTOM)
-    avro_schema_record_field_append(schema, "mpls_label_bottom", avro_schema_long());
-
-  if (wtc_2 & COUNT_MPLS_STACK_DEPTH)
-    avro_schema_record_field_append(schema, "mpls_stack_depth", avro_schema_long());
-
-  if (wtc_2 & COUNT_TIMESTAMP_START)
-    avro_schema_record_field_append(schema, "timestamp_start", avro_schema_string());
-
-  if (wtc_2 & COUNT_TIMESTAMP_END)
-    avro_schema_record_field_append(schema, "timestamp_end", avro_schema_string());
-
-  if (wtc_2 & COUNT_TIMESTAMP_ARRIVAL)
-    avro_schema_record_field_append(schema, "timestamp_arrival", avro_schema_string());
-
-  if (config.nfacctd_stitching) {
-    avro_schema_record_field_append(schema, "timestamp_min", optstr_s);
-    avro_schema_record_field_append(schema, "timestamp_max", optstr_s);
-  }
-
-  if (wtc_2 & COUNT_EXPORT_PROTO_SEQNO)
-    avro_schema_record_field_append(schema, "export_proto_seqno", avro_schema_long());
-
-  if (wtc_2 & COUNT_EXPORT_PROTO_VERSION)
-    avro_schema_record_field_append(schema, "export_proto_version", avro_schema_long());
-
-  if (config.cpptrs.num > 0) {
-    avro_schema_record_field_append(
-        schema, "custom_primitives", avro_schema_map(avro_schema_string()));
-  }
-
-  if (config.sql_history) {
-    avro_schema_record_field_append(schema, "stamp_inserted", optstr_s);
-    avro_schema_record_field_append(schema, "stamp_updated", optstr_s);
-  }
-
-  avro_schema_record_field_append(schema, "packets", optlong_s);
-  avro_schema_record_field_append(schema, "flows", optlong_s);
-  avro_schema_record_field_append(schema, "bytes", optlong_s);
-
-  avro_schema_decref(optlong_s);
-  avro_schema_decref(optstr_s);
-
-  return schema;
+  close_output_file(avro_fp);
 }
 
-avro_value_t compose_avro(u_int64_t wtc, u_int64_t wtc_2, u_int8_t flow_type, struct pkt_primitives *pbase,
-  struct pkt_bgp_primitives *pbgp, struct pkt_nat_primitives *pnat, struct pkt_mpls_primitives *pmpls,
-  char *pcust, struct pkt_vlen_hdr_primitives *pvlen, pm_counter_t bytes_counter,
-  pm_counter_t packet_counter, pm_counter_t flow_counter, u_int32_t tcp_flags, struct timeval *basetime,
-  struct pkt_stitching *stitch, avro_value_iface_t *iface)
+char *compose_avro_purge_schema(avro_schema_t avro_schema, char *writer_name)
 {
-  char src_mac[18], dst_mac[18], src_host[INET6_ADDRSTRLEN], dst_host[INET6_ADDRSTRLEN], ip_address[INET6_ADDRSTRLEN];
-  char rd_str[SRVBUFLEN], misc_str[SRVBUFLEN], *as_path, *bgp_comm, empty_string[] = "", *str_ptr;
-  char tstamp_str[SRVBUFLEN];
+  avro_writer_t avro_writer;
+  char *avro_buf = NULL, *json_str = NULL;
 
-  avro_value_t value;
-  avro_value_t field;
-  avro_value_t branch;
-  check_i(avro_generic_value_new(iface, &value));
+  if (!config.avro_buffer_size) config.avro_buffer_size = LARGEBUFLEN;
 
-  if (wtc & COUNT_TAG) {
-    check_i(avro_value_get_by_name(&value, "tag", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->tag));
+  avro_buf = malloc(config.avro_buffer_size);
+
+  if (!avro_buf) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): malloc() failed (avro_buf). Exiting ..\n", config.name, config.type);
+    exit_plugin(1);
+  }
+  else memset(avro_buf, 0, config.avro_buffer_size);
+
+  avro_writer = avro_writer_memory(avro_buf, config.avro_buffer_size);
+
+  if (avro_schema_to_json(avro_schema, avro_writer)) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: unable to dump schema: %s\n", config.name, config.type, avro_strerror());
+    exit_plugin(1);
   }
 
-  if (wtc & COUNT_TAG2) {
-    check_i(avro_value_get_by_name(&value, "tag2", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->tag2));
+  if (avro_writer_tell(avro_writer)) {
+    char event_type[] = "purge_schema", wid[SHORTSHORTBUFLEN];
+    json_t *obj = json_object();
+
+    json_object_set_new_nocheck(obj, "event_type", json_string(event_type));
+
+    snprintf(wid, SHORTSHORTBUFLEN, "%s/%u", writer_name, 0);
+    json_object_set_new_nocheck(obj, "writer_id", json_string(wid));
+
+    json_object_set_new_nocheck(obj, "schema", json_string(avro_buf));
+
+    avro_writer_free(avro_writer);
+    free(avro_buf);
+
+    json_str = compose_json_str(obj);
   }
 
-  if (wtc_2 & COUNT_LABEL) {
-    vlen_prims_get(pvlen, COUNT_INT_LABEL, &str_ptr);
-    if (!str_ptr) str_ptr = empty_string;
-
-    check_i(avro_value_get_by_name(&value, "label", &field, NULL));
-    check_i(avro_value_set_string(&field, str_ptr));
-  }
-
-  if (wtc & COUNT_CLASS) {
-    check_i(avro_value_get_by_name(&value, "class", &field, NULL));
-    check_i(avro_value_set_string(&field, ((pbase->class && class[(pbase->class)-1].id) ? class[(pbase->class)-1].protocol : "unknown" )));
-  }
-
-#if defined (HAVE_L2)
-  if (wtc & (COUNT_SRC_MAC|COUNT_SUM_MAC)) {
-    etheraddr_string(pbase->eth_shost, src_mac);
-    check_i(avro_value_get_by_name(&value, "mac_src", &field, NULL));
-    check_i(avro_value_set_string(&field, src_mac));
-  }
-
-  if (wtc & COUNT_DST_MAC) {
-    etheraddr_string(pbase->eth_dhost, dst_mac);
-    check_i(avro_value_get_by_name(&value, "mac_dst", &field, NULL));
-    check_i(avro_value_set_string(&field, dst_mac));
-  }
-
-  if (wtc & COUNT_VLAN) {
-    check_i(avro_value_get_by_name(&value, "vlan", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->vlan_id));
-  }
-
-  if (wtc & COUNT_COS) {
-    check_i(avro_value_get_by_name(&value, "cos", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->cos));
-  }
-
-  if (wtc & COUNT_ETHERTYPE) {
-    sprintf(misc_str, "%x", pbase->etype);
-    check_i(avro_value_get_by_name(&value, "etype", &field, NULL));
-    check_i(avro_value_set_string(&field, misc_str));
-  }
-#endif
-
-  if (wtc & (COUNT_SRC_AS|COUNT_SUM_AS)) {
-    check_i(avro_value_get_by_name(&value, "as_src", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->src_as));
-  }
-
-  if (wtc & COUNT_DST_AS) {
-    check_i(avro_value_get_by_name(&value, "as_dst", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->dst_as));
-  }
-
-  if (wtc & COUNT_STD_COMM) {
-    vlen_prims_get(pvlen, COUNT_INT_STD_COMM, &str_ptr);
-    if (str_ptr) {
-      bgp_comm = str_ptr;
-      while (bgp_comm) {
-        bgp_comm = strchr(str_ptr, ' ');
-        if (bgp_comm) *bgp_comm = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    check_i(avro_value_get_by_name(&value, "comms", &field, NULL));
-    check_i(avro_value_set_string(&field, str_ptr));
-  }
-
-  if (wtc & COUNT_EXT_COMM) {
-    vlen_prims_get(pvlen, COUNT_INT_EXT_COMM, &str_ptr);
-    if (str_ptr) {
-      bgp_comm = str_ptr;
-      while (bgp_comm) {
-        bgp_comm = strchr(str_ptr, ' ');
-        if (bgp_comm) *bgp_comm = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    if (!config.tmp_comms_same_field)
-      check_i(avro_value_get_by_name(&value, "ecomms", &field, NULL));
-    else 
-      check_i(avro_value_get_by_name(&value, "comms", &field, NULL));
-
-    check_i(avro_value_set_string(&field, str_ptr));
-  }
-
-  if (wtc & COUNT_AS_PATH) {
-    vlen_prims_get(pvlen, COUNT_INT_AS_PATH, &str_ptr);
-    if (str_ptr) {
-      as_path = str_ptr;
-      while (as_path) {
-	as_path = strchr(str_ptr, ' ');
-	if (as_path) *as_path = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    check_i(avro_value_get_by_name(&value, "as_path", &field, NULL));
-    check_i(avro_value_set_string(&field, str_ptr));
-  }
-
-  if (wtc & COUNT_LOCAL_PREF) {
-    check_i(avro_value_get_by_name(&value, "local_pref", &field, NULL));
-    check_i(avro_value_set_long(&field, pbgp->local_pref));
-  }
-
-  if (wtc & COUNT_MED) {
-    check_i(avro_value_get_by_name(&value, "med", &field, NULL));
-    check_i(avro_value_set_long(&field, pbgp->med));
-  }
-
-  if (wtc & COUNT_PEER_SRC_AS) {
-    check_i(avro_value_get_by_name(&value, "peer_as_src", &field, NULL));
-    check_i(avro_value_set_long(&field, pbgp->peer_src_as));
-  }
-
-  if (wtc & COUNT_PEER_DST_AS) {
-    check_i(avro_value_get_by_name(&value, "peer_as_dst", &field, NULL));
-    check_i(avro_value_set_long(&field, pbgp->peer_dst_as));
-  }
-
-  if (wtc & COUNT_PEER_SRC_IP) {
-    check_i(avro_value_get_by_name(&value, "peer_ip_src", &field, NULL));
-    addr_to_str(ip_address, &pbgp->peer_src_ip);
-    check_i(avro_value_set_string(&field, ip_address));
-  }
-
-  if (wtc & COUNT_PEER_DST_IP) {
-    check_i(avro_value_get_by_name(&value, "peer_ip_dst", &field, NULL));
-    addr_to_str(ip_address, &pbgp->peer_dst_ip);
-    check_i(avro_value_set_string(&field, ip_address));
-  }
-
-  if (wtc & COUNT_STD_COMM) {
-    vlen_prims_get(pvlen, COUNT_INT_SRC_STD_COMM, &str_ptr);
-    if (str_ptr) {
-      bgp_comm = str_ptr;
-      while (bgp_comm) {
-        bgp_comm = strchr(str_ptr, ' ');
-        if (bgp_comm) *bgp_comm = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    check_i(avro_value_get_by_name(&value, "src_comms", &field, NULL));
-    check_i(avro_value_set_string(&field, str_ptr));
-  }
-
-  if (wtc & COUNT_SRC_EXT_COMM) {
-    vlen_prims_get(pvlen, COUNT_INT_SRC_EXT_COMM, &str_ptr);
-    if (str_ptr) {
-      bgp_comm = str_ptr;
-      while (bgp_comm) {
-        bgp_comm = strchr(str_ptr, ' ');
-        if (bgp_comm) *bgp_comm = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    if (!config.tmp_comms_same_field)
-      check_i(avro_value_get_by_name(&value, "src_ecomms", &field, NULL));
-    else
-      check_i(avro_value_get_by_name(&value, "src_comms", &field, NULL));
-
-    check_i(avro_value_set_string(&field, str_ptr));
-  }
-
-  if (wtc & COUNT_SRC_AS_PATH) {
-    vlen_prims_get(pvlen, COUNT_INT_SRC_AS_PATH, &str_ptr);
-    if (str_ptr) {
-      as_path = str_ptr;
-      while (as_path) {
-        as_path = strchr(str_ptr, ' ');
-        if (as_path) *as_path = '_';
-      }
-    }
-    else str_ptr = empty_string;
-
-    check_i(avro_value_get_by_name(&value, "src_as_path", &field, NULL));
-    check_i(avro_value_set_string(&field, str_ptr));
-  }
-
-  if (wtc & COUNT_SRC_LOCAL_PREF) {
-    check_i(avro_value_get_by_name(&value, "src_local_pref", &field, NULL));
-    check_i(avro_value_set_long(&field, pbgp->src_local_pref));
-  }
-
-  if (wtc & COUNT_SRC_MED) {
-    check_i(avro_value_get_by_name(&value, "src_med", &field, NULL));
-    check_i(avro_value_set_long(&field, pbgp->src_med));
-  }
-
-  if (wtc & COUNT_IN_IFACE) {
-    check_i(avro_value_get_by_name(&value, "iface_in", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->ifindex_in));
-  }
-
-  if (wtc & COUNT_OUT_IFACE) {
-    check_i(avro_value_get_by_name(&value, "iface_out", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->ifindex_out));
-  }
-
-  if (wtc & COUNT_MPLS_VPN_RD) {
-    bgp_rd2str(rd_str, &pbgp->mpls_vpn_rd);
-    check_i(avro_value_get_by_name(&value, "mpls_vpn_rd", &field, NULL));
-    check_i(avro_value_set_string(&field, rd_str));
-  }
-
-  if (wtc & (COUNT_SRC_HOST|COUNT_SUM_HOST)) {
-    addr_to_str(src_host, &pbase->src_ip);
-    check_i(avro_value_get_by_name(&value, "ip_src", &field, NULL));
-    check_i(avro_value_set_string(&field, src_host));
-  }
-
-  if (wtc & (COUNT_SRC_NET|COUNT_SUM_NET)) {
-    addr_to_str(src_host, &pbase->src_net);
-    if (config.tmp_net_own_field) {
-      check_i(avro_value_get_by_name(&value, "net_src", &field, NULL));
-      check_i(avro_value_set_string(&field, src_host));
-    }
-    else {
-      check_i(avro_value_get_by_name(&value, "ip_src", &field, NULL));
-      check_i(avro_value_set_string(&field, src_host));
-    }
-  }
-
-  if (wtc & COUNT_DST_HOST) {
-    addr_to_str(dst_host, &pbase->dst_ip);
-    check_i(avro_value_get_by_name(&value, "ip_dst", &field, NULL));
-    check_i(avro_value_set_string(&field, dst_host));
-  }
-
-  if (wtc & COUNT_DST_NET) {
-    addr_to_str(dst_host, &pbase->dst_net);
-    if (config.tmp_net_own_field) {
-      check_i(avro_value_get_by_name(&value, "net_dst", &field, NULL));
-      check_i(avro_value_set_string(&field, dst_host));
-    }
-    else {
-      check_i(avro_value_get_by_name(&value, "ip_dst", &field, NULL));
-      check_i(avro_value_set_string(&field, dst_host));
-    }
-  }
-
-  if (wtc & COUNT_SRC_NMASK) {
-    check_i(avro_value_get_by_name(&value, "mask_src", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->src_nmask));
-  }
-
-  if (wtc & COUNT_DST_NMASK) {
-    check_i(avro_value_get_by_name(&value, "mask_dst", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->dst_nmask));
-  }
-
-  if (wtc & (COUNT_SRC_PORT|COUNT_SUM_PORT)) {
-    check_i(avro_value_get_by_name(&value, "port_src", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->src_port));
-  }
-
-  if (wtc & COUNT_DST_PORT) {
-    check_i(avro_value_get_by_name(&value, "port_dst", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->dst_port));
-  }
-
-#if defined (WITH_GEOIP)
-  if (wtc_2 & COUNT_SRC_HOST_COUNTRY) {
-    check_i(avro_value_get_by_name(&value, "country_ip_src", &field, NULL));
-    if (pbase->src_ip_country.id > 0)
-      check_i(avro_value_set_string(&field, GeoIP_code_by_id(pbase->src_ip_country.id)));
-    else
-      check_i(avro_value_set_string(&field, empty_string));
-  }
-
-  if (wtc_2 & COUNT_DST_HOST_COUNTRY) {
-    check_i(avro_value_get_by_name(&value, "country_ip_dst", &field, NULL));
-    if (pbase->dst_ip_country.id > 0)
-      check_i(avro_value_set_string(&field, GeoIP_code_by_id(pbase->dst_ip_country.id)));
-    else
-      check_i(avro_value_set_string(&field, empty_string));
-  }
-#endif
-#if defined (WITH_GEOIPV2)
-  if (wtc_2 & COUNT_SRC_HOST_COUNTRY) {
-    check_i(avro_value_get_by_name(&value, "country_ip_src", &field, NULL));
-    if (strlen(pbase->src_ip_country.str))
-      check_i(avro_value_set_string(&field, pbase->src_ip_country.str));
-    else
-      check_i(avro_value_set_string(&field, empty_string));
-  }
-
-  if (wtc_2 & COUNT_DST_HOST_COUNTRY) {
-    check_i(avro_value_get_by_name(&value, "country_ip_dst", &field, NULL));
-    if (strlen(pbase->dst_ip_country.str))
-      check_i(avro_value_set_string(&field, pbase->dst_ip_country.str));
-    else
-      check_i(avro_value_set_string(&field, empty_string));
-  }
-#endif
-
-  if (wtc & COUNT_TCPFLAGS) {
-    sprintf(misc_str, "%u", tcp_flags);
-    check_i(avro_value_get_by_name(&value, "tcp_flags", &field, NULL));
-    check_i(avro_value_set_string(&field, misc_str));
-  }
-
-  if (wtc & COUNT_IP_PROTO) {
-    check_i(avro_value_get_by_name(&value, "ip_proto", &field, NULL));
-    if (!config.num_protos && (pbase->proto < protocols_number))
-      check_i(avro_value_set_string(&field, _protocols[pbase->proto].name));
-    else {
-      char proto_number[6];
-      snprintf(proto_number, sizeof(proto_number), "%d", pbase->proto);
-      check_i(avro_value_set_string(&field, proto_number));
-    }
-  }
-
-  if (wtc & COUNT_IP_TOS) {
-    check_i(avro_value_get_by_name(&value, "tos", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->tos));
-  }
-
-  if (wtc_2 & COUNT_SAMPLING_RATE) {
-    check_i(avro_value_get_by_name(&value, "sampling_rate", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->sampling_rate));
-  }
-
-  if (wtc_2 & COUNT_PKT_LEN_DISTRIB) {
-    check_i(avro_value_get_by_name(&value, "pkt_len_distrib", &field, NULL));
-    check_i(avro_value_set_string(&field, config.pkt_len_distrib_bins[pbase->pkt_len_distrib]));
-  }
-
-  if (wtc_2 & COUNT_POST_NAT_SRC_HOST) {
-    addr_to_str(src_host, &pnat->post_nat_src_ip);
-    check_i(avro_value_get_by_name(&value, "post_nat_ip_src", &field, NULL));
-    check_i(avro_value_set_string(&field, src_host));
-  }
-
-  if (wtc_2 & COUNT_POST_NAT_DST_HOST) {
-    addr_to_str(dst_host, &pnat->post_nat_dst_ip);
-    check_i(avro_value_get_by_name(&value, "post_nat_ip_dst", &field, NULL));
-    check_i(avro_value_set_string(&field, dst_host));
-  }
-
-  if (wtc_2 & COUNT_POST_NAT_SRC_PORT) {
-    check_i(avro_value_get_by_name(&value, "post_nat_port_src", &field, NULL));
-    check_i(avro_value_set_long(&field, pnat->post_nat_src_port));
-  }
-
-  if (wtc_2 & COUNT_POST_NAT_DST_PORT) {
-    check_i(avro_value_get_by_name(&value, "post_nat_port_dst", &field, NULL));
-    check_i(avro_value_set_long(&field, pnat->post_nat_dst_port));
-  }
-
-  if (wtc_2 & COUNT_NAT_EVENT) {
-    check_i(avro_value_get_by_name(&value, "nat_event", &field, NULL));
-    check_i(avro_value_set_long(&field, pnat->nat_event));
-  }
-
-  if (wtc_2 & COUNT_MPLS_LABEL_TOP) {
-    check_i(avro_value_get_by_name(&value, "mpls_label_top", &field, NULL));
-    check_i(avro_value_set_long(&field, pmpls->mpls_label_top));
-  }
-
-  if (wtc_2 & COUNT_MPLS_LABEL_BOTTOM) {
-    check_i(avro_value_get_by_name(&value, "mpls_label_bottom", &field, NULL));
-    check_i(avro_value_set_long(&field, pmpls->mpls_label_bottom));
-  }
-
-  if (wtc_2 & COUNT_MPLS_STACK_DEPTH) {
-    check_i(avro_value_get_by_name(&value, "mpls_stack_depth", &field, NULL));
-    check_i(avro_value_set_long(&field, pmpls->mpls_stack_depth));
-  }
-
-  if (wtc_2 & COUNT_TIMESTAMP_START) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_start, TRUE, config.timestamps_since_epoch);
-    check_i(avro_value_get_by_name(&value, "timestamp_start", &field, NULL));
-    check_i(avro_value_set_string(&field, tstamp_str));
-  }
-
-  if (wtc_2 & COUNT_TIMESTAMP_END) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_end, TRUE, config.timestamps_since_epoch);
-    check_i(avro_value_get_by_name(&value, "timestamp_end", &field, NULL));
-    check_i(avro_value_set_string(&field, tstamp_str));
-  }
-
-  if (wtc_2 & COUNT_TIMESTAMP_ARRIVAL) {
-    compose_timestamp(tstamp_str, SRVBUFLEN, &pnat->timestamp_arrival, TRUE, config.timestamps_since_epoch);
-    check_i(avro_value_get_by_name(&value, "timestamp_arrival", &field, NULL));
-    check_i(avro_value_set_string(&field, tstamp_str));
-  }
-
-  if (config.nfacctd_stitching) {
-    if (stitch) {
-      compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_min, TRUE, config.timestamps_since_epoch);
-      check_i(avro_value_get_by_name(&value, "timestamp_min", &field, NULL));
-      check_i(avro_value_set_branch(&field, 1, &branch));
-      check_i(avro_value_set_string(&branch, tstamp_str));
-
-      compose_timestamp(tstamp_str, SRVBUFLEN, &stitch->timestamp_max, TRUE, config.timestamps_since_epoch);
-      check_i(avro_value_get_by_name(&value, "timestamp_max", &field, NULL));
-      check_i(avro_value_set_branch(&field, 1, &branch));
-      check_i(avro_value_set_string(&branch, tstamp_str));
-    }
-    else {
-      check_i(avro_value_get_by_name(&value, "timestamp_min", &field, NULL));
-      check_i(avro_value_set_branch(&field, 0, &branch));
-      check_i(avro_value_get_by_name(&value, "timestamp_max", &field, NULL));
-      check_i(avro_value_set_branch(&field, 0, &branch));
-    }
-  }
-
-  if (wtc_2 & COUNT_EXPORT_PROTO_SEQNO) {
-    check_i(avro_value_get_by_name(&value, "export_proto_seqno", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->export_proto_seqno));
-  }
-
-  if (wtc_2 & COUNT_EXPORT_PROTO_VERSION) {
-    check_i(avro_value_get_by_name(&value, "export_proto_version", &field, NULL));
-    check_i(avro_value_set_long(&field, pbase->export_proto_version));
-  }
-
-  /* all custom primitives printed here */
-  {
-    if (config.cpptrs.num > 0)
-      check_i(avro_value_get_by_name(&value, "custom_primitives", &field, NULL));
-
-    int cp_idx;
-    for (cp_idx = 0; cp_idx < config.cpptrs.num; cp_idx++) {
-      avro_value_t map_value;
-      avro_value_add(&field, config.cpptrs.primitive[cp_idx].name, &map_value, NULL, NULL);
-      if (config.cpptrs.primitive[cp_idx].ptr->len != PM_VARIABLE_LENGTH) {
-        char cp_str[SRVBUFLEN];
-        custom_primitive_value_print(cp_str, SRVBUFLEN, pcust, &config.cpptrs.primitive[cp_idx], FALSE);
-        avro_value_set_string(&map_value, cp_str);
-      }
-      else {
-        char *label_ptr = NULL;
-        vlen_prims_get(pvlen, config.cpptrs.primitive[cp_idx].ptr->type, &label_ptr);
-        if (!label_ptr) label_ptr = empty_string;
-        avro_value_set_string(&map_value, label_ptr);
-      }
-    }
-  }
-
-  if (config.sql_history) {
-    if (basetime) {
-      struct timeval tv;
-
-      tv.tv_sec = basetime->tv_sec;
-      tv.tv_usec = 0;
-      compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE, config.timestamps_since_epoch);
-      check_i(avro_value_get_by_name(&value, "stamp_inserted", &field, NULL));
-      check_i(avro_value_set_branch(&field, 1, &branch));
-      check_i(avro_value_set_string(&branch, tstamp_str));
-
-      tv.tv_sec = time(NULL);
-      tv.tv_usec = 0;
-      compose_timestamp(tstamp_str, SRVBUFLEN, &tv, FALSE, config.timestamps_since_epoch);
-      check_i(avro_value_get_by_name(&value, "stamp_updated", &field, NULL));
-      check_i(avro_value_set_branch(&field, 1, &branch));
-      check_i(avro_value_set_string(&branch, tstamp_str));
-    }
-    else {
-      check_i(avro_value_get_by_name(&value, "stamp_inserted", &field, NULL));
-      check_i(avro_value_set_branch(&field, 0, &branch));
-      check_i(avro_value_get_by_name(&value, "stamp_updated", &field, NULL));
-      check_i(avro_value_set_branch(&field, 0, &branch));
-    }
-  }
-
-  if (flow_type != NF9_FTYPE_EVENT && flow_type != NF9_FTYPE_OPTION) {
-    check_i(avro_value_get_by_name(&value, "packets", &field, NULL));
-    check_i(avro_value_set_branch(&field, 1, &branch));
-    check_i(avro_value_set_long(&branch, packet_counter));
-
-    check_i(avro_value_get_by_name(&value, "flows", &field, NULL));
-    if (wtc & COUNT_FLOWS) {
-      check_i(avro_value_set_branch(&field, 1, &branch));
-      check_i(avro_value_set_long(&branch, flow_counter));
-    }
-    else {
-      check_i(avro_value_set_branch(&field, 0, &branch));
-    }
-    check_i(avro_value_get_by_name(&value, "bytes", &field, NULL));
-    check_i(avro_value_set_branch(&field, 1, &branch));
-    check_i(avro_value_set_long(&branch, bytes_counter));
-  }
-  else {
-    check_i(avro_value_get_by_name(&value, "packets", &field, NULL));
-    check_i(avro_value_set_branch(&field, 0, &branch));
-    check_i(avro_value_get_by_name(&value, "flows", &field, NULL));
-    check_i(avro_value_set_branch(&field, 0, &branch));
-    check_i(avro_value_get_by_name(&value, "bytes", &field, NULL));
-    check_i(avro_value_set_branch(&field, 0, &branch));
-  }
-
-  return value;
+  return json_str;
 }
 #endif
 
@@ -3775,7 +2491,7 @@ int hash_key_cmp(pm_hash_key_t *a, pm_hash_key_t *b)
 void dump_writers_init()
 {
   dump_writers.active = 0;
-  dump_writers.max = config.sql_max_writers;
+  dump_writers.max = config.dump_max_writers;
   if (dump_writers.list) memset(dump_writers.list, 0, (dump_writers.max * sizeof(pid_t)));
   dump_writers.flags = FALSE;
 }
@@ -3806,6 +2522,11 @@ u_int16_t dump_writers_get_active()
   return dump_writers.active;
 }
 
+u_int16_t dump_writers_get_max()
+{
+  return dump_writers.max;
+}
+
 int dump_writers_add(pid_t pid)
 {
   u_int16_t idx;
@@ -3823,4 +2544,66 @@ int dump_writers_add(pid_t pid)
   }
 
   return ret;
+}
+
+int pm_scandir(const char *dir, struct dirent ***namelist,
+            int (*select)(const struct dirent *),
+            int (*compar)(const void *, const void *))
+{
+  DIR *d;
+  struct dirent *entry;
+  size_t entry_sz;
+  int idx = 0;
+
+  *namelist = NULL;
+
+  if ((d = opendir(dir)) == NULL) return ERR;
+
+  while ((entry = readdir(d))) {
+    if (!select || (select && (*select)(entry))) {
+      *namelist = (struct dirent **) realloc((void *)(*namelist), (size_t)((idx + 1) * sizeof(struct dirent *)));
+
+      if (*namelist == NULL) {
+         closedir(d);
+         return ERR;
+      }
+
+      entry_sz = sizeof(struct dirent) - sizeof(entry->d_name) + strlen(entry->d_name) + 1;
+      (*namelist)[idx] = (struct dirent *) malloc(entry_sz);
+
+      if ((*namelist)[idx] == NULL) {
+        closedir(d);
+        return ERR;
+      }
+
+      memcpy((*namelist)[idx], entry, entry_sz);
+      idx++;
+    }
+  }
+
+  if (closedir(d)) return ERR;
+  if (idx && (compar != NULL))
+    qsort((void *)(*namelist), (size_t) idx, sizeof(struct dirent *), compar);
+
+  return idx;
+}
+
+void pm_scandir_free(struct dirent ***namelist, int num)
+{
+  int idx;
+
+  if (*namelist) {
+    for (idx = 0; idx < num; idx++) free((*namelist)[idx]);
+
+    free((*namelist));
+    *namelist = NULL;
+  }
+}
+
+int pm_alphasort(const void *a, const void *b)
+{
+  const struct dirent *dira = a;
+  const struct dirent *dirb = b;
+
+  return(strcmp(dira->d_name, dirb->d_name));
 }

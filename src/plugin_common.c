@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -23,6 +23,7 @@
 
 /* includes */
 #include "pmacct.h"
+#include "addr.h"
 #include "pmacct-data.h"
 #include "plugin_common.h"
 #include "ip_flow.h"
@@ -67,9 +68,9 @@ void P_init_default_values()
 
   if (!config.sql_refresh_time) config.sql_refresh_time = DEFAULT_PLUGIN_COMMON_REFRESH_TIME;
   if (!config.print_cache_entries) config.print_cache_entries = PRINT_CACHE_ENTRIES;
-  if (!config.sql_max_writers) config.sql_max_writers = DEFAULT_PLUGIN_COMMON_WRITERS_NO;
+  if (!config.dump_max_writers) config.dump_max_writers = DEFAULT_PLUGIN_COMMON_WRITERS_NO;
 
-  dump_writers.list = malloc(config.sql_max_writers * sizeof(pid_t));
+  dump_writers.list = malloc(config.dump_max_writers * sizeof(pid_t));
   dump_writers_init();
 
   pp_size = sizeof(struct pkt_primitives);
@@ -811,14 +812,14 @@ void P_init_historical_acct(time_t now)
   memset(&new_basetime, 0, sizeof(new_basetime));
 }
 
-void P_init_refresh_deadline(time_t *rd)
+void P_init_refresh_deadline(time_t *now, int refresh_time, int startup_delay, char *roundoff)
 {
   time_t t;
 
-  t = roundoff_time(*rd, config.sql_history_roundoff);
-  while ((t+config.sql_refresh_time) < *rd) t += config.sql_refresh_time;
-  *rd = t;
-  *rd += (config.sql_refresh_time+config.sql_startup_delay); /* it's a deadline not a basetime */
+  t = roundoff_time((*now), roundoff);
+  while ((t + refresh_time) < (*now)) t += refresh_time;
+  *now = t;
+  *now += (refresh_time + startup_delay); /* it's a deadline not a basetime */
 }
 
 void P_eval_historical_acct(struct timeval *stamp, struct timeval *basetime, time_t timeslot)

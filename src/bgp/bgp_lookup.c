@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -24,6 +24,10 @@
 
 /* includes */
 #include "pmacct.h"
+#include "plugin_hooks.h"
+#include "pmacct-data.h"
+#include "pkt_handlers.h"
+#include "addr.h"
 #include "bgp.h"
 
 void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
@@ -43,7 +47,6 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
 #if defined ENABLE_IPV6
   struct in6_addr pref6;
 #endif
-  int saved_table_per_peer_buckets, saved_cap_add_paths;
   safi_t safi;
   rd_t rd;
 
@@ -63,7 +66,7 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
 
   memset(&rd, 0, sizeof(rd));
 
-  if (pptrs->bta) {
+  if (pptrs->bta || pptrs->bta2) {
     sa = &sa_local;
     if (pptrs->bta_af == ETHERTYPE_IP) {
       sa->sa_family = AF_INET;
@@ -86,7 +89,7 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
 #endif
   }
 
-  start_again:
+  start_again_follow_default:
 
   peer = bms->bgp_lookup_find_peer(sa, xs_entry, pptrs->l3_proto, compare_bgp_port);
   pptrs->bgp_peer = (char *) peer;
@@ -102,8 +105,8 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
       
       /* note: call to [NF|SF]_peer_dst_ip_handler for the purpose of
 	 code re-use effectively is defeating the concept of libbgp */
-      if (config.acct_type == ACCT_NF) NF_peer_dst_ip_handler(NULL, pptrs, &pbgp_ptr);
-      else if (config.acct_type == ACCT_SF) SF_peer_dst_ip_handler(NULL, pptrs, &pbgp_ptr);
+      if (config.acct_type == ACCT_NF) NF_peer_dst_ip_handler(NULL, pptrs, (char **)&pbgp_ptr);
+      else if (config.acct_type == ACCT_SF) SF_peer_dst_ip_handler(NULL, pptrs, (char **)&pbgp_ptr);
 
       memcpy(&peer_dst_ip, &pbgp.peer_dst_ip, sizeof(struct host_addr));
     }
@@ -113,6 +116,9 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
       memcpy(&rd, &pptrs->bitr, sizeof(rd));
     }
 
+    /* XXX: can be further optimized for the case of no SAFI_UNICAST rib */
+    start_again_mpls_label:
+
     if (pptrs->l3_proto == ETHERTYPE_IP) {
       if (!pptrs->bgp_src) {
 	memset(&nmct2, 0, sizeof(struct node_match_cmp_term2));
@@ -120,20 +126,12 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
 	nmct2.rd = &rd;
 	nmct2.peer_dst_ip = NULL;
 
-	saved_table_per_peer_buckets = bms->table_per_peer_buckets; 
-	bms->table_per_peer_buckets = 1;
-	saved_cap_add_paths = peer->cap_add_paths;
-	peer->cap_add_paths = FALSE;
-
         memcpy(&pref4, &((struct my_iphdr *)pptrs->iph_ptr)->ip_src, sizeof(struct in_addr));
 	bgp_node_match_ipv4(inter_domain_routing_db->rib[AFI_IP][safi],
 			    &pref4, (struct bgp_peer *) pptrs->bgp_peer,
 		     	    bgp_route_info_modulo_pathid,
 			    bms->bgp_lookup_node_match_cmp, &nmct2,
 			    &result, &info);
-
-	bms->table_per_peer_buckets = saved_table_per_peer_buckets;
-	peer->cap_add_paths = saved_cap_add_paths;
       }
 
       if (!pptrs->bgp_src_info && result) {
@@ -176,11 +174,6 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
         nmct2.rd = &rd;
         nmct2.peer_dst_ip = NULL;
 
-        saved_table_per_peer_buckets = bms->table_per_peer_buckets;
-        bms->table_per_peer_buckets = 1;
-        saved_cap_add_paths = peer->cap_add_paths;
-        peer->cap_add_paths = FALSE;
-
         memcpy(&pref6, &((struct ip6_hdr *)pptrs->iph_ptr)->ip6_src, sizeof(struct in6_addr));
 	bgp_node_match_ipv6(inter_domain_routing_db->rib[AFI_IP6][safi],
 		            &pref6, (struct bgp_peer *) pptrs->bgp_peer,
@@ -222,6 +215,19 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
       }
     }
 #endif
+
+    if ((!pptrs->bgp_src || !pptrs->bgp_dst) && safi != SAFI_MPLS_LABEL) {
+      if (pptrs->l3_proto == ETHERTYPE_IP && inter_domain_routing_db->rib[AFI_IP][SAFI_MPLS_LABEL]) {
+        safi = SAFI_MPLS_LABEL;
+        goto start_again_mpls_label;
+      }
+#if defined ENABLE_IPV6
+      else if (pptrs->l3_proto == ETHERTYPE_IPV6 && inter_domain_routing_db->rib[AFI_IP6][SAFI_MPLS_LABEL]) {
+        safi = SAFI_MPLS_LABEL;
+        goto start_again_mpls_label;
+      }
+#endif
+    }
 
     if (follow_default && safi != SAFI_MPLS_VPN) {
       default_node = NULL;
@@ -276,7 +282,7 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
               memset(sa, 0, sizeof(struct sockaddr));
               sa->sa_family = AF_INET;
               memcpy(&((struct sockaddr_in *)sa)->sin_addr, &info->attr->mp_nexthop.address.ipv4, 4);
-	      goto start_again;
+	      goto start_again_follow_default;
             }
 #if defined ENABLE_IPV6
             else if (info->attr->mp_nexthop.family == AF_INET6) {
@@ -284,7 +290,7 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
               memset(sa, 0, sizeof(struct sockaddr));
               sa->sa_family = AF_INET6;
               ip6_addr_cpy(&((struct sockaddr_in6 *)sa)->sin6_addr, &info->attr->mp_nexthop.address.ipv6);
-              goto start_again;
+              goto start_again_follow_default;
             }
 #endif
             else {
@@ -292,7 +298,7 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
               memset(sa, 0, sizeof(struct sockaddr));
               sa->sa_family = AF_INET;
               memcpy(&((struct sockaddr_in *)sa)->sin_addr, &info->attr->nexthop, 4);
-              goto start_again;
+              goto start_again_follow_default;
 	    }
 	  }
         }
@@ -350,7 +356,7 @@ void bgp_follow_nexthop_lookup(struct packet_ptrs *pptrs, int type)
   }
 
   if (nh_peer) {
-    modulo = bms->route_info_modulo(nh_peer, NULL);
+    modulo = bms->route_info_modulo(nh_peer, NULL, bms->table_per_peer_buckets);
 
     // XXX: to be optimized 
     if (bms->table_per_peer_hash == BGP_ASPATH_HASH_PATHID) modulo_max = bms->table_per_peer_buckets;
@@ -365,7 +371,7 @@ void bgp_follow_nexthop_lookup(struct packet_ptrs *pptrs, int type)
       struct host_addr peer_dst_ip;
       rd_t rd;
 
-      // XXX: rd and peer_dst_ip (add_paths capability) not supported
+      /* XXX: SAFI_MPLS_LABEL, SAFI_MPLS_VPN and peer_dst_ip (add_paths capability) not supported */
       memset(&peer_dst_ip, 0, sizeof(peer_dst_ip));
       memset(&rd, 0, sizeof(rd));
       memset(&nmct2, 0, sizeof(struct node_match_cmp_term2));
@@ -568,7 +574,8 @@ int bgp_lookup_node_match_cmp_bgp(struct bgp_info *info, struct node_match_cmp_t
   return TRUE;
 }
 
-void pkt_to_cache_legacy_bgp_primitives(struct cache_legacy_bgp_primitives *c, struct pkt_legacy_bgp_primitives *p, pm_cfgreg_t what_to_count)
+void pkt_to_cache_legacy_bgp_primitives(struct cache_legacy_bgp_primitives *c, struct pkt_legacy_bgp_primitives *p,
+					pm_cfgreg_t what_to_count, pm_cfgreg_t what_to_count_2)
 {
   if (c && p) {
     if (what_to_count & COUNT_STD_COMM) {
@@ -596,6 +603,20 @@ void pkt_to_cache_legacy_bgp_primitives(struct cache_legacy_bgp_primitives *c, s
       if (c->ext_comms) {
         free(c->ext_comms);
         c->ext_comms = NULL;
+      }
+    }
+
+    if (what_to_count_2 & COUNT_LRG_COMM) {
+      if (!c->lrg_comms) {
+        c->lrg_comms = malloc(MAX_BGP_LRG_COMMS);
+        if (!c->lrg_comms) goto malloc_failed;
+      }
+      memcpy(c->lrg_comms, p->lrg_comms, MAX_BGP_LRG_COMMS);
+    }
+    else {
+      if (c->lrg_comms) {
+        free(c->lrg_comms);
+        c->lrg_comms = NULL;
       }
     }
 
@@ -641,6 +662,20 @@ void pkt_to_cache_legacy_bgp_primitives(struct cache_legacy_bgp_primitives *c, s
       }
     }
 
+    if (what_to_count_2 & COUNT_SRC_LRG_COMM) {
+      if (!c->src_lrg_comms) {
+        c->src_lrg_comms = malloc(MAX_BGP_LRG_COMMS);
+        if (!c->src_lrg_comms) goto malloc_failed;
+      }
+      memcpy(c->src_lrg_comms, p->src_lrg_comms, MAX_BGP_LRG_COMMS);
+    }
+    else {
+      if (c->src_lrg_comms) {
+        free(c->src_lrg_comms);
+        c->src_lrg_comms = NULL;
+      }
+    }
+
     if (what_to_count & COUNT_SRC_AS_PATH) {
       if (!c->src_as_path) {
         c->src_as_path = malloc(MAX_BGP_ASPATH);
@@ -669,10 +704,12 @@ void cache_to_pkt_legacy_bgp_primitives(struct pkt_legacy_bgp_primitives *p, str
 
     if (c->std_comms) memcpy(p->std_comms, c->std_comms, MAX_BGP_STD_COMMS);
     if (c->ext_comms) memcpy(p->ext_comms, c->ext_comms, MAX_BGP_EXT_COMMS);
+    if (c->lrg_comms) memcpy(p->lrg_comms, c->lrg_comms, MAX_BGP_LRG_COMMS);
     if (c->as_path) memcpy(p->as_path, c->as_path, MAX_BGP_ASPATH);
 
     if (c->src_std_comms) memcpy(p->src_std_comms, c->src_std_comms, MAX_BGP_STD_COMMS);
     if (c->src_ext_comms) memcpy(p->src_ext_comms, c->src_ext_comms, MAX_BGP_EXT_COMMS);
+    if (c->src_lrg_comms) memcpy(p->src_lrg_comms, c->src_lrg_comms, MAX_BGP_LRG_COMMS);
     if (c->src_as_path) memcpy(p->src_as_path, c->src_as_path, MAX_BGP_ASPATH);
   }
 }
@@ -684,10 +721,12 @@ void free_cache_legacy_bgp_primitives(struct cache_legacy_bgp_primitives **c)
   if (c && *c) {
     if (clbgp->std_comms) free(clbgp->std_comms);
     if (clbgp->ext_comms) free(clbgp->ext_comms);
+    if (clbgp->lrg_comms) free(clbgp->lrg_comms);
     if (clbgp->as_path) free(clbgp->as_path);
 
     if (clbgp->src_std_comms) free(clbgp->src_std_comms);
     if (clbgp->src_ext_comms) free(clbgp->src_ext_comms);
+    if (clbgp->src_lrg_comms) free(clbgp->src_lrg_comms);
     if (clbgp->src_as_path) free(clbgp->src_as_path);
 
     memset(clbgp, 0, sizeof(struct cache_legacy_bgp_primitives));
@@ -696,14 +735,14 @@ void free_cache_legacy_bgp_primitives(struct cache_legacy_bgp_primitives **c)
   }
 }
 
-u_int32_t bgp_route_info_modulo_pathid(struct bgp_peer *peer, path_id_t *path_id)
+u_int32_t bgp_route_info_modulo_pathid(struct bgp_peer *peer, path_id_t *path_id, int per_peer_buckets)
 {
   struct bgp_misc_structs *bms = bgp_select_misc_db(peer->type);
   path_id_t local_path_id = 1;
 
   if (path_id && *path_id) local_path_id = *path_id;
 
-  return (((peer->fd * bms->table_per_peer_buckets) +
-          ((local_path_id - 1) % bms->table_per_peer_buckets)) %
-          (bms->table_peer_buckets * bms->table_per_peer_buckets));
+  return (((peer->fd * per_peer_buckets) +
+          ((local_path_id - 1) % per_peer_buckets)) %
+          (bms->table_peer_buckets * per_peer_buckets));
 }

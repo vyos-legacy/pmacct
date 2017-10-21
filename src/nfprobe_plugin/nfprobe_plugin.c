@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -51,6 +51,7 @@
  */
 
 #include "common.h"
+#include "addr.h"
 #include "sys-tree.h"
 #include "convtime.h"
 #include "../nfacctd.h"
@@ -975,6 +976,11 @@ check_expired(struct FLOWTRACK *ft, struct NETFLOW_TARGET *target, int ex, u_int
 		if (target != NULL) {
 			if (target->fd == -1) {
 			  Log(LOG_WARNING, "WARN ( %s/%s ): No connection to collector, discarding flows\n", config.name, config.type);
+			  for (i = 0; i < num_expired; i++) {
+				  free_flow_allocs(expired_flows[i]);
+				  free(expired_flows[i]);
+			  }
+			  free(expired_flows);
 			  return -1;
                         }
 			else {
@@ -1552,7 +1558,6 @@ sort_version:
   }
 
   for(;;) {
-poll_again:
     status->wakeup = TRUE;
 
     pfd.fd = pipe_fd;
@@ -1569,7 +1574,14 @@ poll_again:
     }
 #endif
 
-    if (ret < 0) goto poll_again;
+    /* Flags set by signal handlers or control socket */
+    if (graceful_shutdown_request) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): Shutting down on user request.\n", config.name, config.type);
+      check_expired(&flowtrack, &target, CE_EXPIRE_ALL, engine_type, engine_id);
+      goto exit_lane;
+    }
+
+    if (ret < 0) continue;
 
     /* Fatal error from per-packet functions */
     if (cb_ctxt.fatal) {
@@ -1741,13 +1753,6 @@ expiry_check:
 	force_expire(&flowtrack, flowtrack.num_flows - max_flows);
 	goto expiry_check;
       }
-    }
-    
-    /* Flags set by signal handlers or control socket */
-    if (graceful_shutdown_request) {
-      Log(LOG_WARNING, "WARN ( %s/%s ): Shutting down on user request.\n", config.name, config.type);
-      check_expired(&flowtrack, &target, CE_EXPIRE_ALL, engine_type, engine_id);
-      goto exit_lane;
     }
   }
 		

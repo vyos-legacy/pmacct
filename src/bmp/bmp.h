@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -112,6 +112,11 @@ struct bmp_peer {
   struct log_notification missing_peer_up;
 };
 
+struct bgp_msg_extra_data_bmp {
+  u_int8_t is_post;
+  u_int8_t is_2b_asn;
+};
+
 #define BMP_STATS_TYPE0		0 /* (32-bit Counter) Number of prefixes rejected by inbound policy */
 #define BMP_STATS_TYPE1		1 /* (32-bit Counter) Number of (known) duplicate prefix advertisements */
 #define BMP_STATS_TYPE2		2 /* (32-bit Counter) Number of (known) duplicate withdraws */
@@ -163,6 +168,8 @@ struct bmp_data {
   struct host_addr bgp_id;
   u_int32_t peer_asn;
   u_int8_t peer_type;
+  u_int8_t is_post;
+  u_int8_t is_2b_asn;
   struct timeval tstamp;
 };
 
@@ -191,7 +198,7 @@ EXT void bmp_prepare_daemon();
 #define EXT
 #endif
 EXT struct bmp_peer *bmp_peers;
-EXT u_int32_t (*bmp_route_info_modulo)(struct bgp_peer *, path_id_t *);
+EXT u_int32_t (*bmp_route_info_modulo)(struct bgp_peer *, path_id_t *, int);
 
 EXT struct bgp_rt_structs *bmp_routing_db;
 EXT struct bgp_misc_structs *bmp_misc_db;

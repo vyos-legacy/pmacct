@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -27,11 +27,12 @@
 #include "kafka_common.h"
 
 /* Functions */
-void p_kafka_init_host(struct p_kafka_host *kafka_host)
+void p_kafka_init_host(struct p_kafka_host *kafka_host, char *config_file)
 {
   if (kafka_host) {
     memset(kafka_host, 0, sizeof(struct p_kafka_host));
     P_broker_timers_set_retry_interval(&kafka_host->btimers, PM_KAFKA_DEFAULT_RETRY);
+    p_kafka_set_config_file(kafka_host, config_file);
 
     kafka_host->cfg = rd_kafka_conf_new();
     if (kafka_host->cfg) {
@@ -39,6 +40,18 @@ void p_kafka_init_host(struct p_kafka_host *kafka_host)
       rd_kafka_conf_set_error_cb(kafka_host->cfg, p_kafka_msg_error);
       rd_kafka_conf_set_dr_cb(kafka_host->cfg, p_kafka_msg_delivered);
       rd_kafka_conf_set_opaque(kafka_host->cfg, kafka_host);
+      p_kafka_apply_global_config(kafka_host);
+
+      if (config.debug) {
+	const char **res;
+	size_t res_len, idx;
+
+	res = rd_kafka_conf_dump(kafka_host->cfg, &res_len);
+	for (idx = 0; idx < res_len; idx += 2)
+	  Log(LOG_DEBUG, "DEBUG ( %s/%s ): librdkafka global config: %s = %s\n", config.name, config.type, res[idx], res[idx + 1]);
+
+	rd_kafka_conf_dump_free(res, res_len);
+      }
     }
   }
 }
@@ -55,6 +68,18 @@ void p_kafka_set_topic(struct p_kafka_host *kafka_host, char *topic)
 {
   if (kafka_host) {
     kafka_host->topic_cfg = rd_kafka_topic_conf_new();
+    p_kafka_apply_topic_config(kafka_host);
+
+    if (config.debug) {
+      const char **res;
+      size_t res_len, idx;
+
+      res = rd_kafka_topic_conf_dump(kafka_host->topic_cfg, &res_len);
+      for (idx = 0; idx < res_len; idx += 2)
+        Log(LOG_DEBUG, "DEBUG ( %s/%s ): librdkafka '%s' topic config: %s = %s\n", config.name, config.type, topic, res[idx], res[idx + 1]);
+
+      rd_kafka_conf_dump_free(res, res_len);
+    }
 
     /* destroy current allocation before making a new one */
     if (kafka_host->topic) p_kafka_unset_topic(kafka_host);
@@ -62,10 +87,6 @@ void p_kafka_set_topic(struct p_kafka_host *kafka_host, char *topic)
     if (kafka_host->rk && kafka_host->topic_cfg) {
       kafka_host->topic = rd_kafka_topic_new(kafka_host->rk, topic, kafka_host->topic_cfg);
       kafka_host->topic_cfg = NULL; /* rd_kafka_topic_new() destroys conf as per rdkafka.h */
-
-      /* give it some time for the topic to get created, if needed */
-      sleep(1);
-      rd_kafka_poll(kafka_host->rk, 100);
     }
   }
 }
@@ -112,9 +133,7 @@ void p_kafka_set_broker(struct p_kafka_host *kafka_host, char *host, int port)
       Log(LOG_WARNING, "WARN ( %s/%s ): Invalid 'kafka_broker_host' or 'kafka_broker_port' specified (%s).\n",
 	  config.name, config.type, kafka_host->broker);
     }
-    else {
-      if (multiple_brokers) Log(LOG_INFO, "INFO ( %s/%s ): %u brokers successfully added.\n", config.name, config.type, ret); 
-    }
+    else Log(LOG_DEBUG, "DEBUG ( %s/%s ): %u broker(s) successfully added.\n", config.name, config.type, ret); 
   }
 }
 
@@ -132,7 +151,11 @@ int p_kafka_get_content_type(struct p_kafka_host *kafka_host)
 
 void p_kafka_set_partition(struct p_kafka_host *kafka_host, int partition)
 {
-  if (kafka_host) kafka_host->partition = partition;
+  if (kafka_host) {
+    if (!partition) kafka_host->partition = RD_KAFKA_PARTITION_UA; 
+    else if (partition == FALSE_NONZERO) kafka_host->partition = 0;
+    else kafka_host->partition = partition;
+  }
 }
 
 int p_kafka_get_partition(struct p_kafka_host *kafka_host)
@@ -154,7 +177,145 @@ char *p_kafka_get_key(struct p_kafka_host *kafka_host)
 {
   if (kafka_host) return kafka_host->key;
 
-  return FALSE;
+  return NULL;
+}
+
+void p_kafka_set_fallback(struct p_kafka_host *kafka_host, char *fallback)
+{
+  int res;
+  char errstr[SRVBUFLEN];
+
+  if (kafka_host && kafka_host->cfg && fallback) {
+    res = rd_kafka_conf_set(kafka_host->cfg, "api.version.request", "false", errstr, sizeof(errstr));
+    if (res != RD_KAFKA_CONF_OK)
+      Log(LOG_WARNING, "WARN ( %s/%s ): p_kafka_set_fallback(): api.version.request=false failed: %s\n",
+	  config.name, config.type, errstr);
+
+    res = rd_kafka_conf_set(kafka_host->cfg, "broker.version.fallback", fallback, errstr, sizeof(errstr));
+    if (res != RD_KAFKA_CONF_OK)
+      Log(LOG_WARNING, "WARN ( %s/%s ): p_kafka_set_fallback(): broker.version.fallback=%s failed: %s\n",
+	  config.name, config.type, fallback, errstr);
+  }
+}
+
+void p_kafka_set_config_file(struct p_kafka_host *kafka_host, char *config_file)
+{
+  if (kafka_host) {
+    kafka_host->config_file = config_file;
+  }
+}
+
+int p_kafka_parse_config_entry(char *buf, char *type, char **key, char **value)
+{
+  char *value_ptr, *token;
+  int index, type_match = FALSE;
+
+  if (buf && type && key && value) {
+    value_ptr = buf;
+    (*key) = NULL;
+    (*value) = NULL;
+    index = 0;
+
+    while (token = extract_token(&value_ptr, ',')) {
+      index++;
+      trim_spaces(token);
+
+      if (index == 1) {
+	lower_string(token);
+	if (!strcmp(token, type)) type_match = TRUE;
+	else break;
+      }
+      else if (index == 2) {
+	(*key) = token;
+	break;
+      }
+    }
+
+    if (strlen(value_ptr)) {
+      trim_spaces(value_ptr);
+      (*value) = value_ptr;
+      index++;
+    }
+
+    if (type_match && index != 3) return ERR;
+  }
+  else return ERR;
+
+  return type_match;
+}
+
+void p_kafka_apply_global_config(struct p_kafka_host *kafka_host)
+{
+  FILE *file;
+  char buf[SRVBUFLEN], errstr[SRVBUFLEN], *key, *value;
+  int lineno = 1, ret;
+
+  if (kafka_host && kafka_host->config_file && kafka_host->cfg) {
+    if ((file = fopen(kafka_host->config_file, "r")) == NULL) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] file not found. librdkafka global config not loaded.\n", config.name, config.type, kafka_host->config_file);
+      return;
+    }
+    else Log(LOG_INFO, "INFO ( %s/%s ): [%s] Reading librdkafka global config.\n", config.name, config.type, kafka_host->config_file);
+
+    while (!feof(file)) {
+      if (fgets(buf, SRVBUFLEN, file)) {
+	if ((ret = p_kafka_parse_config_entry(buf, "global", &key, &value)) > 0) {
+	  ret = rd_kafka_conf_set(kafka_host->cfg, key, value, errstr, sizeof(errstr));
+	  if (ret != RD_KAFKA_CONF_OK) {
+	    Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] key=%s value=%s failed: %s\n",
+		config.name, config.type, kafka_host->config_file, lineno, key, value, errstr);
+	  }
+        }
+	else {
+	  if (ret == ERR) {
+	    Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] Line malformed. Ignored.", config.name, config.type, kafka_host->config_file, lineno);
+	    continue;
+	  }
+	}
+      }
+
+      lineno++;
+    }
+
+    fclose(file);
+  }
+}
+
+void p_kafka_apply_topic_config(struct p_kafka_host *kafka_host)
+{
+  FILE *file;
+  char buf[SRVBUFLEN], errstr[SRVBUFLEN], *key, *value;
+  int lineno = 1, ret;
+
+  if (kafka_host && kafka_host->config_file && kafka_host->topic_cfg) {
+    if ((file = fopen(kafka_host->config_file, "r")) == NULL) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] file not found. librdkafka topic configuration not loaded.\n", config.name, config.type, kafka_host->config_file);
+      return;
+    }
+    else Log(LOG_INFO, "INFO ( %s/%s ): [%s] Reading librdkafka topic configuration.\n", config.name, config.type, kafka_host->config_file);
+
+    while (!feof(file)) {
+      if (fgets(buf, SRVBUFLEN, file)) {
+        if ((ret = p_kafka_parse_config_entry(buf, "topic", &key, &value)) > 0) {
+          ret = rd_kafka_topic_conf_set(kafka_host->topic_cfg, key, value, errstr, sizeof(errstr));
+          if (ret != RD_KAFKA_CONF_OK) {
+            Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] key=%s value=%s failed: %s\n",
+                config.name, config.type, kafka_host->config_file, lineno, key, value, errstr);
+          }
+        }
+        else {
+          if (ret == ERR) {
+            Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] Line malformed. Ignored.", config.name, config.type, kafka_host->config_file, lineno);
+            continue;
+          }
+        }
+      }
+
+      lineno++;
+    }
+
+    fclose(file);
+  }
 }
 
 void p_kafka_logger(const rd_kafka_t *rk, int level, const char *fac, const char *buf)

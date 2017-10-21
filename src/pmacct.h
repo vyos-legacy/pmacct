@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -45,6 +45,10 @@
 #include <malloc.h>
 #endif
 
+#if defined (HAVE_ZLIB)
+#include <zlib.h>
+#endif
+
 #include <ctype.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -52,6 +56,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
+#include <net/if.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -61,6 +66,8 @@
 #include <syslog.h>
 #include <sys/resource.h>
 #include <search.h>
+#include <dirent.h>
+#include <limits.h>
 
 #include <sys/mman.h>
 #if !defined (MAP_ANONYMOUS)
@@ -204,6 +211,14 @@ typedef struct {
   u_int16_t off;
 } pm_hash_serial_t;
 
+#if (defined WITH_JANSSON)
+#include <jansson.h>
+#endif
+
+#if (defined WITH_AVRO)
+#include <avro.h>
+#endif
+
 #include "pmacct-defines.h"
 #include "network.h"
 #include "pretag.h"
@@ -269,7 +284,7 @@ struct _primitives_matrix_struct {
   u_int8_t sfacctd;
   u_int8_t pmtelemetryd;
   u_int8_t pmbgpd;
-  u_int8_t pmbgmd;
+  u_int8_t pmbmpd;
   char desc[PRIMITIVE_DESC_LEN];
 };
 
@@ -283,12 +298,6 @@ struct largebuf {
   u_char base[LARGEBUFLEN];
   u_char *end;
   u_char *ptr;
-};
-
-struct child_ctl {
-  u_int16_t active;
-  u_int16_t retired;
-  u_int32_t flags;
 };
 
 struct child_ctl2 {
@@ -353,11 +362,21 @@ size_t strlcpy(char *, const char *, size_t);
 #endif
 
 #if (defined WITH_JANSSON)
-#include <jansson.h>
 #if (!defined HAVE_JSON_OBJECT_UPDATE_MISSING)
 int json_object_update_missing(json_t *, json_t *);
 #endif
 #endif
+
+void
+#ifdef __STDC__
+pm_setproctitle(const char *fmt, ...);
+#else /* __STDC__ */
+#error
+pm_setproctitle(fmt, va_alist);
+#endif /* __STDC__ */
+
+void
+initsetproctitle(int, char**, char**);
 
 /* global variables */
 #if (!defined __PMACCTD_C) && (!defined __NFACCTD_C) && (!defined __SFACCTD_C) && (!defined __UACCTD_C) && (!defined __PMTELEMETRYD_C) && (!defined __PMBGPD_C) && (!defined __PMBMPD_C)
@@ -371,7 +390,6 @@ EXT int reload_map_bgp_thread, reload_log_bgp_thread, reload_log_bmp_thread;
 EXT int reload_log_sf_cnt, reload_log_telemetry_thread;
 EXT int data_plugins, tee_plugins;
 EXT struct timeval reload_map_tstamp;
-EXT struct child_ctl sql_writers;
 EXT struct child_ctl2 dump_writers;
 EXT int debug;
 EXT struct configuration config; /* global configuration structure */

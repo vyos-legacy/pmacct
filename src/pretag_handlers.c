@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -22,6 +22,7 @@
 #define __PRETAG_HANDLERS_C
 
 #include "pmacct.h"
+#include "addr.h"
 #include "bgp/bgp_packet.h"
 #include "bgp/bgp.h"
 #include "nfacctd.h"
@@ -31,6 +32,9 @@
 #include "net_aggr.h"
 #include "bgp/bgp.h"
 #include "pmacct-data.h"
+#include "plugin_hooks.h"
+#include "pkt_handlers.h"
+#include "util.h"
 
 int PT_map_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
@@ -186,10 +190,22 @@ int PT_map_label_handler(char *filename, struct id_entry *e, char *value, struct
 
 int PT_map_ip_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
+  int x = 0;
+
   if (!str_to_addr_mask(value, &e->key.agent_ip.a, &e->key.agent_mask)) {
     Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Bad IP address or prefix '%s'.\n", config.name, config.type, filename, value);
     return TRUE;
   }
+
+  for (x = 0; e->func[x]; x++) {
+    if (e->func_type[x] == PRETAG_IP) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Multiple 'ip' clauses part of the same statement.\n", config.name, config.type, filename);
+      return TRUE;
+    }
+  }
+
+  e->func[x] = pretag_dummy_ip_handler; 
+  if (e->func[x]) e->func_type[x] = PRETAG_IP;
 
   return FALSE;
 }
@@ -393,6 +409,33 @@ int BITR_map_mpls_label_bottom_handler(char *filename, struct id_entry *e, char 
   return FALSE;
 }
 
+int BITR_map_mpls_vpn_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
+{
+  u_int32_t tmp;
+  int x = 0;
+  char *endptr;
+
+  e->key.mpls_vpn_id.neg = pt_check_neg(&value, &((struct id_table *) req->key_value_table)->flags);
+  e->key.mpls_vpn_id.n = strtoul(value, &endptr, 10);
+
+  if (!e->key.mpls_vpn_id.n) {
+    Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Bad MPLS VPN ID value '%u'.\n", config.name, config.type, filename, e->key.mpls_vpn_id.n);
+    return TRUE;
+  }
+
+  for (x = 0; e->func[x]; x++) {
+    if (e->func_type[x] == PRETAG_MPLS_VPN_ID) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Multiple 'mpls_vpn_id' clauses part of the same statement.\n", config.name, config.type, filename);
+      return TRUE;
+    }
+  }
+
+  if (config.acct_type == ACCT_NF) e->func[x] = BITR_mpls_vpn_id_handler;
+  if (e->func[x]) e->func_type[x] = PRETAG_MPLS_VPN_ID;
+
+  return FALSE;
+}
+
 int PT_map_engine_type_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int x = 0, j, len;
@@ -470,8 +513,9 @@ int PT_map_filter_handler(char *filename, struct id_entry *e, char *value, struc
   int x, link_type;
 
   if (acct_type == MAP_BGP_TO_XFLOW_AGENT) {
-    if (strncmp(value, "ip", 2) && strncmp(value, "ip6", 3)) {
-      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] bgp_agent_map filter supports only 'ip' and 'ip6' keywords\n", config.name, config.type, filename);
+    if (strncmp(value, "ip", 2) && strncmp(value, "ip6", 3) && strncmp(value, "vlan and ip", 11) && strncmp(value, "vlan and ip6", 12)) {
+      Log(LOG_WARNING, "WARN ( %s/%s ): [%s] bgp_agent_map filter supports only 'ip', 'ip6', 'vlan and ip' and 'vlan and ip6' keywords\n",
+	  config.name, config.type, filename);
       return TRUE;
     }
   }
@@ -1000,7 +1044,7 @@ int PT_map_src_mac_handler(char *filename, struct id_entry *e, char *value, stru
 
   e->key.src_mac.neg = pt_check_neg(&value, &((struct id_table *) req->key_value_table)->flags);
 
-  if (string_etheraddr(value, &e->key.src_mac.a)) {
+  if (string_etheraddr(value, e->key.src_mac.a)) {
     Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Bad source MAC address '%s'.\n", config.name, config.type, filename, value);
     return TRUE;
   }
@@ -1027,7 +1071,7 @@ int PT_map_dst_mac_handler(char *filename, struct id_entry *e, char *value, stru
 
   e->key.dst_mac.neg = pt_check_neg(&value, &((struct id_table *) req->key_value_table)->flags);
 
-  if (string_etheraddr(value, &e->key.dst_mac.a)) {
+  if (string_etheraddr(value, e->key.dst_mac.a)) {
     Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Bad destination MAC address '%s'.\n", config.name, config.type, filename, value);
     return TRUE;
   }
@@ -1049,6 +1093,8 @@ int PT_map_dst_mac_handler(char *filename, struct id_entry *e, char *value, stru
 int PT_map_vlan_id_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   int tmp, x = 0;
+
+  if (req->ptm_c.load_ptm_plugin == PLUGIN_ID_TEE) req->ptm_c.load_ptm_res = TRUE;
 
   e->key.vlan_id.neg = pt_check_neg(&value, &((struct id_table *) req->key_value_table)->flags);
 
@@ -1200,6 +1246,11 @@ int PT_map_stack_handler(char *filename, struct id_entry *e, char *value, struct
   else if (!strncmp(value, "or", 2)) e->stack.func = PT_stack_logical_or;
   else Log(LOG_WARNING, "WARN ( %s/%s ): [%s] Unknown STACK operator: '%c'. Ignoring.\n", config.name, config.type, filename, value);
 
+  return FALSE;
+}
+
+int pretag_dummy_ip_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
   return FALSE;
 }
 
@@ -1921,6 +1972,8 @@ int pretag_mpls_vpn_rd_handler(struct packet_ptrs *pptrs, void *unused, void *e)
   struct bgp_info *info;
   int ret = -1;
 
+  /* XXX: no src_ret lookup? */
+
   if (dst_ret) {
     info = (struct bgp_info *) pptrs->bgp_dst_info;
     if (info && info->extra) {
@@ -2374,6 +2427,40 @@ int BITR_mpls_label_bottom_handler(struct packet_ptrs *pptrs, void *unused, void
   }
 }
 
+int BITR_mpls_vpn_id_handler(struct packet_ptrs *pptrs, void *unused, void *e)
+{
+  struct id_entry *entry = e;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
+  u_int32_t tmp32 = 0, label = 0;
+
+  switch(hdr->version) {
+  case 10:
+  case 9:
+    if (tpl->tpl[NF9_INGRESS_VRFID].len) {
+      memcpy(&tmp32, pptrs->f_data+tpl->tpl[NF9_INGRESS_VRFID].off, MIN(tpl->tpl[NF9_INGRESS_VRFID].len, 4));
+      label = ntohl(tmp32);
+
+      if (!memcmp(&entry->key.mpls_vpn_id.n, &label, 4))
+        return (FALSE | entry->key.mpls_vpn_id.neg);
+    }
+
+    if (tpl->tpl[NF9_EGRESS_VRFID].len) {
+      memcpy(&tmp32, pptrs->f_data+tpl->tpl[NF9_EGRESS_VRFID].off, MIN(tpl->tpl[NF9_EGRESS_VRFID].len, 4));
+      label = ntohl(tmp32);
+
+      if (!memcmp(&entry->key.mpls_vpn_id.n, &label, 4))
+        return (FALSE | entry->key.mpls_vpn_id.neg);
+    }
+
+    return (TRUE ^ entry->key.mpls_vpn_id.neg);
+    break;
+  default:
+    return (TRUE ^ entry->key.mpls_vpn_id.neg);
+    break;
+  }
+}
+
 int custom_primitives_map_name_handler(char *filename, struct id_entry *e, char *value, struct plugin_requests *req, int acct_type)
 {
   struct custom_primitives *table = (struct custom_primitives *) req->key_value_table;
@@ -2666,7 +2753,7 @@ int PT_map_index_entries_ip_handler(struct id_entry *e, pm_hash_serial_t *hash_s
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.agent_ip, &src_e->key.agent_ip, sizeof(pt_hostaddr_t));
-  hash_serial_append(hash_serializer, &src_e->key.agent_ip.a, sizeof(struct host_addr), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.agent_ip.a, sizeof(struct host_addr), TRUE);
 
   return FALSE;
 }
@@ -2678,7 +2765,7 @@ int PT_map_index_entries_input_handler(struct id_entry *e, pm_hash_serial_t *has
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.input, &src_e->key.input, sizeof(pt_uint32_t));
-  hash_serial_append(hash_serializer, &src_e->key.input.n, sizeof(u_int32_t), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.input.n, sizeof(u_int32_t), TRUE);
 
   return FALSE;
 }
@@ -2690,7 +2777,7 @@ int PT_map_index_entries_output_handler(struct id_entry *e, pm_hash_serial_t *ha
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.output, &src_e->key.output, sizeof(pt_uint32_t));
-  hash_serial_append(hash_serializer, &src_e->key.output.n, sizeof(u_int32_t), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.output.n, sizeof(u_int32_t), TRUE);
 
   return FALSE;
 }
@@ -2702,7 +2789,7 @@ int PT_map_index_entries_bgp_nexthop_handler(struct id_entry *e, pm_hash_serial_
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.bgp_nexthop, &src_e->key.bgp_nexthop, sizeof(pt_hostaddr_t));
-  hash_serial_append(hash_serializer, &src_e->key.bgp_nexthop.a, sizeof(struct host_addr), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.bgp_nexthop.a, sizeof(struct host_addr), TRUE);
 
   return FALSE;
 }
@@ -2714,7 +2801,7 @@ int PT_map_index_entries_src_as_handler(struct id_entry *e, pm_hash_serial_t *ha
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.src_as, &src_e->key.src_as, sizeof(pt_uint32_t));
-  hash_serial_append(hash_serializer, &src_e->key.src_as.n, sizeof(u_int32_t), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.src_as.n, sizeof(u_int32_t), TRUE);
 
   return FALSE;
 }
@@ -2726,7 +2813,7 @@ int PT_map_index_entries_dst_as_handler(struct id_entry *e, pm_hash_serial_t *ha
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.dst_as, &src_e->key.dst_as, sizeof(pt_uint32_t));
-  hash_serial_append(hash_serializer, &src_e->key.dst_as.n, sizeof(u_int32_t), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.dst_as.n, sizeof(u_int32_t), TRUE);
 
   return FALSE;
 }
@@ -2738,7 +2825,7 @@ int PT_map_index_entries_peer_src_as_handler(struct id_entry *e, pm_hash_serial_
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.peer_src_as, &src_e->key.peer_src_as, sizeof(pt_uint32_t));
-  hash_serial_append(hash_serializer, &src_e->key.peer_src_as.n, sizeof(u_int32_t), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.peer_src_as.n, sizeof(u_int32_t), TRUE);
 
   return FALSE;
 }
@@ -2750,7 +2837,7 @@ int PT_map_index_entries_peer_dst_as_handler(struct id_entry *e, pm_hash_serial_
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.peer_dst_as, &src_e->key.peer_dst_as, sizeof(pt_uint32_t));
-  hash_serial_append(hash_serializer, &src_e->key.peer_dst_as.n, sizeof(u_int32_t), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.peer_dst_as.n, sizeof(u_int32_t), TRUE);
 
   return FALSE;
 }
@@ -2762,7 +2849,7 @@ int PT_map_index_entries_mpls_vpn_rd_handler(struct id_entry *e, pm_hash_serial_
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.mpls_vpn_rd, &src_e->key.mpls_vpn_rd, sizeof(pt_rd_t));
-  hash_serial_append(hash_serializer, &src_e->key.mpls_vpn_rd.rd, sizeof(rd_t), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.mpls_vpn_rd.rd, sizeof(rd_t), TRUE);
 
   return FALSE;
 }
@@ -2774,7 +2861,19 @@ int PT_map_index_entries_mpls_label_bottom_handler(struct id_entry *e, pm_hash_s
   if (!e || !hash_serializer || !src_e) return TRUE;
 
   memcpy(&e->key.mpls_label_bottom, &src_e->key.mpls_label_bottom, sizeof(pt_uint32_t));
-  hash_serial_append(hash_serializer, &src_e->key.mpls_label_bottom.n, sizeof(u_int32_t), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.mpls_label_bottom.n, sizeof(u_int32_t), TRUE);
+
+  return FALSE;
+}
+
+int PT_map_index_entries_mpls_vpn_id_handler(struct id_entry *e, pm_hash_serial_t *hash_serializer, void *src)
+{
+  struct id_entry *src_e = (struct id_entry *) src;
+
+  if (!e || !hash_serializer || !src_e) return TRUE;
+
+  memcpy(&e->key.mpls_vpn_id, &src_e->key.mpls_vpn_id, sizeof(pt_uint32_t));
+  hash_serial_append(hash_serializer, (char *)&src_e->key.mpls_vpn_id.n, sizeof(u_int32_t), TRUE);
 
   return FALSE;
 }
@@ -2786,7 +2885,7 @@ int PT_map_index_entries_src_mac_handler(struct id_entry *e, pm_hash_serial_t *h
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.src_mac, &src_e->key.src_mac, sizeof(pt_etheraddr_t));
-  hash_serial_append(hash_serializer, &src_e->key.src_mac.a, ETH_ADDR_LEN, TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.src_mac.a, ETH_ADDR_LEN, TRUE);
 
   return FALSE;
 }
@@ -2798,7 +2897,7 @@ int PT_map_index_entries_dst_mac_handler(struct id_entry *e, pm_hash_serial_t *h
   if (!e || !hash_serializer || !src_e) return TRUE;
 
   memcpy(&e->key.dst_mac, &src_e->key.dst_mac, sizeof(pt_etheraddr_t));
-  hash_serial_append(hash_serializer, &src_e->key.dst_mac.a, ETH_ADDR_LEN, TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.dst_mac.a, ETH_ADDR_LEN, TRUE);
 
   return FALSE;
 }
@@ -2810,7 +2909,7 @@ int PT_map_index_entries_vlan_id_handler(struct id_entry *e, pm_hash_serial_t *h
   if (!e || !hash_serializer || !src_e) return TRUE; 
 
   memcpy(&e->key.vlan_id, &src_e->key.vlan_id, sizeof(pt_uint16_t));
-  hash_serial_append(hash_serializer, &src_e->key.vlan_id.n, sizeof(u_int16_t), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.vlan_id.n, sizeof(u_int16_t), TRUE);
 
   return FALSE;
 }
@@ -2822,7 +2921,7 @@ int PT_map_index_entries_cvlan_id_handler(struct id_entry *e, pm_hash_serial_t *
   if (!e || !hash_serializer || !src_e) return TRUE;
 
   memcpy(&e->key.cvlan_id, &src_e->key.cvlan_id, sizeof(pt_uint16_t));
-  hash_serial_append(hash_serializer, &src_e->key.cvlan_id.n, sizeof(u_int16_t), TRUE);
+  hash_serial_append(hash_serializer, (char *)&src_e->key.cvlan_id.n, sizeof(u_int16_t), TRUE);
 
   return FALSE;
 }
@@ -2835,7 +2934,7 @@ int PT_map_index_fdata_ip_handler(struct id_entry *e, pm_hash_serial_t *hash_ser
   u_int16_t port, j;
 
   if (config.acct_type == ACCT_NF) {
-    sa_to_addr(sa, &e->key.agent_ip.a, &port);
+    sa_to_addr((struct sockaddr *)sa, &e->key.agent_ip.a, &port);
   }
   else if (config.acct_type == ACCT_SF) {
     if (sample->agent_addr.type == SFLADDRESSTYPE_IP_V4) {
@@ -2851,7 +2950,7 @@ int PT_map_index_fdata_ip_handler(struct id_entry *e, pm_hash_serial_t *hash_ser
   }
   else return TRUE;
 
-  hash_serial_append(hash_serializer, &e->key.agent_ip.a, sizeof(struct host_addr), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.agent_ip.a, sizeof(struct host_addr), FALSE);
 
   return FALSE;
 }
@@ -2899,7 +2998,7 @@ int PT_map_index_fdata_input_handler(struct id_entry *e, pm_hash_serial_t *hash_
     e->key.input.n = pptrs->ifindex_in;
   }
 
-  hash_serial_append(hash_serializer, &e->key.input.n, sizeof(u_int32_t), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.input.n, sizeof(u_int32_t), FALSE);
 
   return FALSE;
 }
@@ -2947,7 +3046,7 @@ int PT_map_index_fdata_output_handler(struct id_entry *e, pm_hash_serial_t *hash
     e->key.output.n = pptrs->ifindex_out;
   }
 
-  hash_serial_append(hash_serializer, &e->key.output.n, sizeof(u_int32_t), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.output.n, sizeof(u_int32_t), FALSE);
 
   return FALSE;
 }
@@ -3032,7 +3131,7 @@ int PT_map_index_fdata_bgp_nexthop_handler(struct id_entry *e, pm_hash_serial_t 
     else return TRUE;
   }
 
-  hash_serial_append(hash_serializer, &e->key.bgp_nexthop.a, sizeof(struct host_addr), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.bgp_nexthop.a, sizeof(struct host_addr), FALSE);
 
   return FALSE;
 }
@@ -3085,7 +3184,7 @@ int PT_map_index_fdata_src_as_handler(struct id_entry *e, pm_hash_serial_t *hash
     else return TRUE;
   }
 
-  hash_serial_append(hash_serializer, &e->key.src_as.n, sizeof(u_int32_t), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.src_as.n, sizeof(u_int32_t), FALSE);
 
   return FALSE;
 }
@@ -3138,7 +3237,7 @@ int PT_map_index_fdata_dst_as_handler(struct id_entry *e, pm_hash_serial_t *hash
   }
   else return TRUE;
 
-  hash_serial_append(hash_serializer, &e->key.dst_as.n, sizeof(u_int32_t), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.dst_as.n, sizeof(u_int32_t), FALSE);
 
   return FALSE;
 }
@@ -3192,7 +3291,7 @@ int PT_map_index_fdata_peer_src_as_handler(struct id_entry *e, pm_hash_serial_t 
     }
   }
 
-  hash_serial_append(hash_serializer, &e->key.peer_src_as.n, sizeof(u_int32_t), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.peer_src_as.n, sizeof(u_int32_t), FALSE);
 
   return FALSE;
 }
@@ -3241,7 +3340,7 @@ int PT_map_index_fdata_peer_dst_as_handler(struct id_entry *e, pm_hash_serial_t 
     else return TRUE;
   }
 
-  hash_serial_append(hash_serializer, &e->key.peer_dst_as.n, sizeof(u_int32_t), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.peer_dst_as.n, sizeof(u_int32_t), FALSE);
 
   return FALSE;
 }
@@ -3249,38 +3348,49 @@ int PT_map_index_fdata_peer_dst_as_handler(struct id_entry *e, pm_hash_serial_t 
 int PT_map_index_fdata_mpls_vpn_rd_handler(struct id_entry *e, pm_hash_serial_t *hash_serializer, void *src)
 {
   struct packet_ptrs *pptrs = (struct packet_ptrs *) src;
-  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
-  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
-  SFSample *sample = (SFSample *) pptrs->f_data;
+  struct bgp_node *dst_ret = (struct bgp_node *) pptrs->bgp_dst;
+  struct bgp_peer *peer = (struct bgp_peer *) pptrs->bgp_peer;
+  struct bgp_info *info;
 
   /* if bitr is populate we infer non-zero config.nfacctd_flow_to_rd_map */
   if (pptrs->bitr) memcpy(&e->key.mpls_vpn_rd.rd, &pptrs->bitr, sizeof(rd_t));
+  else {
+    /* XXX: no src_ret lookup? */
+
+    if (dst_ret) {
+      info = (struct bgp_info *) pptrs->bgp_dst_info;
+      if (info && info->extra) memcpy(&e->key.mpls_vpn_rd.rd, &info->extra->rd, sizeof(rd_t));
+    }
+  }
+
+  hash_serial_append(hash_serializer, (char *)&e->key.mpls_vpn_rd.rd, sizeof(rd_t), FALSE);
+
+  return FALSE;
+}
+
+int PT_map_index_fdata_mpls_vpn_id_handler(struct id_entry *e, pm_hash_serial_t *hash_serializer, void *src)
+{
+  struct packet_ptrs *pptrs = (struct packet_ptrs *) src;
+  struct struct_header_v8 *hdr = (struct struct_header_v8 *) pptrs->f_header;
+  struct template_cache_entry *tpl = (struct template_cache_entry *) pptrs->f_tpl;
 
   if (config.acct_type == ACCT_NF) {
-    int vrfid = FALSE;
-
     switch(hdr->version) {
     case 10:
     case 9:
-      if (tpl->tpl[NF9_INGRESS_VRFID].len && !e->key.mpls_vpn_rd.rd.val) {
-        memcpy(&e->key.mpls_vpn_rd.rd.val, pptrs->f_data+tpl->tpl[NF9_INGRESS_VRFID].off, MIN(tpl->tpl[NF9_INGRESS_VRFID].len, 4));
-        vrfid = TRUE;
+      if (tpl->tpl[NF9_INGRESS_VRFID].len) {
+        memcpy(&e->key.mpls_vpn_id.n, pptrs->f_data+tpl->tpl[NF9_INGRESS_VRFID].off, MIN(tpl->tpl[NF9_INGRESS_VRFID].len, 4));
       }
 
-      if (tpl->tpl[NF9_EGRESS_VRFID].len && !e->key.mpls_vpn_rd.rd.val) {
-        memcpy(&e->key.mpls_vpn_rd.rd.val, pptrs->f_data+tpl->tpl[NF9_EGRESS_VRFID].off, MIN(tpl->tpl[NF9_EGRESS_VRFID].len, 4));
-        vrfid = TRUE;
+      if (tpl->tpl[NF9_EGRESS_VRFID].len) {
+        memcpy(&e->key.mpls_vpn_id.n, pptrs->f_data+tpl->tpl[NF9_EGRESS_VRFID].off, MIN(tpl->tpl[NF9_EGRESS_VRFID].len, 4));
       }
 
-      if (vrfid) {
-        e->key.mpls_vpn_rd.rd.val = ntohl(e->key.mpls_vpn_rd.rd.val);
-        if (e->key.mpls_vpn_rd.rd.val) e->key.mpls_vpn_rd.rd.type = RD_TYPE_VRFID;
-      }
       break;
     }
   }
 
-  hash_serial_append(hash_serializer, &e->key.mpls_vpn_rd.rd, sizeof(rd_t), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.mpls_vpn_id.n, sizeof(u_int32_t), FALSE);
 
   return FALSE;
 }
@@ -3308,7 +3418,7 @@ int PT_map_index_fdata_mpls_label_bottom_handler(struct id_entry *e, pm_hash_ser
     }
   }
 
-  hash_serial_append(hash_serializer, &e->key.mpls_label_bottom.n, sizeof(u_int32_t), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.mpls_label_bottom.n, sizeof(u_int32_t), FALSE);
 
   return FALSE;
 }
@@ -3334,7 +3444,7 @@ int PT_map_index_fdata_src_mac_handler(struct id_entry *e, pm_hash_serial_t *has
   }
   else return TRUE;
 
-  hash_serial_append(hash_serializer, &e->key.src_mac.a, ETH_ADDR_LEN, FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.src_mac.a, ETH_ADDR_LEN, FALSE);
 
   return FALSE;
 }
@@ -3360,7 +3470,7 @@ int PT_map_index_fdata_dst_mac_handler(struct id_entry *e, pm_hash_serial_t *has
   }
   else return TRUE;
 
-  hash_serial_append(hash_serializer, &e->key.dst_mac.a, ETH_ADDR_LEN, FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.dst_mac.a, ETH_ADDR_LEN, FALSE);
 
   return FALSE;
 }
@@ -3392,7 +3502,7 @@ int PT_map_index_fdata_vlan_id_handler(struct id_entry *e, pm_hash_serial_t *has
   }
   else return TRUE;
 
-  hash_serial_append(hash_serializer, &e->key.vlan_id.n, sizeof(u_int16_t), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.vlan_id.n, sizeof(u_int16_t), FALSE);
 
   return FALSE;
 }
@@ -3416,7 +3526,7 @@ int PT_map_index_fdata_cvlan_id_handler(struct id_entry *e, pm_hash_serial_t *ha
   }
   else return TRUE;
 
-  hash_serial_append(hash_serializer, &e->key.cvlan_id.n, sizeof(u_int16_t), FALSE);
+  hash_serial_append(hash_serializer, (char *)&e->key.cvlan_id.n, sizeof(u_int16_t), FALSE);
 
   return FALSE;
 }

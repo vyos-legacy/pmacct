@@ -24,6 +24,7 @@
 
 /* includes */
 #include "pmacct.h"
+#include "addr.h"
 #include "nfacctd.h"
 #include "pretag_handlers.h"
 #include "pmacct-data.h"
@@ -34,6 +35,10 @@
 #include "net_aggr.h"
 #include "bgp/bgp_packet.h"
 #include "bgp/bgp.h"
+#include "isis/isis.h"
+#include "bmp/bmp.h"
+#include "nfv8_handlers.h"
+#include "telemetry/telemetry.h"
 
 /* variables to be exported away */
 struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
@@ -642,7 +647,8 @@ int main(int argc,char **argv, char **envp)
   /* starting the BGP thread */
   if (config.nfacctd_bgp) {
     req.bpf_filter = TRUE;
-    load_comm_patterns(&config.nfacctd_bgp_stdcomm_pattern, &config.nfacctd_bgp_extcomm_pattern, &config.nfacctd_bgp_stdcomm_pattern_to_asn);
+    load_comm_patterns(&config.nfacctd_bgp_stdcomm_pattern, &config.nfacctd_bgp_extcomm_pattern,
+			&config.nfacctd_bgp_lrgcomm_pattern, &config.nfacctd_bgp_stdcomm_pattern_to_asn);
 
     if (config.nfacctd_bgp_peer_as_src_type == BGP_SRC_PRIMITIVES_MAP) {
       if (config.nfacctd_bgp_peer_as_src_map) {
@@ -761,7 +767,7 @@ int main(int argc,char **argv, char **envp)
   if (config.pidfile) write_pid_file(config.pidfile);
   load_networks(config.networks_file, &nt, &nc);
 
-  /* signals to be handled only by pmacctd;
+  /* signals to be handled only by the core process;
      we set proper handlers after plugin creation */
   signal(SIGINT, my_sigint_handler);
   signal(SIGTERM, my_sigint_handler);
@@ -898,7 +904,7 @@ int main(int argc,char **argv, char **envp)
     struct host_addr srv_addr;
     u_int16_t srv_port;
 
-    sa_to_addr(&server, &srv_addr, &srv_port); 
+    sa_to_addr((struct sockaddr *)&server, &srv_addr, &srv_port); 
     addr_to_str(srv_string, &srv_addr);
     Log(LOG_INFO, "INFO ( %s/core ): waiting for NetFlow data on %s:%u\n", config.name, srv_string, srv_port);
     allowed = TRUE;
@@ -2290,7 +2296,7 @@ void notify_malf_packet(short int severity, char *ostr, struct sockaddr *sa, u_i
   u_char agent_addr[50] /* able to fit an IPv6 string aswell */, any[]="0.0.0.0";
   u_int16_t agent_port;
 
-  sa_to_addr(sa, &a, &agent_port);
+  sa_to_addr((struct sockaddr *)sa, &a, &agent_port);
   addr_to_str(agent_addr, &a);
   if (!config.nfacctd_ip) config.nfacctd_ip = any;
 

@@ -33,6 +33,9 @@
 #include "ip_flow.h"
 #include "net_aggr.h"
 #include "thread_pool.h"
+#include "bgp/bgp.h"
+#include "classifier.h"
+#include "isis/isis.h"
 
 /* variables to be exported away */
 struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
@@ -469,10 +472,11 @@ int main(int argc,char **argv, char **envp)
 	}
         list->cfg.what_to_count |= COUNT_IN_IFACE;
         list->cfg.what_to_count |= COUNT_OUT_IFACE;
-	if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
+	if ((list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                        COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_SRC_STD_COMM|
 				       COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
-				       COUNT_MPLS_VPN_RD)) {
+				       COUNT_MPLS_VPN_RD)) ||
+	    (list->cfg.what_to_count_2 & (COUNT_LRG_COMM|COUNT_SRC_LRG_COMM))) {
 	  Log(LOG_ERR, "ERROR ( %s/core ): 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'nfprobe' plugin.\n", config.name);
 	  exit(1);
 	}
@@ -516,10 +520,11 @@ int main(int argc,char **argv, char **envp)
 	  list->cfg.what_to_count |= COUNT_TAG;
 	  list->cfg.what_to_count |= COUNT_TAG2;
 	}
-        if (list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
+        if ((list->cfg.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM|COUNT_LOCAL_PREF|COUNT_MED|COUNT_AS_PATH|
                                        COUNT_PEER_SRC_AS|COUNT_PEER_DST_AS|COUNT_PEER_SRC_IP|COUNT_SRC_STD_COMM|
 				       COUNT_SRC_EXT_COMM|COUNT_SRC_AS_PATH|COUNT_SRC_MED|COUNT_SRC_LOCAL_PREF|
-				       COUNT_MPLS_VPN_RD)) {
+				       COUNT_MPLS_VPN_RD)) ||
+	    (list->cfg.what_to_count_2 & (COUNT_LRG_COMM|COUNT_SRC_LRG_COMM))) {
           Log(LOG_ERR, "ERROR ( %s/core ): 'src_as', 'dst_as' and 'peer_dst_ip' are currently the only BGP-related primitives supported within the 'sfprobe' plugin.\n", config.name);
           exit(1);
         }
@@ -757,7 +762,8 @@ int main(int argc,char **argv, char **envp)
   /* starting the BGP thread */
   if (config.nfacctd_bgp) {
     req.bpf_filter = TRUE;
-    load_comm_patterns(&config.nfacctd_bgp_stdcomm_pattern, &config.nfacctd_bgp_extcomm_pattern, &config.nfacctd_bgp_stdcomm_pattern_to_asn);
+    load_comm_patterns(&config.nfacctd_bgp_stdcomm_pattern, &config.nfacctd_bgp_extcomm_pattern,
+                        &config.nfacctd_bgp_lrgcomm_pattern, &config.nfacctd_bgp_stdcomm_pattern_to_asn);
 
     if (config.nfacctd_bgp_peer_as_src_type == BGP_SRC_PRIMITIVES_MAP) {
       if (config.nfacctd_bgp_peer_as_src_map) {
@@ -852,7 +858,7 @@ int main(int argc,char **argv, char **envp)
   pm_setproctitle("%s [%s]", "Core Process", config.proc_name);
   if (config.pidfile) write_pid_file(config.pidfile);  
 
-  /* signals to be handled only by pmacctd;
+  /* signals to be handled only by the core process;
      we set proper handlers after plugin creation */
   signal(SIGINT, my_sigint_handler);
   signal(SIGTERM, my_sigint_handler);

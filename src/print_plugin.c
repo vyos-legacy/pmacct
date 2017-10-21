@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -23,17 +23,17 @@
 
 /* includes */
 #include "pmacct.h"
+#include "addr.h"
 #include "pmacct-data.h"
 #include "plugin_hooks.h"
 #include "plugin_common.h"
+#include "plugin_cmn_json.h"
+#include "plugin_cmn_avro.h"
 #include "print_plugin.h"
 #include "ip_flow.h"
 #include "classifier.h"
 #include "crc32.h"
-
-#ifdef WITH_AVRO
-#include <avro.h>
-#endif
+#include "bgp/bgp.h"
 
 /* Functions */
 void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr) 
@@ -90,12 +90,15 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   refresh_timeout = config.sql_refresh_time*1000;
 
-#ifdef WITH_AVRO
-  if (config.print_output & PRINT_OUTPUT_AVRO) {
-    Log(LOG_INFO, "INFO ( %s/%s ): AVRO: building schema.\n", config.name, config.type);
-    avro_acct_schema = build_avro_schema(config.what_to_count, config.what_to_count_2);
+  if (config.print_output & PRINT_OUTPUT_JSON) {
+    compose_json(config.what_to_count, config.what_to_count_2);
   }
+  else if (config.print_output & PRINT_OUTPUT_AVRO) {
+#ifdef WITH_AVRO
+    avro_acct_schema = build_avro_schema(config.what_to_count, config.what_to_count_2);
+    if (config.avro_schema_output_file) write_avro_schema_to_file(config.avro_schema_output_file, avro_acct_schema);
 #endif
+  }
 
   /* setting function pointers */
   if (config.what_to_count & (COUNT_SUM_HOST|COUNT_SUM_NET))
@@ -148,7 +151,7 @@ void print_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   /* print_refresh time init: deadline */
   refresh_deadline = idata.now; 
-  P_init_refresh_deadline(&refresh_deadline);
+  P_init_refresh_deadline(&refresh_deadline, config.sql_refresh_time, config.sql_startup_delay, config.sql_history_roundoff);
 
   if (config.sql_history) {
     basetime_init = P_init_historical_acct;
@@ -462,7 +465,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
       if (ret) {
         Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: failed opening %s: %s\n",
             config.name, config.type, current_table, avro_strerror());
-        exit_plugin(EXIT_FAILURE);
+        exit_plugin(1);
       }
 #endif
     }
@@ -488,7 +491,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
 	else if (config.print_output & PRINT_OUTPUT_JSON) {
           void *json_obj;
 
-	  json_obj = compose_purge_init_json(writer_pid);
+	  json_obj = compose_purge_init_json(config.name, writer_pid);
           if (json_obj) write_and_free_json(f, json_obj);
 	}
       }
@@ -516,7 +519,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
       else if (config.print_output & PRINT_OUTPUT_JSON) {
         void *json_obj;
 
-        json_obj = compose_purge_init_json(writer_pid);
+        json_obj = compose_purge_init_json(config.name, writer_pid);
         if (json_obj) write_and_free_json(stdout, json_obj);
       }
     }
@@ -733,6 +736,8 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   #if defined WITH_GEOIPV2
         if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "%-5s       ", data->src_ip_country.str);
         if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "%-5s       ", data->dst_ip_country.str);
+        if (config.what_to_count_2 & COUNT_SRC_HOST_POCODE) fprintf(f, "%-12s  ", data->src_ip_pocode.str);
+        if (config.what_to_count_2 & COUNT_DST_HOST_POCODE) fprintf(f, "%-12s  ", data->dst_ip_pocode.str);
   #endif
   
         if (config.what_to_count_2 & COUNT_SAMPLING_RATE) fprintf(f, "%-7u       ", data->sampling_rate);
@@ -955,6 +960,21 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           P_fprintf_csv_string(f, pvlen, COUNT_INT_EXT_COMM, write_sep(sep, &count), empty_string);
         }
 
+        if (config.what_to_count_2 & COUNT_LRG_COMM) {
+          char *str_ptr = NULL;
+
+          vlen_prims_get(pvlen, COUNT_INT_LRG_COMM, &str_ptr);
+          if (str_ptr) {
+            bgp_comm = str_ptr;
+            while (bgp_comm) {
+              bgp_comm = strchr(str_ptr, ' ');
+              if (bgp_comm) *bgp_comm = '_';
+            }
+          }
+
+          P_fprintf_csv_string(f, pvlen, COUNT_INT_LRG_COMM, write_sep(sep, &count), empty_string);
+        }
+
         if (config.what_to_count & COUNT_SRC_STD_COMM) {
           char *str_ptr = NULL;
 
@@ -984,6 +1004,21 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           }
 
           P_fprintf_csv_string(f, pvlen, COUNT_INT_SRC_EXT_COMM, write_sep(sep, &count), empty_string);
+        }
+
+        if (config.what_to_count_2 & COUNT_SRC_LRG_COMM) {
+          char *str_ptr = NULL;
+
+          vlen_prims_get(pvlen, COUNT_INT_SRC_LRG_COMM, &str_ptr);
+          if (str_ptr) {
+            bgp_comm = str_ptr;
+            while (bgp_comm) {
+              bgp_comm = strchr(str_ptr, ' ');
+              if (bgp_comm) *bgp_comm = '_';
+            }
+          }
+
+          P_fprintf_csv_string(f, pvlen, COUNT_INT_SRC_LRG_COMM, write_sep(sep, &count), empty_string);
         }
   
 	if (config.what_to_count & COUNT_AS_PATH) {
@@ -1083,6 +1118,8 @@ void P_cache_purge(struct chained_cache *queue[], int index)
   #if defined WITH_GEOIPV2
         if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "%s%s", write_sep(sep, &count), data->src_ip_country.str);
         if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "%s%s", write_sep(sep, &count), data->dst_ip_country.str);
+        if (config.what_to_count_2 & COUNT_SRC_HOST_POCODE) fprintf(f, "%s%s", write_sep(sep, &count), data->src_ip_pocode.str);
+        if (config.what_to_count_2 & COUNT_DST_HOST_POCODE) fprintf(f, "%s%s", write_sep(sep, &count), data->dst_ip_pocode.str);
   #endif
   
         if (config.what_to_count_2 & COUNT_SAMPLING_RATE) fprintf(f, "%s%u", write_sep(sep, &count), data->sampling_rate);
@@ -1223,14 +1260,13 @@ void P_cache_purge(struct chained_cache *queue[], int index)
         else fprintf(f, "\n");
       }
       else if (f && config.print_output & PRINT_OUTPUT_JSON) {
-        void *json_obj;
-  
-        json_obj = compose_json(config.what_to_count, config.what_to_count_2, queue[j]->flow_type,
-                         &queue[j]->primitives, pbgp, pnat, pmpls, pcust, pvlen, queue[j]->bytes_counter,
-                         queue[j]->packet_counter, queue[j]->flow_counter, queue[j]->tcp_flags, NULL,
-                         queue[j]->stitch);
-  
+#ifdef WITH_JANSSON
+	json_t *json_obj = json_object();
+	int idx;
+
+	for (idx = 0; idx < N_PRIMITIVES && cjhandler[idx]; idx++) cjhandler[idx](json_obj, queue[j]);
         if (json_obj) write_and_free_json(f, json_obj);
+#endif
       }
       else if (f && config.print_output & PRINT_OUTPUT_AVRO) {
 #ifdef WITH_AVRO
@@ -1245,7 +1281,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           if (avro_file_writer_append_value(avro_writer, &avro_value)) {
             Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: failed writing the value: %s\n",
                 config.name, config.type, avro_strerror());
-            exit_plugin(EXIT_FAILURE);
+            exit_plugin(1);
           }
         }
         else {
@@ -1254,7 +1290,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
           if (avro_value_to_json(&avro_value, TRUE, &json_str)) {
             Log(LOG_ERR, "ERROR ( %s/%s ): AVRO: unable to value to JSON: %s\n",
                 config.name, config.type, avro_strerror());
-            exit_plugin(EXIT_FAILURE);
+            exit_plugin(1);
           }
 
           fprintf(f, "%s\n", json_str);
@@ -1278,7 +1314,7 @@ void P_cache_purge(struct chained_cache *queue[], int index)
     else if (config.print_output & PRINT_OUTPUT_JSON) {
       void *json_obj;
 
-      json_obj = compose_purge_close_json(writer_pid, qn, saved_index, duration);
+      json_obj = compose_purge_close_json(config.name, writer_pid, qn, saved_index, duration);
       if (json_obj) write_and_free_json(f, json_obj);
     }
   }
@@ -1377,9 +1413,13 @@ void P_write_stats_header_formatted(FILE *f, int is_event)
   if (config.what_to_count & COUNT_TCPFLAGS) fprintf(f, "TCP_FLAGS  ");
   if (config.what_to_count & COUNT_IP_PROTO) fprintf(f, "PROTOCOL    ");
   if (config.what_to_count & COUNT_IP_TOS) fprintf(f, "TOS    ");
-#if defined (WITH_GEOIP) || (WITH_GEOIPV2)
+#if defined (WITH_GEOIP) || defined (WITH_GEOIPV2)
   if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "SH_COUNTRY  ");
   if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "DH_COUNTRY  ");
+#endif
+#if defined (WITH_GEOIPV2)
+  if (config.what_to_count_2 & COUNT_SRC_HOST_POCODE) fprintf(f, "SH_POCODE     ");
+  if (config.what_to_count_2 & COUNT_DST_HOST_POCODE) fprintf(f, "DH_POCODE     ");
 #endif
   if (config.what_to_count_2 & COUNT_SAMPLING_RATE) fprintf(f, "SAMPLING_RATE ");
   if (config.what_to_count_2 & COUNT_PKT_LEN_DISTRIB) fprintf(f, "PKT_LEN_DISTRIB ");
@@ -1456,6 +1496,7 @@ void P_write_stats_header_csv(FILE *f, int is_event)
   else {
     if (config.what_to_count & (COUNT_STD_COMM|COUNT_EXT_COMM)) fprintf(f, "%sCOMMS", write_sep(sep, &count));
   }
+  if (config.what_to_count_2 & COUNT_LRG_COMM) fprintf(f, "%sLCOMMS", write_sep(sep, &count));
   if (!config.tmp_comms_same_field) {
     if (config.what_to_count & COUNT_SRC_STD_COMM) fprintf(f, "%sSRC_COMMS", write_sep(sep, &count));
     if (config.what_to_count & COUNT_SRC_EXT_COMM) fprintf(f, "%sSRC_ECOMMS", write_sep(sep, &count));
@@ -1463,6 +1504,7 @@ void P_write_stats_header_csv(FILE *f, int is_event)
   else {
     if (config.what_to_count & (COUNT_SRC_STD_COMM|COUNT_SRC_EXT_COMM)) fprintf(f, "%sSRC_COMMS", write_sep(sep, &count));
   }
+  if (config.what_to_count_2 & COUNT_SRC_LRG_COMM) fprintf(f, "%sSRC_LCOMMS", write_sep(sep, &count));
   if (config.what_to_count & COUNT_AS_PATH) fprintf(f, "%sAS_PATH", write_sep(sep, &count));
   if (config.what_to_count & COUNT_SRC_AS_PATH) fprintf(f, "%sSRC_AS_PATH", write_sep(sep, &count));
   if (config.what_to_count & COUNT_LOCAL_PREF) fprintf(f, "%sPREF", write_sep(sep, &count));
@@ -1497,6 +1539,10 @@ void P_write_stats_header_csv(FILE *f, int is_event)
 #if defined (WITH_GEOIP) || defined (WITH_GEOIPV2)
   if (config.what_to_count_2 & COUNT_SRC_HOST_COUNTRY) fprintf(f, "%sSH_COUNTRY", write_sep(sep, &count));
   if (config.what_to_count_2 & COUNT_DST_HOST_COUNTRY) fprintf(f, "%sDH_COUNTRY", write_sep(sep, &count));
+#endif
+#if defined (WITH_GEOIPV2)
+  if (config.what_to_count_2 & COUNT_SRC_HOST_POCODE) fprintf(f, "%sSH_POCODE", write_sep(sep, &count));
+  if (config.what_to_count_2 & COUNT_DST_HOST_POCODE) fprintf(f, "%sDH_POCODE", write_sep(sep, &count));
 #endif
   if (config.what_to_count_2 & COUNT_SAMPLING_RATE) fprintf(f, "%sSAMPLING_RATE", write_sep(sep, &count));
   if (config.what_to_count_2 & COUNT_PKT_LEN_DISTRIB) fprintf(f, "%sPKT_LEN_DISTRIB", write_sep(sep, &count));

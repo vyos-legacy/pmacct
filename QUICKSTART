@@ -1,5 +1,5 @@
-pmacct (Promiscuous mode IP Accounting package)
-pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+pmacct [IP traffic accounting : BGP : BMP : IGP : Streaming Telemetry]
+pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 
 
 TABLE OF CONTENTS:
@@ -7,20 +7,20 @@ I.	Plugins included with pmacct distribution
 II.	Configuring pmacct for compilation and installing
 III.	Brief SQL (MySQL, PostgreSQL, SQLite 3.x) and noSQL (MongoDB) setup examples
 IV.	Running the libpcap-based daemon (pmacctd)
-V.	Running the NetFlow and sFlow daemons (nfacctd/sfacctd)
+V.	Running the NetFlow/IPFIX and sFlow daemons (nfacctd/sfacctd)
 VI.	Running the NFLOG-based daemon (uacctd)
 VII.	Running the pmacct client (pmacct)
 VIII.	Running the RabbitMQ/AMQP plugin
 IX.	Running the Kafka plugin
 X.	Internal buffering and queueing
 XI.	Quickstart guide to packet/stream classifiers
-XII.	Quickstart guide to setup a NetFlow agent/probe 
+XII.	Quickstart guide to setup a NetFlow/IPFIX agent/probe 
 XIII.	Quickstart guide to setup a sFlow agent/probe 
 XIV.	Quickstart guide to setup the BGP daemon
-XV.	Quickstart guide to setup a NetFlow/sFlow replicator
+XV.	Quickstart guide to setup a NetFlow/IPFIX/sFlow replicator
 XVI.	Quickstart guide to setup the IS-IS daemon
 XVII.	Quickstart guide to setup the BMP daemon
-XVIII.	Quickstart guide to setup Streaming Network Telemetry collection 
+XVIII.	Quickstart guide to setup Streaming Telemetry collection 
 XIX.	Running the print plugin to write to flat-files
 XX.	Quickstart guide to setup GeoIP lookups
 XXI.	Using pmacct as traffic/event logger
@@ -35,26 +35,34 @@ plugins. Here is a list of plugins included in the official pmacct distribution:
 	   command-line client tool, 'pmacct'. This plugin also allows easily to
 	   inject data into 3rd party tools like GNUplot, RRDtool or a Net-SNMP
 	   server. The plugin is good for prototype solutions and smaller-scale
-	   environments.
-'mysql':   a working MySQL installation can be used for data storage.
-'pgsql':   a working PostgreSQL installation can be used for data storage.
+	   environments. This plugin is compiled in by default.
+'mysql':   a working MySQL installation can be used for data storage. This
+	   plugin can be compiled using the --enable-mysql switch. 
+'pgsql':   a working PostgreSQL installation can be used for data storage. This
+	   plugin can be compiled using the --enable-pgsql switch.
 'sqlite3': a working SQLite 3.x or BerkeleyDB 5.x (compiled in with the SQLite
-	   API) installation can be used for data storage.
+	   API) installation can be used for data storage. This plugin can be
+	   compiled using the --enable-sqlite3 switch.
 'print':   data is printed at regular intervals to flat-files or standard output
-	   in tab-spaced, CSV and JSON formats.
+	   in tab-spaced, CSV and JSON formats. This plugin is compiled in by
+	   default.
 'mongodb': a working MongoDB installation can be used for data storage. It is
-	   required to install the MongoDB API C driver.
+	   required to install the MongoDB API C driver. This plugin can be
+	   compiled using the --enable-mongodb switch.
 'amqp':    data is sent to a RabbitMQ message exchange, running AMQP protocol,
 	   for delivery to consumer applications or tools. Popular consumers
-	   are ElasticSearch, Cassandra and CouchDB.
+	   are ElasticSearch, InfluxDB and Cassandra. This plugin can be compiled
+	   using the --enable-rabbitmq switch.
 'kafka':   data is sent to a Kafka broker for delivery to consumer applications
-	   or tools.
+	   or tools. Popular consumers are ElasticSearch, InfluxDB and Cassandra.
+	   This plugin can be compiled using the --enable-kafka switch.
 'tee':	   applies to nfacctd and sfacctd daemons only. It's a featureful packet
-	   replicator for NetFlow/IPFIX/sFlow data.
+	   replicator for NetFlow/IPFIX/sFlow data. This plugin is compiled in by
+	   default.
 'nfprobe': applies to pmacctd and uacctd daemons only. Exports collected data via
-	   NetFlow v5/v9 or IPFIX.
+	   NetFlow v5/v9 or IPFIX. This plugin is compiled in by default.
 'sfprobe': applies to pmacctd and uacctd daemons only. Exports collected data via
-	   sFlow v5.
+	   sFlow v5. This plugin is compiled in by default.
 
 
 II. Configuring pmacct for compilation and installing
@@ -63,9 +71,10 @@ script to probe default headers and libraries for you. A first round of guessing
 is done via pkg-config then, for some libraries, "typical" default locations
 are checked, ie. /usr/local/lib. Switches you are likely to want enabled are
 already set so, ie. 64 bits counters and multi-threading (pre- requisite for
-the BGP, BMP, and IGP daemon codes). SQL plugins and IPv6 support are by default
-disabled instead. A few examples will follow; as usual to get the list of available
-switches, you can use the following command-line:
+the BGP, BMP, and IGP daemon codes); the full list of switches enabled by default
+are marked as 'default: yes' in the "./configure --help" output. SQL plugins, AMQP
+and Kafka support are all disabled by defaulf instead. A few examples will follow;
+to get the list of available switches, you can use the following command-line:
 
 shell> ./configure --help
 
@@ -82,14 +91,20 @@ Then to compile and install simply typing:
 
 shell> make; make install
 
-But, for example, should you want to compile pmacct with PostgreSQL support and
-have installed PostgreSQL in /usr/local/postgresql and pkg-config is unable to
-help, you can supply this non-default location as follows (assuming you are
-running the bash shell):
+Should you want, for example, to compile pmacct with PostgreSQL support and
+have installed PostgreSQL in /usr/local/postgresql and pkg-config is unable
+to help, you can supply this non-default location as follows (assuming you
+are running the bash shell):
 
 shell> export PGSQL_LIBS="-L/usr/local/postgresql/lib -lpq"
 shell> export PGSQL_CFLAGS="-I/usr/local/postgresql/include"
 shell> ./configure --enable-pgsql
+
+By default all tools - flow, BGP, BMP and Streaming Telemetry - are compiled.
+Specific tool sets can be disabled. For example, to compile only flow tools
+(ie. no pmbgpd, pmbmpd, pmtelemetryd) the following command-line can be used:
+
+shell> ./configure --disable-bgp-bins --disable-bmp-bins --disable-st-bins
 
 Once daemons are installed you can check:
 * how to instrument each daemon via its usage help page: 
@@ -284,7 +299,7 @@ at the following URL: https://github.com/mongodb/mongo-c-driver-legacy .
  
 
 IV. Running the libpcap-based daemon (pmacctd) 
-pmacctd, like the other daemons, can be run with commandline options, using a config
+All deamons including pmacctd can be run with commandline options, using a config
 file or a mix of the two. Sample configuration files are in examples/ tree. Note also 
 that most of the new features are available only as configuration directives. To be
 aware of the existing configuration directives, please read the CONFIG-KEYS document. 
@@ -391,11 +406,11 @@ shell> pmacctd -c src_host,dst_host -S local2
 NOTE: superuser privileges are needed to execute pmacctd correctly. 
 
 
-V. Running the NetFlow and sFlow daemons (nfacctd/sfacctd) 
+V. Running the NetFlow/IPFIX and sFlow daemons (nfacctd/sfacctd) 
 All examples about pmacctd are also valid for nfacctd and sfacctd with the exception
-of directives that apply exclusively to libpcap. If you've skipped examples in section
-'IV', please read them before continuing. All configuration keys available are in the
-CONFIG-KEYS document. Some examples:
+of directives that apply exclusively to libpcap. If you've skipped examples in the
+previous section, please read them before continuing. All config keys available are
+in the CONFIG-KEYS document. Some examples:
 
 Run nfacctd reading configuration from a specified file.
 shell> nfacctd -f nfacctd.conf
@@ -691,6 +706,16 @@ This is a pointer to the quick start guide to Kafka (0.10.0):
 
 http://kafka.apache.org/0100/quickstart.html
 
+NOTE: some users have reported troubles getting messages delivered via Kafka with
+the following error messages:
+
+ERROR ( default/kafka ): Connection failed to Kafka: p_kafka_check_outq_len()
+ERROR ( default/kafka ): Connection failed to Kafka: p_kafka_close()
+
+It appears these were not related specifically to pmacct but rather to the broader
+enviornment in which Kafka was run. A summary of the conversation, some findings and
+potential leads are captured here online: https://github.com/pmacct/pmacct/issues/34 .
+
 
 X. Internal buffering and queueing
 Two options are provided for internal buffering and queueing: 1) a home-grown circular
@@ -749,12 +774,11 @@ plugin_pipe_kafka_retry[blabla]: 60
 
 
 XI. Quickstart guide to packet classifiers
-pmacct 0.10.0 sees the introduction of a packet classification feature. The approach
-is fully extensible: classification patterns are based over regular expressions (RE),
-must be placed into a common directory and have a .pat file extension. Patterns for
-well-known protocols are available and are just a click away. Furthermore, you can
-write your own patterns (and share them with the active L7-filter project's community).
-Below the quickstarter guide:
+The current approach for a packet classification engine is fully extensible: patterns
+are based on regular expressions (RE), must be placed into a common directory and have
+a .pat file extension. Patterns for well-known protocols are available and are just a
+click away. Furthermore, you can write your own patterns (and share them with the
+L7-filter project's community). Below the quickstarter guide:
 
 a) download pmacct
 shell> wget http://www.pmacct.net/pmacct-x.y.z.tar.gz 
@@ -815,11 +839,11 @@ e) Ok, we are done! Fire the pmacct collector daemon:
    values; get the time to take a read about them in the CONFIG-KEYS document.
 
 
-XII. Quickstart guide to setup a NetFlow agent/probe
-pmacct 0.11.0 sees the introduction of traffic data export capabilities, through both
-NetFlow and sFlow protocols. While NetFlow v5 is fixed by nature, v9 adds flexibility
-by allowing to transport custom informations (for example, L7-classification tags to a
-remote collector). Below the quickstarter guide:
+XII. Quickstart guide to setup a NetFlow/IPFIX agent/probe
+pmacct is able to export traffic data through both NetFlow and sFlow protocols. This
+section covers NetFlow/IPFIX and next one covers sFlow. While NetFlow v5 is fixed by
+nature, v9 adds flexibility allowing to transport custom informations (for example,
+classification information or custom tags to remote collectors). Below the guide:
 
 a) usual initial steps: download pmacct, unpack it, compile it.
 
@@ -841,9 +865,8 @@ nfprobe_version: 9
 
    1) generate ASNs by using a networks_file pointing to a valid Networks File (see
    examples/ directory) and adding src_as, dst_as primitives to the 'aggregate'
-   directive; alternatively, as of release 0.12.0rc2, it's possible to generate ASNs
-   from the pmacctd BGP thread. The following fragment can be added to the config
-   above:
+   directive; alternatively, it is possible to generate ASNs from the pmacctd BGP
+   thread. The following fragment can be added to the config above:
 
 pmacctd_as: bgp
 bgp_daemon: true
@@ -953,13 +976,14 @@ d) Ok, we are done ! Now fire both daemons:
 
 
 XIII. Quickstart guide to setup a sFlow agent/probe
-pmacct 0.11.0 sees the introduction of traffic data export capabilities via sFlow; such
-protocol is quite different from NetFlow: in short, it works by exporting portions of
-sampled packets rather than building uni-directional flows as it happens in NetFlow;
-this less-stateful approach makes sFlow a light export protocol well-tailored for high-
-speed networks. Further, sFlow v5 can be extended much like NetFlow v9: meaning, ie.,
-L7 classification or basic Extended Gateway information (ie. src_as, dst_as) can be
-embedded in the record structure being exported. Below the quickstarter guide:
+pmacct can export traffic data via sFlow; such protocol is different from NetFlow/
+IPFIX: in short, it works by exporting portions of sampled packets rather than
+caching and building uni-directional flows as it happens in NetFlow; this not
+stateful approach makes sFlow a light export protocol well-tailored for high-
+speed networks. Furthermore, sFlow v5 can be extended much like NetFlow v9: meaning
+classification information, tags or basic Extended Gateway information (ie. src_as,
+dst_as) can be easily included in the record structure being exported. Below the
+quickstarter guide:
 
 b) build sFlow probe configuration, using pmacctd:
 !
@@ -999,13 +1023,14 @@ shell> ./configure
 The following configuration snippet shows how to set up a BGP thread (ie. part
 of the NetFlow/IPFIX collector, nfacctd) which will bind to an IP address and
 will support up to a maximum number of 100 peers. Once PE routers start sending
-telemetry data and peer up, it should be possible to see the BGP-related fields,
-ie. as_path, peer_as_dst, local_pref, med, etc., correctly populated while
-querying the memory table:
+flow telemetry data and peer up, it should be possible to see the BGP-related
+fields, ie. as_path, peer_as_dst, local_pref, med, etc., correctly populated
+while querying the memory table:
 
 bgp_daemon: true
 bgp_daemon_ip: X.X.X.X
 bgp_daemon_max_peers: 100
+! bgp_daemon_as: 65555
 nfacctd_as: bgp
 [ ... ]
 plugins: memory
@@ -1016,6 +1041,7 @@ at all from the configuration above:
 
 bgp_daemon_ip: X.X.X.X
 bgp_daemon_max_peers: 100
+! bgp_daemon_as: 65555
 bgp_table_dump_file: /path/to/spool/bgp-$peer_src_ip-%H%M.log
 bgp_table_dump_refresh_time: 300
 
@@ -1024,12 +1050,15 @@ to instantiate plugins. On the other hand, the BGP daemon is instructed to dump
 BGP tables to disk every 300 secs with file names embedding the BGP peer info
 ($peer_src_ip) and time reference (%H%M).
 
-The BGP implementation reads the remote ASN upon receipt of a BGP OPEN message
-and dynamically presents itself as part of the same Autonomous System - to
-ensure an iBGP relationship is established all the times. Also, it acts as a
-passive BGP neighbor and hence will never try to re-establish a fallen peering
-session. For debugging purposes related to the BGP feed(s), bgp_daemon_msglog_*
-configuration directives can be enabled in order to log BGP messaging.
+The BGP implementation, by default, reads the remote ASN upon receipt of a BGP
+OPEN message and dynamically presents itself as part of the same ASN - this is
+to ensure an iBGP relationship is established even in multi ASN scenarios. As
+of 1.6.2, it is possible to put pmacct in a specific ASN of choice by using the
+bgp_daemon_as configuration directive, for example, to establish an eBGP kind
+of relationship. Also, the daemon acts as a passive BGP neighbor and hence will
+never try to re-establish a fallen peering session. For debugging purposes
+related to the BGP feed(s), bgp_daemon_msglog_* configuration directives can be
+enabled in order to log BGP messaging.
 
 XIVa. Limiting AS-PATH and BGP community attributes length
 AS-PATH and BGP communities can by nature get easily long, when represented as strings.
@@ -1078,10 +1107,11 @@ NOTES:
   (or egress sFlow) as it mainly relies on either the input interface index
   (ifIndex), the source MAC address, a reverse BGP next-hop lookup or a combination
   of these.
-* "Source" MED, local preference, communities and AS-PATH have all been dedicated an
+* "Source" MED, local preference, communities and AS-PATH have all been allocated
   aggregation primitives. Each carries its own peculiarities but the general concepts
-  highlighed in this paragraph apply to these aswell. Check CONFIG-KEYS out for the
-  src_[med|local_pref|as_path|std_comm|ext_comm]_[type|map] configuration directives.
+  highlighed in this chapter apply to these aswell. Check CONFIG-KEYS out for the
+  src_[med|local_pref|as_path|std_comm|ext_comm|lrg_comm]_[type|map] configuration
+  directives.
 
 XIVc. Tracking entities on the own IP address space
 It might happen that not all entities attached to the service provider network are
@@ -1311,14 +1341,15 @@ TCP MD5 signature for BGP messages is also supported. For a review of all knobs
 and features see the CONFIG-KEYS document. 
 
 
-XV. Quickstart guide to setup a NetFlow/sFlow replicator
-A 'tee' plugin which is meant, in basic terms, to replicate NetFlow/sFlow data
-to remote collectors. The plugin can also act transparently by preserving the
-original IP address of the datagrams. Setting up a replicator is very easy. All
-is needed is where to listen to for incoming packets, where to replicate them
-to and optionally a filtering layer, if required. Filtering bases on the
-standard pre_tag_map infrastructure; only coarse-grained filtering against
-original source IP address is possible. 
+XV. Quickstart guide to setup a NetFlow/IPFIX/sFlow replicator
+The 'tee' plugin is meant to replicate NetFlow/sFlow data to remote collectors.
+The plugin can act transparently, by preserving the original IP address of the
+datagrams, or as a proxy. Basic configuration of up a replicator is very easy:
+all is needed is where to listen to for incoming packets, where to replicate
+them to and optionally a filtering layer, if required. Filtering bases on the
+standard pre_tag_map infrastructure; here is presented only coarse-grained
+filtering against the NetFlow/sFlow source IP address (see next section for
+finer-grained filtering). 
 
 nfacctd_port: 2100
 nfacctd_ip: X.X.X.X
@@ -1369,15 +1400,72 @@ the same daemon instance. So if in the need of using pmacct for both collecting
 and replicating data, two separate instances must be used (intuitively with the
 replicator instance feeding the collector one).
 
+XVa. Splitting and dissecting sFlow flow samples
+Starting with pmacct 1.6.2, it is possible to perform finer-grained filtering,
+ie. against flow-specific primitives, when replicating. For example: replicate
+flows from or to MAC address X1, X2 .. Xn to receiver Y or replicate flows in
+VLAN W to receiver Z. The feature works by inspecting the original packet and
+dissecting it as needed, the most popular use-case being IXPs replicating flows
+back to the members originating and/or receiving them. Some of the supported
+primitives are: source and destination MAC addresses, input/output interfaces
+ifindex; the full list is available in examples/pretag.map.example (look for
+"sfacctd, nfacctd when in 'tee' mode").
+
+The feature is configured just like selective teeing shown in the previous
+section. Incoming packets are tagged with a pre_tag_map and then matched to a
+receiver in tee_receivers. Also, setting tee_dissect_send_full_pkt to true (by
+default false) the original full frame is sent over to the tee plugin. For
+example: replicate flows from/to MAC address XX:XX:XX:XX:XX:XX to receiver Y,
+replicate flows from/to MAC address WW:WW:WW:WW:WW:WW to receiver Z, replicate
+any remaining flows plus original frames to receiver J.
+
+This is the pre_tag_map map:
+
+set_tag=100     ip=0.0.0.0/0	src_mac=XX:XX:XX:XX:XX:XX
+set_tag=100     ip=0.0.0.0/0	dst_mac=XX:XX:XX:XX:XX:XX
+set_tag=200	ip=0.0.0.0/0	src_mac=WW:WW:WW:WW:WW:WW
+set_tag=200	ip=0.0.0.0/0	dst_mac=WW:WW:WW:WW:WW:WW
+set_tag=999	ip=0.0.0.0/0
+
+This is the tee_receivers map:
+
+id=100	ip=Y.Y.Y.Y:2100	tag=100
+id=200	ip=Z.Z.Z.Z:2100	tag=200
+id=999	ip=J.J.J.J:2100	tag=999
+
+This is the relevant section from sfacctd.conf:
+
+[ .. ]
+!
+tee_transparent: true
+maps_index: true
+!
+plugins: tee[a]
+!
+tee_receivers[a]: /path/to/tee_receivers.lst
+pre_tag_map[a]: /path/to/pretag.map
+tee_dissect_send_full_pkt[a]: true
+
+There are a few restrictions to the feature: 1) only sFlow v5 is supported, ie.
+no NetFlow/IPFIX and no sFlow v2-v4; 2) only sFlow flow samples are supported,
+ie. no counter samples. There are also a few known limitations all boiling down
+to non-contextual replication: 1) once split, flows are not muxed back together,
+ie. in case multiple samples part of the same packet are to be replicated to the
+same receiver; 2) sequence numbers are untouched: the most obvious cases being
+receivers may detect non-contiguous sequencing progressions or false duplicates.
+If you are negatively affected by any of these restrictions or limitations or
+you need other primitives to be supported by this feature, please do get in
+touch.
+
 
 XVI. Quickstart guide to setup the IS-IS daemon
-pmacct 0.14.0 integrates an IS-IS daemon into the IP accounting collectors part
-of the toolset. Such daemon is run as a thread within the collector core process.
-The idea is to receive data-plane information, ie. via NetFlow, sFlow, etc., and
-control-plane information via IS-IS. Currently a single L2 P2P neighborship, ie.
-over a GRE tunnel, is supported. The daemon is currently used for the purpose of
-route resolution. A sample scenario could be that more specific internal routes
-might be configured to get summarized in BGP while crossing cluster boundaries.  
+pmacct integrates an IS-IS daemon as part of the IP accounting collectors. Such
+daemon is run as a thread within the collector core process. The idea is to
+receive data-plane information, ie. via NetFlow, sFlow, etc., and control-plane
+information via IS-IS. Currently a single L2 P2P neighborship, ie. over a GRE
+tunnel, is supported. The daemon is currently used for the purpose of route
+resolution. A sample scenario could be that more specific internal routes might
+be configured to get summarized in BGP while crossing cluster boundaries.  
 
 Pre-requisite for the use of the IS-IS daemon is that the pmacct package has to
 be configured for compilation with threads, this line will do it:
@@ -1519,7 +1607,7 @@ Any equivalent examples using JunOS and/or any other vendor implementing BMP
 would be much welcome.
  
 
-XVIII. Quickstart guide to setup Streaming Network Telemetry collection
+XVIII. Quickstart guide to setup Streaming Telemetry collection
 Quoting Cisco IOS-XR Telemetry Configuration Guide at the time of this writing:
 "Streaming telemetry lets users direct data to a configured receiver. This data
 can be used for analysis and troubleshooting purposes to maintain the health of
@@ -1574,10 +1662,8 @@ the following document: docs/MSGLOG_DUMP_FORMATS
 
 
 XIX. Running the print plugin to write to flat-files
-Print plugin was originally conceived to display data on standard output; with
-pmacct 0.14 a new 'print_output_file' configuration directive is introduced to
-allow the plugin to write to flat-files aswell. Dynamic filenames are supported.
-Output is either text-based using JSON, CSV or formatted outputs, or
+pmacct can also output to files via its 'print' plugin. Dynamic filenames are
+supported. Output is either text-based using JSON, CSV or formatted outputs, or
 binary-based using the Apache Avro file container ('print_output' directive).
 Interval between writes can be configured via the 'print_refresh_time'
 directive. An example follows on how to write to files on a 15 mins basis in
@@ -1628,13 +1714,14 @@ print_output_file_append: true
 
 
 XX. Quickstart guide to setup GeoIP lookups
-From pmacct 0.14.2 it is possible to perform GeoIP country lookups against a
-Maxmind database v1 (--enable-geoip) and from 1.5.2 against a Maxmind database
-v2 (--enable-geoipv2). The two traffic aggregation primitives to leverage such
-feature are: src_host_country and dst_host_country.
-Pre-requisite for the feature to work are: a) a working installed Maxmind GeoIP
-library and headers and b) a Maxmind GeoIP country database (freely available).
-Two steps to quickly start with GeoIP lookups in pmacct:
+pmacct can perform GeoIP country lookups against a Maxmind DB v1 (--enable-geoip)
+and against a Maxmind DB v2 (--enable-geoipv2). A v1 database enables resolution
+of src_host_country and dst_host_country primitives only. A v2 database enables
+resolution of presently supported GeoIP-related primitives, ie. src_host_country,
+src_host_pocode, dst_host_country, dst_host_pocode. Pre-requisite for the feature
+to work are: a) a working installed Maxmind GeoIP library and headers and b) a
+Maxmind GeoIP database (freely available). Two steps to quickly start with GeoIP
+lookups in pmacct:
  
 GeoIP v1 (libGeoIP):
 * Have libGeoIP library and headers available to compile against; have a GeoIP
@@ -1693,9 +1780,9 @@ you be interested into any of these, please get in touch.
 
 
 XXI. Using pmacct as traffic/event logger
-pmacct was originally conceived as a traffic aggregator. From pmacct 0.14.3 
-it is now possible to use pmacct as a traffic/event logger, such development
-being fostered particularly by the use of NetFlow/IPFIX as generic transport,
+pmacct was originally conceived as a traffic aggregator. It is now possible
+to use pmacct as a traffic/event logger as well, such development had been 
+fostered particularly by the use of NetFlow/IPFIX as generic transport,
 see for example Cisco NEL and Cisco NSEL. Key to logging are time-stamping
 primitives, timestamp_start and timestamp_end: the former records the likes
 of libpcap packet timestamp, sFlow sample arrival time, NetFlow observation
@@ -1790,6 +1877,15 @@ This chapter will hopefully build up to the point of providing a taxonomy of
 popular cases to troubleshoot by daemon and what to do. Although that is the
 plan, the current format is sparse notes.  
 
+When reporting a bug: please report in all cases the pmacct version that you
+are experiencing your issue against; the CLI option -V of the daemon you are
+using returns all the info needed (daemon, version, specific release and
+options compiled in). Do realise that if using a pre-packaged version from
+your OS and/or old code (ie. not master code on GitHub or latest official
+release), you may be very possibly asked to try one of these first. Finally,
+please refrain to open issues on GitHub if not using master code (use the
+pmacct-discussion mailing list or unicast email instead). 
+
 a) In case of crashes of an any process, regardless if predictable or not, the
 advice is to run the daemon with "ulimit -c unlimited" so to generate a core
 dump. The file is placed in the directory where the daemon is started so it
@@ -1817,23 +1913,25 @@ valgrind, ie. "valgrind --leak-check=yes <pmacct command-line>". A memory leak
 is confirmed if the amount of "definitely lost" bytes keeps increasing over
 time. 
 
-c) If nfacctd or sfacctd is in use and the symptom is no data: 1) check with
-tcpdump, ie. "tcpdump -i <interface> -n port <sfacctd/nfacctd listening port>",
-that packets are arriving. Optionally wireshark (or its commandline counterpart
-tsharki) can be used, in conjunction with decoders (cflow for NetFlow/IPFIX and
-sflow for sFlow) to validate packets are consistent; this proofs there is no
-filtering taking place in between exporters and collector; 2) check firewall
-settings on the collector box, ie. "iptables -L -n" on Linux (disable or do
-appropriate holes): even though tcpdump sees packets hitting the listening
-port, in normal kernel operations the filtering happens after the raw socket
-used by tcpdump is served; 3) especially in case of copy/paste of configs or if
-using a config from a production system in lab, disable or double-check values
-for internal buffering: if set too high they will likely retain data internally
-to the daemon; 4) if multiple interfaces are configured on a system, try to
-disable (at least briefly for a test) rp_filtering. See this link for more info
-on RP filtering: http://tldp.org/HOWTO/Adv-Routing-HOWTO/lartc.kernel.rpf.html
-To disable RP filtering he value in the rp_filter files in /proc must be set to
-zero.
+c) In the two cases of nfacctd/sfacctd or nfprobe/sfprobe not showing signs of
+input/output data: 1) check with tcpdump, ie. "tcpdump -i <interface> -n port
+<sfacctd/nfacctd listening port>", that packets are emitted/received. Optionally
+Wireshark (or its commandline counterpart tshark) can be used, in conjunction
+with decoders ('cflow' for NetFlow/IPFIX and 'sflow' for sFlow), to validate
+packets are consistent; this proofs there is no filtering taking place in
+between exporters and collector; 2) check firewall settings on the collector
+box, ie. "iptables -L -n" on Linux (disable or do appropriate holes): tcpdump
+may see packets hitting the listening port as, in normal kernel operations, the
+filtering happens after the raw socket (the one used by tcpdump) is served; you
+can additionally certainly check with 3rd party equivalent applications or, say,
+'netcat' that the same behaviour is obtained as with pmacct ones 3) especially
+in case of copy/paste of configs or if using a config from a production system
+in lab, disable or double-check values for internal buffering: if set too high
+they will likely retain data internally to the daemon; 4) if multiple interfaces
+are configured on a system, try to disable (at least for a test) rp_filtering.
+See http://tldp.org/HOWTO/Adv-Routing-HOWTO/lartc.kernel.rpf.html for more info
+on RP filtering. To disable RP filtering he value in the rp_filter files in
+/proc must be set to zero.
 
 d) A NetFlow/sFlow packet capture in libpcap format suitable for replay can
 be produced with tcpdump, ie. "tcpdump -i <interface> -n -s 0 -w <output file>

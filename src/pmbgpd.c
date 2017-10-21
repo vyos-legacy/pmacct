@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -214,6 +214,7 @@ int main(int argc,char **argv, char **envp)
   else Log(LOG_INFO, "INFO ( %s/core ): Reading configuration from cmdline.\n", config.name);
 
   pm_setproctitle("%s [%s]", "Core Process", config.proc_name);
+  if (config.pidfile) write_pid_file(config.pidfile);
 
   /* signal handling we want to inherit to plugins (when not re-defined elsewhere) */
   signal(SIGCHLD, startup_handle_falling_child); /* takes note of plugins failed during startup phase */
@@ -221,7 +222,10 @@ int main(int argc,char **argv, char **envp)
   signal(SIGUSR1, SIG_IGN);
   signal(SIGUSR2, reload_maps); /* sets to true the reload_maps flag */
   signal(SIGPIPE, SIG_IGN); /* we want to exit gracefully when a pipe is broken */
+  signal(SIGINT, my_sigint_handler);
+  signal(SIGTERM, my_sigint_handler);
 
+  if (!config.nfacctd_bgp) config.nfacctd_bgp = BGP_DAEMON_ONLINE;
   if (!config.nfacctd_bgp_port) config.nfacctd_bgp_port = BGP_TCP_PORT;
 
   bgp_prepare_daemon();

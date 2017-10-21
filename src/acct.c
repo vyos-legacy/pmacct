@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -25,6 +25,7 @@
 #include "pmacct.h"
 #include "imt_plugin.h"
 #include "crc32.h"
+#include "bgp/bgp.h"
 
 /* functions */
 struct acc *search_accounting_structure(struct primitives_ptrs *prim_ptrs)
@@ -92,7 +93,7 @@ int compare_accounting_structure(struct acc *elem, struct primitives_ptrs *prim_
     if (elem->clbgp) {
       struct pkt_legacy_bgp_primitives tmp_plbgp;
 
-      cache_to_pkt_legacy_bgp_primitives(&tmp_plbgp, elem->clbgp, config.what_to_count);
+      cache_to_pkt_legacy_bgp_primitives(&tmp_plbgp, elem->clbgp);
       res_lbgp = memcmp(&tmp_plbgp, plbgp, sizeof(struct pkt_legacy_bgp_primitives));
     }
   }
@@ -215,7 +216,7 @@ void insert_accounting_structure(struct primitives_ptrs *prim_ptrs)
 	  elem_acc->bytes_counter += data->cst.ba;
           elem_acc->flow_counter += data->cst.fa;
 	}
-        lru_elem_ptr[config.buckets] = elem_acc;
+        lru_elem_ptr[pos] = elem_acc;
         return;
       }
     }
@@ -248,7 +249,7 @@ void insert_accounting_structure(struct primitives_ptrs *prim_ptrs)
         }
 
         memset(elem_acc->clbgp, 0, clb_size);
-        pkt_to_cache_legacy_bgp_primitives(elem_acc->clbgp, plbgp, config.what_to_count);
+        pkt_to_cache_legacy_bgp_primitives(elem_acc->clbgp, plbgp, config.what_to_count, config.what_to_count_2);
       }
       else free_cache_legacy_bgp_primitives(&elem_acc->clbgp);
 
@@ -324,7 +325,7 @@ void insert_accounting_structure(struct primitives_ptrs *prim_ptrs)
         elem_acc->bytes_counter += data->cst.ba;
         elem_acc->flow_counter += data->cst.fa;
       }
-      lru_elem_ptr[config.buckets] = elem_acc;
+      lru_elem_ptr[pos] = elem_acc;
       return;
     }
 
@@ -382,7 +383,7 @@ void insert_accounting_structure(struct primitives_ptrs *prim_ptrs)
           exit_plugin(1);
         }
         memset(elem_acc->clbgp, 0, clb_size);
-        pkt_to_cache_legacy_bgp_primitives(elem_acc->clbgp, plbgp, config.what_to_count);
+        pkt_to_cache_legacy_bgp_primitives(elem_acc->clbgp, plbgp, config.what_to_count, config.what_to_count_2);
       }
       else elem_acc->clbgp = NULL;
 
@@ -444,7 +445,7 @@ void insert_accounting_structure(struct primitives_ptrs *prim_ptrs)
         elem_acc->flow_counter += data->cst.fa;
       }
       elem_acc->next = NULL;
-      lru_elem_ptr[config.buckets] = elem_acc;
+      lru_elem_ptr[pos] = elem_acc;
       return;
     }
   }

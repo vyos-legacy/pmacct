@@ -221,6 +221,22 @@ void count_dst_host_country_handler(const struct db_cache *cache_elem, struct in
   *ptr_where += strlen(*ptr_where);
   *ptr_values += strlen(*ptr_values);
 }
+
+void count_src_host_pocode_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->primitives.src_ip_pocode.str);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->primitives.src_ip_pocode.str);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_dst_host_pocode_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, cache_elem->primitives.dst_ip_pocode.str);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, cache_elem->primitives.dst_ip_pocode.str);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
 #endif
 
 void count_sampling_rate_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
@@ -531,6 +547,19 @@ void count_ext_comm_handler(const struct db_cache *cache_elem, struct insert_dat
   *ptr_values += strlen(*ptr_values);
 }
 
+void count_lrg_comm_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *bgp_comm_ptr = NULL, empty_string[] = "";
+
+  vlen_prims_get(cache_elem->pvlen, COUNT_INT_LRG_COMM, &bgp_comm_ptr);
+  if (!bgp_comm_ptr) bgp_comm_ptr = empty_string;
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, bgp_comm_ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, bgp_comm_ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
 void count_as_path_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
 {
   char *as_path_ptr = NULL, empty_string[] = "";
@@ -562,6 +591,19 @@ void count_src_ext_comm_handler(const struct db_cache *cache_elem, struct insert
   char *bgp_comm_ptr = NULL, empty_string[] = "";
 
   vlen_prims_get(cache_elem->pvlen, COUNT_INT_SRC_EXT_COMM, &bgp_comm_ptr);
+  if (!bgp_comm_ptr) bgp_comm_ptr = empty_string;
+
+  snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, bgp_comm_ptr);
+  snprintf(*ptr_values, SPACELEFT(values_clause), values[num].string, bgp_comm_ptr);
+  *ptr_where += strlen(*ptr_where);
+  *ptr_values += strlen(*ptr_values);
+}
+
+void count_src_lrg_comm_handler(const struct db_cache *cache_elem, struct insert_data *idata, int num, char **ptr_values, char **ptr_where)
+{
+  char *bgp_comm_ptr = NULL, empty_string[] = "";
+
+  vlen_prims_get(cache_elem->pvlen, COUNT_INT_SRC_LRG_COMM, &bgp_comm_ptr);
   if (!bgp_comm_ptr) bgp_comm_ptr = empty_string;
 
   snprintf(*ptr_where, SPACELEFT(where_clause), where[num].string, bgp_comm_ptr);

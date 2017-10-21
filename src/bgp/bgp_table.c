@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /* 
@@ -208,7 +208,7 @@ bgp_unlock_node (struct bgp_peer *peer, struct bgp_node *node)
 /* Find matched prefix. */
 void
 bgp_node_match (const struct bgp_table *table, struct prefix *p, struct bgp_peer *peer,
-		u_int32_t (*modulo_func)(struct bgp_peer *, path_id_t *),
+		u_int32_t (*modulo_func)(struct bgp_peer *, path_id_t *, int),
 		int (*cmp_func)(struct bgp_info *, struct node_match_cmp_term2 *),
 		struct node_match_cmp_term2 *nmct2,
 		struct bgp_node **result_node, struct bgp_info **result_info)
@@ -223,9 +223,11 @@ bgp_node_match (const struct bgp_table *table, struct prefix *p, struct bgp_peer
   bms = bgp_select_misc_db(peer->type);
   if (!bms) return;
 
-  modulo = modulo_func(peer, NULL);
+  /* XXX: see https://github.com/pmacct/pmacct/pull/78 */
   if (bms->table_per_peer_hash == BGP_ASPATH_HASH_PATHID) modulo_max = bms->table_per_peer_buckets;
   else modulo_max = 1;
+
+  modulo = modulo_func(peer, NULL, modulo_max);
 
   matched_node = NULL;
   matched_info = NULL;
@@ -259,7 +261,7 @@ bgp_node_match (const struct bgp_table *table, struct prefix *p, struct bgp_peer
 
 void
 bgp_node_match_ipv4 (const struct bgp_table *table, struct in_addr *addr, struct bgp_peer *peer,
-		     u_int32_t (*modulo_func)(struct bgp_peer *, path_id_t *),
+		     u_int32_t (*modulo_func)(struct bgp_peer *, path_id_t *, int),
 		     int (*cmp_func)(struct bgp_info *, struct node_match_cmp_term2 *),
 		     struct node_match_cmp_term2 *nmct2,
 		     struct bgp_node **result_node, struct bgp_info **result_info)
@@ -277,7 +279,7 @@ bgp_node_match_ipv4 (const struct bgp_table *table, struct in_addr *addr, struct
 #ifdef ENABLE_IPV6
 void
 bgp_node_match_ipv6 (const struct bgp_table *table, struct in6_addr *addr, struct bgp_peer *peer,
-		     u_int32_t (*modulo_func)(struct bgp_peer *, path_id_t *),
+		     u_int32_t (*modulo_func)(struct bgp_peer *, path_id_t *, int),
 		     int (*cmp_func)(struct bgp_info *, struct node_match_cmp_term2 *),
 		     struct node_match_cmp_term2 *nmct2,
 		     struct bgp_node **result_node, struct bgp_info **result_info)

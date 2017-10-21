@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -39,12 +39,14 @@
 #define MAX_PROTOCOL_LEN 16
 #define MAX_PKT_LEN_DISTRIB_BINS 255
 #define MAX_PKT_LEN_DISTRIB_LEN 15
+#define DEFAULT_AVRO_SCHEMA_REFRESH_TIME 60
 #define DEFAULT_IMT_PLUGIN_SELECT_TIMEOUT 5
 #define UINT32T_THRESHOLD 4290000000UL
 #define UINT64T_THRESHOLD 18446744073709551360ULL
 #define INT64T_THRESHOLD 9223372036854775807ULL
 #define PM_VARIABLE_LENGTH 65535
 #define PM_COUNTRY_T_STRLEN 4
+#define PM_POCODE_T_STRLEN 12
 #ifndef UINT8_MAX
 #define UINT8_MAX (255U)
 #endif
@@ -60,6 +62,9 @@
 #ifndef INT_MAX
 #define INT_MAX (2147483647U)
 #endif
+#ifndef INT_MIN
+#define INT_MIN (-2147483647 - 1)
+#endif
 
 #define LONGLONG_RETRY INT_MAX
 
@@ -71,6 +76,9 @@
 #define SNAPLEN_ISIS_MIN 512
 #define SNAPLEN_ISIS_DEFAULT 1476
 
+#define VERYSHORTBUFLEN (32+MOREBUFSZ)
+#define SHORTSHORTBUFLEN (64+MOREBUFSZ)
+#define SHORTBUFLEN (128+MOREBUFSZ)
 #define SRVBUFLEN (256+MOREBUFSZ)
 #define LONGSRVBUFLEN (384+MOREBUFSZ)
 #define LONGLONGSRVBUFLEN (1024+MOREBUFSZ)
@@ -81,14 +89,14 @@
 #define PRIMITIVE_DESC_LEN	64
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.6.1"
-#define UACCTD_USAGE_HEADER "Linux NetFilter NFLOG Accounting Daemon, uacctd 1.6.1"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.6.1"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.6.1"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.6.1"
-#define PMTELEMETRYD_USAGE_HEADER "Streaming Network Telemetry Daemon, pmtelemetryd 1.6.1"
-#define PMBGPD_USAGE_HEADER "pmacct BGP Collector Daemon, pmbgpd 1.6.1"
-#define PMBMPD_USAGE_HEADER "pmacct BMP Collector Daemon, pmbmpd 1.6.1"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.6.2-git"
+#define UACCTD_USAGE_HEADER "Linux NetFilter NFLOG Accounting Daemon, uacctd 1.6.2-git"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.6.2-git"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.6.2-git"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.6.2-git"
+#define PMTELEMETRYD_USAGE_HEADER "Streaming Network Telemetry Daemon, pmtelemetryd 1.6.2-git"
+#define PMBGPD_USAGE_HEADER "pmacct BGP Collector Daemon, pmbgpd 1.6.2-git"
+#define PMBMPD_USAGE_HEADER "pmacct BMP Collector Daemon, pmbmpd 1.6.2-git"
 #define PMACCT_COMPILE_ARGS COMPILE_ARGS
 #ifndef TRUE
 #define TRUE 1
@@ -97,7 +105,7 @@
 #define FALSE 0
 #endif
 #ifndef FALSE_NONZERO
-#define FALSE_NONZERO 2
+#define FALSE_NONZERO INT_MIN
 #endif
 #ifndef ERR
 #define ERR -1
@@ -215,7 +223,11 @@
 #define COUNT_INT_LABEL			0x0002000000008000ULL
 #define COUNT_INT_EXPORT_PROTO_SEQNO	0x0002000000010000ULL
 #define COUNT_INT_EXPORT_PROTO_VERSION  0x0002000000020000ULL
-#define COUNT_INT_CUSTOM_PRIMITIVES	0x0002000000040000ULL
+#define COUNT_INT_LRG_COMM		0x0002000000040000ULL
+#define COUNT_INT_SRC_LRG_COMM		0x0002000000080000ULL
+#define COUNT_INT_SRC_HOST_POCODE	0x0002000000100000ULL
+#define COUNT_INT_DST_HOST_POCODE	0x0002000000200000ULL
+#define COUNT_INT_CUSTOM_PRIMITIVES	0x0002000000400000ULL
 
 #define COUNT_INDEX_MASK	0xFFFF
 #define COUNT_INDEX_CP		0xFFFF000000000000ULL  /* index 0xffff reserved to custom primitives */
@@ -291,6 +303,10 @@
 #define COUNT_LABEL			(COUNT_INT_LABEL & COUNT_REGISTRY_MASK)
 #define COUNT_EXPORT_PROTO_SEQNO	(COUNT_INT_EXPORT_PROTO_SEQNO & COUNT_REGISTRY_MASK)
 #define COUNT_EXPORT_PROTO_VERSION	(COUNT_INT_EXPORT_PROTO_VERSION & COUNT_REGISTRY_MASK)
+#define COUNT_LRG_COMM			(COUNT_INT_LRG_COMM & COUNT_REGISTRY_MASK)
+#define COUNT_SRC_LRG_COMM		(COUNT_INT_SRC_LRG_COMM & COUNT_REGISTRY_MASK)
+#define COUNT_SRC_HOST_POCODE		(COUNT_INT_SRC_HOST_POCODE & COUNT_REGISTRY_MASK)
+#define COUNT_DST_HOST_POCODE		(COUNT_INT_DST_HOST_POCODE & COUNT_REGISTRY_MASK)
 #define COUNT_CUSTOM_PRIMITIVES		(COUNT_INT_CUSTOM_PRIMITIVES & COUNT_REGISTRY_MASK)
 /* PRIMITIVES DEFINITION: END */
 
@@ -395,6 +411,10 @@ typedef struct {
     char str[PM_COUNTRY_T_STRLEN];
   };
 } pm_country_t;
+
+typedef struct {
+  char str[PM_POCODE_T_STRLEN];
+} pm_pocode_t;
 
 typedef struct {
   pm_cfgreg_t type;

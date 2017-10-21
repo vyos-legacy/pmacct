@@ -31,9 +31,6 @@
 #define MAX_IGP_MAP_ELEM 64
 #define MAX_IGP_MAP_NODES 4096
 
-typedef u_int16_t afi_t;
-typedef u_int8_t safi_t;
-
 /* Flag manipulation macros. */
 #define CHECK_FLAG(V,F)      ((V) & (F))
 #define SET_FLAG(V,F)        (V) |= (F)
@@ -102,6 +99,7 @@ EXT void igp_daemon_map_initialize(char *, struct plugin_requests *);
 EXT void igp_daemon_map_finalize(char *, struct plugin_requests *);
 EXT int igp_daemon_map_handle_len(int *, int, struct plugin_requests *, char *);
 EXT int igp_daemon_map_handle_lsp_id(char *, struct host_addr *);
+EXT void isis_srcdst_lookup(struct packet_ptrs *);
 
 /* global variables */
 EXT struct thread_master *master;

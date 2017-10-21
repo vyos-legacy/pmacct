@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2015 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -134,6 +134,12 @@ EXT void P_broker_timers_unset_last_fail(struct p_broker_timers *);
 EXT time_t P_broker_timers_get_last_fail(struct p_broker_timers *);
 EXT int P_broker_timers_get_retry_interval(struct p_broker_timers *);
 
+EXT void P_init_historical_acct(time_t);
+EXT void P_init_refresh_deadline(time_t *, int, int, char *);
+EXT void P_eval_historical_acct(struct timeval *, struct timeval *, time_t);
+EXT int P_cmp_historical_acct(struct timeval *, struct timeval *);
+EXT int P_test_zero_elem(struct chained_cache *);
+
 /* global vars */
 EXT void (*insert_func)(struct primitives_ptrs *, struct insert_data *); /* pointer to INSERT function */
 EXT void (*purge_func)(struct chained_cache *[], int); /* pointer to purge function */ 
@@ -151,11 +157,5 @@ EXT int (*basetime_cmp)(struct timeval *, struct timeval *);
 EXT struct timeval basetime, ibasetime, new_basetime;
 EXT time_t timeslot;
 EXT int dyn_table;
-
-EXT void P_init_historical_acct(time_t);
-EXT void P_init_refresh_deadline(time_t *);
-EXT void P_eval_historical_acct(struct timeval *, struct timeval *, time_t);
-EXT int P_cmp_historical_acct(struct timeval *, struct timeval *);
-EXT int P_test_zero_elem(struct chained_cache *);
 #undef EXT
 #endif /* #if (!defined __PLUGIN_COMMON_EXPORT) */

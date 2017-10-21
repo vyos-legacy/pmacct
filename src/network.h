@@ -259,6 +259,8 @@ struct my_gtphdr_v1 {
 /* typedefs */
 typedef u_int32_t as_t;
 typedef u_int16_t as16_t;
+typedef u_int16_t afi_t;
+typedef u_int8_t safi_t;
 
 #define RD_LEN		8
 #define RD_TYPE_AS      0
@@ -271,21 +273,21 @@ struct rd_as
   u_int16_t type;
   u_int16_t as;
   u_int32_t val;
-};
+} __attribute__ ((packed));
 
 struct rd_ip
 {
   u_int16_t type;
   struct in_addr ip;
   u_int16_t val;
-};
+} __attribute__ ((packed));
 
 struct rd_as4
 {
   u_int16_t type;
   as_t as;
   u_int32_t val;
-};
+} __attribute__ ((packed));
 
 /* Picking one of the three structures as rd_t for simplicity */
 typedef struct rd_as rd_t;
@@ -370,6 +372,7 @@ struct packet_ptrs {
   u_int32_t sample_type; /* sFlow sample type */
   u_int32_t seqno; /* sFlow/NetFlow sequence number */
   u_int16_t f_len; /* sFlow/NetFlow payload length */
+  char *tee_dissect; /* pointer to sFlow tee dissection structure */
   u_int8_t renormalized; /* Is it renormalized yet ? */
   char *pkt_data_ptrs[CUSTOM_PRIMITIVE_MAX_PPTRS_IDX]; /* indexed packet pointers */
   u_int16_t pkt_proto[CUSTOM_PRIMITIVE_MAX_PPTRS_IDX]; /* indexed packet protocols */
@@ -427,6 +430,8 @@ struct pkt_primitives {
 #if defined (WITH_GEOIP) || defined (WITH_GEOIPV2)
   pm_country_t src_ip_country;
   pm_country_t dst_ip_country;
+  pm_pocode_t src_ip_pocode;
+  pm_pocode_t dst_ip_pocode;
 #endif
   pm_id_t tag;
   pm_id_t tag2;
@@ -503,6 +508,7 @@ struct pkt_stitching {
 /* START: BGP section */
 #define MAX_BGP_STD_COMMS       96
 #define MAX_BGP_EXT_COMMS       96
+#define MAX_BGP_LRG_COMMS       96
 #define MAX_BGP_ASPATH          128
 
 struct extra_primitives {
@@ -545,9 +551,11 @@ struct pkt_bgp_primitives {
 struct pkt_legacy_bgp_primitives {
   char std_comms[MAX_BGP_STD_COMMS];
   char ext_comms[MAX_BGP_EXT_COMMS];
+  char lrg_comms[MAX_BGP_LRG_COMMS];
   char as_path[MAX_BGP_ASPATH];
   char src_std_comms[MAX_BGP_STD_COMMS];
   char src_ext_comms[MAX_BGP_EXT_COMMS];
+  char src_lrg_comms[MAX_BGP_LRG_COMMS];
   char src_as_path[MAX_BGP_ASPATH];
 };
 
@@ -572,9 +580,11 @@ struct pkt_mpls_primitives {
 struct cache_legacy_bgp_primitives {
   char *std_comms;
   char *ext_comms;
+  char *lrg_comms;
   char *as_path;
   char *src_std_comms;
   char *src_ext_comms;
+  char *src_lrg_comms;
   char *src_as_path;
 };
 /* END: BGP section */

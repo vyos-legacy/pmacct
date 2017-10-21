@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -24,6 +24,7 @@
 
 /* includes */
 #include "pmacct.h"
+#include "addr.h"
 #include "bgp.h"
 #include "thread_pool.h"
 #if defined WITH_RABBITMQ
@@ -55,6 +56,14 @@ void nfacctd_bgp_wrapper()
 #endif
 
 void skinny_bgp_daemon()
+{
+  if (config.nfacctd_bgp == BGP_DAEMON_ONLINE)
+    skinny_bgp_daemon_online();
+  else if (config.nfacctd_bgp == BGP_DAEMON_OFFLINE)
+    skinny_bgp_daemon_offline();
+}
+
+void skinny_bgp_daemon_online()
 {
   int slen, ret, rc, peers_idx, allowed;
   int peers_idx_rr = 0, max_peers_idx = 0;
@@ -263,7 +272,7 @@ void skinny_bgp_daemon()
     struct host_addr srv_addr;
     u_int16_t srv_port;
 
-    sa_to_addr(&server, &srv_addr, &srv_port);
+    sa_to_addr((struct sockaddr *)&server, &srv_addr, &srv_port);
     addr_to_str(srv_string, &srv_addr);
     Log(LOG_INFO, "INFO ( %s/%s ): waiting for BGP data on %s:%u\n", config.name, bgp_misc_db->log_str, srv_string, srv_port);
   }
@@ -525,20 +534,21 @@ void skinny_bgp_daemon()
 	bgp_peer_log_init(peer, config.nfacctd_bgp_msglog_output, FUNC_TYPE_BGP);
 
       /* Check: only one TCP connection is allowed per peer */
+      /* XXX: fixme for NAT traversal scenarios */
       for (peers_check_idx = 0, peers_num = 0; peers_check_idx < config.nfacctd_bgp_max_peers; peers_check_idx++) { 
 	if (peers_idx != peers_check_idx && !memcmp(&peers[peers_check_idx].addr, &peer->addr, sizeof(peers[peers_check_idx].addr))) { 
 	  if ((now - peers[peers_check_idx].last_keepalive) > peers[peers_check_idx].ht) {
             Log(LOG_INFO, "INFO ( %s/%s ): [%s] Replenishing stale connection by peer.\n",
 				config.name, bgp_misc_db->log_str, bgp_peer_print(&peers[peers_check_idx]));
             FD_CLR(peers[peers_check_idx].fd, &bkp_read_descs);
-            bgp_peer_close(&peers[peers_check_idx], FUNC_TYPE_BGP);
+            bgp_peer_close(&peers[peers_check_idx], FUNC_TYPE_BGP, FALSE, FALSE, FALSE, FALSE, NULL);
 	  }
 	  else {
 	    Log(LOG_ERR, "ERROR ( %s/%s ): [%s] Refusing new connection from existing peer (residual holdtime: %u).\n",
 				config.name, bgp_misc_db->log_str, bgp_peer_print(&peers[peers_check_idx]),
 				(peers[peers_check_idx].ht - (now - peers[peers_check_idx].last_keepalive)));
 	    FD_CLR(peer->fd, &bkp_read_descs);
-	    bgp_peer_close(peer, FUNC_TYPE_BGP);
+	    bgp_peer_close(peer, FUNC_TYPE_BGP, FALSE, FALSE, FALSE, FALSE, NULL);
 	    // bgp_batch_rollback(&bp_batch);
 	    goto read_data;
 	  }
@@ -577,7 +587,7 @@ void skinny_bgp_daemon()
     if (ret <= 0) {
       Log(LOG_INFO, "INFO ( %s/%s ): [%s] BGP connection reset by peer (%d).\n", config.name, bgp_misc_db->log_str, bgp_peer_print(peer), errno);
       FD_CLR(peer->fd, &bkp_read_descs);
-      bgp_peer_close(peer, FUNC_TYPE_BGP);
+      bgp_peer_close(peer, FUNC_TYPE_BGP, FALSE, FALSE, FALSE, FALSE, NULL);
       recalc_fds = TRUE;
       goto select_again;
     }
@@ -593,13 +603,140 @@ void skinny_bgp_daemon()
       } 
 
       ret = bgp_parse_msg(peer, now, TRUE);
-      if (ret < 0) {
+      if (ret) {
         FD_CLR(peer->fd, &bkp_read_descs);
-        bgp_peer_close(peer, FUNC_TYPE_BGP);
+
+	if (ret < 0) bgp_peer_close(peer, FUNC_TYPE_BGP, FALSE, FALSE, FALSE, FALSE, NULL);
+	else bgp_peer_close(peer, FUNC_TYPE_BGP, FALSE, TRUE, ret, BGP_NOTIFY_SUBCODE_UNSPECIFIC, NULL);
+
         recalc_fds = TRUE;
         goto select_again;
       }
     }
+  }
+}
+
+void skinny_bgp_daemon_offline()
+{
+  int timeout, ret, nfacctd_bgp_offline_file_spool_pipe[2];
+  time_t now, file_spool_refresh_deadline, saved_file_spool_refresh_deadline;
+  struct pollfd pfd;
+
+  afi_t afi;
+  safi_t safi;
+
+  /* initial cleanups */
+  reload_map_bgp_thread = FALSE;
+  reload_log_bgp_thread = FALSE;
+
+  file_spool_refresh_deadline = FALSE;
+  saved_file_spool_refresh_deadline = FALSE;
+  offline_peers = NULL;
+  now = time(NULL);
+
+  bgp_routing_db = &inter_domain_routing_dbs[FUNC_TYPE_BGP];
+  memset(bgp_routing_db, 0, sizeof(struct bgp_rt_structs));
+
+  if (!config.bgp_table_attr_hash_buckets) config.bgp_table_attr_hash_buckets = HASHTABSIZE;
+  bgp_attr_init(config.bgp_table_attr_hash_buckets, bgp_routing_db);
+
+  if (!config.nfacctd_bgp_max_peers) config.nfacctd_bgp_max_peers = MAX_BGP_PEERS_DEFAULT;
+  Log(LOG_INFO, "INFO ( %s/%s ): maximum BGP peers allowed: %d\n", config.name, bgp_misc_db->log_str, config.nfacctd_bgp_max_peers);
+
+/* XXX: offline_peers used instead
+
+  peers = malloc(config.nfacctd_bgp_max_peers*sizeof(struct bgp_peer));
+  if (!peers) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): Unable to malloc() BGP peers structure. Terminating thread.\n", config.name, bgp_misc_db->log_str);
+    exit_all(1);
+  }
+  memset(peers, 0, config.nfacctd_bgp_max_peers*sizeof(struct bgp_peer));
+
+*/
+
+  if (config.nfacctd_bgp_offline_file_spool /* XXX: AMQP and Kafka to be added here */) {
+    if (config.nfacctd_bgp_offline_file_spool) bgp_misc_db->dump_input_backend_methods++;
+
+    if (bgp_misc_db->dump_input_backend_methods > 1) {
+      Log(LOG_ERR, "ERROR ( %s/%s ): bgp_daemon_offline_file_spool are mutually exclusive. Terminating thread.\n", config.name, bgp_misc_db->log_str);
+      exit_all(1);
+    }
+
+    if (config.nfacctd_bgp_offline_file_spool) {
+      /* creating a 'fake' fd so to be able to poll() against it later */
+      socketpair(AF_UNIX, SOCK_DGRAM, 0, nfacctd_bgp_offline_file_spool_pipe);
+    }
+
+    /* XXX: init AMQP and Kafka to be added here */
+  }
+
+  if (!config.bgp_table_peer_buckets) config.bgp_table_peer_buckets = DEFAULT_BGP_INFO_HASH;
+  if (!config.bgp_table_per_peer_buckets) config.bgp_table_per_peer_buckets = DEFAULT_BGP_INFO_PER_PEER_HASH;
+
+  if (config.bgp_table_per_peer_hash == BGP_ASPATH_HASH_PATHID)
+    bgp_route_info_modulo = bgp_route_info_modulo_pathid;
+  else {
+    Log(LOG_ERR, "ERROR ( %s/%s ): Unknown 'bgp_table_per_peer_hash' value. Terminating thread.\n", config.name, bgp_misc_db->log_str);
+    exit_all(1);
+  }
+
+  if (config.nfacctd_bgp_offline_file_spool) 
+    Log(LOG_INFO, "INFO ( %s/%s ): waiting for BGP data on %s\n", config.name, bgp_misc_db->log_str, config.nfacctd_bgp_offline_file_spool);
+
+  /* Let's initialize clean shared RIB */
+  for (afi = AFI_IP; afi < AFI_MAX; afi++) {
+    for (safi = SAFI_UNICAST; safi < SAFI_MAX; safi++) {
+      bgp_routing_db->rib[afi][safi] = bgp_table_init(afi, safi);
+    }
+  }
+
+  if (bgp_misc_db->dump_input_backend_methods) {
+    char dump_roundoff[] = "m";
+    time_t tmp_time;
+
+#ifdef WITH_JANSSON
+    if (!config.nfacctd_bgp_offline_input) config.nfacctd_bgp_offline_input = PRINT_OUTPUT_JSON;
+#else
+    Log(LOG_WARNING, "WARN ( %s/%s ): bgp_daemon_offline_input set to json but will consume no input (missing --enable-jansson).\n", config.name, bgp_misc_db->log_str);
+#endif
+
+    if (config.nfacctd_bgp_offline_file_spool) {
+      if (config.nfacctd_bgp_offline_file_refresh_time) {
+        gettimeofday(&bgp_misc_db->log_tstamp, NULL);
+        file_spool_refresh_deadline = bgp_misc_db->log_tstamp.tv_sec;
+        tmp_time = roundoff_time(file_spool_refresh_deadline, dump_roundoff);
+        while ((tmp_time + config.nfacctd_bgp_offline_file_refresh_time) < file_spool_refresh_deadline) {
+          tmp_time += config.nfacctd_bgp_offline_file_refresh_time;
+        }
+        file_spool_refresh_deadline = tmp_time;
+        file_spool_refresh_deadline += config.nfacctd_bgp_offline_file_refresh_time; /* it's a deadline not a basetime */
+      }
+      else {
+        Log(LOG_ERR, "ERROR ( %s/%s ): Invalid 'bgp_daemon_offline_file_refresh_time'.\n", config.name, bgp_misc_db->log_str);
+	exit_all(1);
+      }
+    }
+  }
+
+  bgp_link_misc_structs(bgp_misc_db);
+
+  for (;;) {
+    poll_again:
+
+    if (config.nfacctd_bgp_offline_file_spool) {
+      now = time(NULL);
+      calc_refresh_timeout(file_spool_refresh_deadline, now, &timeout);
+      pfd.fd = nfacctd_bgp_offline_file_spool_pipe[1];
+      pfd.events = POLLIN;
+
+      ret = poll(&pfd, 1, timeout);
+
+      bgp_offline_read_file_spool(config.nfacctd_bgp_offline_file_spool, saved_file_spool_refresh_deadline, &offline_peers);
+      saved_file_spool_refresh_deadline = file_spool_refresh_deadline;
+      file_spool_refresh_deadline += config.nfacctd_bgp_offline_file_refresh_time;
+    }
+
+    // XXX: RabbitMQ and Kafka polling here 
   }
 }
 
@@ -621,4 +758,193 @@ void bgp_prepare_daemon()
   bgp_misc_db->is_thread = FALSE;
   bgp_misc_db->log_str = malloc(strlen("core") + 1);
   strcpy(bgp_misc_db->log_str, "core");
+}
+
+void bgp_offline_read_file_spool(char *path, time_t last_read, void **offline_peers)
+{
+  struct dirent **namelist;
+  struct stat entry_stat;
+  char entry_pathname[SRVBUFLEN], errbuf[SRVBUFLEN], *tmpbuf;
+  int entries = 0, idx = 0, ret;
+
+  tmpbuf = malloc(LARGEBUFLEN);
+  if (!tmpbuf) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): bgp_offline_read_file_spool(): unable to malloc() tmpbuf. Terminating thread.\n",
+	config.name, bgp_misc_db->log_str);
+    exit_all(1);
+  }
+
+  entries = pm_scandir(path, &namelist, NULL, NULL);
+
+  if (entries > 0) {
+    while (idx < entries) {
+      snprintf(entry_pathname, sizeof(entry_pathname), "%s/%s", path, namelist[idx]->d_name);
+      ret = stat(entry_pathname, &entry_stat);
+
+      if (ret < 0) Log(LOG_WARNING, "WARN ( %s/%s ): [%s] bgp_offline_read_file_spool(): unable to stat(). File skipped.\n",
+	   	       config.name, bgp_misc_db->log_str, entry_pathname);
+      else {
+	if (S_ISREG(entry_stat.st_mode) && entry_stat.st_mtime > last_read) {
+	  FILE *fp = fopen(entry_pathname, "r");
+	  
+	  if (!fp) Log(LOG_WARNING, "WARN ( %s/%s ): [%s] bgp_offline_read_file_spool(): unable to fopen(). File skipped.\n",
+		       config.name, bgp_misc_db->log_str, entry_pathname);
+	  else {
+	    int line = 1;
+
+	    while (fgets(tmpbuf, LARGEBUFLEN, fp)) {
+	      if (config.nfacctd_bgp_offline_input == PRINT_OUTPUT_JSON) {
+	        if (bgp_offline_read_json(tmpbuf, errbuf, SRVBUFLEN, offline_peers) == ERR) {
+		  Log(LOG_WARNING, "WARN ( %s/%s ): [%s:%u] %s\n", config.name, bgp_misc_db->log_str, entry_pathname, line, errbuf);
+		} 
+	      }
+
+	      // XXX: Reading Avro here 
+
+	      line++;
+	    }
+
+	    Log(LOG_DEBUG, "DEBUG ( %s/%s ): bgp_offline_read_file_spool(): read '%s'.\n",
+	        config.name, bgp_misc_db->log_str, entry_pathname);
+
+	    fclose(fp);
+	  }
+	}
+      }
+
+      idx++;
+    }
+  }
+
+  pm_scandir_free(&namelist, entries);
+  free(tmpbuf);
+}
+
+int bgp_offline_read_json(char *buf, char *errbuf, int errlen, void **offline_peers)
+{
+  int ret = SUCCESS;
+
+#ifdef WITH_JANSSON
+  json_error_t json_err;
+  json_t *json_obj;
+
+  json_obj = json_loads(buf, 0, &json_err);
+
+  if (!json_obj) {
+    snprintf(errbuf, errlen, "bgp_offline_read_json(): json_loads() error: %s. Line skipped.\n", json_err.text);
+    ret = ERR;
+  }
+  else {
+    if (!json_is_object(json_obj)) {
+      snprintf(errbuf, errlen, "bgp_offline_read_json(): json_is_object() failed. Line skipped.\n");
+      ret = ERR;
+    }
+    else {
+      struct bgp_peer peer_in, *peer;
+      json_t *peer_src_ip_str;
+
+      peer_src_ip_str = json_object_get(json_obj, "peer_ip_src");
+
+      if (!json_is_string(peer_src_ip_str)) {
+        snprintf(errbuf, errlen, "bgp_offline_read_json(): json_object_get() 'peer_ip_src' failed. Line skipped.\n");
+        ret = ERR;
+      }
+      else {
+	void *bin_obj;
+
+	memset(&peer_in, 0, sizeof(struct bgp_peer));
+
+	str_to_addr(json_string_value(peer_src_ip_str), &peer_in.addr);	
+	if (peer_in.addr.family) {
+	  memcpy(&peer_in.id, &peer_in.addr, sizeof(struct host_addr));
+	  peer_in.type = FUNC_TYPE_BGP;
+
+	  bin_obj = pm_tsearch(&peer_in, offline_peers, bgp_peer_cmp, sizeof(struct bgp_peer));
+  	  if (!bin_obj) {
+	    snprintf(errbuf, errlen, "bgp_offline_read_json(): pm_tsearch() failed. Line skipped.\n");
+	    ret = ERR;
+	  }
+	  else {
+	    json_t *afi_int, *safi_int;
+	    afi_t afi;
+	    safi_t safi;
+
+	    peer = (*(struct bgp_peer **) bin_obj);
+
+	    afi_int = json_object_get(json_obj, "afi");
+	    safi_int = json_object_get(json_obj, "safi");
+
+	    if (!json_is_integer(afi_int) || !json_is_integer(safi_int)) {
+	      snprintf(errbuf, errlen, "bgp_offline_read_json(): json_object_get() 'afi' or 'safi' failed. Line skipped.\n");
+	      ret = ERR;
+	    }
+	    else {
+	      afi = json_integer_value(afi_int);
+	      safi = json_integer_value(safi_int);
+
+              /* aligned with cases supported by bgp_parse_update_msg() in bgp_msg.c */
+	      if (afi == AFI_IP) {
+		// XXX
+
+	        switch (safi) {
+	        case SAFI_UNICAST:
+		  // XXX
+		  break;
+	        case SAFI_MPLS_LABEL:
+		  // XXX
+		  break;
+	        case SAFI_MPLS_VPN:
+		  // XXX
+		  break;
+	        default:
+		  snprintf(errbuf, errlen, "bgp_offline_read_json(): invalid IPv4 SAFI. Line skipped.\n");
+		  ret = ERR;
+		  break;
+	        }
+	      }
+#if defined ENABLE_IPV6
+	      else if (afi == AFI_IP6) {
+		//XXX 
+
+	        switch (safi) {
+	        case SAFI_UNICAST:
+		  // XXX
+		  break;
+	        case SAFI_MPLS_LABEL:
+		  // XXX
+		  break;
+	        case SAFI_MPLS_VPN:
+		  // XXX
+		  break;
+	        default:
+		  snprintf(errbuf, errlen, "bgp_offline_read_json(): invalid IPv6 SAFI. Line skipped.\n");
+		  ret = ERR;
+		  break;
+	        }
+	      }
+#endif
+	      else {
+	        snprintf(errbuf, errlen, "bgp_offline_read_json(): invalid AFI. Line skipped.\n");
+	        ret = ERR;
+	      }
+	    }
+
+	    json_decref(afi_int);
+	    json_decref(safi_int);
+	  }
+	}
+	else {
+	  snprintf(errbuf, errlen, "bgp_offline_read_json(): invalid peer_ip_src value. Line skipped.\n");
+	  ret = ERR;
+	}
+      }
+
+      json_decref(peer_src_ip_str);
+    }
+
+    json_decref(json_obj);
+  }
+#endif
+
+  return ret;
 }
