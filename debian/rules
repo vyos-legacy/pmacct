@@ -4,6 +4,7 @@
 #export DH_VERBOSE=1
 
 DEB_HOST_ARCH_OS = $(shell dpkg-architecture -qDEB_HOST_ARCH_OS)
+PGSQL_CFLAGS="-I`pg_config --includedir`"
 
 ifeq ($(DEB_HOST_ARCH_OS),linux)
     extra_confflags += --enable-nflog
@@ -12,19 +13,17 @@ endif
 
 override_dh_auto_configure:
 	dh_auto_configure -- \
-		--enable-mmap \
+		--prefix=/usr \
+		--mandir=\$${prefix}/share/man \
+		--infodir=\$${prefix}/share/info \
 		--enable-pgsql \
-		--with-pgsql-includes=`pg_config --includedir` \
 		--enable-mysql \
 		--enable-sqlite3 \
 		--enable-ipv6 \
-		--enable-v4-mapped \
 		--enable-64bit \
 		--enable-threads \
 		--enable-jansson \
 		--enable-geoip \
-		--enable-rabbitmq \
-		--enable-kafka \
 		$(extra_confflags)
 
 override_dh_installinit:
