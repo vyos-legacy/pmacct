@@ -1,4 +1,11 @@
-pmacct (1.6.2+vyos1+current1) UNRELEASED; urgency=medium
+pmacct (1.7.0+vyos1+current0) unstable; urgency=medium
+
+  * Merge tag 'v1.7.0' into current
+  * Update to pmacct version v1.7.0
+
+ -- Christian Poessinger <christian@poessinger.com>  Sat, 01 Sep 2018 12:57:30 +0200
+
+pmacct (1.6.2+vyos1+current1) unstable; urgency=medium
 
   * Non-maintainer upload.
   * Upstream version 1.6.2
