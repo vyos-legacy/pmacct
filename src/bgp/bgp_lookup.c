@@ -126,7 +126,7 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
 	nmct2.rd = &rd;
 	nmct2.peer_dst_ip = NULL;
 
-        memcpy(&pref4, &((struct my_iphdr *)pptrs->iph_ptr)->ip_src, sizeof(struct in_addr));
+        memcpy(&pref4, &((struct pm_iphdr *)pptrs->iph_ptr)->ip_src, sizeof(struct in_addr));
 	bgp_node_match_ipv4(inter_domain_routing_db->rib[AFI_IP][safi],
 			    &pref4, (struct bgp_peer *) pptrs->bgp_peer,
 		     	    bgp_route_info_modulo_pathid,
@@ -149,7 +149,7 @@ void bgp_srcdst_lookup(struct packet_ptrs *pptrs, int type)
         nmct2.rd = &rd;
         nmct2.peer_dst_ip = &peer_dst_ip;
 
-	memcpy(&pref4, &((struct my_iphdr *)pptrs->iph_ptr)->ip_dst, sizeof(struct in_addr));
+	memcpy(&pref4, &((struct pm_iphdr *)pptrs->iph_ptr)->ip_dst, sizeof(struct in_addr));
 	bgp_node_match_ipv4(inter_domain_routing_db->rib[AFI_IP][safi],
 			    &pref4, (struct bgp_peer *) pptrs->bgp_peer,
 			    bgp_route_info_modulo_pathid,
@@ -381,7 +381,7 @@ void bgp_follow_nexthop_lookup(struct packet_ptrs *pptrs, int type)
       nmct2.peer_dst_ip = &peer_dst_ip;
 
       if (pptrs->l3_proto == ETHERTYPE_IP) {
-        memcpy(&pref4, &((struct my_iphdr *)pptrs->iph_ptr)->ip_dst, sizeof(struct in_addr));
+        memcpy(&pref4, &((struct pm_iphdr *)pptrs->iph_ptr)->ip_dst, sizeof(struct in_addr));
         bgp_node_match_ipv4(inter_domain_routing_db->rib[AFI_IP][SAFI_UNICAST], &pref4, nh_peer,
 			    bgp_route_info_modulo_pathid,
 			    bms->bgp_lookup_node_match_cmp, &nmct2,
@@ -551,16 +551,16 @@ int bgp_lookup_node_match_cmp_bgp(struct bgp_info *info, struct node_match_cmp_t
 
   if (info->peer == nmct2->peer) {
     if (nmct2->safi == SAFI_MPLS_VPN) no_match++;
-    if (nmct2->peer->cap_add_paths) no_match++;
+    if (nmct2->peer->cap_add_paths && info->attr && nmct2->peer_dst_ip) no_match++;
 
     if (nmct2->safi == SAFI_MPLS_VPN) {
       if (info->extra && !memcmp(&info->extra->rd, &nmct2->rd, sizeof(rd_t))) no_match--;
     }
 
     if (nmct2->peer->cap_add_paths) {
-      if (info->attr) {
+      if (nmct2->peer_dst_ip && info->attr) {
 	if (info->attr->mp_nexthop.family == nmct2->peer_dst_ip->family) {
-	  if (!memcmp(&info->attr->mp_nexthop, &nmct2->peer_dst_ip, HostAddrSz)) no_match--;
+	  if (!memcmp(&info->attr->mp_nexthop, nmct2->peer_dst_ip, HostAddrSz)) no_match--;
 	}
 	else if (info->attr->nexthop.s_addr && nmct2->peer_dst_ip->family == AF_INET) {
 	  if (info->attr->nexthop.s_addr == nmct2->peer_dst_ip->address.ipv4.s_addr) no_match--;

@@ -70,7 +70,12 @@ CHAR fields because making use of IP prefix labels, transparently to pmacct.
 - To understand difference between the various BGP table versions:
   * Only BGP table v1 is currently available.
 
-- Aggregation primitives to SQL schema mapping:
+- Aggregation primitives to SQL schema mapping. Although default schemas
+  come all with "NOT NULL", this is optional and depending on the scenario:
+  for example, if mixed L2 (containing L2 only info) and L3 (containing L2
+  and L3 info) flows are collected, maybe L3-related fields like src_host
+  or dst_host are best defined without the "NOT NULL" constraint.
+
   Aggregation primitive => SQL table field
   * tag => agent_id (BIGINT NOT NULL DEFAULT 0)
     - or tag => tag (BIGINT NOT NULL DEFAULT 0, if sql_table_version >= 9)
@@ -117,10 +122,8 @@ CHAR fields because making use of IP prefix labels, transparently to pmacct.
   * dst_as => as_dst (BIGINT NOT NULL DEFAULT 0)
   * src_host => ip_src (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
   * dst_host => ip_dst (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
-  * src_net => ip_src (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
-    - or src_net => net_src (same definition, if tmp_net_own_field: true)
-  * dst_net => ip_dst (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
-    - or dst_net => net_dst (same definition, if tmp_net_own_field: true)
+  * src_net => net_src (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * dst_net => net_dst (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
   * src_port => port_src (INT NOT NULL DEFAULT 0)
   * dst_port => port_dst (INT NOT NULL DEFAULT 0)
   * tcpflags => tcp_flags (SMALLINT NOT NULL DEFAULT 0)
@@ -134,6 +137,10 @@ CHAR fields because making use of IP prefix labels, transparently to pmacct.
   * mpls_label_top => mpls_label_top (INT NOT NULL DEFAULT 0)
   * mpls_label_bottom => mpls_label_bottom (INT NOT NULL DEFAULT 0)
   * mpls_stack_depth => mpls_stack_depth (INT NOT NULL DEFAULT 0)
+  * tunnel_src_host => tunnel_ip_src (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * tunnel_dst_host => tunnel_ip_dst (inet NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * tunnel_proto => tunnel_ip_proto (SMALLINT NOT NULL DEFAULT 0)
+  * tunnel_tos => tunnel_tos (INT NOT NULL DEFAULT 0)
   * timestamp_start => timestamp_start, timestamp_start_residual:
     - timestamp_start timestamp without time zone NOT NULL DEFAULT '0000-01-01 00:00:00', see README.timestamp)
     - timestamp_start_residual INT NOT NULL DEFAULT 0, see README.timestamp)

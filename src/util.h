@@ -63,7 +63,7 @@ EXT void mark_columns(char *);
 EXT int Setsocksize(int, int, int, void *, int);
 EXT void *map_shared(void *, size_t, int, int, int, off_t);
 EXT void lower_string(char *);
-EXT void evaluate_sums(u_int64_t *, char *, char *);
+EXT void evaluate_sums(u_int64_t *, u_int64_t *, char *, char *);
 EXT void stop_all_childs();
 EXT int file_lock(int);
 EXT int file_unlock(int);
@@ -91,15 +91,8 @@ EXT void handle_dynname_internal_strings_same(char *, int, char *, struct primit
 EXT void escape_ip_uscores(char *);
 EXT int sql_history_to_secs(int, int);
 EXT void *pm_malloc(size_t);
-EXT void *pm_tsearch(const void *, void **, int (*compar)(const void *, const void *), size_t);
-EXT void *pm_tfind(const void *, void *const *, int (*compar)(const void *, const void *));
-EXT void *pm_tdelete(const void *, void **, int (*compar)(const void *, const void *));
-EXT void pm_twalk(const void *, void (*action)(const void *, const VISIT, const int));
-EXT void pm_tdestroy(void **, void (*free_node)(void *));
 EXT void load_allow_file(char *, struct hosts_table *);
 EXT int check_allow(struct hosts_table *, struct sockaddr *);
-EXT void load_bgp_md5_file(char *, struct bgp_md5_table *);
-EXT void unload_bgp_md5_file(struct bgp_md5_table *);
 EXT int BTA_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
 EXT void calc_refresh_timeout(time_t, time_t, int *);
 EXT void calc_refresh_timeout_sec(time_t, time_t, int *);
@@ -115,8 +108,6 @@ EXT void set_truefalse_nonzero(int *);
 
 EXT char *compose_json_str(void *);
 EXT void write_and_free_json(FILE *, void *);
-EXT int write_and_free_json_amqp(void *, void *);
-EXT int write_and_free_json_kafka(void *, void *);
 EXT void add_writer_name_and_pid_json(void *, char *, pid_t);
 
 #ifdef WITH_AVRO
@@ -137,6 +128,7 @@ EXT void primptrs_set_bgp(u_char *, struct extra_primitives *, struct primitives
 EXT void primptrs_set_lbgp(u_char *, struct extra_primitives *, struct primitives_ptrs *);
 EXT void primptrs_set_nat(u_char *, struct extra_primitives *, struct primitives_ptrs *);
 EXT void primptrs_set_mpls(u_char *, struct extra_primitives *, struct primitives_ptrs *);
+EXT void primptrs_set_tun(u_char *, struct extra_primitives *, struct primitives_ptrs *);
 EXT void primptrs_set_custom(u_char *, struct extra_primitives *, struct primitives_ptrs *);
 EXT void primptrs_set_extras(u_char *, struct extra_primitives *, struct primitives_ptrs *);
 EXT void primptrs_set_vlen_hdr(u_char *, struct extra_primitives *, struct primitives_ptrs *);
@@ -181,5 +173,11 @@ EXT int pm_scandir(const char *, struct dirent ***, int (*select)(const struct d
 EXT void pm_scandir_free(struct dirent ***, int);
 EXT int pm_alphasort(const void *, const void *);
 
+EXT void *pm_tsearch(const void *, void **, int (*compar)(const void *, const void *), size_t);
+EXT void pm_tdestroy(void **, void (*free_node)(void *));
+
 EXT void replace_string(char *, int, char *, char *);
+EXT int delete_line_from_file(int, char *);
+
+EXT void generate_random_string(char *, const int);
 #undef EXT

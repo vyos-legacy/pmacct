@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -32,7 +32,7 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   struct pkt_msg *msg;
   unsigned char *pipebuf;
   struct pollfd pfd;
-  int timeout, refresh_timeout, amqp_timeout, kafka_timeout, err, ret, num;
+  int timeout, refresh_timeout, err, ret, num;
   int fd, pool_idx, recv_idx;
   struct ring *rg = &((struct channels_list_entry *)ptr)->rg;
   struct ch_status *status = ((struct channels_list_entry *)ptr)->status;
@@ -47,14 +47,9 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
   int pollagain = TRUE;
   u_int32_t seq = 1, rg_err_count = 0;
   time_t now;
-  void *kafka_msg;
 
-#ifdef WITH_RABBITMQ
-  struct p_amqp_host *amqp_host = &((struct channels_list_entry *)ptr)->amqp_host;
-#endif
-
-#ifdef WITH_KAFKA
-  struct p_kafka_host *kafka_host = &((struct channels_list_entry *)ptr)->kafka_host;
+#ifdef WITH_ZMQ
+  struct p_zmq_host *zmq_host = &((struct channels_list_entry *)ptr)->zmq_host;
 #endif
 
   memcpy(&config, cfgptr, sizeof(struct configuration));
@@ -86,12 +81,8 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     exit_plugin(1);
   }
 
-  if (config.nfprobe_receiver && config.tee_receivers) {
-    Log(LOG_ERR, "ERROR ( %s/%s ): tee_receiver and tee_receivers are mutually exclusive. Exiting ...\n", config.name, config.type);
-    exit_plugin(1);
-  }
-  else if (!config.nfprobe_receiver && !config.tee_receivers) {
-    Log(LOG_ERR, "ERROR ( %s/%s ): No receivers specified: tee_receiver or tee_receivers is required. Exiting ...\n", config.name, config.type);
+  if (!config.tee_receivers) {
+    Log(LOG_ERR, "ERROR ( %s/%s ): No receivers specified: tee_receivers is required. Exiting ...\n", config.name, config.type);
     exit_plugin(1);
   }
 
@@ -121,21 +112,7 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     else memset(receivers.pools[pool_idx].receivers, 0, config.tee_max_receivers*sizeof(struct tee_receivers));
   }
 
-  if (config.nfprobe_receiver) {
-    pool_idx = 0; recv_idx = 0;
-
-    target = &receivers.pools[pool_idx].receivers[recv_idx];
-    target->dest_len = sizeof(target->dest);
-    if (Tee_parse_hostport(config.nfprobe_receiver, (struct sockaddr *) &target->dest, &target->dest_len)) {
-      Log(LOG_ERR, "ERROR ( %s/%s ): Invalid receiver %s . ", config.name, config.type, config.nfprobe_receiver);
-      exit_plugin(1);
-    }
-    else {
-      recv_idx++; receivers.pools[pool_idx].num = recv_idx;
-      pool_idx++; receivers.num = pool_idx;
-    }
-  }
-  else if (config.tee_receivers) {
+  if (config.tee_receivers) {
     int recvs_allocated = FALSE;
 
     req.key_value_table = (void *) &receivers;
@@ -147,18 +124,14 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
 
   pipebuf = (unsigned char *) pm_malloc(config.buffer_size);
 
-  if (config.pipe_amqp) {
-    plugin_pipe_amqp_compile_check();
-#ifdef WITH_RABBITMQ
-    pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
-    amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
-#endif
-  }
-  else if (config.pipe_kafka) {
-    plugin_pipe_kafka_compile_check();
-#ifdef WITH_KAFKA
-    pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
-    kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+  if (config.pipe_zmq) {
+    plugin_pipe_zmq_compile_check();
+#ifdef WITH_ZMQ
+    p_zmq_plugin_pipe_init_plugin(zmq_host);
+    p_zmq_plugin_pipe_consume(zmq_host);
+    p_zmq_set_retry_timeout(zmq_host, config.pipe_zmq_retry);
+    pipe_fd = p_zmq_get_fd(zmq_host);
+    seq = 0;
 #endif
   }
   else setnonblocking(pipe_fd);
@@ -179,16 +152,7 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     pfd.fd = pipe_fd;
     pfd.events = POLLIN;
 
-    if (config.pipe_homegrown || config.pipe_amqp) {
-      timeout = MIN(refresh_timeout, (amqp_timeout ? amqp_timeout : INT_MAX));
-      ret = poll(&pfd, (pfd.fd == ERR ? 0 : 1), timeout);
-    }
-#ifdef WITH_KAFKA
-    else if (config.pipe_kafka) {
-      timeout = MIN(refresh_timeout, (kafka_timeout ? kafka_timeout : INT_MAX));
-      ret = p_kafka_consume_poller(kafka_host, &kafka_msg, timeout);
-    }
-#endif
+    ret = poll(&pfd, (pfd.fd == ERR ? 0 : 1), refresh_timeout);
 
     if (ret < 0) goto poll_again;
 
@@ -206,26 +170,6 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
     }
 
     now = time(NULL);
-
-#ifdef WITH_RABBITMQ
-    if (config.pipe_amqp && pipe_fd == ERR) {
-      if (timeout == amqp_timeout) {
-        pipe_fd = plugin_pipe_amqp_connect_to_consume(amqp_host, plugin_data);
-        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
-      }
-      else amqp_timeout = plugin_pipe_calc_retry_timeout_diff(&amqp_host->btimers, now);
-    }
-#endif
-
-#ifdef WITH_KAFKA
-    if (config.pipe_kafka && pipe_fd == ERR) {
-      if (timeout == kafka_timeout) {
-        pipe_fd = plugin_pipe_kafka_connect_to_consume(kafka_host, plugin_data);
-        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
-      }
-      else kafka_timeout = plugin_pipe_calc_retry_timeout_diff(&kafka_host->btimers, now);
-    }
-#endif
 
     switch (ret) {
     case 0: /* timeout */
@@ -269,22 +213,18 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
         memcpy(pipebuf, rg->ptr, bufsz);
         rg->ptr += bufsz;
       }
-#ifdef WITH_RABBITMQ
-      else if (config.pipe_amqp) {
-        ret = p_amqp_consume_binary(amqp_host, pipebuf, config.buffer_size);
-        if (ret) pipe_fd = ERR;
+#ifdef WITH_ZMQ
+      else if (config.pipe_zmq) {
+	ret = p_zmq_plugin_pipe_recv(zmq_host, pipebuf, config.buffer_size);
+	if (ret > 0) {
+	  if (seq && (((struct ch_buf_hdr *)pipebuf)->seq != ((seq + 1) % MAX_SEQNUM))) {
+	    Log(LOG_WARNING, "WARN ( %s/%s ): Missing data detected. Sequence received=%u expected=%u\n",
+		config.name, config.type, ((struct ch_buf_hdr *)pipebuf)->seq, ((seq + 1) % MAX_SEQNUM));
+	  }
 
-        seq = ((struct ch_buf_hdr *)pipebuf)->seq;
-        amqp_timeout = plugin_pipe_set_retry_timeout(&amqp_host->btimers, pipe_fd);
-      }
-#endif
-#ifdef WITH_KAFKA
-      else if (config.pipe_kafka) {
-        ret = p_kafka_consume_data(kafka_host, kafka_msg, pipebuf, config.buffer_size);
-        if (ret) pipe_fd = ERR;
-
-        seq = ((struct ch_buf_hdr *)pipebuf)->seq;
-        kafka_timeout = plugin_pipe_set_retry_timeout(&kafka_host->btimers, pipe_fd);
+	  seq = ((struct ch_buf_hdr *)pipebuf)->seq;
+	}
+	else goto poll_again;
       }
 #endif
 
@@ -323,7 +263,7 @@ void tee_plugin(int pipe_fd, struct configuration *cfgptr, void *ptr)
       }
       }
 
-      if (config.pipe_homegrown) goto read_data;
+      goto read_data;
     }
   }  
 }
@@ -380,25 +320,25 @@ void Tee_send(struct pkt_msg *msg, struct sockaddr *target, int fd)
   else {
     char *buf_ptr = tee_send_buf;
     struct sockaddr_in *sa = (struct sockaddr_in *) &msg->agent;
-    struct my_iphdr *i4h = (struct my_iphdr *) buf_ptr;
+    struct pm_iphdr *i4h = (struct pm_iphdr *) buf_ptr;
 #if defined ENABLE_IPV6
     struct sockaddr_in6 *sa6 = (struct sockaddr_in6 *) &msg->agent;
     struct ip6_hdr *i6h = (struct ip6_hdr *) buf_ptr;
 #endif
-    struct my_udphdr *uh;
+    struct pm_udphdr *uh;
 
     if (msg->agent.sa_family == target->sa_family) {
       /* UDP header first */
       if (target->sa_family == AF_INET) {
         buf_ptr += IP4HdrSz;
-        uh = (struct my_udphdr *) buf_ptr;
+        uh = (struct pm_udphdr *) buf_ptr;
         uh->uh_sport = sa->sin_port;
         uh->uh_dport = ((struct sockaddr_in *)target)->sin_port;
       }
 #if defined ENABLE_IPV6
       else if (target->sa_family == AF_INET6) {
         buf_ptr += IP6HdrSz;
-        uh = (struct my_udphdr *) buf_ptr;
+        uh = (struct pm_udphdr *) buf_ptr;
         uh->uh_sport = sa6->sin6_port;
         uh->uh_dport = ((struct sockaddr_in6 *)target)->sin6_port;
       }
@@ -517,7 +457,7 @@ void Tee_init_socks()
         }
       }
 
-      target->fd = Tee_prepare_sock((struct sockaddr *) &target->dest, target->dest_len);
+      target->fd = Tee_prepare_sock((struct sockaddr *) &target->dest, target->dest_len, receivers.pools[pool_idx].src_port);
 
       if (config.debug) {
 	struct host_addr recv_addr;
@@ -533,7 +473,7 @@ void Tee_init_socks()
   }
 }
 
-int Tee_prepare_sock(struct sockaddr *addr, socklen_t len)
+int Tee_prepare_sock(struct sockaddr *addr, socklen_t len, u_int16_t src_port)
 {
   int s, ret = 0;
 
@@ -545,9 +485,18 @@ int Tee_prepare_sock(struct sockaddr *addr, socklen_t len)
     struct sockaddr ssource_ip;
 #endif
 
+    memset(&source_ip, 0, sizeof(source_ip));
+    memset(&ssource_ip, 0, sizeof(ssource_ip));
+
     if (config.nfprobe_source_ip) {
       ret = str_to_addr(config.nfprobe_source_ip, &source_ip);
-      addr_to_sa((struct sockaddr *) &ssource_ip, &source_ip, 0);
+      addr_to_sa((struct sockaddr *) &ssource_ip, &source_ip, src_port);
+    }
+    else {
+      if (src_port) { 
+	source_ip.family = addr->sa_family; 
+	ret = addr_to_sa((struct sockaddr *) &ssource_ip, &source_ip, src_port);
+      }
     }
 
     if ((s = socket(addr->sa_family, SOCK_DGRAM, 0)) == -1) {
@@ -564,10 +513,10 @@ int Tee_prepare_sock(struct sockaddr *addr, socklen_t len)
     }
 
     if (ret && bind(s, (struct sockaddr *) &ssource_ip, sizeof(ssource_ip)) == -1)
-      Log(LOG_ERR, "ERROR ( %s/%s ): bind() error: %s\n", config.name, config.type, strerror(errno));
+      Log(LOG_WARNING, "WARN ( %s/%s ): bind() error: %s\n", config.name, config.type, strerror(errno));
   }
   else {
-    int hincl = 1;                  /* 1 = on, 0 = off */
+    int hincl = TRUE;
 
     if ((s = socket(addr->sa_family, SOCK_RAW, IPPROTO_RAW)) == -1) {
       Log(LOG_ERR, "ERROR ( %s/%s ): socket() error: %s\n", config.name, config.type, strerror(errno));

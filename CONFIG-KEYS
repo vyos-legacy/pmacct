@@ -52,8 +52,9 @@ VALUES:		[ src_mac, dst_mac, vlan, cos, etype, src_host, dst_host, src_net, dst_
 		 src_med, mpls_vpn_rd, mpls_label_top, mpls_label_bottom, mpls_stack_depth,
 		 sampling_rate, src_host_country, dst_host_country, src_host_pocode,
 		 dst_host_pocode, pkt_len_distrib, nat_event, fw_event, post_nat_src_host,
-		 post_nat_dst_host, post_nat_src_port, post_nat_dst_port, timestamp_start,
-		 timestamp_end, timestamp_arrival, export_proto_seqno, export_proto_version ]
+		 post_nat_dst_host, post_nat_src_port, post_nat_dst_port, tunnel_src_host,
+		 tunnel_dst_host, tunnel_proto, tunnel_tos, timestamp_start, timestamp_end,
+		 timestamp_arrival, export_proto_seqno, export_proto_version ]
 FOREWORDS:	Individual IP packets are uniquely identified by their header field values (a
 		rather large set of primitives!). Same applies to uni-directional IP flows, as
 		they have at least enough information to discriminate where packets are coming
@@ -72,8 +73,7 @@ DESC:		Aggregate captured traffic data by selecting the specified set of primiti
 		allows to make an unique aggregate which  accounts for the grand total of
 		traffic flowing through a specific interface. 'tag', 'tag2' and 'label' enable
 		generation of tags when tagging engines (pre_tag_map, post_tag) are in use.
-		'class' enables L7 traffic classes when Packet/Flow Classification engine
-		(classifiers) is in use.
+		'class' enables L7 traffic classification.
 NOTES:		* Some primitives (ie. tag2, timestamp_start, timestamp_end) are not part of
 		  any default SQL table schema shipped. Always check out documentation related
 		  to the RDBMS in use (ie. 'sql/README.mysql') which will point you to extra
@@ -154,36 +154,39 @@ DESC:		This filter is global and applied to all incoming packets. It's passed to
 		pmacctd.
 DEFAULT:	none
 
+KEY:		pcap_protocol [GLOBAL, PMACCTD_ONLY]
+DESC:		If set, specifies a specific packet socket protocol value to limit packet capture
+		to (for example, 0x0800 = IPv4). This option is only supported if pmacct was built
+		against a version of libpcap that supports pcap_set_protocol(), and it only applies
+		to pmacctd.
+DEFAULT:	none
+
 KEY:		snaplen (-L) [GLOBAL, NO_NFACCTD, NO_SFACCTD]
 DESC:		Specifies the maximum number of bytes to capture for each packet. This directive has
-		key importance when enabling both classification and connection tracking engines. In
-		fact, some protocols (mostly text-based eg.: RTSP, SIP, etc.) benefit of extra bytes
-		because they give more chances to successfully track data streams spawned by control 
-		channel. But it must be also noted that capturing larger packet portion require more 
-		resources. The right value need to be traded-off. In case classification is enabled, 
-		values under 200 bytes are often meaningless. 500-750 bytes are enough even for text
-		based protocols. Default snaplen values are ok if classification is disabled.
+		key importance to both classification and connection tracking engines. In fact, some
+		protocols (mostly text-based eg.: RTSP, SIP, etc.) benefit of extra bytes because
+		they give more chances to successfully track data streams spawned by control channel.
+		But it must be also noted that capturing larger packet portion require more resources.
+		The right value need to be traded-off. In case classification is enabled, values under
+		200 bytes are often meaningless. 500-750 bytes are enough even for text based
+		protocols. Default snaplen values are ok if classification is disabled.
 DEFAULT:	128 bytes; 64 bytes if compiled with --disable-ipv6
 
 KEY:		plugins (-P)
-VALUES:		[ memory | print | mysql | pgsql | sqlite3 | mongodb | nfprobe | sfprobe | tee |
-		  amqp | kafka ]
+VALUES:		[ memory | print | mysql | pgsql | sqlite3 | nfprobe | sfprobe | tee | amqp | kafka ]
 DESC:		Plugins to be enabled. memory, print, nfprobe, sfprobe and tee plugins are always
 		included in pmacct executables as they do not contain dependencies on external
-		libraries. Database (ie. SQL, MongoDB) and messaging ones (ie. amqp, kafka) do
-		have external dependencies and hence are available only if explicitely configured
-		and compiled.
+		libraries. Database (ie. RDBMS, noSQL) and messaging ones (ie. amqp, kafka) do have
+		external dependencies and hence are available only if explicitely configured and
+		compiled.
 		memory plugin uses a memory table as backend; then, a client tool, 'pmacct', can fetch
 		the memory table content; the memory plugin is good for prototype solutions and/or
 		small environments. mysql, pgsql and sqlite3 plugins output respectively to MySQL,
 		PostgreSQL and SQLite 3.x (or BerkeleyDB 5.x with the SQLite API compiled-in) tables
-		to store data. mongodb enables use of the noSQL document-oriented database MongoDB
-		(requires installation of MongoDB API C driver which is shipped separatedly from the
-		main MongoDB package; read more in QUICKSTART in the "noSQL (MongoDB) setup examples"
-		section). print plugin prints output data to flat-files or stdout in JSON, CSV or
-		tab-spaced formats, or encodes it using the Apache Avro serialization system. amqp
-		and kafka plugins allow to output data to RabbitMQ and Kafka brokers respectively. All
-		these plugins, SQL, no-SQL and messaging are good for production solutions and/or
+		to store data. print plugin prints output data to flat-files or stdout in JSON, CSV
+		or tab-spaced formats, or encodes it using the Apache Avro serialization system. amqp
+		and kafka plugins allow to output data to RabbitMQ and Kafka brokers respectively.
+		All these plugins, SQL, no-SQL and messaging are good for production solutions and/or
 		larger scenarios.
 		nfprobe acts as a NetFlow/IPFIX agent and exports collected data via NetFlow v1/v5/
 		v9 and IPFIX datagrams to a remote collector. sfprobe acts as a sFlow agent and 
@@ -254,39 +257,9 @@ DESC:		Core Process and each of the plugin instances are run into different proc
 
 		In case of data loss messages containing the "missing data detected" string will be
 		logged - indicating the plugin affected and current settings.
+
+		Alternatively see at plugin_pipe_zmq and plugin_pipe_zmq_profile.
 DEFAULT:	4MB
-
-KEY:		plugin_pipe_amqp
-VALUES:         [ true | false ]
-DESC:		By defining this directive to 'true', a RabbitMQ broker is used for queueing and
-		data exchange between the Core Process and the plugins. This is in alternative to
-		the home-grown circular queue implementation (see plugin_pipe_size description).
-		This directive, along with all other plugin_pipe_amqp_* directives, can be set
-		globally or apply on a per plugin basis (ie. it is a valid scenario, if multiple
-		plugins are instantiated, that some make use of home-grown queueing, while others
-		use RabbitMQ based queueing). For a quick comparison: while relying on a RabbitMQ
-		broker for queueing introduces an external dependency (rabbitmq-c library, RabbitMQ
-		server, etc.), it reduces the amount of setting needed by the home-grown circular
-		queue implementation. See QUICKSTART for some examples.
-DEFAULT:	false
-
-KEY:            plugin_pipe_kafka
-VALUES:         [ true | false ]
-DESC:           By defining this directive to 'true', a Kafka broker is used for queueing and data
-		exchange between the Core Process and the plugins. This is in alternative to the
-		home-grown circular queue implementation (see plugin_pipe_size description). This
-		directive, along with all other plugin_pipe_kafka_* directives, can be set globally
-		or apply on a per plugin basis (ie. it is a valid scenario, if multiple plugins are
-		instantiated, that some make use of home-grown queueing, while others use Kafka
-		based queueing). For a quick comparison: using a Kafka broker gives the same
-		benefits as using a RabbitMQ broker (read plugin_pipe_amqp); plus, Kafka scales
-		more than RabbitMQ. See QUICKSTART for some examples.
-NOTES:		librdkafka does not currently expose the file descriptor(s) used internally so to
-		allow an external poll() or select() against it/them. This is being worked on as
-		part of librdkafka issue #429: https://github.com/edenhill/librdkafka/issues/429 .
-		As a result of that, the plugin_pipe_kafka feature is limited to 'print' plugin as
-		a proof of concept.
-DEFAULT:        false
 
 KEY:		plugin_buffer_size 
 DESC:		By defining the transfer buffer size, in bytes, this directive enables buffering of
@@ -297,30 +270,57 @@ DESC:		By defining the transfer buffer size, in bytes, this directive enables bu
 		with the home-grown circular queue implemetation, the value has to be minor/equal to
 		the size defined by 'plugin_pipe_size' and keeping a ratio between 1:100 and 1:1000
 		among the two is considered good practice; the circular queue of plugin_pipe_size size
-		is partitioned in chunks of plugin_buffer_size; if used with the RabbitMQ broker based
-		queueing (ie. 'plugin_pipe_amqp: true') this directive sets the frame_max allowed by
-		the underlying RabbitMQ session. 
-DEFAULT:	Set to the size of the smallest element to buffer 
+		is partitioned in chunks of plugin_buffer_size. 
 
-KEY:            plugin_pipe_backlog
-VALUES:         [0 <= value < 100]
-DESC:           Expects the value to be a percentage. It creates a backlog of buffers on the pipe
-		before actually releasing them to the plugin. The strategy helps optimizing inter
-		process communications where plugins are quicker handling data than the Core process.
-		By default backlog is disabled; as with buffering in general, this feature should be
-		enabled with caution in lab and low-traffic environments.
-DEFAULT:	0
+		Alternatively see at plugin_pipe_zmq and plugin_pipe_zmq_profile.
+DEFAULT:	Set to the size of the smallest element to buffer 
 
 KEY:		plugin_pipe_check_core_pid
 VALUES:		[ true | false ]
 DESC:		When enabled (default), validates the sender of data at the plugin side. The check
 		consists in verifying that the sender PID matches the PID of the plugin parent
-		process. This is useful when plugin_pipe_amqp or plugin_pipe_kafka are enabled and
-		hence a broker sits between the daemon Core Process and the Plugins. The feature is
-		not inteded to be a security one; instead its objective is to limit impact of such
-		things like mis-configurations, daemons started twice with the same configuration,
-		etc. 
+		process. The feature is not inteded to be a security one; instead its objective is
+		to limit impact of such things like mis- configurations, daemons started twice with
+		the same configuration, etc. 
 DEFAULT:	true
+
+KEY:		plugin_pipe_zmq
+VALUES:		[ true | false ]
+DESC:		By defining this directive to 'true', a ZeroMQ queue is used for queueing and data
+		exchange between the Core Process and the plugins. This is in alternative to the
+		home-grown circular queue implementation (see plugin_pipe_size description). This
+		directive, along with all other plugin_pipe_zmq_* directives, can be set globally
+		or be applied on a per plugin basis (ie. it is a valid scenario, if multiple
+		plugins are instantiated, that some make use of home-grown queueing, while others
+		use ZeroMQ based queueing). For a quick comparison: while relying on a ZeroMQ queue
+                introduces an external dependency, ie. libzmq, it reduces the bare minimum the need
+		of settings of the home-grown circular queue implementation. See QUICKSTART for
+		some examples.
+DEFAULT:        false
+
+KEY:		plugin_pipe_zmq_retry
+DESC:		Defines the interval of time, in seconds, after which a connection to the ZeroMQ
+                server (Core Process) should be retried by the client (Plugin) after a failure is
+		detected.
+DEFAULT:        60
+
+KEY:		plugin_pipe_zmq_profile
+VALUES:		[ micro | small | medium | large | xlarge ]
+DESC:		Allows to select some standard buffering profiles. Following are the recommended
+		buckets in flows/samples/packets per second:
+
+			micro   : up to 1K
+			small   : from 1K to 10-15K
+			medium  : from 10-10K to 100-125K
+			large   : from 100-125K to 250K
+			xlarge  : from 250K 
+
+		A symptom the selected profile is undersized is missing data warnings appear in
+		the logs; a symptom it is oversized instead is latency in data being purged out.
+		The amount of flows/samples per second can be estimated as described in Q21 in
+		the FAQS document. Should no profile fit the sizing, the buffering value can be
+		customised using the plugin_buffer_size directive. 
+DEFAULT:	micro 
 
 KEY:		files_umask 
 DESC:		Defines the mask for newly created files (log, pid, etc.) and their related directory
@@ -348,15 +348,6 @@ DESC:		Interface on which 'pmacctd' listens. If such directive isn't supplied, a
 		exclusive with 'pcap_savefile' (-I). 
 DEFAULT:	Interface is selected by by the Operating System
 
-KEY:		pcap_savefile (-I) [GLOBAL, PMACCTD_ONLY]
-DESC:		File in libpcap savefile format from which read data (this is in alternative to binding
-		to an intervace). The file has to be correctly finalized in order to be read. As soon
-		as 'pmacctd' is finished with the file, it exits (unless the 'savefile_wait' option is
-		in place). The directive doesn't apply to [ns]facctd; to replay original NetFlow/sFlow
-		streams, a tool like TCPreplay can be used instead. The directive is mutually exclusive
-		with 'interface' (-i). 
-DEFAULT:	none
-
 KEY:		interface_wait (-w) [GLOBAL, PMACCTD_ONLY]
 VALUES:		[ true | false ]
 DESC:		If set to true, this option causes 'pmacctd' to wait for the listening device to become
@@ -365,12 +356,21 @@ DESC:		If set to true, this option causes 'pmacctd' to wait for the listening de
 		detected.
 DEFAULT:	false
 
-KEY:            savefile_wait (-W) [GLOBAL, PMACCTD_ONLY]
+KEY:		pcap_savefile (-I) [GLOBAL, NO_UACCTD]
+DESC:		File in libpcap savefile format to read data from (as an alternative to live data
+		collection. The file has to be correctly finalized in order to be read. As soon as
+		the daemon finished processing the file, it exits (unless the 'pcap_savefile_wait'
+		config directive is specified). The directive is mutually exclusive with 'interface'
+		(-i) for pmacctd and with [ns]facctd_ip (-L) and [ns]facctd_port (-l) for nfacctd
+		and sfacctd respectively.
+DEFAULT:	none
+
+KEY:            pcap_savefile_wait (-W) [GLOBAL, NO_UACCTD]
 VALUES:         [ true | false ]
-DESC:           If set to true, this option will cause 'pmacctd' to wait indefinitely for a signal (ie.
-		CTRL-C when not daemonized or 'killall -9 pmacctd' if it is) after being finished with
-		the supplied libpcap savefile (pcap_savefile). It's particularly useful when inserting
-		fixed amounts of data into memory tables by keeping the daemon alive.
+DESC:           If set to true, this option will cause the daemon to wait indefinitely for a signal
+		(ie. CTRL-C when not daemonized or 'killall -9 pmacctd' if it is) after being finished
+		processing  the supplied libpcap savefile (pcap_savefile). This is particularly useful
+		when inserting fixed amounts of data into memory tables.
 DEFAULT:        false
 
 KEY:		promisc (-N) [GLOBAL, PMACCTD_ONLY]
@@ -418,10 +418,9 @@ DESC:           Enables logging to a file (bypassing syslog); expected value is 
 		be rotated. 
 DEFAULT:	none (logging to stderr)
 
-KEY:		[ amqp_host | plugin_pipe_amqp_host ]
+KEY:		amqp_host
 DESC:           Defines the AMQP/RabbitMQ broker IP. amqp_* directives refer to the broker used by an
-		AMQP plugin to purge data out; plugin_pipe_amqp_* directives refer to the broker used
-		by the core process to send data to plugins. 
+		AMQP plugin to purge data out.
 DEFAULT:        localhost
 
 KEY:		[ bgp_daemon_msglog_amqp_host | bgp_table_dump_amqp_host | bmp_dump_amqp_host |
@@ -439,7 +438,7 @@ DESC:		See amqp_host. bgp_daemon_msglog_amqp_* directives refer to the broker us
 		thread/daemon to dump data out at regular time intervals.
 DEFAULT:	See amqp_host	
 
-KEY:            [ amqp_vhost | plugin_pipe_amqp_vhost ]
+KEY:            amqp_vhost
 DESC:           Defines the AMQP/RabbitMQ server virtual host; see also amqp_host.
 DEFAULT:        "/"
 
@@ -449,7 +448,7 @@ KEY:		[ bgp_daemon_msglog_amqp_vhost | bgp_table_dump_amqp_vhost | bmp_dump_amqp
 DESC:           See amqp_vhost; see also bgp_daemon_msglog_amqp_host.
 DEFAULT:	See amqp_vhost 
 
-KEY:		[ amqp_user | plugin_pipe_amqp_user ]
+KEY:		amqp_user
 DESC:           Defines the username to use when connecting to the AMQP/RabbitMQ server; see also
 		amqp_host.
 DEFAULT:        guest
@@ -460,7 +459,7 @@ KEY:		[ bgp_daemon_msglog_amqp_user | bgp_table_dump_amqp_user | bmp_dump_amqp_u
 DESC:		See amqp_user; see also bgp_daemon_msglog_amqp_host.
 DEFAULT:	See amqp_user
 
-KEY:		[ amqp_passwd | plugin_pipe_amqp_passwd ]
+KEY:		amqp_passwd
 DESC:           Defines the password to use when connecting to the server; see also amqp_host.
 DEFAULT:        guest
 
@@ -524,7 +523,7 @@ KEY:		[ bgp_daemon_msglog_amqp_routing_key_rr | bgp_table_dump_amqp_routing_key_
 DESC:		See amqp_routing_key_rr; see also bgp_daemon_msglog_amqp_host.
 DEFAULT:	See amqp_routing_key_rr
 
-KEY:            [ amqp_exchange | plugin_pipe_amqp_exchange ]
+KEY:            amqp_exchange
 DESC:           Name of the AMQP exchange to publish data; see also amqp_host.
 DEFAULT:	pmacct
 
@@ -536,8 +535,10 @@ DESC:           See amqp_exchange
 DEFAULT:	See amqp_exchange; see also bgp_daemon_msglog_amqp_host.
 
 KEY:            amqp_exchange_type
-DESC:           Type of the AMQP exchange to publish data. Currently only 'direct' and 'fanout' types are
-                supported; see also amqp_host.
+DESC:           Type of the AMQP exchange to publish data to. 'direct', 'fanout' and 'topic'
+		types are supported; "rabbitmqctl list_exchanges" can be used to check the
+		exchange type. Upon mismatch of exchange type, ie. exchange type is 'direct'
+		but amqp_exchange_type is set to 'topic', an error will be returned. 
 DEFAULT:	direct
 
 KEY:		[ bgp_daemon_msglog_amqp_exchange_type | bgp_table_dump_amqp_exchange_type |
@@ -549,13 +550,15 @@ DEFAULT:	See amqp_exchange_type
 
 KEY:            amqp_persistent_msg
 VALUES:         [ true | false ]
-DESC:           Marks messages as persistent so that a queue content does not get lost if RabbitMQ restarts.
-                Note from RabbitMQ docs: "Marking messages as persistent doesn't fully guarantee that a
-                message won't be lost. Although it tells RabbitMQ to save message to the disk, there is
-                still a short time window when RabbitMQ has accepted a message and hasn't saved it yet.
-                Also, RabbitMQ doesn't do fsync(2) for every message -- it may be just saved to cache and
-                not really written to the disk. The persistence guarantees aren't strong, but it is more
-                than enough for our simple task queue."; see also amqp_host.
+DESC:           Marks messages as persistent and sets Exchange as durable so to prevent data loss
+		if a RabbitMQ server restarts (it will still be consumer responsibility to declare
+		the queue durable). Note from RabbitMQ docs: "Marking messages as persistent does
+		not fully guarantee that a message won't be lost. Although it tells RabbitMQ to
+		save message to the disk, there is still a short time window when RabbitMQ has
+		accepted a message and hasn't saved it yet. Also, RabbitMQ doesn't do fsync(2) for
+		every message -- it may be just saved to cache and not really written to the disk.
+		The persistence guarantees aren't strong, but it is more than enough for our simple
+		task queue."; see also amqp_host.
 DEFAULT:        false
 
 KEY:		[ bgp_daemon_msglog_amqp_persistent_msg  | bgp_table_dump_amqp_persistent_msg |
@@ -593,29 +596,12 @@ KEY:		[ bgp_daemon_msglog_amqp_heartbeat_interval | bgp_table_dump_amqp_heartbea
 DESC:           See amqp_heartbeat_interval; see also bgp_daemon_msglog_amqp_host.
 DEFAULT:	See amqp_heartbeat_interval
 
-KEY:            plugin_pipe_amqp_routing_key 
-DESC:           Name of the AMQP routing key to use to send data to a plugin. Currently each plugin
-		must bind to a different routing key in order to avoid duplications. Dynamic names
-		are supported through the use of variables, which are computed at startup. The list
-		of variables supported is:
-
-                $core_proc_name	Configured core_proc_name.
-
-                $plugin_name	Configured plugin name (ie. 'foo' if 'plugins: print[foo]') 
-
-                $plugin_type	Plugin type (ie. memory, print, amqp, etc.)
-
-DEFAULT:        '$core_proc_name-$plugin_name-$plugin_type'
-
-KEY:		plugin_pipe_amqp_retry
-DESC:           Defines the interval of time, in seconds, after which a connection to the RabbitMQ
-		server should be retried after a failure is detected; see also amqp_host.
-DEFAULT:	60
-
 KEY:		[ bgp_daemon_msglog_amqp_retry | bmp_daemon_msglog_amqp_retry |
 		  sfacctd_counter_amqp_retry | telemetry_daemon_msglog_amqp_retry ] [GLOBAL]
-DESC:		See plugin_pipe_amqp_retry; see also bgp_daemon_msglog_amqp_host.
-DEFAULT: 	See plugin_pipe_amqp_retry	
+DESC:		Defines the interval of time, in seconds, after which a connection to the RabbitMQ
+		server should be retried after a failure is detected; see also amqp_host. See also
+		bgp_daemon_msglog_amqp_host.
+DEFAULT: 	60
 
 KEY:		kafka_topic
 DESC:           Name of the Kafka topic to attach to published data. Dynamic names are supported by
@@ -654,44 +640,23 @@ DESC:		Full pathname to a file containing directives to configure librdkafka. Al
 
 DEFAULT:	none
 
-KEY:            plugin_pipe_kafka_topic
-DESC:           Name of the Kafka topic to use to send data to a plugin. Currently each plugin must
-		bind to a different routing key in order to avoid duplications. Dynamic names are
-		supported through the use of variables, which are computed at startup. The list of
-		variables supported is:
-
-                $core_proc_name Configured core_proc_name.
-
-                $plugin_name    Configured plugin name (ie. 'foo' if 'plugins: print[foo]')
-
-                $plugin_type    Plugin type (ie. memory, print, amqp, etc.)
-
-DEFAULT:        '$core_proc_name-$plugin_name-$plugin_type'
-
-KEY:            plugin_pipe_kafka_retry
-DESC:           Defines the interval of time, in seconds, after which a connection to the Kafka
-		broker should be retried after a failure is detected.
-DEFAULT:        60
-
-KEY:            [ kafka_broker_host | plugin_pipe_broker_host ]
+KEY:            kafka_broker_host
 DESC:           Defines one or multiple, comma-separated, Kafka brokers. If only a single broker
 		IP address is defined then the broker port is read via the kafka_broker_port config
 		directive (legacy syntax); if multiple brokers are defined then each broker port,
 		if not left to default 9092, is expected as part of this directive, for example:
-		"broker1:10000,broker2". kafka_* directives refer to the broker used by a kafka
-		plugin to purge data out; plugin_pipe_kafka_* directives refer to the broker used
-		by the core process to send data to plugins. When defining multiple brokers, if the
-		host is IPv4, the value is expected as 'address:port'. If IPv6, it is expected as
-		'[address]:port'. When defining a single broker, this is not needed as the IPv6
-		address is detected and wrapped-around '[' ']' symbols. FQDNs are also accepted.
-		SSL connections can be configured as "ssl://broker3:9000,ssl://broker2". 
+		"broker1:10000,broker2". When defining multiple brokers, if the host is IPv4, the
+		value is expected as 'address:port'. If IPv6, it is expected as '[address]:port'.
+		When defining a single broker, this is not needed as the IPv6 address is detected
+		and wrapped-around '[' ']' symbols. FQDNs are also accepted. SSL connections can be
+		configured as "ssl://broker3:9000,ssl://broker2". 
 DEFAULT:        127.0.0.1
 
-KEY:            [ kafka_broker_port | plugin_pipe_broker_port ]
+KEY:            kafka_broker_port
 DESC:           Defines the Kafka broker port. See also kafka_broker_host.
 DEFAULT:        9092
 
-KEY:		[ kafka_partition | plugin_pipe_kafka_partition ]
+KEY:		kafka_partition
 DESC:		Defines the Kafka broker topic partition ID. RD_KAFKA_PARTITION_UA or ((int32_t)-1)
 		is to define the configured or default partitioner (slower than sending to a fixed
 		partition). See also kafka_broker_host. 
@@ -748,8 +713,9 @@ DEFAULT:        See kafka_partition_key
 
 KEY:            [ bgp_daemon_msglog_kafka_retry | bmp_daemon_msglog_kafka_retry |
 		  sfacctd_counter_kafka_retry | telemetry_daemon_msglog_kafka_retry ] [GLOBAL]
-DESC:           See plugin_pipe_kafka_retry
-DEFAULT:        See plugin_pipe_kafka_retry
+DESC:           Defines the interval of time, in seconds, after which a connection to the Kafka
+		broker should be retried after a failure is detected.
+DEFAULT:        60
 
 KEY:            [ bgp_daemon_msglog_kafka_config_file | bgp_table_dump_kafka_config_file |
                   bmp_daemon_msglog_kafka_config_file | bmp_dump_kafka_config_file |
@@ -779,7 +745,9 @@ DEFAULT:	none
 KEY:		networks_file_filter
 VALUES          [ true | false ]
 DESC:           Makes networks_file work as a filter in addition to its basic resolver functionality:
-		networks and hosts not belonging to defined networks are zeroed out.
+		networks and hosts not belonging to defined networks are zeroed out. This feature can
+		interfere with the intended behaviour of networks_no_mask_if_zero, if they are both
+		set to true.
 DEFAULT:        false
 
 KEY:		networks_file_no_lpm
@@ -806,6 +774,16 @@ DESC:		Makes a matching IP prefix defined in a networks_file win always, even if
 		process; setting networks_file_no_lpm to true makes 192.168.5.0/24, coming from the
 		networks_file, win instead. 
 DEFAULT:        false
+
+KEY:		networks_no_mask_if_zero
+VALUES		[ true | false ]
+DESC:		If set to true, IP prefixes with zero mask - that is, unknown ones or those hitting a
+		default route - are not masked (ie. they are applied a full 0xF mask, that is, 32 bits
+		for IPv4 addresses and 128 bits for IPv6 ones). The feature applies to *_net fields
+		and makes sure individual IP addresses belonging to unknown IP prefixes are not zeroed
+		out. This feature can interfere with the intended behaviour of networks_file_filter,
+		if they are both set to true.
+DEFAULT:	false
 
 KEY:            networks_mask
 DESC:           Specifies the network mask - in bits - to apply to IP address values in L3 header. The
@@ -835,11 +813,10 @@ DESC:		Defines the SQL database to use. Remember that when using the SQLite3 plu
 		directive refers to the full path to the database file
 DEFAULT:	'pmacct'; SQLite 3.x: '/tmp/pmacct.db' 
 
-KEY:            [ sql_table | print_output_file | mongo_table ]
-DESC:           In SQL and mongodb plugins this defines the table to use; in print plugin it defines the
-		file to write output to. Dynamic names are supported through the use of variables, which
-		are computed at the moment when data is purged to the backend. The list of supported
-		variables follows: 
+KEY:            [ sql_table | print_output_file ]
+DESC:           In SQL this defines the table to use; in print plugin it defines the file to write output
+		to. Dynamic names are supported through the use of variables, which are computed at the
+		moment when data is purged to the backend. The list of supported variables follows: 
 
 		%d		The day of the month as a decimal number (range 01 to 31).
 
@@ -1019,38 +996,31 @@ DESC:		This switch makes sense only when using PostgreSQL plugin and supplied de
 		configuration switch deprecated.
 DEFAULT:	typed
 
-KEY:	 	[ sql_host | mongo_host ]
+KEY:	 	sql_host
 DESC:		Defines the backend server IP/hostname
 DEFAULT:	localhost
 
-KEY:		[ sql_user | mongo_user ]
-DESC:		Defines the username to use when connecting to the server. In MongoDB, if both
-		mongo_user and mongo_passwd directives are omitted, authentication is disabled;
-		if only one of the two is specified, the other is set to its default value.
+KEY:		sql_user
+DESC:		Defines the username to use when connecting to the server.
 DEFAULT:	pmacct
 
-KEY:		[ sql_passwd | mongo_passwd ]
-DESC:		Defines the password to use when connecting to the server. In MongoDB, if both
-                mongo_user and mongo_passwd directives are omitted, authentication is disabled;
-		if only one of the two is specified, the other is set to its default value.
+KEY:		sql_passwd
+DESC:		Defines the password to use when connecting to the server.
 DEFAULT:	'arealsmartpwd'
 
-KEY:		[ sql_refresh_time | print_refresh_time | mongo_refresh_time | amqp_refresh_time |
-		  kafka_refresh_time ] (-r)
+KEY:		[ sql_refresh_time | print_refresh_time | amqp_refresh_time | kafka_refresh_time ] (-r)
 DESC:		Time interval, in seconds, between consecutive executions of the plugin cache scanner. The
 		scanner purges data into the plugin backend. Note: internally all these config directives
 		write to the same variable; when using multiple plugins it is recommended to bind refresh
 		time definitions to specific plugins, ie.:
 
-		plugins: mysql[x], mongodb[y]
+		plugins: mysql[x]
 		sql_refresh_time[x]: 900
-		mongo_refresh_time[y]: 300
 
 		As doing otherwise can originate unexpected behaviours.
 DEFAULT:	60
 
-KEY:		[ sql_startup_delay | print_startup_delay | mongo_startup_delay | amqp_startup_delay |
-		  kafka_startup_delay ]
+KEY:		[ sql_startup_delay | print_startup_delay | amqp_startup_delay | kafka_startup_delay ]
 DESC:		Defines the time, in seconds, the first cache scan event has to be delayed. This delay
 		is, in turn, propagated to the subsequent scans. It comes useful in two scenarios: a) so 
 		that multiple plugins can use the same refresh time (ie. sql_refresh_time) value, allowing
@@ -1071,7 +1041,7 @@ DESC:		Enables the optimization of the statements sent to the RDBMS essentially 
 		the 'sql_table_version' directive.
 DEFAULT:	false
 
-KEY:		[ sql_history | print_history | mongo_history | amqp_history | kafka_history ]
+KEY:		[ sql_history | print_history | amqp_history | kafka_history ]
 VALUES:		#[s|m|h|d|w|M]
 DESC:		Enables historical accounting by placing accounted data into configurable time-bins. It
 		will use the 'stamp_inserted' (base time of the time-bin) and 'stamp_updated' (last time
@@ -1082,19 +1052,18 @@ DESC:		Enables historical accounting by placing accounted data into configurable
 		setting nfacctd_pro_rating to true. Note that this value is fully disjoint from the
 		*_refresh_time directives which set the time intervals at which data has to be written to
 		the backend instead. The final effect is close to time slots in a RRD file. Examples of
-		valid values are: '300' or '5m' - five minutes, '3600' or '1h' - one hour, '14400' or '4h'
-		- four hours, '86400' or '1d' - one day, '1w' - one week, '1M' - one month).
+		valid values are: '300s' or '5m' - five minutes, '3600s' or '1h' - one hour, '14400s' or
+		'4h' - four hours, '86400s' or '1d' - one day, '1w' - one week, '1M' - one month).
 DEFAULT:	none
 
-KEY:            [ sql_history_offset | print_history_offset | mongo_history_offset | amqp_history_offset |
-		  kafka_history_offset ]
+KEY:            [ sql_history_offset | print_history_offset | amqp_history_offset | kafka_history_offset ]
 DESC:		Sets an offset to timeslots basetime. If history is set to 30 mins (by default creating
 		10:00, 10:30, 11:00, etc. time-bins), with an offset of 900 seconds (so 15 mins) it will
 		create 10:15, 10:45, 11:15, etc. time-bins. It expects a positive value, in seconds.
 DEFAULT:	0
 
-KEY:		[ sql_history_roundoff | print_history_roundoff | mongo_history_roundoff |
-		  amqp_history_roundoff | kafka_history_roundoff ]
+KEY:		[ sql_history_roundoff | print_history_roundoff | amqp_history_roundoff |
+		  kafka_history_roundoff ]
 VALUES		[m,h,d,w,M]
 DESC:		Enables alignment of minutes (m), hours (h), days of month (d), weeks (w) and months (M)
 		in print (to print_refresh_time) and SQL plugins (to sql_history and sql_refresh_time).
@@ -1116,8 +1085,7 @@ DESC:           Enables recovery mode; recovery mechanism kicks in if DB fails. 
 		system on a box) to use in the case the primary backend fails.
 DEFAULT:	none
 
-KEY:            [ sql_max_writers | print_max_writers | mongo_max_writers | amqp_max_writers |
-		  kafka_max_writers ]
+KEY:            [ sql_max_writers | print_max_writers | amqp_max_writers | kafka_max_writers ]
 DESC:           Sets the maximum number of concurrent writer processes the plugin is allowed to start.
 		This setting allows pmacct to degrade gracefully during major backend lock/outages/
 		unavailability. The value is split as follows: up to N-1 concurrent processes will
@@ -1126,8 +1094,7 @@ DESC:           Sets the maximum number of concurrent writer processes the plugi
 		(so, data will be lost at this stage) and an error message is printed out.
 DEFAULT:	10
 
-KEY:		[ sql_cache_entries | print_cache_entries | mongo_cache_entries | amqp_cache_entries |
-		  kafka_cache_entries ]
+KEY:		[ sql_cache_entries | print_cache_entries | amqp_cache_entries | kafka_cache_entries ]
 DESC:		All plugins have a memory cache in order to store data until next purging event (see
 		refresh time directives, ie. sql_refresh_time). In case of network traffic data, the
 		cache allows to accumulate bytes and packets counters. This directive sets the number
@@ -1165,8 +1132,8 @@ NOTES:		* non SQL plugins: the cache structure has two dimensions, a base and a 
 		  MPLS-related primitives; all these can make the total cache memory size increase
 		  slightly at runtime. 
 		
-DEFAULT:	sql_cache_entries: 32771; print_cache_entries, mongo_cache_entries, amqp_cache_entries,
-		kafka_cache_entries: 16411
+DEFAULT:	print_cache_entries, amqp_cache_entries, kafka_cache_entries: 16411;
+		sql_cache_entries: 32771
 
 KEY:		sql_dont_try_update
 VALUES:         [ true | false ]
@@ -1206,15 +1173,15 @@ DESC:		In SQL plugin, sql_multi_values enables the use of multi-values INSERT st
 		in JSON objects newline-separated (preferred to JSON arrays for performance).  
 DEFAULT:        0
 
-KEY:		[ sql_trigger_exec | print_trigger_exec | mongo_trigger_exec ]
+KEY:		[ sql_trigger_exec | print_trigger_exec | amqp_trigger_exec | kafka_trigger_exec ]
 DESC:		Defines the executable to be launched at fixed time intervals to post-process aggregates;
 		in SQL plugins, intervals are specified by the 'sql_trigger_time' directive; if no interval
 		is supplied 'sql_refresh_time' value is used instead: this will result in a trigger being
 		fired each purging event. A number of environment variables are set in order to allow the
 		trigger to take actions; take a look to docs/TRIGGER_VARS to check them out. In the print
-		and mongodb plugins a simpler implementation is made: triggers can be fired each time data
-		is written to the backend (ie. print_refresh_time) and no environment variables are passed
-		over to the executable.
+		plugin a simpler implementation is made: triggers can be fired each time data is written to
+		the backend (ie. print_refresh_time) and no environment variables are passed over to the
+		executable.
 DEFAULT:	none
 
 KEY:		sql_trigger_time
@@ -1226,7 +1193,7 @@ DESC:		Specifies time interval at which the executable specified by 'sql_trigger
 		the executable will be fired each hour).
 DEFAULT:	none
 
-KEY:		[ sql_preprocess | print_preprocess | mongo_preprocess | amqp_preprocess | kafka_preprocess ]
+KEY:		[ sql_preprocess | print_preprocess | amqp_preprocess | kafka_preprocess ]
 DESC:		Allows to process aggregates (via a comma-separated list of conditionals and checks) while
 		purging data to the backend thus resulting in a powerful selection tier; aggregates filtered
 		out may be just discarded or saved through the recovery mechanism (if enabled, if supported
@@ -1336,8 +1303,7 @@ DESC:		Allows to process aggregates (via a comma-separated list of conditionals 
 		the following line can be used to instrument the print plugin: 'print_preprocess: minb=100000'. 
 DEFAULT:	none
 
-KEY:		[ sql_preprocess_type | print_preprocess_type | mongo_preprocess_type | amqp_preprocess_type |
-		  kafka_preprocess_type ]
+KEY:		[ sql_preprocess_type | print_preprocess_type | amqp_preprocess_type | kafka_preprocess_type ]
 VALUES:		[ any | all ]
 DESC:		When more checks are to be evaluated, this directive tells whether aggregates on the queue
 		are valid if they just match one of the checks (any) or all of them (all).
@@ -1355,29 +1321,15 @@ KEY:            timestamps_since_epoch
 VALUES          [ true | false ]
 DESC:           All timestamps (ie. timestamp_start, timestamp_end, timestamp_arrival primitives; sql_history-
 		related fields stamp_inserted, stamp_updated; etc.) in the standard seconds since the Epoch
-		format. In case the output is to a RDBMS, setting this directive to true will require changes
-		to the default types for timestamp fields in the SQL schema.
+		format. This not only makes output more compact but also prevents computationally expensive
+		time-formatting functions to be invoked, resulting in speed gains at purge time. In case the
+		output is to a RDBMS, setting this directive to true will require changes to the default types
+		for timestamp fields in the SQL schema.
 
 		MySQL:          DATETIME ==> INT(8) UNSIGNED
                 PostgreSQL:     timestamp without time zone ==> bigint
                 SQLite3:        DATETIME ==> INT(8)
 DEFAULT:        false
-
-KEY:		mongo_insert_batch
-DESC:		When purging data in a MongoDB database, defines the amount of elements to be inserted per
-		batch. This value depends on available memory: with 8GB RAM a max 35000 value did work OK;
-		with 16GB RAM a max 75000 value did work OK instead.
-DEFAULT:	10000
-
-KEY:            mongo_indexes_file
-DESC:           Full pathname to a file containing a list of indexes to apply to a MongoDB collection with
-		dynamic name. If the collection does not exists, it is created. Index names are picked by
-		MongoDB. For example, to create collections with two indexes 1) one using as key source/
-		destination IP addresses and 2) the other using source/destination TCP/UDP ports compile
-		the file pointed by this directive as:
-
-		src_host, dst_host
-		src_port, dst_port
 
 KEY:		[ print_markers | amqp_markers | kafka_markers ]
 VALUES:		[ true | false ]
@@ -1464,7 +1416,7 @@ DESC:		Time interval, in seconds, at which the generated Avro schema is sent ove
 		AMQP routing key (amqp_avro_schema_routing_key) or Kafka topic (kafka_avro_schema_topic).
 DEFAULT:	60
 
-KEY:            [ print_num_protos | sql_num_protos | amqp_num_protos | mongo_num_protos | kafka_num_protos ]
+KEY:            [ print_num_protos | sql_num_protos | amqp_num_protos | kafka_num_protos ]
 VALUES:         [ true | false ]
 DESC:		Defines whether IP protocols (ie. tcp, udp) should be looked up and presented in string format
 		or left numerical. The default is to look protocol names up.
@@ -1475,9 +1427,11 @@ VALUES:         [ true | false ]
 DESC:           Defines whether IP addresses should be left numerical (in network bytes ordering) or converted
 		into human-readable strings. Applies to MySQL and SQLite plugins only and assumes the INET_ATON()
 		and INET6_ATON() function are defined in the RDBMS. INET_ATON() is always defined in MySQL whereas
-		INET6_ATON() requires MySQL >= 5.6.3. Bothfunctions are not defined by default in SQLite instead.
-		The feature is not compatible with making use of IP prefix labels. Default setting is to convert
-		IP addresses and prefixes into strings.
+		INET6_ATON() requires MySQL >= 5.6.3. Both functions are not defined by default in SQLite instead
+		and are to be user-defined: if pmacct is compiled with --disable-ipv6, a INET_ATON() function is
+		invoked; if pmacct is compiled with --enable-ipv6 (default), a INET6_ATON() function is invoked.
+		The feature is not compatible with making use of IP prefix labels. Default setting, false, is to
+		convert IP addresses and prefixes into strings.
 DEFAULT:        false
 
 KEY:		[ nfacctd_port | sfacctd_port ] (-l) [GLOBAL, NO_PMACCTD, NO_UACCTD]
@@ -1513,12 +1467,12 @@ DESC:		Makes 'nfacctd' expect times included in NetFlow header to be in seconds 
 		for secs and msecs timestamps, increasing collector awareness.
 DEFAULT:        false
 
-KEY:		nfacctd_time_new [GLOBAL, NFACCTD_ONLY]
+KEY:		[ nfacctd_time_new | pmacctd_time_new | sfacctd_time_new ] [GLOBAL, NO_UACCTD]
 VALUES:		[ true | false ]
-DESC:		Makes 'nfacctd' to ignore timestamps included in NetFlow header and build new ones. This gets
-		particularly useful to assign flows to time-bins based on the flow arrival time at the collector
-		rather than the flow start time. An application for it is when historical accounting is enabled
-		('sql_history') and an INSERT-only mechanism is in use ('sql_dont_try_update', 'sql_use_copy').
+DESC:		Makes the daemon to ignore external timestamps associated to data, ie. included in NetFlow
+		header or pcap header, and generate new ones (reflecting data arrival time to the collector).
+		This gets particularly useful to assign flows to time-bins based on the flow arrival time at
+		the collector rather than the flow original (start) time.
 DEFAULT:        false
 
 KEY:		nfacctd_pro_rating [NFACCTD_ONLY]
@@ -1533,6 +1487,17 @@ DESC:		If nfacctd_time_new is set to false (default) and historical accounting (
 NOTES:          If NetFlow sampling is enabled, it is recommended to have counters renormalization enabled
                 (nfacctd_renormalize set to true).
 DEFAULT:        false
+
+KEY:		nfacctd_templates_file [NFACCTD_ONLY]
+DESC:		Full pathname to a file containing serialized templates data from previous nfacctd use.
+                Templates are loaded from this file when nfacctd is (re)started in order to reduce the
+		amount of dropped packets due to unknown templates. Be aware that this file will be
+		written to with possible new templates and updated versions of provided ones. Hence, an
+                empty file can be specified and incoming templates will be cached into it. This file
+		will be created if it does not exist. Only JSON format is currently supported and
+		requires compiling against Jansson library (--enable-jansson when configuring for
+		compiling).
+DEFAULT:        none
 
 KEY:            [ nfacctd_stitching | sfacctd_stitching | pmacctd_stitching | uacctd_stitching ]
 VALUES:         [ true | false ]
@@ -1629,6 +1594,13 @@ DESC:           Both nfacctd and sfacctd can log warning messages for failing ba
 		and notes).
 DEFAULT:        true
 
+KEY:		nfacctd_disable_opt_scope_check [GLOBAL, ONLY_NFACCTD]
+VALUES:         [ true | false ]
+DESC:		Mainly a workaround to implementations not encoding NetFlow v9/IPIFX option scope correctly,
+		this knob allows to disable option scope checking. By doing so, options are considered scoped
+		to the system level (ie. to the IP address of the expoter).
+DEFAULT:	false
+
 KEY:		pre_tag_map [MAP]
 DESC:		Full pathname to a file containing tag mappings. Tags can be internal-only (ie. for filtering
 		purposes, see pre_tag_filter configuration directive) or exposed to users (ie. if 'tag', 'tag2'
@@ -1636,71 +1608,74 @@ DESC:		Full pathname to a file containing tag mappings. Tags can be internal-onl
 		sub-tree for all supported keys and detailed examples (pretag.map.example). Pre-Tagging is
 		evaluated in the Core Process and each plugin can be defined a local pre_tag_map. Result of
 		evaluation of pre_tag_map overrides any tags passed via NetFlow/sFlow by a pmacct nfprobe/
-		sfprobe plugin.  
+		sfprobe plugin. Number of map entries (by default 384) can be modified via maps_entries.
+		Content can be reloaded at runtime by sending the daemon a SIGUSR2 signal (ie. "killall -USR2
+		nfacctd").  
 DEFAULT:	none
 
 KEY:		maps_entries
 DESC:		Defines the maximum number of entries a map (ie. pre_tag_map and all directives with the
-		'MAP' flag) can contain. The default value is suitable for most scenarios, though tuning it
-		could be required either to save on memory or to allow for more entries. Refer to the
-		specific map directives documentation in this file to see which are affected by this setting.
+		'MAP' flag in this document) can contain. The default value is suitable for most scenarios,
+		though tuning it could be required either to save on memory or to allow for more entries.
+		Refer to the specific map directives documentation in this file to see which are affected by
+		this setting.
 DEFAULT:	384
 
 KEY:            maps_row_len
-DESC:		Defines the maximum length of map (ie. pre_tag_map and all directives with the 'MAP' flag)
-		rows. The default value is suitable for most scenario, though tuning it could be required
-		either to save on memory or to allow for more entries.
+DESC:		Defines the maximum length of map (ie. pre_tag_map and all directives with the 'MAP' flag in
+		this document) rows. The default value is suitable for most scenario, though tuning it could
+		be required either to save on memory or to allow for more entries.
 DEFAULT:	256
 
 KEY:		maps_refresh [GLOBAL]
 VALUES:		[ true | false ]
 DESC:		When enabled, this directive allows to reload map files (ie. pre_tag_map and all directives
-		with the 'MAP' flag) without restarting the daemon instance. For example, it may result
-		particularly useful to reload pre_tag_map or networks_file entries in order to reflect some
-		change in the network. After having modified the map files, a SIGUSR2 has to be sent (e.g.:
-		in the simplest case "killall -USR2 pmacctd") to the daemon to notify the change. If such
-		signal is sent to the daemon and this directive is not enabled, the signal is silently
-		discarded. The Core Process is in charge of processing the Pre-Tagging map; plugins are
-		devoted to Networks and Ports maps instead. Then, because signals can be sent either to the
-		whole daemon (killall) or to just a specific process (kill), this mechanism also offers the
-		advantage to elicit local reloads.
+		with the 'MAP' flag in this document) without restarting the daemon instance. For example,
+		it may result particularly useful to reload pre_tag_map or networks_file entries in order
+		to reflect some change in the network. After having modified the map files, a SIGUSR2 has
+		to be sent (e.g.: in the simplest case "killall -USR2 pmacctd") to the daemon to notify the
+		change. If such signal is sent to the daemon and this directive is not enabled, the signal
+		is silently discarded. The Core Process is in charge of processing the Pre-Tagging map;
+		plugins are devoted to Networks and Ports maps instead. Then, because signals can be sent
+		either to the whole daemon (killall) or to just a specific process (kill), this mechanism
+		also offers the advantage to elicit local reloads.
 DEFAULT:        true
 
 KEY:		maps_index [GLOBAL]
 VALUES:		[ true | false ]
-DESC:		Enables indexing of maps (ie. pre_tag_map and all directives with the 'MAP' flag) to
-		increase lookup speeds on large maps and/or sustained lookup rates. Indexes are automatically
-		defined basing on structure and content of the map, up to a maximum of 8. Indexing of
-		pre_tag_map, bgp_peer_src_as_map, flow_to_rd_map is supported. Only a sub-set of pre_tag_map
-		fields are supported, including: ip, bgp_nexthop, vlan, cvlan, src_mac, mpls_vpn_rd,
-		src_as, dst_as, peer_src_as, peer_dst_as, input, output. Only IP addresses, ie. no IP prefixes,
-		are supported as part of the 'ip' field. Also, negations are not supported (ie. 'in=-216' match
-		all but input interface 216). bgp_agent_map and sampling_map implement a separate caching
-		mechanism and hence do not leverage this feature. Duplicates in the key part of the map
-		entry, key being defined as all fields except set_* ones, are not supported and may result
-		in a "out of index space" message.
+DESC:		Enables indexing of maps (ie. pre_tag_map and all directives with the 'MAP' flag in this
+		document) to increase lookup speeds on large maps and/or sustained lookup rates. Indexes
+		are automatically defined basing on structure and content of the map, up to a maximum of
+		8. Indexing of pre_tag_map, bgp_peer_src_as_map, flow_to_rd_map is supported. Only a sub-
+		set of pre_tag_map fields are supported, including: ip, bgp_nexthop, vlan, cvlan, src_mac,
+		mpls_vpn_rd, src_as, dst_as, peer_src_as, peer_dst_as, input, output. Only IP addresses,
+		ie. no IP prefixes, are supported as part of the 'ip' field. Also, negations are not
+		supported (ie. 'in=-216' match all but input interface 216). bgp_agent_map and sampling_map
+		implement a separate caching mechanism and hence do not leverage this feature. Duplicates
+		in the key part of the map entry, key being defined as all fields except set_* ones, are
+		not supported and may result in a "out of index space" message.
 DEFAULT:        false
 
 KEY:            pre_tag_filter, pre_tag2_filter [NO_GLOBAL]
 VALUES:         [ 0-2^64-1 ]
 DESC:		Expects one or more tags (when multiple tags are supplied, they need to be comma separated
 		and a logical OR is used in the evaluation phase) as value and allows to filter aggregates
-		basing upon their tag value: in case of a match, the aggregate is delivered to the plugin.
-		This directive has to be bound to a plugin (that is, it cannot be global) and is suitable,
-		for example, to split tagged data among the active plugins. While tags themselves need to be
-		positive values, this directive also allows to specify a tag value '0' to intercept untagged
+		basing upon their tag (or tag2) value: in case of a match, the aggregate is filtered in, ie.
+		it is delivered to the plugin it is attached to. This directive has to be attached to a
+		plugin (that is, it cannot be global) and is suitable, for example, to split tagged data
+		among the active plugins. This directive also allows to specify a value '0' to match untagged
 		data, thus allowing to split tagged traffic from untagged one. It also allows negations by
 		pre-pending a minus sign to the tag value (ie. '-6' would send everything but traffic tagged
-		as '6' to the plugin it is bound to) and ranges (ie. '10-20' would send over traffic tagged
-		in the range 10..20) and any combination of these. This directive makes sense if coupled with
-		'pre_tag_map'; it could be used in conjunction with 'aggregate_filter'.
+		as '6' to the plugin it is attached to, hence achieving a filter out behaviour) and ranges
+		(ie. '10-20' would send over traffic tagged in the range 10..20) and any combination of these.
+		This directive makes sense if coupled with 'pre_tag_map'.
 DEFAULT:	none
 
 KEY:            pre_tag_label_filter [NO_GLOBAL]
 DESC:		Expects one or more labels (when multiple labels are supplied, they need to be comma
-		separated and a logical OR is used in the evaluation phase) as value and allows to filter
-		aggregates basing upon their label value: only in case of match data is delivered to the
-		plugin. This directive has to be bound to a plugin (that is, it cannot be global). Null
+		separated and a logical OR is used in the evaluation phase) as value and allows to filter in
+		aggregates basing upon their label value(s): only in case of match data is delivered to the
+		plugin. This directive has to be attached to a plugin (that is, it cannot be global). Null
 		label values (ie. unlabelled data) can be matched using the 'null' keyword. Negations are
 		allowed by pre-pending a minus sign to the label value. The use of this directive makes
 		sense if coupled with 'pre_tag_map'.
@@ -1730,7 +1705,9 @@ DESC:           Full pathname to a file containing traffic sampling mappings. It
 		enabled (nfacctd_renormalize or sfacctd_renormalize set to true) in order for the feature to
 		work. If a specific router is not defined in the map, the sampling rate advertised by the
 		router itself is applied. Take a look to the examples/ sub-tree 'sampling.map.example' for all
-		supported keys and detailed examples.
+		supported keys and detailed examples. Number of map entries (by default 384) can be modified
+		via maps_entries. Content can be reloaded at runtime by sending the daemon a SIGUSR2 signal
+		(ie. "killall -USR2 nfacctd").
 DEFAULT:	none
 
 KEY:		[ pmacctd_force_frag_handling | uacctd_force_frag_handling ] [GLOBAL, NO_NFACCTD, NO_SFACCTD]
@@ -1822,20 +1799,6 @@ DESC:           Defines output format for the streamed logging of sFlow counters
 		compiling).
 DEFAULT:	json
 
-KEY:		classifiers [GLOBAL, NO_NFACCTD, NO_SFACCTD]
-DESC:		Full path to a spool directory containing the packet classification patterns (expected as .pat
-		or .so files; files with different extensions and subdirectories will be just ignored). This
-		feature enables packet/flow classification against application layer data (that is, the packet
-		payload) and based either over regular expression (RE) patterns (.pat) or external/pluggable C
-		modules (.so). Patterns are loaded in filename alphabetic order and will be evaluated in the
-		same order while classifying packets. Supported RE patterns are those from the great L7-filter
-		project, which is a new packet classifier for Linux kernel, and are avilable for download at:
-		http://sourceforge.net/projects/l7-filter/ (then point to the Protocol definitions archive).
-		Existing SO patterns are available at: http://www.pmacct.net/classification/ . 
-		This configuration directive should be specified whenever the 'class' aggregation method is in
-		use (ie. 'aggregate: class'). It's supported only by pmacctd. 
-DEFAULT:	none
-
 KEY:		sql_aggressive_classification 
 VALUES:		[ true | false ]
 DESC:		Usually 5 to 10 packets are required to classify a stream by the 'classifiers' feature. Until
@@ -1844,7 +1807,7 @@ DESC:		Usually 5 to 10 packets are required to classify a stream by the 'classif
 		they are still cached by the SQL plugin. This directive delays 'unknown' streams - but only
 		those which would have still chances to be correctly classified - from being purged to the DB
 		but only for a small number of consecutive sql_refresh_time slots. It is incompatible with
-		sql_dont_try_update and sql_use_copy directives.
+		sql_dont_try_update and sql_use_copy directives. This feature/directive is being phased-out.
 DEFAULT:        false
 
 KEY:		sql_locking_style
@@ -1860,17 +1823,6 @@ DESC:		Defines the locking style for the SQL table. MySQL supports "table" and "
 		over the whole database (requirement for "table" locking in MySQL) is not available, it is not
 		recommended since serialization allows to contain database load.
 DEFAULT:        table
-
-KEY:		classifier_tentatives [GLOBAL, NO_NFACCTD, NO_SFACCTD]
-DESC:		Number of tentatives to classify a stream. Usually 5 "full" (ie. carrying payload) packets are
-		sufficient to classify an uni-directional flow. This is the default value. However classifiers
-		not basing on the payload content may require a different (maybe larger) number of tentatives.
-DEFAULT:	5
-
-KEY:		classifier_table_num [GLOBAL, NO_NFACCTD, NO_SFACCTD]
-DESC:		The maximum number of classifiers (SO + RE) that could be loaded runtime. The default number is 
-		usually ok, but some "dirty" uses of classifiers might require more entries.
-DEFAULT:	256
 
 KEY:		nfprobe_timeouts
 DESC:		Allows to tune a set of timeouts to be applied over collected packets. The value is expected in
@@ -2123,8 +2075,8 @@ KEY:		bgp_peer_src_as_map [GLOBAL, MAP]
 DESC:		Full pathname to a file containing source peer AS mappings. The AS can be mapped to one or
 		a combination of: ifIndex, source MAC address and BGP next-hop (query against the BGP RIB
 		to look up the source IP prefix). This is sufficient to model popular tecniques for both
-		public and private BGP peerings. Number of map entries (by default 384) can be modified via 
-		maps_entries. Sample map in 'examples/peers.map.example'.
+		public and private BGP peerings. Sample map in 'examples/peers.map.example'. Content can
+		be reloaded at runtime by sending the daemon a SIGUSR2 signal (ie. "killall -USR2 nfacctd").
 DEFAULT:	none
 
 KEY:            bgp_src_std_comm_type [GLOBAL]
@@ -2165,8 +2117,9 @@ DEFAULT:	none
 KEY:            bgp_src_local_pref_map [GLOBAL, MAP]
 DESC:           Full pathname to a file containing source local preference mappings. The LP value can be
 		mapped to one or a combination of: ifIndex, source MAC address and BGP next-hop (query
-		against the BGP RIB to look up the source IP prefix). Number of map entries (by default
-		384) can be modified via maps_entries. Sample map in 'examples/lpref.map.example'.
+		against the BGP RIB to look up the source IP prefix). Sample map in 'examples/
+		lpref.map.example'. Content can be reloaded at runtime by sending the daemon a SIGUSR2
+		signal (ie. "killall -USR2 nfacctd").
 DEFAULT:	none
 
 KEY:            bgp_src_med_type [GLOBAL]
@@ -2179,9 +2132,9 @@ DEFAULT:	none
 KEY:            bgp_src_med_map [GLOBAL, MAP]
 DESC:           Full pathname to a file containing source MED (Multi Exit Discriminator) mappings. The
 		MED value can be mapped to one or a combination of: ifIndex, source MAC address and BGP
-		next-hop (query against the BGP RIB to look up the source IP prefix). Number of map
-		entries (by default 384) can be modified via maps_entries. Sample map in 'examples/
-		med.map.example'.
+		next-hop (query against the BGP RIB to look up the source IP prefix). Sample map in
+		'examples/med.map.example'. Content can be reloaded at runtime by sending the daemon a
+		SIGUSR2 signal (ie. "killall -USR2 nfacctd").
 DEFAULT:	none
 
 KEY:		bgp_agent_map [GLOBAL, MAP]
@@ -2192,7 +2145,8 @@ DESC:		Full pathname to a file to map source IP address of NetFlow agents and Ag
 		uacctd daemons are required to use a bgp_agent_map with up to two "catch-all" entries -
 		working in a primary/backup fashion (see agent_to_peer.map in the examples section):
 		this is because these daemons do not have a NetFlow/sFlow source address to match to.
-		Number of map entries (by default 384) can be modified via maps_entries.
+		Number of map entries (by default 384) can be modified via maps_entries. Content can be
+		reloaded at runtime by sending the daemon a SIGUSR2 signal (ie. "killall -USR2 nfacctd").
 DEFAULT:	none
 
 KEY:		flow_to_rd_map [GLOBAL, MAP]
@@ -2200,7 +2154,8 @@ DESC:		Full pathname to a file to map flows (typically, a) ingress router, input
 		b) MPLS bottom label, BGP next-hop couples) to BGP/MPLS Virtual Private Network (VPN)
 		Route Distinguisher (RD), based upon rfc4659. See flow_to_rd.map file in the examples
 		section for further info. Number of map entries (by default 384) can be modified via
-		maps_entries. 
+		maps_entries. Content can be reloaded at runtime by sending the daemon a SIGUSR2 signal
+		(ie. "killall -USR2 nfacctd"). 
 DEFAULT:	none
 
 KEY:		bgp_follow_default [GLOBAL]
@@ -2421,7 +2376,8 @@ DESC:		Sets the number of packets to queue inside the kernel before sending them
 DEFAULT:	1
 
 KEY:		tunnel_0 [GLOBAL, NO_NFACCTD, NO_SFACCTD]
-DESC:		Defines tunnel inspection, disabled by default. The daemon will then account on tunnelled
+DESC:		Defines tunnel inspection in pmacctd and uacctd, disabled by default (note: this feature
+		is currently unrelated to tunnel_* primitives). The daemon will then account on tunnelled
 		data rather than on the envelope. The implementation approach is stateless, ie. control
 		messages are not handled. Up to 4 tunnel layers are supported (ie. <tun proto>, <options>;
 		<tun proto>, <options>; ...). Up to 8 tunnel stacks will be supported (ie. configuration
@@ -2432,17 +2388,12 @@ DESC:		Defines tunnel inspection, disabled by default. The daemon will then acco
 		tunnel_0: gtp, <UDP port> 
 DEFAULT:	none
 
-KEY:		tee_receiver 
-DESC:           Defines remote IP address and port to which NetFlow/sFlow dagagrams are to be replicated
-		to. The value is expected to be in the usual form 'address:port'. Either tee_receiver key
-		(legacy) or tee_receivers is mandatory for a 'tee' plugin instance.
-DEFAULT:	none
-
 KEY:            tee_receivers [MAP]
 DESC:           Defines full pathname to a list of remote IP addresses and ports to which NetFlow/sFlow
 		dagagrams are to be replicated to. Examples are available in "examples/tee_receivers.lst.
-		example" file. Either tee_receiver key (legacy) or tee_receivers is mandatory for a 'tee'
-		plugin instance.
+		example" file. Number of map entries (by default 384) can be modified via maps_entries.
+		Content can be reloaded at runtime by sending the daemon a SIGUSR2 signal (ie. "killall
+		-USR2 nfacctd").
 DEFAULT:	none
 
 KEY:		tee_source_ip
@@ -2485,27 +2436,12 @@ DESC:		Defines a list of packet length distributions, comma-separated, which is 
 		than a single bin the latest definition wins. 
 DEFAULT:        none
 
-KEY:		tmp_net_own_field
-VALUES:         [ true | false ]
-DESC:		Writes IP prefixes, src_net and dst_net primitives, to a own/distinct field than the
-		one used for IP addresses, src_host and dst_host primitives. This config directive is
-		meant for pmacct 1.6 only in order to ease backward compatibility by setting the value
-		of this directive to false. In the next major release this directive will be removed.
-DEFAULT:        true
-
 KEY:		tmp_asa_bi_flow
 VALUES:		[ true | false ]
 DESC:		Bi-flows use two counters to report counters, ie. bytes and packets, in forward and
 		reverse directions. This hack (ab)uses the packets field in order to store the extra
 		bytes counter. The patch specifically targets NetFlow v9/IPFIX field types #231 and
 		#232 and has been tested against a Cisco ASA export.
-DEFAULT:	false
-
-KEY:		tmp_comms_same_field
-VALUES:		[ true | false ]
-DESC:		Writes BGP extended communities to a own/distinct field than the one used for BGP
-		standard communities. This config directive is meant for pmacct 1.6 only in order to
-		ease backward compatibility. In the next major release this directive will be removed.
 DEFAULT:	false
 
 KEY:		thread_stack
@@ -2574,3 +2510,45 @@ KEY:		telemetry_daemon_ipprec [GLOBAL]
 DESC:           Marks self-originated Streaming Telemetry messages with the supplied IP precedence value.
 		Applies to TCP sessions only.
 DEFAULT:        0
+
+KEY:		classifier_num_roots [GLOBAL]
+DESC:		Defines the number of buckets of the nDPI memory structure on which to hash flows.
+		The more the buckets, the more memory will be allocated at startup and the smaller
+		- and hence more performing - each memory structure will be.
+DEFAULT:	512
+
+KEY:		classifier_max_flows [GLOBAL]
+DESC:		Maximum number of concurrent flows allowed in the nDPI memory structure.
+DEFAULT:	200000000
+
+KEY:		classifier_proto_guess [GLOBAL]
+VALUES:         [ true | false ]
+DESC:		If DPI classification is unsuccessful, and before giving up, try guessing the protocol 
+		given collected flow characteristics, ie. IP protocol, port numbers, etc.
+DEFAULT:	false
+
+KEY:		classifier_idle_scan_period [GLOBAL]
+DESC:		Defines the time interval, in seconds, at which going through the memory structure to
+		find for idle flows to expire.  
+DEFAULT:	10
+
+KEY:		classifier_idle_scan_budget [GLOBAL]
+DESC:		Defines the amount of idle flows to expire per each classifier_idle_scan_period. This
+		feature is to prevent too many flows to expire can disrupt the regular classification
+		activity.
+DEFAULT:	1024
+
+KEY:		classifier_giveup_proto_tcp [GLOBAL]
+DESC:		Defines the maximum amount of packets to try to classify a TCP flow. After such amount
+		of trials, the flow will be marked as given up and no classification attempts will be
+		made anymore, until it expires.
+DEFAULT:	10
+
+KEY:		classifier_giveup_proto_udp [GLOBAL]
+DESC:		Same as classifier_giveup_proto_tcp but for UDP flows.
+DEFAULT:	8
+
+KEY:		classifier_giveup_proto_other [GLOBAL]
+DESC:		Same as classifier_giveup_proto_tcp but for flows which IP protocol is different than
+		TCP and UDP.
+DEFAULT:	8

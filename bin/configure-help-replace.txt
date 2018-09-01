@@ -17,6 +17,8 @@
   SQLITE3_LIBS			linker flags for SQLITE3, overriding pkg-config
   RABBITMQ_CFLAGS		C compiler flags for RABBITMQ, overriding pkg-config
   RABBITMQ_LIBS			linker flags for RABBITMQ, overriding pkg-config
+  ZMQ_CFLAGS			C compiler flags for ZMQ, overriding pkg-config
+  ZMQ_LIBS			linker flags for ZMQ, overriding pkg-config
   KAFKA_CFLAGS			C compiler flags for KAFKA, overriding pkg-config
   KAFKA_LIBS			linker flags for KAFKA, overriding pkg-config
   GEOIP_CFLAGS			C compiler flags for GEOIP, overriding pkg-config
@@ -29,4 +31,6 @@
   AVRO_LIBS			linker flags for AVRO, overriding pkg-config
   NFLOG_CFLAGS			C compiler flags for NFLOG, overriding pkg-config
   NFLOG_LIBS			linker flags for NFLOG, overriding pkg-config
+  NDPI_CFLAGS			C compiler flags for dynamic nDPI, overriding pkg-config
+  NDPI_LIBS			linker flags for dynamic nDPI, overriding pkg-config
 

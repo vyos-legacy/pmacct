@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -134,11 +134,6 @@ void sql_init_default_values(struct extra_primitives *extras)
   dump_writers.list = malloc(config.dump_max_writers * sizeof(pid_t));
   dump_writers_init();
 
-  if (config.sql_aggressive_classification) {
-    if (config.acct_type == ACCT_PM && config.what_to_count & COUNT_CLASS);
-    else config.sql_aggressive_classification = FALSE;
-  }
-
   /* SQL table type parsing; basically mapping everything down to a SQL table version */
   /* ie. BGP == 1000 */
   if (config.sql_table_type) {
@@ -173,6 +168,7 @@ void sql_init_default_values(struct extra_primitives *extras)
   pb_size = sizeof(struct pkt_bgp_primitives);
   pn_size = sizeof(struct pkt_nat_primitives);
   pm_size = sizeof(struct pkt_mpls_primitives);
+  pt_size = sizeof(struct pkt_tunnel_primitives);
   pc_size = config.cpptrs.len;
   dbc_size = sizeof(struct db_cache);
 
@@ -186,7 +182,8 @@ void sql_init_historical_acct(time_t now, struct insert_data *idata)
 
   if (config.sql_history) {
     idata->basetime = now;
-    if (config.sql_history == COUNT_MINUTELY) idata->timeslot = config.sql_history_howmany*60;
+    if (config.sql_history == COUNT_SECONDLY) idata->timeslot = config.sql_history_howmany;
+    else if (config.sql_history == COUNT_MINUTELY) idata->timeslot = config.sql_history_howmany*60;
     else if (config.sql_history == COUNT_HOURLY) idata->timeslot = config.sql_history_howmany*3600;
     else if (config.sql_history == COUNT_DAILY) idata->timeslot = config.sql_history_howmany*86400;
     else if (config.sql_history == COUNT_WEEKLY) idata->timeslot = config.sql_history_howmany*86400*7;
@@ -292,6 +289,7 @@ void sql_cache_modulo(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
   struct pkt_bgp_primitives *pbgp = prim_ptrs->pbgp;
   struct pkt_nat_primitives *pnat = prim_ptrs->pnat;
   struct pkt_mpls_primitives *pmpls = prim_ptrs->pmpls;
+  struct pkt_tunnel_primitives *ptun = prim_ptrs->ptun;
   char *pcust = prim_ptrs->pcust;
   struct pkt_vlen_hdr_primitives *pvlen = prim_ptrs->pvlen;
 
@@ -299,6 +297,7 @@ void sql_cache_modulo(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
   if (pbgp) idata->hash ^= cache_crc32((unsigned char *)pbgp, pb_size);
   if (pnat) idata->hash ^= cache_crc32((unsigned char *)pnat, pn_size);
   if (pmpls) idata->hash ^= cache_crc32((unsigned char *)pmpls, pm_size);
+  if (ptun) idata->hash ^= cache_crc32((unsigned char *)ptun, pt_size);
   if (pcust) idata->hash ^= cache_crc32((unsigned char *)pcust, pc_size);
   if (pvlen) idata->hash ^= cache_crc32((unsigned char *)pvlen, (PvhdrSz + pvlen->tot_len));
 
@@ -327,39 +326,17 @@ int sql_cache_flush(struct db_cache *queue[], int index, struct insert_data *ida
   }
   else idata->committed_basetime = idata->basetime;
 
-  /* If aggressive classification is enabled and there are still
-     chances for the stream to be classified - ie. tentatives is
-     non-zero - let's leave it in SQL_CACHE_INUSE state */
   if (!exiting) {
-    if (config.sql_aggressive_classification) {
-      for (j = 0, pqq_ptr = 0; j < index; j++) {
-        if (!queue[j]->primitives.class && queue[j]->tentatives && (queue[j]->start_tag > (idata->now - ((STALE_M-1) * config.sql_refresh_time))) ) {
-          pending_queries_queue[pqq_ptr] = queue[j];
-          pqq_ptr++;
-        }
-        else if (new_basetime && queue[j]->basetime+delay >= idata->basetime) {
-	  pending_queries_queue[pqq_ptr] = queue[j];
-	  pqq_ptr++;
-        }
-        else if (!new_basetime && queue[j]->basetime+delay > idata->basetime) {
-          pending_queries_queue[pqq_ptr] = queue[j];
-          pqq_ptr++;
-        }
-        else queue[j]->valid = SQL_CACHE_COMMITTED;
+    for (j = 0, pqq_ptr = 0; j < index; j++) {
+      if (new_basetime && queue[j]->basetime+delay >= idata->basetime) {
+        pending_queries_queue[pqq_ptr] = queue[j];
+        pqq_ptr++;
       }
-    }
-    else {
-      for (j = 0, pqq_ptr = 0; j < index; j++) {
-        if (new_basetime && queue[j]->basetime+delay >= idata->basetime) {
-          pending_queries_queue[pqq_ptr] = queue[j];
-          pqq_ptr++;
-        }
-        else if (!new_basetime && queue[j]->basetime+delay > idata->basetime) {
-          pending_queries_queue[pqq_ptr] = queue[j];
-          pqq_ptr++;
-        }
-        else queue[j]->valid = SQL_CACHE_COMMITTED;
+      else if (!new_basetime && queue[j]->basetime+delay > idata->basetime) {
+        pending_queries_queue[pqq_ptr] = queue[j];
+        pqq_ptr++;
       }
+      else queue[j]->valid = SQL_CACHE_COMMITTED;
     }
   }
   /* If exiting instead .. */
@@ -407,6 +384,7 @@ int sql_cache_flush_pending(struct db_cache *queue[], int index, struct insert_d
 	    PendingElem->pbgp = NULL;
 	    PendingElem->pnat = NULL;
 	    PendingElem->pmpls = NULL;
+	    PendingElem->ptun = NULL;
 	    PendingElem->pcust = NULL;
 	    PendingElem->pvlen = NULL;
 	    PendingElem->stitch = NULL;
@@ -418,6 +396,7 @@ int sql_cache_flush_pending(struct db_cache *queue[], int index, struct insert_d
 	    if (SavedCursor.pbgp) free(SavedCursor.pbgp);
 	    if (SavedCursor.pnat) free(SavedCursor.pnat);
 	    if (SavedCursor.pmpls) free(SavedCursor.pmpls);
+	    if (SavedCursor.ptun) free(SavedCursor.ptun);
 	    if (SavedCursor.pcust) free(SavedCursor.pcust);
 	    if (SavedCursor.pvlen) free(SavedCursor.pvlen);
 	    if (SavedCursor.stitch) free(SavedCursor.stitch);
@@ -499,12 +478,14 @@ struct db_cache *sql_cache_search(struct primitives_ptrs *prim_ptrs, time_t base
   struct pkt_bgp_primitives *pbgp = prim_ptrs->pbgp;
   struct pkt_nat_primitives *pnat = prim_ptrs->pnat;
   struct pkt_mpls_primitives *pmpls = prim_ptrs->pmpls;
+  struct pkt_tunnel_primitives *ptun = prim_ptrs->ptun;
   char *pcust = prim_ptrs->pcust;
   struct pkt_vlen_hdr_primitives *pvlen = prim_ptrs->pvlen;
   unsigned int modulo;
   struct db_cache *Cursor;
   struct insert_data idata;
-  int res_data = TRUE, res_bgp = TRUE, res_nat = TRUE, res_mpls = TRUE, res_cust = TRUE, res_vlen = TRUE;
+  int res_data = TRUE, res_bgp = TRUE, res_nat = TRUE, res_mpls = TRUE, res_tun = TRUE;
+  int res_cust = TRUE, res_vlen = TRUE;
 
   sql_cache_modulo(prim_ptrs, &idata);
   modulo = idata.modulo;
@@ -541,6 +522,11 @@ struct db_cache *sql_cache_search(struct primitives_ptrs *prim_ptrs, time_t base
       }
       else res_mpls = FALSE;
 
+      if (ptun && Cursor->ptun) {
+        res_tun = memcmp(Cursor->ptun, ptun, sizeof(struct pkt_tunnel_primitives));
+      }
+      else res_tun = FALSE;
+
       if (pcust && Cursor->pcust) {
         res_cust = memcmp(Cursor->pcust, pcust, config.cpptrs.len);
       }
@@ -551,7 +537,7 @@ struct db_cache *sql_cache_search(struct primitives_ptrs *prim_ptrs, time_t base
       }
       else res_vlen = FALSE;
 
-      if (!res_data && !res_bgp && !res_nat && !res_mpls && !res_cust && !res_vlen) {
+      if (!res_data && !res_bgp && !res_nat && !res_mpls && !res_tun && !res_cust && !res_vlen) {
         /* additional check: time */
         if ((Cursor->basetime < basetime) && config.sql_history)
           goto follow_chain;
@@ -570,6 +556,7 @@ void sql_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
   struct pkt_bgp_primitives *pbgp = prim_ptrs->pbgp;
   struct pkt_nat_primitives *pnat = prim_ptrs->pnat;
   struct pkt_mpls_primitives *pmpls = prim_ptrs->pmpls;
+  struct pkt_tunnel_primitives *ptun = prim_ptrs->ptun;
   char *pcust = prim_ptrs->pcust;
   struct pkt_vlen_hdr_primitives *pvlen = prim_ptrs->pvlen;
   time_t basetime = idata->basetime, timeslot = idata->timeslot;
@@ -698,7 +685,7 @@ void sql_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
   }
   else {
     if (Cursor->valid == SQL_CACHE_INUSE) {
-      int res_data = TRUE, res_bgp = TRUE, res_nat = TRUE, res_mpls = TRUE;
+      int res_data = TRUE, res_bgp = TRUE, res_nat = TRUE, res_mpls = TRUE, res_tun = TRUE;
       int res_cust = TRUE, res_vlen = TRUE;
 
       /* checks: pkt_primitives and pkt_bgp_primitives */
@@ -719,6 +706,11 @@ void sql_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
       }
       else res_mpls = FALSE;
 
+      if (ptun && Cursor->ptun) {
+        res_tun = memcmp(Cursor->ptun, ptun, sizeof(struct pkt_tunnel_primitives));
+      }
+      else res_tun = FALSE;
+
       if (pcust && Cursor->pcust) {
         res_cust = memcmp(Cursor->pcust, pcust, config.cpptrs.len);
       }
@@ -729,7 +721,7 @@ void sql_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
       }
       else res_vlen = FALSE;
 
-      if (!res_data && !res_bgp && !res_nat && !res_mpls && !res_cust && !res_vlen) {
+      if (!res_data && !res_bgp && !res_nat && !res_mpls && !res_tun && !res_cust && !res_vlen) {
         /* additional check: time */
         if ((Cursor->basetime != basetime) && config.sql_history) goto follow_chain;
 
@@ -787,6 +779,18 @@ void sql_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
     else {
       if (Cursor->pmpls) free(Cursor->pmpls);
       Cursor->pmpls = NULL;
+    }
+
+    if (ptun) {
+      if (!Cursor->ptun) {
+        Cursor->ptun = (struct pkt_tunnel_primitives *) malloc(pt_size);
+        if (!Cursor->ptun) goto safe_action;
+      }
+      memcpy(Cursor->ptun, ptun, pt_size);
+    }
+    else {
+      if (Cursor->ptun) free(Cursor->ptun);
+      Cursor->ptun = NULL;
     }
   
     if (pcust) {
@@ -879,7 +883,9 @@ void sql_cache_insert(struct primitives_ptrs *prim_ptrs, struct insert_data *ida
     if (config.nfacctd_stitching) {
       if (Cursor->stitch) {
         if (data->time_end.tv_sec) {
-          memcpy(&Cursor->stitch->timestamp_max, &data->time_end, sizeof(struct timeval));
+          if (data->time_end.tv_sec > Cursor->stitch->timestamp_max.tv_sec && 
+              data->time_end.tv_usec > Cursor->stitch->timestamp_max.tv_usec)
+            memcpy(&Cursor->stitch->timestamp_max, &data->time_end, sizeof(struct timeval));
         }
         else {
           Cursor->stitch->timestamp_max.tv_sec = idata->now;
@@ -1051,11 +1057,11 @@ void sql_exit_gracefully(int signum)
   idata.now = time(NULL);
   idata.basetime = glob_basetime;
   idata.dyn_table = glob_dyn_table;
+  idata.dyn_table_time_only = glob_dyn_table_time_only;
   idata.new_basetime = glob_new_basetime;
   idata.timeslot = glob_timeslot;
   idata.committed_basetime = glob_committed_basetime;
   if (config.sql_backup_host) idata.recover = TRUE;
-  if (config.what_to_count & COUNT_CLASS) config.sql_aggressive_classification = FALSE;
   if (config.sql_locking_style) idata.locks = sql_select_locking_style(config.sql_locking_style);
 
   sql_cache_flush(queries_queue, qq_ptr, &idata, TRUE);
@@ -1068,6 +1074,8 @@ void sql_exit_gracefully(int signum)
     (*sqlfunc_cbr.close)(&bed);
   }
   else Log(LOG_WARNING, "WARN ( %s/%s ): Maximum number of writer processes reached (%d).\n", config.name, config.type, dump_writers_get_active());
+
+  if (config.pidfile) remove_pid_file(config.pidfile);
 
   exit_plugin(0);
 }
@@ -1113,18 +1121,12 @@ int sql_evaluate_primitives(int primitive)
     else if (config.what_to_count & COUNT_SUM_NET) what_to_count |= COUNT_SUM_NET;
     else fakes |= FAKE_SRC_HOST;
 
-    if (config.what_to_count & COUNT_SRC_NET) {
-      what_to_count |= COUNT_SRC_NET;
-      if (!config.tmp_net_own_field) what_to_count ^= FAKE_SRC_HOST;
-    }
+    if (config.what_to_count & COUNT_SRC_NET) what_to_count |= COUNT_SRC_NET;
 
     if (config.what_to_count & COUNT_DST_HOST) what_to_count |= COUNT_DST_HOST;
     else fakes |= FAKE_DST_HOST;
 
-    if (config.what_to_count & COUNT_DST_NET) {
-      what_to_count |= COUNT_DST_NET;
-      if (!config.tmp_net_own_field) what_to_count ^= FAKE_DST_HOST;
-    }
+    if (config.what_to_count & COUNT_DST_NET) what_to_count |= COUNT_DST_NET;
 
     if (config.what_to_count & COUNT_AS_PATH) what_to_count |= COUNT_AS_PATH;
     else fakes |= FAKE_AS_PATH;
@@ -1208,19 +1210,36 @@ int sql_evaluate_primitives(int primitive)
     if (config.what_to_count_2 & COUNT_SRC_HOST_POCODE) what_to_count_2 |= COUNT_SRC_HOST_POCODE;
     if (config.what_to_count_2 & COUNT_DST_HOST_POCODE) what_to_count_2 |= COUNT_DST_HOST_POCODE;
 #endif
+
     if (config.what_to_count_2 & COUNT_SAMPLING_RATE) what_to_count_2 |= COUNT_SAMPLING_RATE;
     if (config.what_to_count_2 & COUNT_PKT_LEN_DISTRIB) what_to_count_2 |= COUNT_PKT_LEN_DISTRIB;
+
     if (config.what_to_count_2 & COUNT_POST_NAT_SRC_HOST) what_to_count_2 |= COUNT_POST_NAT_SRC_HOST;
     if (config.what_to_count_2 & COUNT_POST_NAT_DST_HOST) what_to_count_2 |= COUNT_POST_NAT_DST_HOST;
     if (config.what_to_count_2 & COUNT_POST_NAT_SRC_PORT) what_to_count_2 |= COUNT_POST_NAT_SRC_PORT;
     if (config.what_to_count_2 & COUNT_POST_NAT_DST_PORT) what_to_count_2 |= COUNT_POST_NAT_DST_PORT;
     if (config.what_to_count_2 & COUNT_NAT_EVENT) what_to_count_2 |= COUNT_NAT_EVENT;
+
+    if (config.what_to_count_2 & COUNT_MPLS_LABEL_TOP) what_to_count_2 |= COUNT_MPLS_LABEL_TOP;
+    if (config.what_to_count_2 & COUNT_MPLS_LABEL_BOTTOM) what_to_count_2 |= COUNT_MPLS_LABEL_BOTTOM;
+    if (config.what_to_count_2 & COUNT_MPLS_STACK_DEPTH) what_to_count_2 |= COUNT_MPLS_STACK_DEPTH;
+
+    if (config.what_to_count_2 & COUNT_TUNNEL_SRC_HOST) what_to_count_2 |= COUNT_TUNNEL_SRC_HOST;
+    if (config.what_to_count_2 & COUNT_TUNNEL_DST_HOST) what_to_count_2 |= COUNT_TUNNEL_DST_HOST;
+    if (config.what_to_count_2 & COUNT_TUNNEL_IP_PROTO) what_to_count_2 |= COUNT_TUNNEL_IP_PROTO;
+    if (config.what_to_count_2 & COUNT_TUNNEL_IP_TOS) what_to_count_2 |= COUNT_TUNNEL_IP_TOS;
+
     if (config.what_to_count_2 & COUNT_TIMESTAMP_START) what_to_count_2 |= COUNT_TIMESTAMP_START;
     if (config.what_to_count_2 & COUNT_TIMESTAMP_END) what_to_count_2 |= COUNT_TIMESTAMP_END;
     if (config.what_to_count_2 & COUNT_TIMESTAMP_ARRIVAL) what_to_count_2 |= COUNT_TIMESTAMP_ARRIVAL;
+
     if (config.what_to_count_2 & COUNT_EXPORT_PROTO_SEQNO) what_to_count_2 |= COUNT_EXPORT_PROTO_SEQNO;
     if (config.what_to_count_2 & COUNT_EXPORT_PROTO_VERSION) what_to_count_2 |= COUNT_EXPORT_PROTO_VERSION;
     if (config.what_to_count_2 & COUNT_LABEL) what_to_count_2 |= COUNT_LABEL;
+
+#if defined (WITH_NDPI)
+    if (config.what_to_count_2 & COUNT_NDPI_CLASS) what_to_count_2 |= COUNT_NDPI_CLASS;
+#endif
   }
 
   /* sorting out delimiter */
@@ -1372,51 +1391,26 @@ int sql_evaluate_primitives(int primitive)
   }
 
   if (what_to_count & (COUNT_SRC_NET|COUNT_SUM_NET)) {
-    int count_it = FALSE;
-
-    if (!config.tmp_net_own_field) {
-      if ((config.sql_table_version >= SQL_TABLE_VERSION_BGP) && !assume_custom_table) {
-        Log(LOG_ERR, "ERROR ( %s/%s ): IP host accounting not supported for selected sql_table_version/_type. Read about SQL table versioning or consider using sql_optimize_clauses.\n", config.name, config.type);
-        exit_plugin(1);
-      }
-      else count_it = TRUE;
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
     }
-    else count_it = TRUE;
-
-    if (count_it) {
-      if (primitive) {
-        strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
-        strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
-      }
-      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
-        if (!config.tmp_net_own_field) {
-	  strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
-          strncat(where[primitive].string, "ip_src=%s(\'%s\')", SPACELEFT(where[primitive].string));
-        }
-	else {
-	  strncat(insert_clause, "net_src", SPACELEFT(insert_clause));
-          strncat(where[primitive].string, "net_src=%s(\'%s\')", SPACELEFT(where[primitive].string));
-	}
-        strncat(values[primitive].string, "%s(\'%s\')", SPACELEFT(values[primitive].string));
-        values[primitive].type = where[primitive].type = COUNT_INT_SRC_NET;
-        values[primitive].handler = where[primitive].handler = count_src_net_aton_handler;
-        primitive++;
-      }
-      else {
-	if (!config.tmp_net_own_field) {
-          strncat(insert_clause, "ip_src", SPACELEFT(insert_clause));
-          strncat(where[primitive].string, "ip_src=\'%s\'", SPACELEFT(where[primitive].string));
-	}
-	else {
-          strncat(insert_clause, "net_src", SPACELEFT(insert_clause));
-          strncat(where[primitive].string, "net_src=\'%s\'", SPACELEFT(where[primitive].string));
-	}
-        strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
-        values[primitive].type = where[primitive].type = COUNT_INT_SRC_NET;
-        values[primitive].handler = where[primitive].handler = count_src_net_handler;
-        primitive++;
-      }
+    if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+      strncat(insert_clause, "net_src", SPACELEFT(insert_clause));
+      strncat(where[primitive].string, "net_src=%s(\'%s\')", SPACELEFT(where[primitive].string));
+      strncat(values[primitive].string, "%s(\'%s\')", SPACELEFT(values[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_INT_SRC_NET;
+      values[primitive].handler = where[primitive].handler = count_src_net_aton_handler;
+      primitive++;
+    }
+    else {
+      strncat(insert_clause, "net_src", SPACELEFT(insert_clause));
+      strncat(where[primitive].string, "net_src=\'%s\'", SPACELEFT(where[primitive].string));
+      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_INT_SRC_NET;
+      values[primitive].handler = where[primitive].handler = count_src_net_handler;
+      primitive++;
     }
   }
 
@@ -1455,51 +1449,26 @@ int sql_evaluate_primitives(int primitive)
   }
 
   if (what_to_count & COUNT_DST_NET) {
-    int count_it = FALSE;
-
-    if (!config.tmp_net_own_field) {
-      if ((config.sql_table_version >= SQL_TABLE_VERSION_BGP) && !assume_custom_table) {
-        Log(LOG_ERR, "ERROR ( %s/%s ): IP host accounting not supported for selected sql_table_version/_type. Read about SQL table versioning or consider using sql_optimize_clauses.\n", config.name, config.type);
-        exit_plugin(1);
-      }
-      else count_it = TRUE;
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
     }
-    else count_it = TRUE;
-
-    if (count_it) {
-      if (primitive) {
-        strncat(insert_clause, ", ", SPACELEFT(insert_clause));
-        strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
-        strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
-      }
-      if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
-	if (!config.tmp_net_own_field) {
-          strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
-          strncat(where[primitive].string, "ip_dst=%s(\'%s\')", SPACELEFT(where[primitive].string));
-	}
-	else {
-          strncat(insert_clause, "net_dst", SPACELEFT(insert_clause));
-          strncat(where[primitive].string, "net_dst=%s(\'%s\')", SPACELEFT(where[primitive].string));
-	}
-        strncat(values[primitive].string, "%s(\'%s\')", SPACELEFT(values[primitive].string));
-        values[primitive].type = where[primitive].type = COUNT_INT_DST_NET;
-        values[primitive].handler = where[primitive].handler = count_dst_net_aton_handler;
-        primitive++;
-      }
-      else {
-	if (!config.tmp_net_own_field) {
-          strncat(insert_clause, "ip_dst", SPACELEFT(insert_clause));
-          strncat(where[primitive].string, "ip_dst=\'%s\'", SPACELEFT(where[primitive].string));
-	}
-	else {
-          strncat(insert_clause, "net_dst", SPACELEFT(insert_clause));
-          strncat(where[primitive].string, "net_dst=\'%s\'", SPACELEFT(where[primitive].string));
-	}
-        strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
-        values[primitive].type = where[primitive].type = COUNT_INT_DST_NET;
-        values[primitive].handler = where[primitive].handler = count_dst_net_handler;
-        primitive++;
-      }
+    if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+      strncat(insert_clause, "net_dst", SPACELEFT(insert_clause));
+      strncat(where[primitive].string, "net_dst=%s(\'%s\')", SPACELEFT(where[primitive].string));
+      strncat(values[primitive].string, "%s(\'%s\')", SPACELEFT(values[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_INT_DST_NET;
+      values[primitive].handler = where[primitive].handler = count_dst_net_aton_handler;
+      primitive++;
+    }
+    else {
+      strncat(insert_clause, "net_dst", SPACELEFT(insert_clause));
+      strncat(where[primitive].string, "net_dst=\'%s\'", SPACELEFT(where[primitive].string));
+      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_INT_DST_NET;
+      values[primitive].handler = where[primitive].handler = count_dst_net_handler;
+      primitive++;
     }
   }
 
@@ -1657,14 +1626,8 @@ int sql_evaluate_primitives(int primitive)
         strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
       }
 
-      if (!config.tmp_comms_same_field) {
-        strncat(insert_clause, "ecomms", SPACELEFT(insert_clause));
-        strncat(where[primitive].string, "ecomms=\'%s\'", SPACELEFT(where[primitive].string));
-      }
-      else {
-        strncat(insert_clause, "comms", SPACELEFT(insert_clause));
-        strncat(where[primitive].string, "comms=\'%s\'", SPACELEFT(where[primitive].string));
-      }
+      strncat(insert_clause, "ecomms", SPACELEFT(insert_clause));
+      strncat(where[primitive].string, "ecomms=\'%s\'", SPACELEFT(where[primitive].string));
 
       strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
       values[primitive].type = where[primitive].type = COUNT_INT_EXT_COMM;
@@ -1709,14 +1672,8 @@ int sql_evaluate_primitives(int primitive)
       strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
       strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
     }
-    if (!config.tmp_comms_same_field) {
-      strncat(insert_clause, "ecomms_src", SPACELEFT(insert_clause));
-      strncat(where[primitive].string, "ecomms_src=\'%s\'", SPACELEFT(where[primitive].string));
-    }
-    else {
-      strncat(insert_clause, "comms_src", SPACELEFT(insert_clause));
-      strncat(where[primitive].string, "comms_src=\'%s\'", SPACELEFT(where[primitive].string));
-    }
+    strncat(insert_clause, "ecomms_src", SPACELEFT(insert_clause));
+    strncat(where[primitive].string, "ecomms_src=\'%s\'", SPACELEFT(where[primitive].string));
     strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
     values[primitive].type = where[primitive].type = COUNT_INT_SRC_EXT_COMM;
     values[primitive].handler = where[primitive].handler = count_src_ext_comm_handler;
@@ -2368,6 +2325,89 @@ int sql_evaluate_primitives(int primitive)
     primitive++;
   }
 
+  if (what_to_count_2 & COUNT_TUNNEL_SRC_HOST) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
+    }
+    if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+      strncat(insert_clause, "tunnel_ip_src", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "%s(\'%s\')", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "tunnel_ip_src=%s(\'%s\')", SPACELEFT(where[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_INT_TUNNEL_SRC_HOST;
+      values[primitive].handler = where[primitive].handler = count_tunnel_src_ip_aton_handler;
+      primitive++;
+    }
+    else {
+      strncat(insert_clause, "tunnel_ip_src", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "tunnel_ip_src=\'%s\'", SPACELEFT(where[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_INT_TUNNEL_SRC_HOST;
+      values[primitive].handler = where[primitive].handler = count_tunnel_src_ip_handler;
+      primitive++;
+    }
+  }
+
+  if (what_to_count_2 & COUNT_TUNNEL_DST_HOST) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
+    }
+    if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && config.num_hosts) {
+      strncat(insert_clause, "tunnel_ip_dst", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "%s(\'%s\')", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "tunnel_ip_dst=%s(\'%s\')", SPACELEFT(where[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_INT_TUNNEL_DST_HOST;
+      values[primitive].handler = where[primitive].handler = count_tunnel_dst_ip_aton_handler;
+      primitive++;
+    }
+    else {
+      strncat(insert_clause, "tunnel_ip_dst", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "tunnel_ip_dst=\'%s\'", SPACELEFT(where[primitive].string));
+      values[primitive].type = where[primitive].type = COUNT_INT_TUNNEL_DST_HOST;
+      values[primitive].handler = where[primitive].handler = count_tunnel_dst_ip_handler;
+      primitive++;
+    }
+  }
+
+  if (what_to_count_2 & COUNT_TUNNEL_IP_PROTO) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
+    }
+    strncat(insert_clause, "tunnel_ip_proto", SPACELEFT(insert_clause));
+    if ((!strcmp(config.type, "sqlite3") || !strcmp(config.type, "mysql")) && !config.num_protos) {
+      strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "tunnel_ip_proto=\'%s\'", SPACELEFT(where[primitive].string));
+      values[primitive].handler = where[primitive].handler = MY_count_tunnel_ip_proto_handler;
+    }
+    else { 
+      strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, "tunnel_ip_proto=%u", SPACELEFT(where[primitive].string));
+      values[primitive].handler = where[primitive].handler = PG_count_tunnel_ip_proto_handler;
+    }
+    values[primitive].type = where[primitive].type = COUNT_INT_TUNNEL_IP_PROTO;
+    primitive++;
+  }
+
+  if (what_to_count_2 & COUNT_TUNNEL_IP_TOS) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
+    }
+    strncat(insert_clause, "tunnel_tos", SPACELEFT(insert_clause));
+    strncat(values[primitive].string, "%u", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "tunnel_tos=%u", SPACELEFT(where[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_INT_TUNNEL_IP_TOS;
+    values[primitive].handler = where[primitive].handler = count_tunnel_ip_tos_handler;
+    primitive++;
+  }
+
   if (what_to_count_2 & COUNT_TIMESTAMP_START) {
     int use_copy=0;
 
@@ -2774,6 +2814,22 @@ int sql_evaluate_primitives(int primitive)
       primitive++;
     }
   }
+
+#if defined (WITH_NDPI)
+  if (what_to_count_2 & COUNT_NDPI_CLASS) {
+    if (primitive) {
+      strncat(insert_clause, ", ", SPACELEFT(insert_clause));
+      strncat(values[primitive].string, delim_buf, SPACELEFT(values[primitive].string));
+      strncat(where[primitive].string, " AND ", SPACELEFT(where[primitive].string));
+    }
+    strncat(insert_clause, "class", SPACELEFT(insert_clause));
+    strncat(values[primitive].string, "\'%s\'", SPACELEFT(values[primitive].string));
+    strncat(where[primitive].string, "class=\'%s\'", SPACELEFT(where[primitive].string));
+    values[primitive].type = where[primitive].type = COUNT_INT_CLASS;
+    values[primitive].handler = where[primitive].handler = count_ndpi_class_handler;
+    primitive++;
+  }
+#endif
 
 #if defined (HAVE_L2)
   if (fakes & FAKE_SRC_MAC) {
@@ -3237,6 +3293,7 @@ void primptrs_set_all_from_db_cache(struct primitives_ptrs *prim_ptrs, struct db
     prim_ptrs->pbgp = entry->pbgp;
     prim_ptrs->pnat = entry->pnat;
     prim_ptrs->pmpls = entry->pmpls;
+    prim_ptrs->ptun = entry->ptun;
     prim_ptrs->pcust = entry->pcust;
     prim_ptrs->pvlen = entry->pvlen;
   }

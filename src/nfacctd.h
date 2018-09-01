@@ -1,6 +1,6 @@
 /*  
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -505,6 +505,8 @@ struct data_hdr_v9 {
 /* ... */
 #define NF9_FLOW_BYTES			85 
 #define NF9_FLOW_PACKETS		86 
+
+#define NF9_FORWARDING_STATUS           89
 /* ... */
 #define NF9_PEER_DST_AS			128
 #define NF9_PEER_SRC_AS			129
@@ -594,7 +596,7 @@ struct data_hdr_v9 {
 #define NF9_CUST_LABEL			3
 /* CUSTOM TYPES END HERE */
 
-#define MAX_TPL_DESC_LIST 81
+#define MAX_TPL_DESC_LIST 89
 static char *tpl_desc_list[] = {
   "",
   "in bytes",
@@ -660,7 +662,10 @@ static char *tpl_desc_list[] = {
   "mpls label 9",
   "mpls label 10",
   "in dst mac",
-  "out src mac"
+  "out src mac",
+  "", "", "", "",
+  "", "", "",
+  "forwarding status",
 };
 
 #define MAX_OPT_TPL_DESC_LIST 100
@@ -777,6 +782,7 @@ EXT void reset_ip4(struct packet_ptrs *);
 EXT void reset_ip6(struct packet_ptrs *);
 EXT void notify_malf_packet(short int, char *, struct sockaddr *, u_int32_t);
 EXT int NF_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
+EXT void NF_compute_once();
 
 EXT char *nfv578_check_status(struct packet_ptrs *);
 EXT char *nfv9_check_status(struct packet_ptrs *, u_int32_t, u_int32_t, u_int32_t, u_int8_t);
@@ -795,20 +801,24 @@ EXT u_int16_t debug_agent_port;
 #define EXT
 #endif
 EXT struct template_cache_entry *handle_template(struct template_hdr_v9 *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *, u_int16_t, u_int32_t);
-EXT struct template_cache_entry *find_template(u_int16_t, struct packet_ptrs *, u_int16_t, u_int32_t);
+EXT struct template_cache_entry *find_template(u_int16_t, struct host_addr *, u_int16_t, u_int32_t);
 EXT struct template_cache_entry *insert_template(struct template_hdr_v9 *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *, u_int8_t, u_int16_t, u_int32_t);
 EXT struct template_cache_entry *refresh_template(struct template_hdr_v9 *, struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *, u_int8_t, u_int16_t, u_int32_t);
 EXT void log_template_header(struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t);
-EXT void log_opt_template_field(u_int16_t, u_int16_t, u_int16_t, u_int8_t);
+EXT void log_opt_template_field(u_int8_t, u_int32_t *, u_int16_t, u_int16_t, u_int16_t, u_int8_t);
 EXT void log_template_field(u_int8_t, u_int32_t *, u_int16_t, u_int16_t, u_int16_t, u_int8_t);
 EXT void log_template_footer(struct template_cache_entry *, u_int16_t, u_int8_t);
-EXT struct template_cache_entry *insert_opt_template(void *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t, u_int16_t, u_int32_t);
-EXT struct template_cache_entry *refresh_opt_template(void *, struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int8_t, u_int16_t, u_int32_t);
+EXT struct template_cache_entry *insert_opt_template(void *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *, u_int8_t, u_int16_t, u_int32_t);
+EXT struct template_cache_entry *refresh_opt_template(void *, struct template_cache_entry *, struct packet_ptrs *, u_int16_t, u_int32_t, u_int16_t *, u_int8_t, u_int16_t, u_int32_t);
 EXT struct utpl_field *ext_db_get_ie(struct template_cache_entry *, u_int32_t, u_int16_t, u_int8_t);
 EXT struct utpl_field *ext_db_get_next_ie(struct template_cache_entry *, u_int16_t, u_int8_t *);
 
-EXT void resolve_vlen_template(char *, struct template_cache_entry *);
+EXT void resolve_vlen_template(char *, u_int16_t, struct template_cache_entry *);
 EXT u_int8_t get_ipfix_vlen(char *, u_int16_t *);
+
+EXT struct template_cache_entry *nfacctd_offline_read_json_template(char *, char *, int);
+EXT void load_templates_from_file(char *);
+EXT void save_template(struct template_cache_entry *, char *);
 #undef EXT
 
 #if (!defined __PKT_HANDLERS_C)

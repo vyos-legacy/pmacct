@@ -1,20 +1,18 @@
 #!/usr/bin/env python
 #
-# It is recommended to run the kafka module against Python 2.7+. If missing
-# 'kafka' read how to download it at:
+# It is recommended to run the Kafka Python module against Python 2.7+. The
+# module is available at:
 # http://kafka-python.readthedocs.org/
 #
-# If missing 'avro' read how to download it at: 
+# UltraJSON, an ultra fast JSON encoder and decoder, is available at:
+# https://pypi.python.org/pypi/ujson
+#
+# The Apache Avro Python module is available at: 
 # https://avro.apache.org/docs/1.8.1/gettingstartedpython.html
 #
 # Binding to the topic specified by kafka_topic (by default 'acct') allows to
 # receive messages published by a 'kafka' plugin, in JSON format. Similarly for
 # BGP daemon bgp_*_topic and BMP daemon bmp_*_topic.
-#
-# Binding to the topic specified by plugin_pipe_kafka_topic (by default
-# 'core_proc_name-$plugin_name-$plugin_type') allows to receive a copy of
-# messages produced by the Core Process to a specific plugin; the messages are
-# in binary format, first quad being the sequence number.
 #
 # Three pipelines are supported in this script:
 # * Kafka -> Kafka 
@@ -27,6 +25,7 @@
 
 import sys, os, getopt, StringIO, time, urllib2 
 from kafka import KafkaConsumer, KafkaProducer
+import ujson as json
 
 try:
 	import avro.io
@@ -52,6 +51,7 @@ def usage(tool):
 	print "  -e, --earliest".ljust(25) + "Set consume topic offset to 'earliest' [default: 'latest']"
 	print "  -H, --host".ljust(25) + "Define Kafka broker host [default: '127.0.0.1:9092']"
 	print "  -p, --print".ljust(25) + "Print data to stdout"
+	print "  -n, --num".ljust(25) + "Number of rows to print to stdout [default: 0, ie. forever]"
 	print "  -T, --produce-topic".ljust(25) + "Define a topic to produce to"
 	print "  -u, --url".ljust(25) + "Define a URL to HTTP POST data to"
 	print "  -a, --to-json-array".ljust(25) + "Convert list of newline-separated JSON objects in a JSON array"
@@ -72,15 +72,17 @@ def post_to_url(http_req, value):
 
 def main():
 	try:
-		opts, args = getopt.getopt(sys.argv[1:], "ht:T:pg:H:d:eu:as:", ["help", "topic=",
+		opts, args = getopt.getopt(sys.argv[1:], "ht:T:pn:g:H:d:eu:as:", ["help", "topic=",
 				"group_id=", "host=", "decode-with-avro=", "earliest=", "url=",
-				"produce-topic=", "print=", "to-json-array=", "stats-interval="])
+				"produce-topic=", "print=", "num=", "to-json-array=",
+				"stats-interval="])
 	except getopt.GetoptError as err:
 		# print help information and exit:
 		print str(err) # will print something like "option -a not recognized"
 		usage(sys.argv[0])
 		sys.exit(2)
 
+	mypid = os.getpid()
 	kafka_topic = None
 	kafka_group_id = None
 	kafka_host = "127.0.0.1:9092"
@@ -88,6 +90,8 @@ def main():
 	topic_offset = "latest"
 	http_url_post = None
 	print_stdout = 0
+	print_stdout_num = 0
+	print_stdout_max = 0
 	convert_to_json_array = 0
 	stats_interval = 0
  	
@@ -104,6 +108,8 @@ def main():
             		kafka_produce_topic = a
 		elif o in ("-p", "--print"):
             		print_stdout = 1
+		elif o in ("-n", "--num"):
+			print_stdout_max = int(a)
 		elif o in ("-g", "--group_id"):
             		kafka_group_id = a
 		elif o in ("-H", "--host"):
@@ -173,9 +179,12 @@ def main():
 				elem_count += len(avro_data)
 
 			if print_stdout:
-				print("%s:%d:%d: key=%s value=%s" % (message.topic, message.partition,
-						message.offset, message.key, (",\n".join(avro_data))))
+				print("%s:%d:%d: pid=%d key=%s value=%s" % (message.topic, message.partition,
+						message.offset, mypid, message.key, (",\n".join(avro_data))))
 				sys.stdout.flush()
+				print_stdout_num += 1
+				if (print_stdout_max == print_stdout_num):
+					sys.exit(0)
 
 			if http_url_post:
 				http_req = urllib2.Request(http_url_post)
@@ -192,8 +201,8 @@ def main():
 				value = value.replace(',\n]', ']')
 
 			if print_stdout:
-				print("%s:%d:%d: key=%s value=%s" % (message.topic, message.partition,
-						message.offset, message.key, value))
+				print("%s:%d:%d: pid=%d key=%s value=%s" % (message.topic, message.partition,
+						message.offset, mypid, message.key, value))
 				sys.stdout.flush()
 
 			if http_url_post:
@@ -206,8 +215,8 @@ def main():
 
 		if stats_interval:
 			if time_now >= (time_count + stats_interval):
-				print("INFO: stats: [ time=%s interval=%d records=%d ]" %
-					(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time_now)), stats_interval, elem_count))
+				print("INFO: stats: [ time=%s interval=%d records=%d pid=%d ]" %
+					(time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time_now)), stats_interval, elem_count), mypid)
 				sys.stdout.flush()
 				time_count = time_now
 				elem_count = 0

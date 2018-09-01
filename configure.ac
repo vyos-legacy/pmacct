@@ -1,7 +1,7 @@
 dnl Process this file with autoconf to produce a configure script.
 dnl configuration file for pmacct 
 
-AC_INIT([pmacct], [1.6.2-git], [paolo@pmacct.net])
+AC_INIT([pmacct], [1.7.0-git], [paolo@pmacct.net])
 AM_INIT_AUTOMAKE([foreign])
 AC_CONFIG_MACRO_DIR([m4])
 LT_INIT
@@ -18,9 +18,7 @@ PKG_CONFIG_PATH=${PKG_CONFIG_PATH}:/usr/local/lib/pkgconfig
 export PKG_CONFIG_PATH
 PKG_PROG_PKG_CONFIG
 
-host_os=`uname`
-host_cpu=`uname -m`
-host_os1=`uname -rs`
+AC_CANONICAL_HOST
 
 AC_MSG_CHECKING(OS)
 AC_MSG_RESULT($host_os)
@@ -115,6 +113,9 @@ case "$host_os" in
     ;;
   *BSD)
     AC_DEFINE(BSD, 1)
+    ;;
+  linux*)
+    AC_DEFINE(LINUX, 1)
     ;;
 esac
 
@@ -343,7 +344,7 @@ AC_ARG_ENABLE(plabel,
   ])
 
 AC_ARG_WITH(pcap-includes,
-  [  --with-pcap-includes=DIR         Search the specified directories for header files],
+  [  --with-pcap-includes=DIR         Search the specified directory for header files],
   [
 	AC_LINEARIZE_PATH($withval, withval=$absdir)
 	INCLUDES="${INCLUDES} -I$withval"
@@ -390,7 +391,7 @@ if test x"$PCAPINCLUDESFOUND" = x""; then
 fi
 
 AC_ARG_WITH(pcap-libs,
-  [  --with-pcap-libs=DIR             Search the specified directories for libraries],
+  [  --with-pcap-libs=DIR             Search the specified directory for pcap library],
   [	
 	AC_LINEARIZE_PATH($withval, withval=$absdir)
 	LIBS="${LIBS} -L$withval"
@@ -446,7 +447,7 @@ if test x"$PFRING_LIB_FOUND" = x""; then
     ERROR: missing pcap library. Refer to: http://www.tcpdump.org/
   ])])
 
-  AC_CHECK_LIB([pcap], [pcap_setnonblock], [ AC_DEFINE(PCAP_7, 1) ], [])
+  AC_CHECK_LIB([pcap], [pcap_set_protocol], [ AC_DEFINE(PCAP_SET_PROTOCOL, 1) ], [])
   AC_CHECK_LIB([pcap], [bpf_filter], [ AC_DEFINE(PCAP_NOBPF, 1) ], [])
 else
   dnl Unable to test: we should check for these libs
@@ -507,7 +508,7 @@ AC_ARG_ENABLE(mysql,
     AC_MSG_RESULT(yes)
 
 dnl Unfortunately, no pkg-config support for MySQL
-    AC_CHECK_PROG([MYSQL_CONFIG], [mysql_config], [mysql_config], [no],,)
+    AC_CHECK_PROG([MYSQL_CONFIG], [mysql_config], [mysql_config], [no])
     if test "x${MYSQL_CONFIG}" = "xno"; then
       AC_MSG_ERROR([ERROR: missing mysql_config program])
     fi
@@ -516,6 +517,9 @@ dnl Unfortunately, no pkg-config support for MySQL
                   MYSQL_LIBS=`$MYSQL_CONFIG --libs`],
                  [AC_MSG_ERROR([ERROR: missing MySQL client library])],
                  [`$MYSQL_CONFIG --libs`])
+    dnl version check not enforced with a AC_MSG_ERROR for now
+    AX_LIB_MYSQL(5.6.3)
+
     AC_SUBST(MYSQL_CFLAGS)
     AC_SUBST(MYSQL_LIBS)
 
@@ -659,6 +663,7 @@ AC_ARG_ENABLE(mongodb,
 )
 dnl finish: mongodb handling
 
+dnl start: sqlite3 handling
 AC_MSG_CHECKING(whether to enable SQLite3 support)
 AC_ARG_ENABLE(sqlite3,
   [  --enable-sqlite3                 Enable SQLite3 support (default: no)],
@@ -691,7 +696,7 @@ AC_ARG_ENABLE(rabbitmq,
   yes)
     AC_MSG_RESULT(yes)
     dnl reasonably old librabbitmq already support pkg-config
-    PKG_CHECK_MODULES([RABBITMQ], [librabbitmq])
+    PKG_CHECK_MODULES([RABBITMQ], [librabbitmq >= 0.8.0])
     PLUGINS="${PLUGINS} rabbitmq"
     USING_RABBITMQ="yes"
     PMACCT_CFLAGS="$PMACCT_CFLAGS $RABBITMQ_CFLAGS"
@@ -707,6 +712,28 @@ AC_ARG_ENABLE(rabbitmq,
 )
 dnl finish: RabbitMQ/AMQP handling
 
+dnl start: ZMQ/AMQP handling
+AC_MSG_CHECKING(whether to enable ZMQ/AMQP support)
+AC_ARG_ENABLE(zmq,
+  [  --enable-zmq                     Enable ZMQ/AMQP support (default: no)],
+  [ case "$enableval" in
+  yes)
+    AC_MSG_RESULT(yes)
+    PKG_CHECK_MODULES([ZMQ], [libzmq >= 4.2.0])
+    SUPPORTS="${SUPPORTS} zmq"
+    USING_ZMQ="yes"
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $ZMQ_CFLAGS"
+    AC_DEFINE(WITH_ZMQ, 1)
+    ;;
+  no)
+    AC_MSG_RESULT(no)
+    ;;
+  esac ],
+  [
+    AC_MSG_RESULT(no)
+  ]
+)
+dnl finish: ZMQ/AMQP handling
 
 dnl start: Kafka handling
 AC_MSG_CHECKING(whether to enable Kafka support)
@@ -715,7 +742,7 @@ AC_ARG_ENABLE(kafka,
   [ case "$enableval" in
   yes)
     AC_MSG_RESULT(yes)
-    PKG_CHECK_MODULES([KAFKA], [rdkafka >= 0.8.5],, [
+    PKG_CHECK_MODULES([KAFKA], [rdkafka >= 0.9.2],, [
 	AC_MSG_CHECKING([default locations for librdkafka])
 	if test -r /usr/lib/librdkafka.a -o -r /usr/lib/librdkafka.so; then
 		KAFKA_LIBS="-L/usr/lib -lrdkafka"
@@ -775,7 +802,7 @@ AC_ARG_ENABLE(geoip,
     AC_MSG_RESULT(yes)
     dnl reasonably old Maxmind GeoIP v1 already support pkg-config
     PKG_CHECK_MODULES([GEOIP], [geoip >= 1.0.0])
-    PLUGINS="${PLUGINS} geoip"
+    SUPPORTS="${SUPPORTS} geoip"
     USING_MMGEOIP="yes"
     PMACCT_CFLAGS="$PMACCT_CFLAGS $GEOIP_CFLAGS"
     AC_DEFINE(WITH_GEOIP, 1)
@@ -795,7 +822,7 @@ AC_ARG_ENABLE(geoipv2,
   [ case "$enableval" in
   yes)
     AC_MSG_RESULT(yes)
-    PKG_CHECK_MODULES([GEOIPV2], [libmaxminddb >= 1.0.0],, [
+    PKG_CHECK_MODULES([GEOIPV2], [libmaxminddb >= 1.2.0],, [
 	AC_MSG_CHECKING([default locations for libmaxminddb])
 	if test -r /usr/lib/libmaxminddb.a -o -r /usr/lib/libmaxminddb.so; then
 		GEOIPV2_LIBS="-L/usr/lib -lmaxminddb"
@@ -831,7 +858,7 @@ AC_ARG_ENABLE(geoipv2,
                 CFLAGS="$_save_CFLAGS"
 	fi
     ])
-    PLUGINS="${PLUGINS} geoipv2"
+    SUPPORTS="${SUPPORTS} geoipv2"
     USING_MMGEOIPV2="yes"
     PMACCT_CFLAGS="$PMACCT_CFLAGS $GEOIPV2_CFLAGS"
     AC_DEFINE(WITH_GEOIPV2, 1)
@@ -854,8 +881,8 @@ AC_ARG_ENABLE(jansson,
   yes)
     AC_MSG_RESULT(yes)
     dnl reasonably old Jansson already support pkg-config
-    PKG_CHECK_MODULES([JANSSON], [jansson >= 2.2])
-    PLUGINS="${PLUGINS} jansson"
+    PKG_CHECK_MODULES([JANSSON], [jansson >= 2.5])
+    SUPPORTS="${SUPPORTS} jansson"
     USING_JANSSON="yes"
     PMACCT_CFLAGS="$PMACCT_CFLAGS $JANSSON_CFLAGS"
     AC_DEFINE(WITH_JANSSON, 1)
@@ -878,11 +905,12 @@ dnl finish: Jansson handling
 dnl start: Avro handling
 AC_MSG_CHECKING(whether to enable Avro support)
 AC_ARG_ENABLE(avro,
-  [  --enable-avro                    Enable avro support (default: no)],
+  [  --enable-avro                    Enable Apache Avro support (default: no)],
   [ case "$enableval" in
   yes)
     AC_MSG_RESULT(yes)
     PKG_CHECK_MODULES([AVRO], [avro-c >= 1.8])
+    SUPPORTS="${SUPPORTS} avro"
     USING_AVRO="yes"
     PMACCT_CFLAGS="$PMACCT_CFLAGS $AVRO_CFLAGS"
     AC_DEFINE(WITH_AVRO, 1)
@@ -900,6 +928,74 @@ AC_ARG_ENABLE(avro,
   ]
 )
 dnl finish: Avro handling
+
+dnl start: nDPI handling
+AC_ARG_WITH(ndpi-static-lib,
+  [  --with-ndpi-static-lib=DIR       Search the specified directory for nDPI static library],
+  [
+        AC_LINEARIZE_PATH($withval, withval=$absdir)
+        NDPI_CUST_STATIC_LIB=$withval
+  ])
+
+if test x"$NDPI_CUST_STATIC_LIB" != x""; then
+  AC_MSG_CHECKING(your own nDPI library)
+  if test -r $NDPI_CUST_STATIC_LIB/libndpi.a; then
+    AC_MSG_RESULT(ok)
+    NDPI_CUST_STATIC_LIB_FOUND="yes"
+  else
+    AC_MSG_RESULT(no)
+    AC_MSG_ERROR(ERROR: unable to find nDPI library in $NDPI_CUST_STATIC_LIB)
+  fi
+fi
+
+AC_MSG_CHECKING(whether to enable nDPI support)
+AC_ARG_ENABLE(ndpi,
+  [  --enable-ndpi                    Enable nDPI support (default: no)],
+  [ case "$enableval" in
+  yes)
+    AC_MSG_RESULT(yes)
+    PKG_CHECK_MODULES([NDPI], [libndpi >= 2.0])
+    SUPPORTS="${SUPPORTS} ndpi"
+    USING_NDPI="yes"
+
+    if test x"$NDPI_CFLAGS" != x""; then
+      NDPI_CFLAGS_INST=`echo $NDPI_CFLAGS | sed 's/ $//'`
+      NDPI_CFLAGS_INST="$NDPI_CFLAGS_INST/libndpi"
+    else
+      NDPI_CFLAGS_INST=""
+    fi
+    PMACCT_CFLAGS="$PMACCT_CFLAGS $NDPI_CFLAGS $NDPI_CFLAGS_INST"
+
+    AC_DEFINE(WITH_NDPI, 1)
+    _save_LIBS="$LIBS"
+    LIBS="$LIBS $NDPI_LIBS"
+    AC_CHECK_LIB(ndpi, ndpi_init_detection_module, [], [])
+    LIBS="$_save_LIBS"
+
+    dnl XXX: to be improved: avoid linking both static and dynamic libs
+    if test x"$NDPI_CUST_STATIC_LIB_FOUND" = x"yes"; then
+      NDPI_LIBS_STATIC="$NDPI_CUST_STATIC_LIB/libndpi.a"
+    elif test -r /usr/lib/libndpi.a; then
+      NDPI_LIBS_STATIC="/usr/lib/libndpi.a"
+    elif test -r /usr/local/lib/libndpi.a; then
+      NDPI_LIBS_STATIC="/usr/local/lib/libndpi.a"
+    elif test -r /usr/local/nDPI/lib/libndpi.a; then
+      NDPI_LIBS_STATIC="/usr/local/nDPI/lib/libndpi.a"
+    else
+      AC_MSG_ERROR([ERROR: missing nDPI static library])
+    fi
+
+    AC_SUBST([NDPI_LIBS_STATIC])
+    ;;
+  no)
+    AC_MSG_RESULT(no)
+    ;;
+  esac ],
+  [
+    AC_MSG_RESULT(no)
+  ]
+)
+dnl finish: nDPI handling
 
 if test x"$USING_DLOPEN" = x"yes"; then
 	AC_DEFINE(HAVE_DLOPEN, 1)
@@ -1008,7 +1104,7 @@ AC_MSG_RESULT(no))
 
 AC_MSG_CHECKING(whether to link IPv4/IPv6 traffic accounting accounting binaries)
 AC_ARG_ENABLE(traffic-bins,
-	[  --enable-traffic-bins               Link IPv4/IPv6 traffic accounting binaries (default: yes)],
+	[  --enable-traffic-bins            Link IPv4/IPv6 traffic accounting binaries (default: yes)],
 	[
 	  if test x$enableval = x"yes" ; then
 	    AC_MSG_RESULT(yes)
@@ -1105,6 +1201,7 @@ CFLAGS ....... : ${CFLAGS}
 LIBS ......... : ${LIBS}
 LDFLAGS ...... : ${LDFLAGS}
 PLUGINS ...... : ${PLUGINS}
+SUPPORTS ..... : ${SUPPORTS}
 
 Now type 'make' to compile the source code.
 
@@ -1127,10 +1224,12 @@ AM_CONDITIONAL([WITH_PGSQL], [test x"$USING_PGSQL" = x"yes"])
 AM_CONDITIONAL([WITH_MONGODB], [test x"$USING_MONGODB" = x"yes"])
 AM_CONDITIONAL([WITH_SQLITE3], [test x"$USING_SQLITE3" = x"yes"])
 AM_CONDITIONAL([WITH_RABBITMQ], [test x"$USING_RABBITMQ" = x"yes"])
+AM_CONDITIONAL([WITH_ZMQ], [test x"$USING_ZMQ" = x"yes"])
 AM_CONDITIONAL([WITH_KAFKA], [test x"$USING_KAFKA" = x"yes"])
 AM_CONDITIONAL([USING_SQL], [test x"$USING_SQL" = x"yes"])
 AM_CONDITIONAL([USING_THREADPOOL], [test x"$USING_THREADPOOL" = x"yes"])
 AM_CONDITIONAL([WITH_AVRO], [test x"$USING_AVRO" = x"yes"])
+AM_CONDITIONAL([WITH_NDPI], [test x"$USING_NDPI" = x"yes"])
 AM_CONDITIONAL([WITH_NFLOG], [test x"$USING_NFLOG" = x"yes"])
 AM_CONDITIONAL([USING_TRAFFIC_BINS], [test x"$USING_TRAFFIC_BINS" = x"yes"])
 AM_CONDITIONAL([USING_BGP_BINS], [test x"$USING_BGP_BINS" = x"yes"])
@@ -1140,4 +1239,5 @@ AC_OUTPUT([ Makefile \
 	    src/Makefile src/nfprobe_plugin/Makefile \
 	    src/sfprobe_plugin/Makefile src/bgp/Makefile \
 	    src/tee_plugin/Makefile src/isis/Makefile \
-	    src/bmp/Makefile src/telemetry/Makefile ])
+	    src/bmp/Makefile src/telemetry/Makefile \
+	    src/ndpi/Makefile ])

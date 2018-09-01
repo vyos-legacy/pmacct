@@ -58,7 +58,12 @@ Similarly, BGP tables:
 - To understand difference between the various BGP table versions:
   * Only BGP table v1 is currently available.
 
-- Aggregation primitives to SQL schema mapping:
+- Aggregation primitives to SQL schema mapping. Although default schemas
+  come all with "NOT NULL", this is optional and depending on the scenario:
+  for example, if mixed L2 (containing L2 only info) and L3 (containing L2
+  and L3 info) flows are collected, maybe L3-related fields like src_host
+  or dst_host are best defined without the "NOT NULL" constraint.
+
   Aggregation primitive => SQL table field
   * tag => agent_id (INT(8) NOT NULL DEFAULT 0)
     - or tag => tag (INT(8) NOT NULL DEFAULT 0, if sql_table_version >= 9)
@@ -113,14 +118,12 @@ Similarly, BGP tables:
   * dst_host => ip_dst (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
     - or (INT(8) DEFAULT 0, if sql_num_hosts: true and --disable-ipv6)
     - or (INT(32) DEFAULT 0, if sql_num_hosts: true)
-  * src_net => ip_src (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * src_net => net_src (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
     - or (INT(8) DEFAULT 0, if sql_num_hosts: true and --disable-ipv6)
     - or (INT(32) DEFAULT 0, if sql_num_hosts: true)
-    - or src_net => net_src (same definitions, if tmp_net_own_field: true)
-  * dst_net => ip_dst (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+  * dst_net => net_dst (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
     - or (INT(8) DEFAULT 0, if sql_num_hosts: true and --disable-ipv6)
     - or (INT(32) DEFAULT 0, if sql_num_hosts: true)
-    - or dst_net => net_dst (same definitions, if tmp_net_own_field: true)
   * src_port => src_port (INT(4) NOT NULL DEFAULT 0)
     - or src_port => port_src (INT(4) NOT NULL DEFAULT 0, if sql_table_version >= 8 or sql_table_type == bgp)
   * dst_port => dst_port (INT(4) NOT NULL DEFAULT 0)
@@ -141,6 +144,15 @@ Similarly, BGP tables:
   * mpls_label_top => mpls_label_top (INT(4) NOT NULL DEFAULT 0)
   * mpls_label_bottom => mpls_label_bottom (INT(4) NOT NULL DEFAULT 0)
   * mpls_stack_depth => mpls_stack_depth (INT(1) NOT NULL DEFAULT 0)
+  * tunnel_src_host => tunnel_ip_src (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+    - or (INT(8) NOT NULL DEFAULT 0, if sql_num_hosts: true and --disable-ipv6)
+    - or (INT(32) DEFAULT 0, if sql_num_hosts: true)
+  * tunnel_dst_host => tunnel_ip_dst (CHAR(15) NOT NULL DEFAULT '0.0.0.0', see README.IPv6)
+    - or (INT(8) NOT NULL DEFAULT 0, if sql_num_hosts: true and --disable-ipv6)
+    - or (INT(32) DEFAULT 0, if sql_num_hosts: true)
+  * tunnel_proto => tunnel_ip_proto (CHAR(6) NOT NULL DEFAULT ' ')
+    - or (INT(2) DEFAULT 0, if sql_num_protos: true)
+  * tunnel_tos => tunnel_tos (INT(4) NOT NULL DEFAULT 0)
   * timestamp_start => timestamp_start, timestamp_start_residual:
     - timestamp_start DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', see README.timestamp)
     - timestamp_start_residual INT NOT NULL DEFAULT 0, see README.timestamp)

@@ -68,6 +68,7 @@ struct chained_cache {
   struct pkt_bgp_primitives *pbgp;
   struct pkt_nat_primitives *pnat;
   struct pkt_mpls_primitives *pmpls;
+  struct pkt_tunnel_primitives *ptun;
   char *pcust;
   struct pkt_vlen_hdr_primitives *pvlen;
   u_int8_t valid;
@@ -138,16 +139,18 @@ EXT void P_init_historical_acct(time_t);
 EXT void P_init_refresh_deadline(time_t *, int, int, char *);
 EXT void P_eval_historical_acct(struct timeval *, struct timeval *, time_t);
 EXT int P_cmp_historical_acct(struct timeval *, struct timeval *);
+EXT void P_update_time_reference(struct insert_data *);
+
 EXT int P_test_zero_elem(struct chained_cache *);
 
 /* global vars */
 EXT void (*insert_func)(struct primitives_ptrs *, struct insert_data *); /* pointer to INSERT function */
-EXT void (*purge_func)(struct chained_cache *[], int); /* pointer to purge function */ 
+EXT void (*purge_func)(struct chained_cache *[], int, int); /* pointer to purge function */ 
 EXT struct scratch_area sa;
 EXT struct chained_cache *cache;
 EXT struct chained_cache **queries_queue, **pending_queries_queue, *pqq_container;
 EXT struct timeval flushtime;
-EXT int qq_ptr, pqq_ptr, pp_size, pb_size, pn_size, pm_size, pc_size;
+EXT int qq_ptr, pqq_ptr, pp_size, pb_size, pn_size, pm_size, pt_size, pc_size;
 EXT int dbc_size, quit; 
 EXT time_t refresh_deadline;
 
@@ -156,6 +159,10 @@ EXT void (*basetime_eval)(struct timeval *, struct timeval *, time_t);
 EXT int (*basetime_cmp)(struct timeval *, struct timeval *);
 EXT struct timeval basetime, ibasetime, new_basetime;
 EXT time_t timeslot;
-EXT int dyn_table;
+EXT int dyn_table, dyn_table_time_only;
+
+#ifdef WITH_AVRO
+EXT avro_schema_t avro_acct_schema;
+#endif
 #undef EXT
 #endif /* #if (!defined __PLUGIN_COMMON_EXPORT) */

@@ -40,6 +40,9 @@ EXT void compose_json_tag(json_t *, struct chained_cache *);
 EXT void compose_json_tag2(json_t *, struct chained_cache *);
 EXT void compose_json_label(json_t *, struct chained_cache *);
 EXT void compose_json_class(json_t *, struct chained_cache *);
+#if defined (WITH_NDPI)
+EXT void compose_json_ndpi_class(json_t *, struct chained_cache *);
+#endif
 EXT void compose_json_src_mac(json_t *, struct chained_cache *);
 EXT void compose_json_dst_mac(json_t *, struct chained_cache *);
 EXT void compose_json_vlan(json_t *, struct chained_cache *);
@@ -97,6 +100,10 @@ EXT void compose_json_nat_event(json_t *, struct chained_cache *);
 EXT void compose_json_mpls_label_top(json_t *, struct chained_cache *);
 EXT void compose_json_mpls_label_bottom(json_t *, struct chained_cache *);
 EXT void compose_json_mpls_stack_depth(json_t *, struct chained_cache *);
+EXT void compose_json_tunnel_src_host(json_t *, struct chained_cache *);
+EXT void compose_json_tunnel_dst_host(json_t *, struct chained_cache *);
+EXT void compose_json_tunnel_proto(json_t *, struct chained_cache *);
+EXT void compose_json_tunnel_tos(json_t *, struct chained_cache *);
 EXT void compose_json_timestamp_start(json_t *, struct chained_cache *);
 EXT void compose_json_timestamp_end(json_t *, struct chained_cache *);
 EXT void compose_json_timestamp_arrival(json_t *, struct chained_cache *);

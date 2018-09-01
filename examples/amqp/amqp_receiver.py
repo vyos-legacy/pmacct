@@ -1,19 +1,19 @@
 #!/usr/bin/env python
 #
-# If missing 'pika' read how to download it at: 
+# Pika is a pure-Python implementation of the AMQP 0-9-1 protocol and
+# is available at:
+# https://pypi.python.org/pypi/pika
 # http://www.rabbitmq.com/tutorials/tutorial-one-python.html
 #
-# If missing 'avro' read how to download it at: 
+# UltraJSON, an ultra fast JSON encoder and decoder, is available at:
+# https://pypi.python.org/pypi/ujson
+#
+# The Apache Avro Python module is available at: 
 # https://avro.apache.org/docs/1.8.1/gettingstartedpython.html
 #
 # Binding to the routing key specified by amqp_routing_key (by default 'acct')
 # allows to receive messages published by an 'amqp' plugin, in JSON format.
 # Similarly for BGP daemon bgp_*_routing_key and BMP daemon bmp_*_routing_key.
-#
-# Binding to the routing key specified by plugin_pipe_amqp_routing_key (by
-# default 'core_proc_name-$plugin_name-$plugin_type') allows to receive a copy
-# of messages published by the Core Process to a specific plugin; the messages
-# are in binary format, first quad being the sequence number.
 #
 # Binding to the reserved exchange 'amq.rabbitmq.trace' and to routing keys
 # 'publish.pmacct' or 'deliver.<queue name>' allows to receive a copy of the
@@ -33,6 +33,7 @@
 # * Apache Avro
 
 import sys, os, getopt, pika, StringIO, time
+import ujson as json
 
 try:
 	import avro.io
@@ -45,6 +46,8 @@ except ImportError:
 avro_schema = None
 http_url_post = None
 print_stdout = 0
+print_stdout_num = 0
+print_stdout_max = 0
 convert_to_json_array = 0
 stats_interval = 0
 time_count = 0
@@ -64,6 +67,7 @@ def usage(tool):
 	print "  -h, --help".ljust(25) + "Print this help"
 	print "  -H, --host".ljust(25) + "Define RabbitMQ broker host [default: 'localhost']"
 	print "  -p, --print".ljust(25) + "Print data to stdout"
+	print "  -n, --num".ljust(25) + "Number of rows to print to stdout [default: 0, ie. forever]"
 	print "  -u, --url".ljust(25) + "Define a URL to HTTP POST data to" 
 	print "  -a, --to-json-array".ljust(25) + "Convert list of newline-separated JSON objects in a JSON array"
 	print "  -s, --stats-interval".ljust(25) + "Define a time interval, in secs, to get statistics to stdout"
@@ -82,6 +86,16 @@ def post_to_url(http_req, value):
 		sys.stdout.flush()
 
 def callback(ch, method, properties, body):
+        global avro_schema
+        global http_url_post
+        global print_stdout
+        global print_stdout_num
+        global print_stdout_max
+        global convert_to_json_array
+        global stats_interval
+        global time_count
+        global elem_count
+
 	#
 	# XXX: data enrichments, manipulations, correlations, etc. go here
 	#
@@ -105,6 +119,9 @@ def callback(ch, method, properties, body):
 		if print_stdout:
 			print " [x] Received %r" % (",".join(avro_data),)
 			sys.stdout.flush()
+			print_stdout_num += 1
+			if (print_stdout_max == print_stdout_num):
+				sys.exit(0)
 
 		if http_url_post:
 			http_req = urllib2.Request(http_url_post)
@@ -125,6 +142,9 @@ def callback(ch, method, properties, body):
 		if print_stdout:
 			print " [x] Received %r" % (value,)
 			sys.stdout.flush()
+			print_stdout_num += 1
+			if (print_stdout_max == print_stdout_num):
+				sys.exit(0)
 
 		if http_url_post:
 			http_req = urllib2.Request(http_url_post)
@@ -139,10 +159,21 @@ def callback(ch, method, properties, body):
 			elem_count = 0
 
 def main():
+        global avro_schema
+        global http_url_post
+        global print_stdout
+        global print_stdout_num
+        global print_stdout_max
+        global convert_to_json_array
+        global stats_interval
+        global time_count
+        global elem_count
+
 	try:
-		opts, args = getopt.getopt(sys.argv[1:], "he:k:q:H:u:d:pas:", ["help", "exchange=",
-				"routing_key=", "queue=", "host=", "url=", "decode-with-avro=",
-				"print=", "to-json-array=", "stats-interval="])
+		opts, args = getopt.getopt(sys.argv[1:], "he:k:q:H:u:d:pn:as:", ["help",
+				"exchange=", "routing_key=", "queue=", "host=", "url=",
+				"decode-with-avro=", "print=", "num=", "to-json-array=",
+				"stats-interval="])
 	except getopt.GetoptError as err:
 		# print help information and exit:
 		print str(err) # will print something like "option -a not recognized"
@@ -175,6 +206,8 @@ def main():
 			http_url_post = a
 		elif o in ("-p", "--print"):
 			print_stdout = 1
+		elif o in ("-n", "--num"):
+			print_stdout_max = int(a)
 		elif o in ("-a", "--to-json-array"):
 			convert_to_json_array = 1
 		elif o in ("-s", "--stats-interval"):
@@ -191,8 +224,6 @@ def main():
                         if not os.path.isfile(a):
 				sys.stderr.write("ERROR: '%s' does not exist or is not a file\n" % (a,))
 				sys.exit(1)
-
-			global avro_schema
 
 			with open(a) as f:
 				avro_schema = avro.schema.parse(f.read())

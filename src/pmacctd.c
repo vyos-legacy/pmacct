@@ -1,6 +1,6 @@
-/*  
+/*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -36,6 +36,9 @@
 #include "bgp/bgp.h"
 #include "classifier.h"
 #include "isis/isis.h"
+#if defined (WITH_NDPI)
+#include "ndpi/ndpi.h"
+#endif
 
 /* variables to be exported away */
 struct channels_list_entry channels_list[MAX_N_PLUGINS]; /* communication channels: core <-> plugins */
@@ -53,12 +56,12 @@ void usage_daemon(char *prog_name)
   printf("  -f  \tLoad configuration from the specified file\n");
   printf("  -a  \tPrint list of supported aggregation primitives\n");
   printf("  -c  \tAggregation method, see full list of primitives with -a (DEFAULT: src_host)\n");
-  printf("  -D  \tDaemonize\n"); 
+  printf("  -D  \tDaemonize\n");
   printf("  -N  \tDisable promiscuous mode\n");
   printf("  -z  \tAllow to run with non root privileges (ie. setcap in use)\n");
   printf("  -n  \tPath to a file containing networks and/or ASNs definitions\n");
   printf("  -t  \tPath to a file containing ports definitions\n");
-  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | mongodb | amqp | kafka | nfprobe | sfprobe ] \n\tActivate plugin\n"); 
+  printf("  -P  \t[ memory | print | mysql | pgsql | sqlite3 | amqp | kafka | nfprobe | sfprobe ] \n\tActivate plugin\n");
   printf("  -d  \tEnable debug\n");
   printf("  -i  \tListen on the specified interface\n");
   printf("  -I  \tRead packets from the specified savefile\n");
@@ -81,11 +84,66 @@ void usage_daemon(char *prog_name)
   printf("  -A  \tAppend output (applies to -o)\n");
   printf("  -E  \tCSV format serparator (applies to -O csv, DEFAULT: ',')\n");
   printf("\n");
-  printf("  See QUICKSTART or visit http://wiki.pmacct.net/ for examples.\n");
+  printf("For examples, see:\n");
+  printf("  https://github.com/pmacct/pmacct/blob/master/QUICKSTART or\n");
+  printf("  https://github.com/pmacct/pmacct/wiki\n");
   printf("\n");
   printf("For suggestions, critics, bugs, contact me: %s.\n", MANTAINER);
 }
 
+static pcap_t *do_pcap_open(const char *device, int snaplen, int promisc,
+			    int to_ms, int protocol, char *errbuf)
+{
+  pcap_t *p;
+  int ret;
+
+  p = pcap_create(device, errbuf);
+  if (p == NULL)
+    return NULL;
+
+  ret = pcap_set_snaplen(p, snaplen);
+  if (ret < 0)
+    goto err;
+
+  ret = pcap_set_promisc(p, promisc);
+  if (ret < 0)
+    goto err;
+
+  ret = pcap_set_timeout(p, to_ms);
+  if (ret < 0)
+    goto err;
+
+#ifdef PCAP_SET_PROTOCOL
+  ret = pcap_set_protocol(p, protocol);
+  if (ret < 0)
+    goto err;
+#else
+  if (protocol)
+    Log(LOG_WARNING, "WARN ( %s/core ): pcap_protocol specified but linked against a version of libpcap that does not support pcap_set_protocol.\n", config.name);
+#endif
+
+  ret = pcap_activate(p);
+  if (ret < 0)
+    goto err;
+
+  return p;
+
+err:
+  if (ret == PCAP_ERROR)
+    snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %s", device, pcap_geterr(p));
+  else if (ret == PCAP_ERROR_NO_SUCH_DEVICE ||
+	   ret == PCAP_ERROR_PERM_DENIED ||
+	   ret == PCAP_ERROR_PROMISC_PERM_DENIED)
+    snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %s (%s)", device,
+	     pcap_statustostr(ret), pcap_geterr(p));
+  else
+    snprintf(errbuf, PCAP_ERRBUF_SIZE, "%s: %s", device,
+	     pcap_statustostr(ret));
+
+  pcap_close(p);
+
+  return NULL;
+}
 
 int main(int argc,char **argv, char **envp)
 {
@@ -110,7 +168,7 @@ int main(int argc,char **argv, char **envp)
   /* getopt() stuff */
   extern char *optarg;
   extern int optind, opterr, optopt;
-  int errflag, cp; 
+  int errflag, cp;
 
 #if defined ENABLE_IPV6
   struct sockaddr_storage client;
@@ -125,7 +183,7 @@ int main(int argc,char **argv, char **envp)
   umask(077);
   compute_once();
 
-  /* a bunch of default definitions */ 
+  /* a bunch of default definitions */
   reload_map = FALSE;
   reload_geoipv2_file = FALSE;
   bpas_map_allocated = FALSE;
@@ -195,7 +253,7 @@ int main(int argc,char **argv, char **envp)
       strlcpy(cfg_cmdline[rows], "ports_file: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
       rows++;
-      break; 
+      break;
     case 'O':
       strlcpy(cfg_cmdline[rows], "print_output: ", SRVBUFLEN);
       strncat(cfg_cmdline[rows], optarg, CFG_LINE_LEN(cfg_cmdline[rows]));
@@ -284,7 +342,7 @@ int main(int argc,char **argv, char **envp)
       rows++;
       break;
     case 'W':
-      strlcpy(cfg_cmdline[rows], "savefile_wait: true", SRVBUFLEN);
+      strlcpy(cfg_cmdline[rows], "pcap_savefile_wait: true", SRVBUFLEN);
       rows++;
       break;
     case 'L':
@@ -317,14 +375,14 @@ int main(int argc,char **argv, char **envp)
 
   /* post-checks and resolving conflicts */
   if (strlen(config_file)) {
-    if (parse_configuration_file(config_file) != SUCCESS) 
+    if (parse_configuration_file(config_file) != SUCCESS)
       exit(1);
   }
   else {
     if (parse_configuration_file(NULL) != SUCCESS)
       exit(1);
   }
-    
+
   /* XXX: glue; i'm conscious it's a dirty solution from an engineering viewpoint;
      someday later i'll fix this */
   list = plugins_list;
@@ -332,7 +390,7 @@ int main(int argc,char **argv, char **envp)
     list->cfg.acct_type = ACCT_PM;
     set_default_preferences(&list->cfg);
     if (!strcmp(list->type.string, "core")) {
-      memcpy(&config, &list->cfg, sizeof(struct configuration)); 
+      memcpy(&config, &list->cfg, sizeof(struct configuration));
       config.name = list->name;
       config.type = list->type.string;
     }
@@ -361,7 +419,7 @@ int main(int argc,char **argv, char **envp)
       list = list->next;
     }
     if (debug || config.debug)
-      printf("WARN ( %s/core ): debug is enabled; forking in background. Logging to standard error (stderr) will get lost.\n", config.name); 
+      printf("WARN ( %s/core ): debug is enabled; forking in background. Logging to standard error (stderr) will get lost.\n", config.name);
     daemonize();
   }
 
@@ -430,7 +488,7 @@ int main(int argc,char **argv, char **envp)
       else if (list->type.id == PLUGIN_ID_NFPROBE) {
 	/* If we already renormalizing an external sampling rate,
 	   we cancel the sampling information from the probe plugin */
-	if (config.sfacctd_renormalize && list->cfg.ext_sampling_rate) list->cfg.ext_sampling_rate = 0; 
+	if (config.sfacctd_renormalize && list->cfg.ext_sampling_rate) list->cfg.ext_sampling_rate = 0;
 
 	config.handle_fragments = TRUE;
 	list->cfg.nfprobe_what_to_count = list->cfg.what_to_count;
@@ -450,7 +508,7 @@ int main(int argc,char **argv, char **envp)
 	if (list->cfg.networks_file || list->cfg.networks_mask || list->cfg.nfacctd_net) {
 	  list->cfg.what_to_count |= COUNT_SRC_NMASK;
 	  list->cfg.what_to_count |= COUNT_DST_NMASK;
-	} 
+	}
 
 	list->cfg.what_to_count |= COUNT_SRC_PORT;
 	list->cfg.what_to_count |= COUNT_DST_PORT;
@@ -461,9 +519,13 @@ int main(int argc,char **argv, char **envp)
 	  list->cfg.what_to_count |= COUNT_DST_AS;
 	  list->cfg.what_to_count |= COUNT_PEER_DST_IP;
 	}
-	if ((list->cfg.nfprobe_version == 9 || list->cfg.nfprobe_version == 10) && list->cfg.classifiers_path) {
-	  list->cfg.what_to_count |= COUNT_CLASS; 
-	  config.handle_flows = TRUE;
+	if (list->cfg.nfprobe_version == 9 || list->cfg.nfprobe_version == 10) {
+	  if (list->cfg.classifiers_path) {
+	    list->cfg.what_to_count |= COUNT_CLASS;
+	    config.handle_flows = TRUE;
+	  }
+	  if (list->cfg.nfprobe_what_to_count_2 & COUNT_NDPI_CLASS)
+	    list->cfg.what_to_count_2 |= COUNT_NDPI_CLASS;
 	}
 	if (list->cfg.pre_tag_map) {
 	  list->cfg.what_to_count |= COUNT_TAG;
@@ -507,6 +569,11 @@ int main(int argc,char **argv, char **envp)
 	  config.handle_fragments = TRUE;
 	  config.handle_flows = TRUE;
 	}
+#if defined (WITH_NDPI)
+	{ // XXX: some if condition here
+	  list->cfg.what_to_count_2 |= COUNT_NDPI_CLASS;
+	}
+#endif
         if (list->cfg.networks_file || (list->cfg.nfacctd_bgp && list->cfg.nfacctd_as == NF_AS_BGP)) {
           list->cfg.what_to_count |= COUNT_SRC_AS;
           list->cfg.what_to_count |= COUNT_DST_AS;
@@ -552,10 +619,14 @@ int main(int argc,char **argv, char **envp)
                         COUNT_MPLS_STACK_DEPTH))
           list->cfg.data_type |= PIPE_TYPE_MPLS;
 
+	if (list->cfg.what_to_count_2 & (COUNT_TUNNEL_SRC_HOST|COUNT_TUNNEL_DST_HOST|
+			COUNT_TUNNEL_IP_PROTO|COUNT_TUNNEL_IP_TOS))
+	  list->cfg.data_type |= PIPE_TYPE_TUN;
+
         if (list->cfg.what_to_count_2 & (COUNT_LABEL))
           list->cfg.data_type |= PIPE_TYPE_VLEN;
 
-	evaluate_sums(&list->cfg.what_to_count, list->name, list->type.string);
+	evaluate_sums(&list->cfg.what_to_count, &list->cfg.what_to_count_2, list->name, list->type.string);
 	if (list->cfg.what_to_count & (COUNT_SRC_PORT|COUNT_DST_PORT|COUNT_SUM_PORT|COUNT_TCPFLAGS))
 	  config.handle_fragments = TRUE;
 	if (list->cfg.what_to_count & COUNT_FLOWS) {
@@ -570,15 +641,8 @@ int main(int argc,char **argv, char **envp)
 	  Log(LOG_WARNING, "WARN ( %s/%s ): defaulting to SRC HOST aggregation.\n", list->name, list->type.string);
 	  list->cfg.what_to_count |= COUNT_SRC_HOST;
 	}
-        if (((list->cfg.what_to_count & COUNT_SRC_HOST) && (list->cfg.what_to_count & COUNT_SRC_NET)) ||
-            ((list->cfg.what_to_count & COUNT_DST_HOST) && (list->cfg.what_to_count & COUNT_DST_NET))) {
-          if (!list->cfg.tmp_net_own_field) {
-            Log(LOG_ERR, "ERROR ( %s/%s ): src_host, src_net and dst_host, dst_net are mutually exclusive: set tmp_net_own_field to true. Exiting...\n\n", list->name, list->type.string);
-            exit(1);
-          }
-        }
 	if (list->cfg.what_to_count & (COUNT_SRC_AS|COUNT_DST_AS|COUNT_SUM_AS)) {
-	  if (!list->cfg.networks_file && list->cfg.nfacctd_as != NF_AS_BGP) { 
+	  if (!list->cfg.networks_file && list->cfg.nfacctd_as != NF_AS_BGP) {
 	    Log(LOG_ERR, "ERROR ( %s/%s ): AS aggregation selected but NO 'networks_file' or 'pmacctd_as' are specified. Exiting...\n\n", list->name, list->type.string);
 	    exit(1);
 	  }
@@ -607,6 +671,7 @@ int main(int argc,char **argv, char **envp)
 	      list->cfg.nfacctd_net |= NF_NET_NEW;
           }
         }
+
 	if (list->cfg.what_to_count & COUNT_CLASS && !list->cfg.classifiers_path) {
 	  Log(LOG_ERR, "ERROR ( %s/%s ): 'class' aggregation selected but NO 'classifiers' key specified. Exiting...\n\n", list->name, list->type.string);
 	  exit(1);
@@ -618,6 +683,18 @@ int main(int argc,char **argv, char **envp)
 	list->cfg.what_to_count |= COUNT_COUNTERS;
 	list->cfg.data_type |= PIPE_TYPE_METADATA;
       }
+
+      /* applies to all plugins */
+      if ((list->cfg.what_to_count_2 & COUNT_NDPI_CLASS) ||
+	  (list->cfg.nfprobe_what_to_count_2 & COUNT_NDPI_CLASS)) {
+	config.handle_fragments = TRUE;
+	config.classifier_ndpi = TRUE;
+      }
+
+      if ((list->cfg.what_to_count & COUNT_CLASS) && (list->cfg.what_to_count_2 & COUNT_NDPI_CLASS)) {
+	Log(LOG_ERR, "ERROR ( %s/%s ): 'class_legacy' and 'class' primitives are mutual exclusive. Exiting...\n\n", list->name, list->type.string);
+	exit(1);
+      }
     }
     list = list->next;
   }
@@ -627,6 +704,15 @@ int main(int argc,char **argv, char **envp)
     init_classifiers(config.classifiers_path);
     init_conntrack_table();
   }
+
+#if defined (WITH_NDPI)
+  if (config.classifier_ndpi) {
+    config.handle_fragments = TRUE;
+    pm_ndpi_wfl = pm_ndpi_workflow_init();
+    pm_ndpi_export_proto_to_class(pm_ndpi_wfl);
+  }
+  else pm_ndpi_wfl = NULL;
+#endif
 
   if (config.aggregate_primitives) {
     req.key_value_table = (void *) &custom_primitives_registry;
@@ -649,10 +735,10 @@ int main(int argc,char **argv, char **envp)
   load_networks(config.networks_file, &nt, &nc);
 
   /* If any device/savefile have been specified, choose a suitable device
-     where to listen for traffic */ 
+     where to listen for traffic */
   if (!config.dev && !config.pcap_savefile) {
     Log(LOG_WARNING, "WARN ( %s/core ): Selecting a suitable device.\n", config.name);
-    config.dev = pcap_lookupdev(errbuf); 
+    config.dev = pcap_lookupdev(errbuf);
     if (!config.dev) {
       Log(LOG_WARNING, "WARN ( %s/core ): Unable to find a suitable device. Exiting.\n", config.name);
       exit_all(1);
@@ -665,31 +751,26 @@ int main(int argc,char **argv, char **envp)
 
   if (config.dev && config.pcap_savefile) {
     Log(LOG_ERR, "ERROR ( %s/core ): 'interface' (-i) and 'pcap_savefile' (-I) directives are mutually exclusive. Exiting.\n", config.name);
-    exit_all(1); 
+    exit_all(1);
   }
 
   throttle_startup:
   if (config.dev) {
-    if ((device.dev_desc = pcap_open_live(config.dev, psize, config.promisc, 1000, errbuf)) == NULL) {
+    if ((device.dev_desc = do_pcap_open(config.dev, psize, config.promisc, 1000, config.pcap_protocol, errbuf)) == NULL) {
       if (!config.if_wait) {
-        Log(LOG_ERR, "ERROR ( %s/core ): pcap_open_live(): %s\n", config.name, errbuf);
+        Log(LOG_ERR, "ERROR ( %s/core ): do_pcap_open(): %s\n", config.name, errbuf);
         exit_all(1);
       }
       else {
         sleep(5); /* XXX: user defined ? */
         goto throttle_startup;
       }
-    } 
-  }
-  else if (config.pcap_savefile) {
-    if ((device.dev_desc = pcap_open_offline(config.pcap_savefile, errbuf)) == NULL) {
-      Log(LOG_ERR, "ERROR ( %s/core ): pcap_open_offline(): %s\n", config.name, errbuf);
-      exit_all(1);
     }
   }
+  else if (config.pcap_savefile) open_pcap_savefile(&device, config.pcap_savefile);
 
   device.active = TRUE;
-  glob_pcapt = device.dev_desc; /* SIGINT/stats handling */ 
+  glob_pcapt = device.dev_desc; /* SIGINT/stats handling */
   if (config.nfacctd_pipe_size) {
     int slen = sizeof(config.nfacctd_pipe_size), x;
 
@@ -700,7 +781,7 @@ int main(int argc,char **argv, char **envp)
 #endif
   }
 
-  device.link_type = pcap_datalink(device.dev_desc); 
+  device.link_type = pcap_datalink(device.dev_desc);
   for (index = 0; _devices[index].link_type != -1; index++) {
     if (device.link_type == _devices[index].link_type)
       device.data = &_devices[index];
@@ -709,10 +790,10 @@ int main(int argc,char **argv, char **envp)
 
   /* we need to solve some link constraints */
   if (device.data == NULL) {
-    Log(LOG_ERR, "ERROR ( %s/core ): data link not supported: %d\n", config.name, device.link_type); 
+    Log(LOG_ERR, "ERROR ( %s/core ): data link not supported: %d\n", config.name, device.link_type);
     exit_all(1);
   }
-  else Log(LOG_INFO, "INFO ( %s/core ): link type is: %d\n", config.name, device.link_type); 
+  else Log(LOG_INFO, "INFO ( %s/core ): link type is: %d\n", config.name, device.link_type);
 
   if (device.link_type != DLT_EN10MB && device.link_type != DLT_IEEE802 && device.link_type != DLT_LINUX_SLL) {
     list = plugins_list;
@@ -726,7 +807,7 @@ int main(int argc,char **argv, char **envp)
   }
 
   cb_data.device = &device;
-  
+
   /* doing pcap stuff */
   if (!config.dev || pcap_lookupnet(config.dev, &localnet, &netmask, errbuf) < 0) {
     localnet = 0;
@@ -856,7 +937,7 @@ int main(int argc,char **argv, char **envp)
   /* plugins glue: creation (until 093) */
   evaluate_packet_handlers();
   pm_setproctitle("%s [%s]", "Core Process", config.proc_name);
-  if (config.pidfile) write_pid_file(config.pidfile);  
+  if (config.pidfile) write_pid_file(config.pidfile);
 
   /* signals to be handled only by the core process;
      we set proper handlers after plugin creation */
@@ -865,8 +946,8 @@ int main(int argc,char **argv, char **envp)
   signal(SIGCHLD, handle_falling_child);
   kill(getpid(), SIGCHLD);
 
-  /* When reading packets from a savefile, things are lightning fast; we will sit 
-     here just few seconds, thus allowing plugins to complete their startup operations */ 
+  /* When reading packets from a savefile, things are lightning fast; we will sit
+     here just few seconds, thus allowing plugins to complete their startup operations */
   if (config.pcap_savefile) {
     Log(LOG_INFO, "INFO ( %s/core ): PCAP capture file, sleeping for 2 seconds\n", config.name);
     sleep(2);
@@ -879,7 +960,7 @@ int main(int argc,char **argv, char **envp)
       Log(LOG_WARNING, "WARN ( %s/core ): %s has become unavailable; throttling ...\n", config.name, config.dev);
       throttle_loop:
       sleep(5); /* XXX: user defined ? */
-      if ((device.dev_desc = pcap_open_live(config.dev, psize, config.promisc, 1000, errbuf)) == NULL)
+      if ((device.dev_desc = do_pcap_open(config.dev, psize, config.promisc, 1000, config.pcap_protocol, errbuf)) == NULL)
         goto throttle_loop;
       pcap_setfilter(device.dev_desc, &filter);
       device.active = TRUE;

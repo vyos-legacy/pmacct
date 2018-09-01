@@ -93,25 +93,10 @@ struct configuration {
   u_int64_t pipe_size;
   u_int64_t buffer_size;
   int buffer_immediate;
-  int pipe_backlog;
   int pipe_check_core_pid;
-  int pipe_amqp;
-  char *pipe_amqp_host;
-  char *pipe_amqp_vhost;
-  char *pipe_amqp_user;
-  char *pipe_amqp_passwd;
-  char *pipe_amqp_exchange;
-  char *pipe_amqp_routing_key;
-  int pipe_amqp_retry;
-  int pipe_kafka;
-  char *pipe_kafka_broker_host;
-  char *pipe_kafka_topic;
-  int pipe_kafka_partition;
-  char *pipe_kafka_partition_key;
-  int pipe_kafka_partition_keylen;
-  int pipe_kafka_broker_port;
-  int pipe_kafka_retry;
-  char *pipe_kafka_fallback;
+  int pipe_zmq;
+  int pipe_zmq_retry;
+  int pipe_zmq_profile;
   int files_umask;
   int files_uid;
   int files_gid;
@@ -153,7 +138,6 @@ struct configuration {
   char *sql_preprocess;
   int sql_preprocess_type;
   int sql_multi_values;
-  int sql_aggressive_classification;
   char *sql_locking_style;
   int sql_use_copy;
   char *sql_delimiter;
@@ -190,7 +174,9 @@ struct configuration {
   char *nfacctd_ip;
   char *nfacctd_allow_file;
   int nfacctd_time;
+  int nfacctd_time_new;
   int nfacctd_pro_rating;
+  char *nfacctd_templates_file;
   int nfacctd_account_options;
   int nfacctd_stitching;
   u_int32_t nfacctd_as;
@@ -220,6 +206,7 @@ struct configuration {
   int sfacctd_counter_kafka_retry;
   char *sfacctd_counter_kafka_config_file;
   int nfacctd_disable_checks;
+  int nfacctd_disable_opt_scope_check;
   int telemetry_daemon;
   int telemetry_sock;
   int telemetry_port_tcp;
@@ -446,6 +433,7 @@ struct configuration {
 #endif
   int promisc; /* pcap_open_live() promisc parameter */
   char *clbuf; /* pcap filter */
+  int pcap_protocol;
   char *pcap_savefile;
   char *dev;
   int if_wait;
@@ -462,6 +450,7 @@ struct configuration {
   char *networks_file;
   int networks_file_filter;
   int networks_file_no_lpm;
+  int networks_no_mask_if_zero;
   int networks_cache_entries;
   char *ports_file;
   char *a_filter;
@@ -491,6 +480,16 @@ struct configuration {
   char *classifiers_path;
   int classifier_tentatives;
   int classifier_table_num;
+  int classifier_ndpi;
+  u_int32_t ndpi_num_roots;
+  u_int32_t ndpi_max_flows;
+  int ndpi_proto_guess;
+  u_int32_t ndpi_idle_scan_period;
+  u_int32_t ndpi_idle_max_time;
+  u_int32_t ndpi_idle_scan_budget;
+  int ndpi_giveup_proto_tcp;
+  int ndpi_giveup_proto_udp;
+  int ndpi_giveup_proto_other;
   char *nfprobe_timeouts;
   int nfprobe_id;
   int nfprobe_hoplimit;
@@ -524,9 +523,7 @@ struct configuration {
   u_int16_t pkt_len_distrib_bins_lookup[ETHER_JUMBO_MTU+1];
   int use_ip_next_hop;
   int dump_max_writers;
-  int tmp_net_own_field;
   int tmp_asa_bi_flow;
-  int tmp_comms_same_field;
   size_t thread_stack;
 };
 
@@ -549,7 +546,7 @@ EXT void sanitize_cfg(int, char *);
 EXT void set_default_values();
 
 /* global vars */
-EXT char *cfg[SRVBUFLEN], *cfg_cmdline[SRVBUFLEN];
+EXT char *cfg[LARGEBUFLEN], *cfg_cmdline[SRVBUFLEN];
 EXT struct custom_primitives custom_primitives_registry;
 EXT pm_cfgreg_t custom_primitives_type;
 EXT int rows;

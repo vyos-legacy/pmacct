@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2014 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -74,10 +74,11 @@ int ip_fragment_handler(struct packet_ptrs *pptrs)
 
 int find_fragment(u_int32_t now, struct packet_ptrs *pptrs)
 {
-  struct my_iphdr *iphp = (struct my_iphdr *)pptrs->iph_ptr;
+  struct pm_iphdr *iphp = (struct pm_iphdr *)pptrs->iph_ptr;
   struct ip_fragment *fp, *candidate = NULL, *last_seen = NULL;
   unsigned int bucket = hash_fragment(iphp->ip_id, iphp->ip_src.s_addr,
 				      iphp->ip_dst.s_addr, iphp->ip_p);
+  int ret;
 
   for (fp = ipft[bucket]; fp; fp = fp->next) {
     if (fp->ip_id == iphp->ip_id && fp->ip_src == iphp->ip_src.s_addr &&
@@ -87,6 +88,8 @@ int find_fragment(u_int32_t now, struct packet_ptrs *pptrs)
 	if (fp->got_first) {
 	  // pptrs->tlh_ptr = fp->tlhdr; 
 	  memcpy(pptrs->tlh_ptr, fp->tlhdr, MyTLHdrSz); 
+
+	  pptrs->frag_first_found = TRUE;
 	  return TRUE;
 	}
 	else {
@@ -95,11 +98,12 @@ int find_fragment(u_int32_t now, struct packet_ptrs *pptrs)
 	    fp->got_first = TRUE;
 	    memcpy(fp->tlhdr, pptrs->tlh_ptr, MyTLHdrSz);
 
-	    fp->a += ntohs(iphp->ip_len);
-	    iphp->ip_len = htons(fp->a);
-	    pptrs->pf = fp->pa;
+	    pptrs->frag_sum_bytes = fp->a;
+	    pptrs->frag_sum_pkts = fp->pa;
 	    fp->pa = 0;
 	    fp->a = 0;
+
+	    pptrs->frag_first_found = TRUE;
             return TRUE;
 	  }
 	  else { /* we still don't have the first fragment; increase accumulators */
@@ -107,6 +111,8 @@ int find_fragment(u_int32_t now, struct packet_ptrs *pptrs)
 	      fp->pa++;
 	      fp->a += ntohs(iphp->ip_len);
 	    }
+
+	    pptrs->frag_first_found = FALSE;
 	    return FALSE;
 	  } 
 	}
@@ -125,13 +131,16 @@ int find_fragment(u_int32_t now, struct packet_ptrs *pptrs)
   } 
 
   create:
-  if (candidate) return create_fragment(now, candidate, TRUE, bucket, pptrs);
-  else return create_fragment(now, last_seen, FALSE, bucket, pptrs); 
+  if (candidate) ret = create_fragment(now, candidate, TRUE, bucket, pptrs);
+  else ret = create_fragment(now, last_seen, FALSE, bucket, pptrs); 
+
+  pptrs->frag_first_found = ret;
+  return ret;
 }
 
 int create_fragment(u_int32_t now, struct ip_fragment *fp, u_int8_t is_candidate, unsigned int bucket, struct packet_ptrs *pptrs)
 {
-  struct my_iphdr *iphp = (struct my_iphdr *)pptrs->iph_ptr;
+  struct pm_iphdr *iphp = (struct pm_iphdr *)pptrs->iph_ptr;
   struct ip_fragment *newf;
 
   if (!ipft_total_nodes) {
@@ -356,9 +365,8 @@ int find_fragment6(u_int32_t now, struct packet_ptrs *pptrs, struct ip6_frag *fh
             fp->got_first = TRUE;
             memcpy(fp->tlhdr, pptrs->tlh_ptr, MyTLHdrSz);
 
-            fp->a += ntohs(iphp->ip6_plen); /* IPv6 Header length will be added later */
-            iphp->ip6_plen = htons(fp->a);
-	    pptrs->pf = fp->pa;
+	    pptrs->frag_sum_bytes = fp->a;
+	    pptrs->frag_sum_pkts = fp->pa;
             fp->pa = 0;
             fp->a = 0;
             return TRUE;

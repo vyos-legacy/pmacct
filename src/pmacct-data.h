@@ -91,6 +91,11 @@ static const struct _primitives_matrix_struct _primitives_matrix[] = {
   {"post_nat_dst_host", 0, 0, 1, 0, 0, 0, 0, "Destination IPv4/IPv6 address after NAT translation"},
   {"post_nat_src_port", 0, 0, 1, 0, 0, 0, 0, "Source TCP/UDP port after NAT translation"},
   {"post_nat_dst_port", 0, 0, 1, 0, 0, 0, 0, "Destination TCP/UDP port after NAT translation"},
+  {"TUNNEL", 1, 1, 1, 1, 0, 0, 0, ""}, 
+  {"tunnel_src_host", 0, 0, 0, 1, 0, 0, 0, "Tunnel inner Source IPv4/IPv6 address"},
+  {"tunnel_dst_host", 0, 0, 0, 1, 0, 0, 0, "Tunnel inner Destination IPv4/IPv6 address"},
+  {"tunnel_proto", 0, 0, 0, 1, 0, 0, 0, "Tunnel inner IP protocol"},
+  {"tunnel_tos", 0, 0, 0, 1, 0, 0, 0, "Tunnel inner IP ToS"},
   {"MPLS", 1, 1, 1, 1, 0, 0, 0, ""}, 
   {"mpls_label_bottom", 1, 1, 1, 0, 0, 0, 0, "Bottom MPLS label"},
   {"mpls_label_top", 1, 1, 1, 0, 0, 0, 0, "Top MPLS label"},
@@ -120,11 +125,11 @@ static const struct _primitives_matrix_struct _primitives_matrix[] = {
 };
 
 static const struct _protocols_struct _protocols[] = {
-  {"ip", 0},
+  {"0", 0},
   {"icmp", 1},
   {"igmp", 2},
   {"ggp", 3},
-  {"4", 4},
+  {"ipencap", 4},
   {"5", 5},
   {"tcp", 6},
   {"7", 7},
@@ -280,7 +285,7 @@ static const int cps_flen[] = {
   20
 };
 
-#if defined __PMACCTD_C || defined __UACCTD_C
+#if defined __PMACCTD_C || defined __UACCTD_C || defined __UTIL_C
 static struct _devices_struct _devices[] = {
 #if defined DLT_LOOP
   {null_handler, DLT_LOOP},
@@ -288,8 +293,6 @@ static struct _devices_struct _devices[] = {
   {null_handler, DLT_NULL},
   {eth_handler, DLT_EN10MB},
   {ppp_handler, DLT_PPP},
-  {fddi_handler, DLT_FDDI},
-  {tr_handler, DLT_IEEE802},
 #if defined DLT_IEEE802_11
   {ieee_802_11_handler, DLT_IEEE802_11}, 
 #endif
@@ -298,12 +301,6 @@ static struct _devices_struct _devices[] = {
 #endif
 #if defined DLT_RAW
   {raw_handler, DLT_RAW},
-#endif
-#if defined DLT_C_HDLC
-  {chdlc_handler, DLT_C_HDLC},
-#endif
-#ifdef DLT_HDLC
-  {chdlc_handler, DLT_HDLC},
 #endif
   {NULL, -1},
 };
@@ -323,6 +320,9 @@ static const struct _dictionary_line dictionary[] = {
   {"aggregate_filter", cfg_key_aggregate_filter},
   {"promisc", cfg_key_promisc},
   {"pcap_filter", cfg_key_pcap_filter},
+  {"pcap_protocol", cfg_key_pcap_protocol},
+  {"pcap_savefile", cfg_key_pcap_savefile},
+  {"pcap_savefile_wait", cfg_key_pcap_savefile_wait},
   {"core_proc_name", cfg_key_proc_name},
   {"proc_priority", cfg_key_proc_priority},
   {"pmacctd_as", cfg_key_nfacctd_as_new},
@@ -333,34 +333,22 @@ static const struct _dictionary_line dictionary[] = {
   {"thread_stack", cfg_key_thread_stack},
   {"plugins", NULL},
   {"plugin_pipe_size", cfg_key_plugin_pipe_size},
-  {"plugin_pipe_backlog", cfg_key_plugin_pipe_backlog},
-  {"plugin_pipe_check_core_pid", cfg_key_plugin_pipe_check_core_pid},
-  {"plugin_pipe_amqp", cfg_key_plugin_pipe_amqp},
-  {"plugin_pipe_amqp_user", cfg_key_plugin_pipe_amqp_user},
-  {"plugin_pipe_amqp_passwd", cfg_key_plugin_pipe_amqp_passwd},
-  {"plugin_pipe_amqp_exchange", cfg_key_plugin_pipe_amqp_exchange},
-  {"plugin_pipe_amqp_host", cfg_key_plugin_pipe_amqp_host},
-  {"plugin_pipe_amqp_vhost", cfg_key_plugin_pipe_amqp_vhost},
-  {"plugin_pipe_amqp_routing_key", cfg_key_plugin_pipe_amqp_routing_key},
-  {"plugin_pipe_amqp_retry", cfg_key_plugin_pipe_amqp_retry},
-  {"plugin_pipe_kafka", cfg_key_plugin_pipe_kafka},
-  {"plugin_pipe_kafka_broker_host", cfg_key_plugin_pipe_kafka_broker_host},
-  {"plugin_pipe_kafka_broker_port", cfg_key_plugin_pipe_kafka_broker_port},
-  {"plugin_pipe_kafka_topic", cfg_key_plugin_pipe_kafka_topic},
-  {"plugin_pipe_kafka_partition", cfg_key_plugin_pipe_kafka_partition},
-  {"plugin_pipe_kafka_retry", cfg_key_plugin_pipe_kafka_retry},
-  {"plugin_pipe_kafka_fallback", cfg_key_plugin_pipe_kafka_fallback},
   {"plugin_buffer_size", cfg_key_plugin_buffer_size},
+  {"plugin_pipe_check_core_pid", cfg_key_plugin_pipe_check_core_pid},
+  {"plugin_pipe_zmq", cfg_key_plugin_pipe_zmq},
+  {"plugin_pipe_zmq_retry", cfg_key_plugin_pipe_zmq_retry},
+  {"plugin_pipe_zmq_profile", cfg_key_plugin_pipe_zmq_profile},
   {"interface", cfg_key_interface},
   {"interface_wait", cfg_key_interface_wait},
   {"files_umask", cfg_key_files_umask},
   {"files_uid", cfg_key_files_uid},
   {"files_gid", cfg_key_files_gid},
-  {"savefile_wait", cfg_key_savefile_wait},
+  {"savefile_wait", cfg_key_pcap_savefile_wait}, /* XXX: legacy; to be obsoleted */
   {"networks_mask", cfg_key_networks_mask},
   {"networks_file", cfg_key_networks_file},
   {"networks_file_filter", cfg_key_networks_file_filter},
   {"networks_file_no_lpm", cfg_key_networks_file_no_lpm},
+  {"networks_no_mask_if_zero", cfg_key_networks_no_mask_if_zero},
   {"networks_cache_entries", cfg_key_networks_cache_entries},
   {"ports_file", cfg_key_ports_file},
   {"timestamps_secs", cfg_key_timestamps_secs},
@@ -397,7 +385,6 @@ static const struct _dictionary_line dictionary[] = {
   {"sql_preprocess", cfg_key_sql_preprocess},
   {"sql_preprocess_type", cfg_key_sql_preprocess_type},
   {"sql_multi_values", cfg_key_sql_multi_values},
-  {"sql_aggressive_classification", cfg_key_sql_aggressive_classification},
   {"sql_locking_style", cfg_key_sql_locking_style},
   {"sql_use_copy", cfg_key_sql_use_copy},
   {"sql_num_protos", cfg_key_num_protos},
@@ -467,6 +454,7 @@ static const struct _dictionary_line dictionary[] = {
   {"amqp_output", cfg_key_message_broker_output},
   {"amqp_avro_schema_routing_key", cfg_key_amqp_avro_schema_routing_key},
   {"amqp_avro_schema_refresh_time", cfg_key_amqp_avro_schema_refresh_time},
+  {"amqp_trigger_exec", cfg_key_sql_trigger_exec},
   {"kafka_refresh_time", cfg_key_sql_refresh_time},
   {"kafka_history", cfg_key_sql_history},
   {"kafka_history_offset", cfg_key_sql_history_offset},
@@ -489,6 +477,7 @@ static const struct _dictionary_line dictionary[] = {
   {"kafka_avro_schema_topic", cfg_key_kafka_avro_schema_topic},
   {"kafka_avro_schema_refresh_time", cfg_key_kafka_avro_schema_refresh_time},
   {"kafka_config_file", cfg_key_kafka_config_file},
+  {"kafka_trigger_exec", cfg_key_sql_trigger_exec},
   {"nfacctd_proc_name", cfg_key_proc_name},
   {"nfacctd_port", cfg_key_nfacctd_port},
   {"nfacctd_ip", cfg_key_nfacctd_ip},
@@ -502,11 +491,13 @@ static const struct _dictionary_line dictionary[] = {
   {"nfacctd_peer_as", cfg_key_nfprobe_peer_as},
   {"nfacctd_pipe_size", cfg_key_nfacctd_pipe_size},
   {"nfacctd_pro_rating", cfg_key_nfacctd_pro_rating},
+  {"nfacctd_templates_file", cfg_key_nfacctd_templates_file},
   {"nfacctd_account_options", cfg_key_nfacctd_account_options},
   {"nfacctd_stitching", cfg_key_nfacctd_stitching},
   {"nfacctd_ext_sampling_rate", cfg_key_pmacctd_ext_sampling_rate},
   {"nfacctd_renormalize", cfg_key_sfacctd_renormalize},
   {"nfacctd_disable_checks", cfg_key_nfacctd_disable_checks},
+  {"nfacctd_disable_opt_scope_check", cfg_key_nfacctd_disable_opt_scope_check},
   {"pmacctd_proc_name", cfg_key_proc_name},
   {"pmacctd_force_frag_handling", cfg_key_pmacctd_force_frag_handling},
   {"pmacctd_frag_buffer_size", cfg_key_pmacctd_frag_buffer_size},
@@ -520,6 +511,7 @@ static const struct _dictionary_line dictionary[] = {
   {"pmacctd_stitching", cfg_key_nfacctd_stitching},
   {"pmacctd_renormalize", cfg_key_sfacctd_renormalize},
   {"pmacctd_nonroot", cfg_key_pmacctd_nonroot},
+  {"pmacctd_time_new", cfg_key_nfacctd_time_new},
   {"uacctd_proc_name", cfg_key_proc_name},
   {"uacctd_force_frag_handling", cfg_key_pmacctd_force_frag_handling},
   {"uacctd_frag_buffer_size", cfg_key_pmacctd_frag_buffer_size},
@@ -585,7 +577,6 @@ static const struct _dictionary_line dictionary[] = {
   {"telemetry_dump_kafka_partition", cfg_key_telemetry_dump_kafka_partition},
   {"telemetry_dump_kafka_partition_key", cfg_key_telemetry_dump_kafka_partition_key},
   {"telemetry_dump_kafka_config_file", cfg_key_telemetry_dump_kafka_config_file},
-  {"pcap_savefile", cfg_key_pcap_savefile},
   {"refresh_maps", cfg_key_maps_refresh}, // legacy
   {"maps_refresh", cfg_key_maps_refresh},
   {"maps_index", cfg_key_maps_index},
@@ -608,6 +599,7 @@ static const struct _dictionary_line dictionary[] = {
   {"sfacctd_as", cfg_key_nfacctd_as_new},
   {"sfacctd_net", cfg_key_nfacctd_net},
   {"sfacctd_peer_as", cfg_key_nfprobe_peer_as},
+  {"sfacctd_time_new", cfg_key_nfacctd_time_new},
   {"sfacctd_pipe_size", cfg_key_nfacctd_pipe_size},
   {"sfacctd_renormalize", cfg_key_sfacctd_renormalize},
   {"sfacctd_disable_checks", cfg_key_nfacctd_disable_checks},
@@ -637,6 +629,17 @@ static const struct _dictionary_line dictionary[] = {
   {"classifiers", cfg_key_classifiers},
   {"classifier_tentatives", cfg_key_classifier_tentatives},
   {"classifier_table_num", cfg_key_classifier_table_num},
+#if defined (WITH_NDPI)
+  {"classifier_num_roots", cfg_key_classifier_ndpi_num_roots},
+  {"classifier_max_flows", cfg_key_classifier_ndpi_max_flows},
+  {"classifier_proto_guess", cfg_key_classifier_ndpi_proto_guess},
+  {"classifier_idle_scan_period", cfg_key_classifier_ndpi_idle_scan_period},
+  {"classifier_idle_max_time", cfg_key_classifier_ndpi_idle_max_time},
+  {"classifier_idle_scan_budget", cfg_key_classifier_ndpi_idle_scan_budget},
+  {"classifier_giveup_proto_tcp", cfg_key_classifier_ndpi_giveup_proto_tcp},
+  {"classifier_giveup_proto_udp", cfg_key_classifier_ndpi_giveup_proto_udp},
+  {"classifier_giveup_proto_other", cfg_key_classifier_ndpi_giveup_proto_other},
+#endif
   {"nfprobe_timeouts", cfg_key_nfprobe_timeouts},
   {"nfprobe_hoplimit", cfg_key_nfprobe_hoplimit},
   {"nfprobe_maxflows", cfg_key_nfprobe_maxflows},
@@ -656,7 +659,6 @@ static const struct _dictionary_line dictionary[] = {
   {"sfprobe_direction", cfg_key_nfprobe_direction},
   {"sfprobe_ifindex", cfg_key_nfprobe_ifindex},
   {"sfprobe_ifspeed", cfg_key_sfprobe_ifspeed},
-  {"tee_receiver", cfg_key_nfprobe_receiver},
   {"tee_receivers", cfg_key_tee_receivers},
   {"tee_source_ip", cfg_key_nfprobe_source_ip},
   {"tee_transparent", cfg_key_tee_transparent},
@@ -829,9 +831,7 @@ static const struct _dictionary_line dictionary[] = {
   {"uacctd_threshold", cfg_key_uacctd_threshold},
   {"tunnel_0", cfg_key_tunnel_0},
   {"pkt_len_distrib_bins", cfg_key_pkt_len_distrib_bins},
-  {"tmp_net_own_field", cfg_key_tmp_net_own_field},
   {"tmp_asa_bi_flow", cfg_key_tmp_asa_bi_flow},
-  {"tmp_comms_same_field", cfg_key_tmp_comms_same_field},
   {"", NULL},
 };
 
@@ -851,7 +851,8 @@ static struct plugin_type_entry plugin_types_list[] = {
   {PLUGIN_ID_SQLITE3,	"sqlite3",	sqlite3_plugin},
 #endif
 #ifdef WITH_MONGODB
-  {PLUGIN_ID_MONGODB,   "mongodb",      mongodb_plugin},
+  {PLUGIN_ID_UNKNOWN,	"mongodb",		mongodb_legacy_warning},
+  {PLUGIN_ID_MONGODB,  	"mongodb_legacy",	mongodb_plugin},
 #endif
 #ifdef WITH_RABBITMQ
   {PLUGIN_ID_AMQP,	"amqp",		amqp_plugin},

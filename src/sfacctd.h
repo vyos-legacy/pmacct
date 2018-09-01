@@ -55,6 +55,7 @@ enum INMCounters_version {
 };
 
 typedef struct _SFSample {
+  struct timeval *ts;
   struct in_addr sourceIP;
   SFLAddress agent_addr;
   u_int32_t agentSubId;
@@ -105,6 +106,14 @@ typedef struct _SFSample {
   u_int32_t dcd_tcpFlags;
   u_int32_t ip_fragmentOffset;
   u_int32_t udp_pduLen;
+
+  /* inner header decode */
+  int got_inner_IPV4;
+  struct in_addr dcd_inner_srcIP;
+  struct in_addr dcd_inner_dstIP;
+  u_int32_t dcd_inner_ipProtocol;
+  u_int32_t dcd_inner_ipTos;
+  u_int32_t ip_inner_fragmentOffset;
 
   /* ports */
   u_int32_t inputPortFormat;
@@ -197,6 +206,10 @@ typedef struct _SFSample {
 
   /* classification */
   pm_class_t class;
+#if defined (WITH_NDPI)
+  pm_class2_t ndpi_class;
+#endif 
+
   pm_id_t tag;
   pm_id_t tag2;
 
@@ -272,6 +285,7 @@ EXT void reset_ip4(struct packet_ptrs *);
 EXT void reset_ip6(struct packet_ptrs *);
 EXT void SF_notify_malf_packet(short int, char *, struct sockaddr *);
 EXT int SF_find_id(struct id_table *, struct packet_ptrs *, pm_id_t *, pm_id_t *);
+EXT void SF_compute_once();
 
 EXT char *getPointer(SFSample *);
 EXT u_int32_t getData32(SFSample *);
@@ -297,6 +311,7 @@ EXT void decodeLinkLayer(SFSample *);
 EXT void decodeIPLayer4(SFSample *, u_char *, u_int32_t);
 EXT void decodeIPV4(SFSample *);
 EXT void decodeIPV6(SFSample *);
+EXT void decodeIPV4_inner(SFSample *, u_char *);
 EXT void readExtendedSwitch(SFSample *);
 EXT void readExtendedRouter(SFSample *);
 EXT void readExtendedGateway_v2(SFSample *);

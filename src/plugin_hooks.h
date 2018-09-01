@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -51,7 +51,6 @@ struct ch_buf_hdr {
 
 struct ch_status {
   u_int8_t wakeup;		/* plugin is polling */ 
-  u_int32_t backlog;
   u_int64_t last_buf_off;	/* offset of last committed buffer */
 };
 
@@ -69,13 +68,13 @@ struct aggregate_filter {
 };
 
 struct plugin_type_entry {
-  int id;
-  char string[10];
+  u_int8_t id;
+  char string[16];
   void (*func)(int, struct configuration *, void *);
 };
 
 struct plugins_list_entry {
-  int id;
+  u_int8_t id;
   pid_t pid;
   char name[SRVBUFLEN];
   struct configuration cfg;
@@ -84,12 +83,8 @@ struct plugins_list_entry {
   struct plugins_list_entry *next;
 };
 
-#ifdef WITH_RABBITMQ 
-#include "amqp_common.h"
-#endif
-
-#ifdef WITH_KAFKA
-#include "kafka_common.h"
+#ifdef WITH_ZMQ
+#include "zmq_common.h"
 #endif
 
 struct channels_list_entry {
@@ -122,27 +117,10 @@ struct channels_list_entry {
   struct sampling s;
   struct plugins_list_entry *plugin;			/* backpointer to the plugin the actual channel belongs to */
   struct extra_primitives extras;			/* offset for non-standard aggregation primitives structures */
-#ifdef WITH_RABBITMQ
-  struct p_amqp_host amqp_host;
-  int amqp_host_reconnect;				/* flag need to reconnect to RabbitMQ server */ 
-  void *amqp_host_sleep;				/* pointer to the sleep thread (in case of reconnection) */
-#endif
-#ifdef WITH_KAFKA
-  struct p_kafka_host kafka_host;
-/* XXX Kafka:
-  int kafka_host_reconnect;				// flag need to reconnect to Kafka server
-  void *kafka_host_sleep;				// pointer to the sleep thread (in case of reconnection)
-*/
+#ifdef WITH_ZMQ
+  struct p_zmq_host zmq_host;
 #endif
 };
-
-#ifdef WITH_RABBITMQ
-struct plugin_pipe_amqp_sleeper {
-  struct p_amqp_host *amqp_host;
-  struct plugins_list_entry *plugin;
-  int *do_reconnect;
-};
-#endif
 
 #if (defined __PLUGIN_HOOKS_C)
 extern struct channels_list_entry channels_list[MAX_N_PLUGINS];
@@ -175,27 +153,8 @@ EXT int pkt_extras_clean(void *, int);
 EXT void evaluate_sampling(struct sampling *, pm_counter_t *, pm_counter_t *, pm_counter_t *);
 EXT pm_counter_t take_simple_random_skip(pm_counter_t);
 EXT pm_counter_t take_simple_systematic_skip(pm_counter_t);
-#if defined WITH_RABBITMQ
-EXT void plugin_pipe_amqp_init_host(struct p_amqp_host *, struct plugins_list_entry *);
-EXT struct plugin_pipe_amqp_sleeper *plugin_pipe_amqp_sleeper_define(struct p_amqp_host *, int *, struct plugins_list_entry *);
-EXT void plugin_pipe_amqp_sleeper_free(struct plugin_pipe_amqp_sleeper **);
-EXT void plugin_pipe_amqp_sleeper_publish_func(struct plugin_pipe_amqp_sleeper *);
-EXT void plugin_pipe_amqp_sleeper_start(struct channels_list_entry *);
-EXT void plugin_pipe_amqp_sleeper_stop(struct channels_list_entry *);
-EXT int plugin_pipe_amqp_connect_to_consume(struct p_amqp_host *, struct plugins_list_entry *);
-#endif
-#if defined WITH_KAFKA
-EXT int plugin_pipe_kafka_init_host(struct p_kafka_host *, struct plugins_list_entry *, int);
-EXT int plugin_pipe_kafka_connect_to_consume(struct p_kafka_host *, struct plugins_list_entry *);
-#endif
-EXT void plugin_pipe_amqp_compile_check();
-EXT void plugin_pipe_kafka_compile_check();
+EXT void plugin_pipe_zmq_compile_check();
 EXT void plugin_pipe_check(struct configuration *);
-EXT int plugin_pipe_set_retry_timeout(struct p_broker_timers *, int);
-EXT int plugin_pipe_calc_retry_timeout_diff(struct p_broker_timers *, time_t);
-
-EXT void handle_plugin_pipe_dyn_strings(char *, int, char *, struct plugins_list_entry *);
-EXT char *plugin_pipe_compose_default_string(struct plugins_list_entry *, char *);
 #undef EXT
 
 #if (defined __PLUGIN_HOOKS_C)
@@ -223,6 +182,7 @@ EXT void sqlite3_plugin(int, struct configuration *, void *);
 
 #ifdef WITH_MONGODB
 EXT void mongodb_plugin(int, struct configuration *, void *);
+EXT void mongodb_legacy_warning(int, struct configuration *, void *);
 #endif
 
 #ifdef WITH_RABBITMQ

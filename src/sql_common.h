@@ -1,6 +1,6 @@
 /*
     pmacct (Promiscuous mode IP Accounting package)
-    pmacct is Copyright (C) 2003-2016 by Paolo Lucente
+    pmacct is Copyright (C) 2003-2017 by Paolo Lucente
 */
 
 /*
@@ -98,6 +98,7 @@ struct insert_data {
   int pending_accumulators;
   int num_primitives;
   int dyn_table;
+  int dyn_table_time_only;
   char dyn_table_name[SRVBUFLEN];
   int recover;
   int locks;
@@ -127,6 +128,7 @@ struct db_cache {
   struct pkt_bgp_primitives *pbgp;
   struct pkt_nat_primitives *pnat;
   struct pkt_mpls_primitives *pmpls;
+  struct pkt_tunnel_primitives *ptun;
   char *pcust;
   struct pkt_vlen_hdr_primitives *pvlen;
   u_int8_t valid;
@@ -251,6 +253,11 @@ EXT void count_nat_event_handler(const struct db_cache *, struct insert_data *, 
 EXT void count_mpls_label_top_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_mpls_label_bottom_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_mpls_stack_depth_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_tunnel_src_ip_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_tunnel_dst_ip_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void MY_count_tunnel_ip_proto_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void PG_count_tunnel_ip_proto_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_tunnel_ip_tos_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_timestamp_start_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void PG_copy_count_timestamp_start_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_timestamp_start_residual_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
@@ -284,6 +291,8 @@ EXT void count_peer_src_ip_aton_handler(const struct db_cache *, struct insert_d
 EXT void count_peer_dst_ip_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_post_nat_src_ip_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_post_nat_dst_ip_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_tunnel_src_ip_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+EXT void count_tunnel_dst_ip_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void fake_host_aton_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 
 #if defined (WITH_GEOIP) || defined (WITH_GEOIPV2)
@@ -293,6 +302,10 @@ EXT void count_dst_host_country_handler(const struct db_cache *, struct insert_d
 #if defined (WITH_GEOIPV2)
 EXT void count_src_host_pocode_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 EXT void count_dst_host_pocode_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
+#endif
+
+#if defined (WITH_NDPI)
+EXT void count_ndpi_class_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
 #endif
 
 EXT void count_counters_setclause_handler(const struct db_cache *, struct insert_data *, int, char **, char **);
@@ -374,7 +387,7 @@ EXT unsigned char *pipebuf;
 EXT struct db_cache *cache;
 EXT struct db_cache **queries_queue, **pending_queries_queue;
 EXT struct db_cache *collision_queue;
-EXT int cq_ptr, qq_ptr, qq_size, pp_size, pb_size, pn_size, pm_size;
+EXT int cq_ptr, qq_ptr, qq_size, pp_size, pb_size, pn_size, pm_size, pt_size;
 EXT int pc_size, dbc_size, cq_size, pqq_ptr;
 EXT struct db_cache lru_head, *lru_tail;
 EXT struct frags where[N_PRIMITIVES+2];
@@ -386,7 +399,7 @@ EXT int glob_num_primitives; /* last resort for signal handling */
 EXT int glob_basetime; /* last resort for signal handling */
 EXT time_t glob_new_basetime; /* last resort for signal handling */
 EXT time_t glob_committed_basetime; /* last resort for signal handling */
-EXT int glob_dyn_table; /* last resort for signal handling */
+EXT int glob_dyn_table, glob_dyn_table_time_only; /* last resort for signal handling */
 EXT int glob_timeslot; /* last resort for sql handlers */
 
 EXT struct sqlfunc_cb_registry sqlfunc_cbr; 

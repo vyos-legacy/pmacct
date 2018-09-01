@@ -95,8 +95,8 @@ A: CPU cycles are proportional to the amount of traffic (packets, flows, samples
    Internal buffering can also help and, contrary to the previous tecniques, applies
    to all daemons. Buffering is enabled with the plugin_buffer_size directive; buffers
    can then be queued and distributed with a choice of an home-grown circolar queue
-   implementation (plugin_pipe_size) or a RabbitMQ broker (plugin_pipe_amqp). Check
-   CONFIG-KEYS and QUICKSTART for more information. 
+   implementation (plugin_pipe_size) or a ZeroMQ queue (plugin_pipe_zmq). Check both
+   CONFIG-KEYS and QUICKSTART for more information.
 
 
 Q8: I want to to account both inbound and outbound traffic of my network, with an host
@@ -164,11 +164,18 @@ A: The portion of the packet accounted starts from the IPv4/IPv6 header (inclusi
    directly within pmacct via the 'adjb' action (sql_preprocess).
 
 
-Q11: How to get the historical accounting enabled ? SQL table have a 'stamp_inserted'
-   and 'stamp_updated' fields but they remain empty.
-A: Historical accounting is easily enabled by adding to the SQL plugin configuration a
-   'sql_history' directive. Associate to it a 'sql_history_roundoff'. For examples and
-   syntax, refer to CONFIG-KEYS and QUICKSTART documents. 
+Q11: What is historical accounting feature and how to get it configured?
+A: pmacct allows to optionally define arbitrary time-bins (ie. 5 mins, 1 hour, etc.)
+   and assign collected data to it basing on a timestamp. This is in brief called
+   historical accounting and is enabled via *history* directives (ie. print_history,
+   print_history_roundoff, sql_history, etc.). The time-bin to which data is allocated 
+   to is stored in the 'stamp_inserted' field (if supported by the plugin in use, ie.
+   all except 'print', where to avoid redundancy this is encoded as part of the file
+   name, and 'memory'). Flow data is by default assigned to a time-bin basing on its
+   start time or - not applying that or missing such info - the timestamp of the whole
+   datagram or - not applying that or missing such info - the time of arrival at the
+   collector. Where multiple choices are supported, ie. NetFlow/IPFIX, the directive
+   nfacctd_time_new allows to explicitely select the time source. 
 
 
 Q12: Counters via CLI are good for (email, web) reporting but not enough. What are the
@@ -246,9 +253,9 @@ A: pmacct tarball gets with so called 'default' tables (IP and BGP); they are bu
 
 Q16: What is the best way to kill a running instance of pmacct avoiding data loss ?
 A: Two ways. a) Simply kill a specific plugin that you don't need anymore: you will
-   have to identify it and use the 'kill -INT <process number> command; b) kill the
+   have to identify it and use the 'kill -INT <process number>' command; b) kill the
    whole pmacct instance: you can either use the 'killall -INT <daemon name>' command
-   or identify the Core Process and use the 'kill -INT <process number> command. All
+   or identify the Core Process and use the 'kill -INT <process number>' command. All
    of these, will do the job for you: will stop receiving new data from the network,
    clear the memory buffers, notify the running plugins to take th exit lane (which
    in turn will clear cached data as required).
@@ -296,12 +303,13 @@ A: Few hints are summed below in order to improve SQL database performances. The
      in case of unsecured shutdowns (remember power failure is a variable ...).
 
 
-Q18: I've configured the server hosting pmacct with my local timezone - which includes
-     DST (Daylight Saving Time). Is this allright?
-A: In general, it's good rule to run the backend part of any accounting system as UTC;
-   pmacct uses the underlying system clock, expecially in the SQL plugins to calculate
-   time-bins and scanner deadlines among the others. The use of timezones is supported
-   but not recommended. 
+Q18: Does having the local timezone configured on servers, routers, etc. - which can
+     very well include DST (Daylight Saving Time) shifts, impact accounting?
+A: It is good rule to run the infrastructure and the backend part of the accounting
+   system as UTC; for example, accuracy can be negatively impacted if sampled flows
+   are cached on a router while the DST shift takes place; plus, pmacct uses system
+   clock to calculate time-bins and scanner deadlines among the others. In short,
+   the use of local timezones is not recommended. 
 
 
 Q19: I'm using the 'tee' plugin with transparent mode set to true and keep receiving
@@ -328,6 +336,29 @@ A: Binding to a "::" address (ie. no [sn]facctd_ip specified should allow to rec
    default has been '0'. It appears over time some distributions have changed the
    default to be '1'. If you experience this issue on Linux, please check your kernel
    setting.
-   
+
+
+Q21: How can i count how much telemetry data (ie. NetFlow, sFlow, IPFIX, Streaming
+     Telemetry) i'm receiving on my collector? 
+
+A: If the interface where telemetry data is received is dedicated to the task then any
+   ifconfig, netstat or dstat tools or SNMP meaurement would do in order to verify
+   amount of telemetry packets and bytes (from which packets per second, bytes per
+   second can be easily inferred). If, instead, the interface is shared then pmacctd,
+   the libpcap-based daemon, can help to isolate and account for the telemetry traffic;
+   guess telemetry data is pointed to UDP port 2100 of the IP address configured on
+   eth0, pmacctd can be started as "pmacctd -i eth0 -P print -c none port 2100" to
+   account for the grand total of telemetry packets and bytes; if a breakdown per
+   telemetry exporting node is wanted, the following command-line can be used: "pmacctd
+   -i eth0 -P print -c src_host port 2100"; this example is suitable for manual reading
+   as it will print data every 60 secs on the screen and can, of course, be complicated
+   slightly to make it suitable for automation. A related question that often arises
+   is: how many flows per second am i receiving? This can be similarly addressed by
+   using "nfacctd -P print -c flows" for NetFlow/IPFIX and "sfacctd -P print -c flows"
+   for sFlow. Here FLOWS is the amount of flow records (NetFlow/IPFIX) or flow samples
+   (sFlow) processed in the period of time, and is the measure of interest. Changing
+   the aggregation argument in "-c peer_src_ip,flows" gives the amount of flows per
+   telemetry exporter (ie. router).
+    
 
 /* EOF */

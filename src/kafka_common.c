@@ -205,6 +205,11 @@ void p_kafka_set_config_file(struct p_kafka_host *kafka_host, char *config_file)
   }
 }
 
+void p_kafka_get_version()
+{
+  printf("rdkafka %s\n", rd_kafka_version_str());
+}
+
 int p_kafka_parse_config_entry(char *buf, char *type, char **key, char **value)
 {
   char *value_ptr, *token;
@@ -373,23 +378,6 @@ int p_kafka_connect_to_produce(struct p_kafka_host *kafka_host)
   return SUCCESS;
 }
 
-int p_kafka_connect_to_consume(struct p_kafka_host *kafka_host)
-{
-  if (kafka_host) {
-    kafka_host->rk = rd_kafka_new(RD_KAFKA_CONSUMER, kafka_host->cfg, kafka_host->errstr, sizeof(kafka_host->errstr));
-    if (!kafka_host->rk) {
-      Log(LOG_ERR, "ERROR ( %s/%s ): Failed to create new Kafka producer: %s\n", config.name, config.type, kafka_host->errstr);
-      p_kafka_close(kafka_host, TRUE);
-      return ERR;
-    }
-
-    if (config.debug) rd_kafka_set_log_level(kafka_host->rk, LOG_DEBUG);
-  }
-  else return ERR;
-
-  return SUCCESS;
-}
-
 int p_kafka_produce_data(struct p_kafka_host *kafka_host, void *data, u_int32_t data_len)
 {
   int ret = SUCCESS;
@@ -411,76 +399,6 @@ int p_kafka_produce_data(struct p_kafka_host *kafka_host, void *data, u_int32_t 
   rd_kafka_poll(kafka_host->rk, 0);
 
   return ret; 
-}
-
-int p_kafka_manage_consumer(struct p_kafka_host *kafka_host, int is_start)
-{
-  int ret = SUCCESS;
-
-  kafkap_ret_err_cb = FALSE;
-
-  if (kafka_host && kafka_host->rk && kafka_host->topic && !validate_truefalse(is_start)) {
-    if (is_start) {
-      ret = rd_kafka_consume_start(kafka_host->topic, kafka_host->partition, RD_KAFKA_OFFSET_END);
-      if (ret == ERR) {
-	Log(LOG_ERR, "ERROR ( %s/%s ): Failed to start consuming topic %s partition %i: %s\n", config.name, config.type,
-          rd_kafka_topic_name(kafka_host->topic), kafka_host->partition, rd_kafka_err2str(rd_kafka_errno2err(errno)));
-	p_kafka_close(kafka_host, TRUE);
-      }
-    }
-    else {
-      rd_kafka_consume_stop(kafka_host->topic, kafka_host->partition);
-      p_kafka_close(kafka_host, FALSE);
-    }
-  }
-  else return ERR;
-
-  return ret;
-}
-
-int p_kafka_consume_poller(struct p_kafka_host *kafka_host, void **data, int timeout)
-{
-  rd_kafka_message_t *kafka_msg; 
-  int ret = SUCCESS;
-  
-  if (kafka_host && data && timeout) { 
-    kafka_msg = rd_kafka_consume(kafka_host->topic, kafka_host->partition, timeout);
-    if (!kafka_msg) ret = FALSE; /* timeout */
-    else ret = TRUE; /* got data */
-
-    (*data) = kafka_msg;
-  }
-  else {
-    (*data) = NULL;
-    ret = ERR;
-  }
-
-  return ret;
-}
-
-int p_kafka_consume_data(struct p_kafka_host *kafka_host, void *data, char *payload, u_int32_t payload_len)
-{
-  rd_kafka_message_t *kafka_msg = (rd_kafka_message_t *) data;
-  int ret = SUCCESS;
-
-  if (kafka_host && data && payload && payload_len) {
-    if (kafka_msg->payload && kafka_msg->len) {
-      if (kafka_msg->len <= payload_len) {
-	memcpy(payload, kafka_msg->payload, kafka_msg->len);
-	ret = SUCCESS;
-      }
-      else {
-	memset(payload, 0, payload_len);
-	ret = ERR;
-      }
-    } 
-    else ret = ERR;
-  }
-  else ret = ERR;
-
-  rd_kafka_message_destroy(kafka_msg);
-
-  return ret;
 }
 
 void p_kafka_close(struct p_kafka_host *kafka_host, int set_fail)
@@ -532,3 +450,38 @@ int p_kafka_check_outq_len(struct p_kafka_host *kafka_host)
 
   return SUCCESS;
 }
+
+#if defined WITH_JANSSON
+int write_and_free_json_kafka(void *kafka_log, void *obj)
+{
+  char *orig_kafka_topic = NULL, dyn_kafka_topic[SRVBUFLEN];
+  struct p_kafka_host *alog = (struct p_kafka_host *) kafka_log;
+  int ret = ERR;
+
+  char *tmpbuf = NULL;
+  json_t *json_obj = (json_t *) obj;
+
+  tmpbuf = json_dumps(json_obj, JSON_PRESERVE_ORDER);
+  json_decref(json_obj);
+
+  if (tmpbuf) {
+    if (alog->topic_rr.max) {
+      orig_kafka_topic = p_kafka_get_topic(alog);
+      P_handle_table_dyn_rr(dyn_kafka_topic, SRVBUFLEN, orig_kafka_topic, &alog->topic_rr);
+      p_kafka_set_topic(alog, dyn_kafka_topic);
+    }
+
+    ret = p_kafka_produce_data(alog, tmpbuf, strlen(tmpbuf));
+    free(tmpbuf);
+
+    if (alog->topic_rr.max) p_kafka_set_topic(alog, orig_kafka_topic);
+  }
+
+  return ret;
+}
+#else
+int write_and_free_json_kafka(void *kafka_log, void *obj)
+{
+  if (config.debug) Log(LOG_DEBUG, "DEBUG ( %s/%s ): write_and_free_json_kafka(): JSON object not created due to missing --enable-jansson\n", config.name, config.type);
+}
+#endif

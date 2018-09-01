@@ -20,15 +20,15 @@
 */
 
 /* defines */
-#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:o:t:O:uRVaA:E:"
-#define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:o:t:O:uRVaA:E:"
+#define ARGS_NFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:o:t:O:uRVaA:E:I:W"
+#define ARGS_SFACCTD "n:dDhP:b:f:F:c:m:p:r:s:S:L:l:o:t:O:uRVaA:E:I:W"
 #define ARGS_PMACCTD "n:NdDhP:b:f:F:c:i:I:m:p:r:s:S:o:t:O:uwWL:RVazA:E:"
 #define ARGS_UACCTD "n:NdDhP:b:f:F:c:m:p:r:s:S:o:t:O:uRg:L:VaA:E:"
-#define ARGS_PMTELEMETRYD "hVL:l:f:dDS:F:"
-#define ARGS_PMBGPD "hVL:l:f:dDS:F:"
-#define ARGS_PMBMPD "hVL:l:f:dDS:F:"
-#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:O:E:uDVUoiIx"
-#define N_PRIMITIVES 57
+#define ARGS_PMTELEMETRYD "hVL:l:f:dDS:F:o:O:i:"
+#define ARGS_PMBGPD "hVL:l:f:dDS:F:o:O:i:"
+#define ARGS_PMBMPD "hVL:l:f:dDS:F:o:O:i:"
+#define ARGS_PMACCT "Ssc:Cetm:p:P:M:arN:n:lT:O:E:uDVUiI"
+#define N_PRIMITIVES 75
 #define N_FUNCS 10 
 #define MAX_N_PLUGINS 32
 #define PROTO_LEN 12
@@ -40,13 +40,14 @@
 #define MAX_PKT_LEN_DISTRIB_BINS 255
 #define MAX_PKT_LEN_DISTRIB_LEN 15
 #define DEFAULT_AVRO_SCHEMA_REFRESH_TIME 60
-#define DEFAULT_IMT_PLUGIN_SELECT_TIMEOUT 5
+#define DEFAULT_IMT_PLUGIN_POLL_TIMEOUT 5
 #define UINT32T_THRESHOLD 4290000000UL
 #define UINT64T_THRESHOLD 18446744073709551360ULL
 #define INT64T_THRESHOLD 9223372036854775807ULL
 #define PM_VARIABLE_LENGTH 65535
 #define PM_COUNTRY_T_STRLEN 4
 #define PM_POCODE_T_STRLEN 12
+#define PCAP_SAVEFILE_MAX_ERRORS 10
 #ifndef UINT8_MAX
 #define UINT8_MAX (255U)
 #endif
@@ -76,6 +77,7 @@
 #define SNAPLEN_ISIS_MIN 512
 #define SNAPLEN_ISIS_DEFAULT 1476
 
+#define SUPERSHORTBUFLEN (16+MOREBUFSZ)
 #define VERYSHORTBUFLEN (32+MOREBUFSZ)
 #define SHORTSHORTBUFLEN (64+MOREBUFSZ)
 #define SHORTBUFLEN (128+MOREBUFSZ)
@@ -89,14 +91,15 @@
 #define PRIMITIVE_DESC_LEN	64
 
 #define MANTAINER "Paolo Lucente <paolo@pmacct.net>"
-#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.6.2-git"
-#define UACCTD_USAGE_HEADER "Linux NetFilter NFLOG Accounting Daemon, uacctd 1.6.2-git"
-#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.6.2-git"
-#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.6.2-git"
-#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.6.2-git"
-#define PMTELEMETRYD_USAGE_HEADER "Streaming Network Telemetry Daemon, pmtelemetryd 1.6.2-git"
-#define PMBGPD_USAGE_HEADER "pmacct BGP Collector Daemon, pmbgpd 1.6.2-git"
-#define PMBMPD_USAGE_HEADER "pmacct BMP Collector Daemon, pmbmpd 1.6.2-git"
+#define GET_IN_TOUCH_MSG "If you see this message, please get in touch"
+#define PMACCTD_USAGE_HEADER "Promiscuous Mode Accounting Daemon, pmacctd 1.7.0-git"
+#define UACCTD_USAGE_HEADER "Linux NetFilter NFLOG Accounting Daemon, uacctd 1.7.0-git"
+#define PMACCT_USAGE_HEADER "pmacct, pmacct client 1.7.0-git"
+#define NFACCTD_USAGE_HEADER "NetFlow Accounting Daemon, nfacctd 1.7.0-git"
+#define SFACCTD_USAGE_HEADER "sFlow Accounting Daemon, sfacctd 1.7.0-git"
+#define PMTELEMETRYD_USAGE_HEADER "Streaming Network Telemetry Daemon, pmtelemetryd 1.7.0-git"
+#define PMBGPD_USAGE_HEADER "pmacct BGP Collector Daemon, pmbgpd 1.7.0-git"
+#define PMBMPD_USAGE_HEADER "pmacct BMP Collector Daemon, pmbmpd 1.7.0-git"
 #define PMACCT_COMPILE_ARGS COMPILE_ARGS
 #ifndef TRUE
 #define TRUE 1
@@ -153,7 +156,6 @@
 #define MAP_CUSTOM_PRIMITIVES	108	/* aggregate_primitives */
 
 /* PRIMITIVES DEFINITION: START */
-/* 55 primitives currently defined */
 /* internal: first registry, ie. what_to_count, aggregation, etc. */
 #define COUNT_INT_SRC_HOST		0x0001000000000001ULL
 #define COUNT_INT_DST_HOST		0x0001000000000002ULL
@@ -227,7 +229,12 @@
 #define COUNT_INT_SRC_LRG_COMM		0x0002000000080000ULL
 #define COUNT_INT_SRC_HOST_POCODE	0x0002000000100000ULL
 #define COUNT_INT_DST_HOST_POCODE	0x0002000000200000ULL
-#define COUNT_INT_CUSTOM_PRIMITIVES	0x0002000000400000ULL
+#define COUNT_INT_TUNNEL_SRC_HOST 	0x0002000000400000ULL
+#define COUNT_INT_TUNNEL_DST_HOST	0x0002000000800000ULL
+#define COUNT_INT_TUNNEL_IP_PROTO	0x0002000001000000ULL
+#define COUNT_INT_TUNNEL_IP_TOS		0x0002000002000000ULL
+#define COUNT_INT_NDPI_CLASS		0x0002000004000000ULL
+#define COUNT_INT_CUSTOM_PRIMITIVES	0x0002000008000000ULL
 
 #define COUNT_INDEX_MASK	0xFFFF
 #define COUNT_INDEX_CP		0xFFFF000000000000ULL  /* index 0xffff reserved to custom primitives */
@@ -307,6 +314,11 @@
 #define COUNT_SRC_LRG_COMM		(COUNT_INT_SRC_LRG_COMM & COUNT_REGISTRY_MASK)
 #define COUNT_SRC_HOST_POCODE		(COUNT_INT_SRC_HOST_POCODE & COUNT_REGISTRY_MASK)
 #define COUNT_DST_HOST_POCODE		(COUNT_INT_DST_HOST_POCODE & COUNT_REGISTRY_MASK)
+#define COUNT_TUNNEL_SRC_HOST		(COUNT_INT_TUNNEL_SRC_HOST & COUNT_REGISTRY_MASK)
+#define COUNT_TUNNEL_DST_HOST		(COUNT_INT_TUNNEL_DST_HOST & COUNT_REGISTRY_MASK)
+#define COUNT_TUNNEL_IP_PROTO		(COUNT_INT_TUNNEL_IP_PROTO & COUNT_REGISTRY_MASK)
+#define COUNT_TUNNEL_IP_TOS		(COUNT_INT_TUNNEL_IP_TOS & COUNT_REGISTRY_MASK)
+#define COUNT_NDPI_CLASS                (COUNT_INT_NDPI_CLASS & COUNT_REGISTRY_MASK)
 #define COUNT_CUSTOM_PRIMITIVES		(COUNT_INT_CUSTOM_PRIMITIVES & COUNT_REGISTRY_MASK)
 /* PRIMITIVES DEFINITION: END */
 
@@ -358,6 +370,7 @@
 #define PIPE_TYPE_MPLS		0x00000040
 #define PIPE_TYPE_VLEN		0x00000080
 #define PIPE_TYPE_LBGP		0x00000100
+#define PIPE_TYPE_TUN		0x00000200
 
 #define CHLD_WARNING		0x00000001
 #define CHLD_ALERT		0x00000002
@@ -404,6 +417,10 @@
 typedef u_int32_t pm_class_t;
 typedef u_int64_t pm_id_t;
 typedef u_int64_t pm_cfgreg_t;
+
+#if defined (WITH_NDPI)
+typedef struct ndpi_proto pm_class2_t;
+#endif
 
 typedef struct {
   union {
